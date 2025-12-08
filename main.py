@@ -159,6 +159,58 @@ def attack_correctly_classified_samples(dataloader, model: ViTWithAttn, attacker
     print(f"Attack success rate: {success_rate:.4f}")
     print(f"Adversarial images saved under: {output_dir}")
 
+def save_clean_samples(
+    dataloader,
+    correct_mask: List[bool],
+    output_dir: str,
+    max_samples: int | None,
+) -> None:
+    total_clean = sum(correct_mask)
+    if total_clean == 0:
+        print("没有任何正确分类的样本可供保存。")
+        return
+
+    limit = total_clean if max_samples is None else min(total_clean, max_samples)
+    saved_images = 0
+    progress = tqdm(total=limit, desc="Saving clean samples")
+
+    for images, _labels, indices in dataloader:
+        if max_samples is not None and saved_images >= max_samples:
+            break
+
+        mask_list = [correct_mask[idx] for idx in indices.tolist()]
+        if not any(mask_list):
+            continue
+
+        batch_mask = torch.tensor(mask_list, dtype=torch.bool)
+        remaining = limit - saved_images
+        if remaining <= 0:
+            break
+
+        if batch_mask.sum().item() > remaining:
+            true_idx = batch_mask.nonzero(as_tuple=False).view(-1)
+            keep = true_idx[:remaining]
+            new_mask = torch.zeros_like(batch_mask)
+            new_mask[keep] = True
+            batch_mask = new_mask
+
+        clean_images = images[batch_mask]
+        if clean_images.numel() == 0:
+            continue
+
+        saved = save_adversarial_images(
+            clean_images,
+            output_dir=output_dir,
+            prefix="clean",
+            start_index=saved_images,
+        )
+        saved_count = len(saved)
+        saved_images += saved_count
+        progress.update(saved_count)
+
+    progress.close()
+    print(f"保存了 {saved_images} 张干净样本到 {output_dir}")
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--batch-size", type=int, default=16)
 parser.add_argument("--num-workers", type=int, default=4)
@@ -174,6 +226,7 @@ parser.add_argument("--seed", type=int, default=42, help="Random seed for datase
 parser.add_argument("--download", action="store_true", help="Download torchvision dataset if needed.")
 parser.add_argument("--weights-path", type=str, default=None, help="Path to fine-tuned model weights.")
 parser.add_argument("--img-size", type=int, default=DEFAULT_IMG_SIZE, help="Input resolution for ViT." )
+parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
 
 
 def main(image_dir: str,
@@ -191,6 +244,7 @@ def main(image_dir: str,
     seed: int,
     download: bool,
     weights_path: Optional[str],
+    mode: str,
 ) -> None:
     dataset_name = dataset_name.lower()
     split = "test" if dataset_name == "cifar10" else "full"
@@ -221,14 +275,22 @@ def main(image_dir: str,
         dataloader=dataloader,
         model=model,
     )
-    attack_correctly_classified_samples(
-        dataloader=dataloader,
-        model=model,
-        attacker=attacker,
-        correct_mask=correct_mask,
-        output_dir=output_dir,
-        max_attacked_samples=max_attacked_samples,
-    )
+    if mode == "clean":
+        save_clean_samples(
+            dataloader=dataloader,
+            correct_mask=correct_mask,
+            output_dir=output_dir,
+            max_samples=max_attacked_samples,
+        )
+    else:
+        attack_correctly_classified_samples(
+            dataloader=dataloader,
+            model=model,
+            attacker=attacker,
+            correct_mask=correct_mask,
+            output_dir=output_dir,
+            max_attacked_samples=max_attacked_samples,
+        )
 
 if __name__ == "__main__":
     print("Running Attention-Fool Patch Attack on :", DEVICE)
@@ -249,5 +311,6 @@ if __name__ == "__main__":
         seed=args.seed,
         download=args.download,
         weights_path=args.weights_path,
+        mode=args.mode,
 
     )
