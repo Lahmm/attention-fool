@@ -8,3 +8,12 @@
     checkpoints/vit_cifar10.pth --max-attacked-samples 5 --pgd-step-size 0.0314
     --output-dir outputs 用刚训练好的权重在 CIFAR-10 测试集上先评估再执行注意力
     补丁攻击，成功的对抗样本会保存在 outputs/。
+  - python visualize_attention_from_images.py \
+    --weights-path checkpoints/vit_cifar10.pth \
+    --image-dir outputs \
+    --pattern "adv_*.png" \
+    --num-classes 10 \
+    --img-size 224 \
+    --max-images 5 \
+    --cls-layer last \
+    --output-dir outputs/attention_from_images  
