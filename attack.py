@@ -56,9 +56,9 @@ def compute_attention_fool_loss(attn_logits_list: List[torch.Tensor],key_token_i
         L_l = torch.logsumexp(L_lh, dim=1)
         layer_losses.append(L_l)
 
-    # layer 维 log-sum-exp: [L, B] -> [B]
-    layer_losses = torch.stack(layer_losses, dim=0)  
-    L = torch.logsumexp(layer_losses, dim=0)      
+    # layer 维平均: [L, B] -> [B]，让每一层都被均匀优化
+    layer_losses = torch.stack(layer_losses, dim=0)
+    L = layer_losses.mean(dim=0)   
 
     return L.mean()
 

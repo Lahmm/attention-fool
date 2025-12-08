@@ -6,13 +6,13 @@ import torch
 from tqdm import tqdm
 
 from attack import AttentionFoolPatchAttacker
-from evaluation import evaluate_clean_dataset
+from evaluate import evaluate_clean_dataset
 from nets import ViTWithAttn
-from utils import DEVICE, load_data, load_model_weights, save_adversarial_images
+from utils import DEVICE, load_data, load_model_weights, save_adversarial_images, save_clean_samples
 
 IMAGE_DIR = "data/clean_resized_images"
 ANNOTATIONS_PATH = "data/image_name_to_class_id_and_name.json"
-DEFAULT_DATASET = "custom"
+DEFAULT_DATASET = "cifar10"
 DEFAULT_IMG_SIZE = 224
 
 # 构架模型
@@ -27,46 +27,19 @@ def create_model(num_classes: int) -> ViTWithAttn:
 
 # 构建攻击器
 def create_attacker(model: ViTWithAttn, img_size: int, pgd_step_size: float) -> AttentionFoolPatchAttacker:
-    attacker = AttentionFoolPatchAttacker(
-        model=model,
-        img_size=img_size,
-        patch_size=16,
-        patch_row=0,
-        patch_col=0,
-        steps=250,
-        step_size=pgd_step_size,
-        lambda_attn=1.0,
+    attacker = AttentionFoolPatchAttacker(model=model,img_size=img_size,step_size=pgd_step_size,
         loss_type="ce+attn",
+        lambda_attn=1.0,                                  
+        steps=250,
         use_momentum=False,
         momentum_mu=0.9,
-        device=DEVICE,
+        device=DEVICE
     )
     return attacker
 
-# 加载数据集
-def create_dataloader(image_dir,annotations_path,batch_size,num_workers,img_size,
-    shuffle: bool,
-    dataset_name: str,
-    split: str,
-    data_dir: str,
-    val_split: float,
-    seed: int,
-    download: bool,
-): # shuffle 用于打乱训练用的数据集
-    return load_data(
-        image_dir_arg=image_dir,
-        annotations_path_arg=annotations_path,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        img_size=img_size,
-        shuffle=shuffle,
-        dataset_name=dataset_name,
-        split=split,
-        data_dir_arg=data_dir,
-        val_split=val_split,
-        seed=seed,
-        download=download,
-    )
+# 加载数据集 dataset_name = "custom" or "cifar10"
+def create_dataloader(dataset_name: str):
+    return load_data(dataset_name=dataset_name)
 
 # 开始攻击
 def attack_correctly_classified_samples(dataloader, model: ViTWithAttn, attacker: AttentionFoolPatchAttacker, correct_mask: List[bool],
@@ -159,73 +132,15 @@ def attack_correctly_classified_samples(dataloader, model: ViTWithAttn, attacker
     print(f"Attack success rate: {success_rate:.4f}")
     print(f"Adversarial images saved under: {output_dir}")
 
-def save_clean_samples(
-    dataloader,
-    correct_mask: List[bool],
-    output_dir: str,
-    max_samples: int | None,
-) -> None:
-    total_clean = sum(correct_mask)
-    if total_clean == 0:
-        print("没有任何正确分类的样本可供保存。")
-        return
-
-    limit = total_clean if max_samples is None else min(total_clean, max_samples)
-    saved_images = 0
-    progress = tqdm(total=limit, desc="Saving clean samples")
-
-    for images, _labels, indices in dataloader:
-        if max_samples is not None and saved_images >= max_samples:
-            break
-
-        mask_list = [correct_mask[idx] for idx in indices.tolist()]
-        if not any(mask_list):
-            continue
-
-        batch_mask = torch.tensor(mask_list, dtype=torch.bool)
-        remaining = limit - saved_images
-        if remaining <= 0:
-            break
-
-        if batch_mask.sum().item() > remaining:
-            true_idx = batch_mask.nonzero(as_tuple=False).view(-1)
-            keep = true_idx[:remaining]
-            new_mask = torch.zeros_like(batch_mask)
-            new_mask[keep] = True
-            batch_mask = new_mask
-
-        clean_images = images[batch_mask]
-        if clean_images.numel() == 0:
-            continue
-
-        saved = save_adversarial_images(
-            clean_images,
-            output_dir=output_dir,
-            prefix="clean",
-            start_index=saved_images,
-        )
-        saved_count = len(saved)
-        saved_images += saved_count
-        progress.update(saved_count)
-
-    progress.close()
-    print(f"保存了 {saved_images} 张干净样本到 {output_dir}")
-
 parser = argparse.ArgumentParser()
-parser.add_argument("--batch-size", type=int, default=16)
-parser.add_argument("--num-workers", type=int, default=4)
 parser.add_argument("--max-attacked-samples", type=int, default=5, help="Maximum number of correctly classified samples to attack.")
 parser.add_argument("--pgd-step-size", type=float, default=8.0 / 255.0, help="PGD step size in normalized pixel range [0, 1].")
 parser.add_argument("--output-dir", default="outputs", help="Directory used to store adversarial samples.")
 parser.add_argument("--dataset", choices=["custom", "cifar10"], default=DEFAULT_DATASET, help="Select which dataset loader to use.")
-parser.add_argument("--image-dir", default=IMAGE_DIR, help="Image directory for custom dataset.")
-parser.add_argument("--annotations-path", default=ANNOTATIONS_PATH, help="Annotation file for custom dataset.")
-parser.add_argument("--data-dir", default=None, help="Root directory used by torchvision datasets (e.g., CIFAR-10).")
 parser.add_argument("--val-split", type=float, default=0.1, help="Validation ratio/count for CIFAR-10 train/val split.")
 parser.add_argument("--seed", type=int, default=42, help="Random seed for dataset splits.")
 parser.add_argument("--download", action="store_true", help="Download torchvision dataset if needed.")
 parser.add_argument("--weights-path", type=str, default=None, help="Path to fine-tuned model weights.")
-parser.add_argument("--img-size", type=int, default=DEFAULT_IMG_SIZE, help="Input resolution for ViT." )
 parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
 
 
@@ -296,17 +211,10 @@ if __name__ == "__main__":
     print("Running Attention-Fool Patch Attack on :", DEVICE)
     args = parser.parse_args()
     main(
-        image_dir=args.image_dir,
-        annotations_path=args.annotations_path,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        img_size=args.img_size,
-        shuffle=False,
         dataset_name=args.dataset,
         max_attacked_samples=args.max_attacked_samples,
         pgd_step_size=args.pgd_step_size,
         output_dir=args.output_dir,
-        data_dir=args.data_dir,
         val_split=args.val_split,
         seed=args.seed,
         download=args.download,
