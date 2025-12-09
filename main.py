@@ -33,7 +33,8 @@ def create_attacker(model: ViTWithAttn, img_size: int, pgd_step_size: float) -> 
         steps=250,
         use_momentum=False,
         momentum_mu=0.9,
-        device=DEVICE
+        device=DEVICE,
+        k_last=None
     )
     return attacker
 
@@ -157,6 +158,7 @@ def main(
     img_size: int = DEFAULT_IMG_SIZE,
     shuffle: bool = False,
     data_dir: Optional[str] = None,
+    k_last: Optional[int] = None,
 ) -> None:
     dataset_name = dataset_name.lower()
     split = "test" if dataset_name == "cifar10" else "full"
@@ -181,6 +183,7 @@ def main(
         model=model,
         img_size=img_size,
         pgd_step_size=pgd_step_size,
+        k_last=k_last,
     )
 
     _, correct_mask = evaluate_clean_dataset(

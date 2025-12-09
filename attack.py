@@ -37,29 +37,52 @@ def get_patch_token_index(img_size: int,patch_size: int,patch_row: int,patch_col
     return token_idx
 
 # Attention-Fool 损失：L_kq / L_kq*
-def compute_attention_fool_loss(attn_logits_list: List[torch.Tensor],key_token_idx: int,cls_only: bool = False,) -> torch.Tensor:
+def compute_attention_fool_loss(
+    attn_logits_list: List[torch.Tensor],
+    key_token_idx: int,
+    cls_only: bool = False,
+    k_last: int | None = None,
+) -> torch.Tensor:
+    """
+    - 对每一层 l、每一个 head h:
+        * 若 cls_only=False: 对所有 query 的 B^{h,l}_{j,i*} 做平均
+        * 若 cls_only=True:  只取 CLS query (j*=0) 对 key=i* 的 B^{h,l}_{j*,i*}
+    - 再在 head 维、layer 维上分别用 log-sum-exp 做 smooth maximum
+    - 可选参数 k_last: 若不为 None,则只在最后 k_last 层上计算该损失(last-k)
+    """
+    # 选择参与损失的层（支持 last-k）
+    if k_last is not None and k_last > 0 and k_last < len(attn_logits_list):
+        selected_attn = attn_logits_list[-k_last:]
+    else:
+        selected_attn = attn_logits_list
 
-    layer_losses = []
+    per_layer_head_losses: List[torch.Tensor] = []
 
-    for attn_logits in attn_logits_list:
-        # attn_logits: [B, H, N, N]
-        B, H, N, _ = attn_logits.shape
-        # 对应 key 的那一列: [B, H, N]
+    for attn_logits in selected_attn:
+        # attn_logits: [B, H, N, N]，对应论文中的 B^{h,l}
+        # 取 key = i* 的那一列: [B, H, N]，N 为 query token 数量
         col = attn_logits[:, :, :, key_token_idx]
 
         if cls_only:
-            L_lh = col[:, :, 0]
+            # 只取 CLS query：假定 CLS token 的 index = 0
+            # 对应 L^{h,l}_{kq*} = B^{h,l}_{j*,i*}
+            L_lh = col[:, :, 0]             # [B, H]
         else:
-            L_lh = torch.logsumexp(col, dim=-1)
+            # 对所有 query j 做平均：L^{h,l}_{kq} = (1/N) \sum_j B^{h,l}_{j,i*}
+            L_lh = col.mean(dim=-1)         # [B, H]
 
-        # head 维 log-sum-exp: [B, H] -> [B]
-        L_l = torch.logsumexp(L_lh, dim=1)
-        layer_losses.append(L_l)
+        per_layer_head_losses.append(L_lh)  # 每层得到 [B, H]
 
-    # layer 维平均: [L, B] -> [B]，让每一层都被均匀优化
-    layer_losses = torch.stack(layer_losses, dim=0)
-    L = layer_losses.mean(dim=0)   
+    # [L', B, H]，L' 为参与计算的层数
+    hl = torch.stack(per_layer_head_losses, dim=0)
 
+    # 先在 head 维做 log-sum-exp：得到每层的 smooth max，形状 [L', B]
+    L_l = torch.logsumexp(hl, dim=2)
+
+    # 再在 layer 维做 log-sum-exp：得到跨层的 smooth max，形状 [B]
+    L = torch.logsumexp(L_l, dim=0)
+
+    # 对 batch 取平均
     return L.mean()
 
 # Attention-Fool Patch 攻击器
@@ -84,6 +107,7 @@ class AttentionFoolPatchAttacker:
         use_momentum: bool = False,
         momentum_mu: float = 0.9,
         device: torch.device | None = None,
+        k_last: int | None = None,
     ) -> None:
         """
         :param steps:         PGD 迭代步数
@@ -93,6 +117,7 @@ class AttentionFoolPatchAttacker:
         :param use_momentum:  是否使用 momentum-PGD
         :param momentum_mu:   动量衰减系数 μ
         :param device:        设备；若为 None,则使用全局 DEVICE
+        :param k_last:        只在最后 k_last 层上计算 Attention-Fool 损失；若为 None 则使用所有层
         """
         self.model = model
         self.model.eval()
@@ -119,6 +144,8 @@ class AttentionFoolPatchAttacker:
             patch_col=patch_col,
         )
 
+        self.k_last = k_last
+
     # 损失函数
     def _compute_total_loss(
         self,
@@ -143,6 +170,7 @@ class AttentionFoolPatchAttacker:
             attn_logits_list=attn_logits_list,
             key_token_idx=self.key_token_idx,
             cls_only=cls_only,
+            k_last=self.k_last,
         )
 
         if self.loss_type == "attn":
