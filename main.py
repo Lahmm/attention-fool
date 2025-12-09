@@ -37,10 +37,6 @@ def create_attacker(model: ViTWithAttn, img_size: int, pgd_step_size: float) -> 
     )
     return attacker
 
-# 加载数据集 dataset_name = "custom" or "cifar10"
-def create_dataloader(dataset_name: str):
-    return load_data(dataset_name=dataset_name)
-
 # 开始攻击
 def attack_correctly_classified_samples(dataloader, model: ViTWithAttn, attacker: AttentionFoolPatchAttacker, correct_mask: List[bool],
     output_dir: str,
@@ -144,35 +140,36 @@ parser.add_argument("--weights-path", type=str, default=None, help="Path to fine
 parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
 
 
-def main(image_dir: str,
-    annotations_path: str,
-    batch_size: int,
-    num_workers: int,
-    img_size: int,
-    shuffle: bool,
+def main(
     dataset_name: str,
     max_attacked_samples: int | None,
     pgd_step_size: float,
     output_dir: str,
-    data_dir: Optional[str],
     val_split: float,
     seed: int,
     download: bool,
     weights_path: Optional[str],
     mode: str,
+    image_dir: str = IMAGE_DIR,
+    annotations_path: str = ANNOTATIONS_PATH,
+    batch_size: int = 16,
+    num_workers: int = 4,
+    img_size: int = DEFAULT_IMG_SIZE,
+    shuffle: bool = False,
+    data_dir: Optional[str] = None,
 ) -> None:
     dataset_name = dataset_name.lower()
     split = "test" if dataset_name == "cifar10" else "full"
-    dataloader, num_classes = create_dataloader(
-        image_dir=image_dir,
-        annotations_path=annotations_path,
+    dataloader, num_classes = load_data(
+        dataset_name=dataset_name,
+        image_dir_arg=image_dir,
+        annotations_path_arg=annotations_path,
         batch_size=batch_size,
         num_workers=num_workers,
         img_size=img_size,
         shuffle=(shuffle if split != "test" else False),
-        dataset_name=dataset_name,
         split=split,
-        data_dir=data_dir,
+        data_dir_arg=data_dir,
         val_split=val_split,
         seed=seed,
         download=download,
@@ -220,5 +217,4 @@ if __name__ == "__main__":
         download=args.download,
         weights_path=args.weights_path,
         mode=args.mode,
-
     )
