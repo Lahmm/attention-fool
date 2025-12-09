@@ -183,7 +183,6 @@ def main(
         model=model,
         img_size=img_size,
         pgd_step_size=pgd_step_size,
-        k_last=k_last,
     )
 
     _, correct_mask = evaluate_clean_dataset(
