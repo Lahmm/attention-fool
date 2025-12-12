@@ -1,29 +1,26 @@
 # attack.py
+import math
 from typing import List, Tuple
 import torch
 import torch.nn.functional as F
 
-from utils import DEVICE
+from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
 
 # 工具函数：贴 patch、计算 patch 对应的 token index
 def apply_patch(images: torch.Tensor,patch: torch.Tensor,top: int,left: int,) -> torch.Tensor:
     """
-    把 patch 贴到一批图像的固定位置。
+    把 patch 贴到一批图像的固定位置。要求 patch 与 images 的 batch size 对齐，
+    从而实现 per-image patch。
     :param top:    patch 左上角在图像中的行坐标（像素）
     :param left:   patch 左上角在图像中的列坐标（像素）
     """
     B, C, H, W = images.shape
     _, _, ph, pw = patch.shape
+    if patch.size(0) != B:
+        raise ValueError(f"Patch batch ({patch.size(0)}) 与图像 batch ({B}) 不匹配。")
 
     x_adv = images.clone()
-
-    if patch.size(0) == 1 and B > 1:
-        # 共享一个 universal patch
-        patch_b = patch.expand(B, -1, -1, -1)
-    else:
-        patch_b = patch
-
-    x_adv[:, :, top:top + ph, left:left + pw] = patch_b
+    x_adv[:, :, top:top + ph, left:left + pw] = patch
     return x_adv
 
 
@@ -145,6 +142,20 @@ class AttentionFoolPatchAttacker:
         )
 
         self.k_last = k_last
+        self.pixel_mean = torch.tensor(IMAGENET_MEAN, dtype=torch.float32, device=self.device).view(1, 3, 1, 1)
+        self.pixel_std = torch.tensor(IMAGENET_STD, dtype=torch.float32, device=self.device).view(1, 3, 1, 1)
+
+    def _denormalize(self, images: torch.Tensor) -> torch.Tensor:
+        return images * self.pixel_std + self.pixel_mean
+
+    def _normalize(self, images: torch.Tensor) -> torch.Tensor:
+        return (images - self.pixel_mean) / self.pixel_std
+
+    def _cosine_step_size(self, iteration: int) -> float:
+        if self.steps <= 1:
+            return self.step_size
+        cos_decay = 0.5 * (1.0 + math.cos(math.pi * iteration / (self.steps - 1)))
+        return self.step_size * cos_decay
 
     # 损失函数
     def _compute_total_loss(
@@ -193,14 +204,15 @@ class AttentionFoolPatchAttacker:
         labels = labels.to(self.device)
 
         #初始化patch #todo 可以考虑制定target pic
+        batch_size = images.size(0)
         if init == "rand":
             patch = torch.rand(
-                1, 3, self.patch_size, self.patch_size,
+                batch_size, 3, self.patch_size, self.patch_size,
                 device=self.device,
             )
         elif init == "zero":
             patch = torch.zeros(
-                1, 3, self.patch_size, self.patch_size,
+                batch_size, 3, self.patch_size, self.patch_size,
                 device=self.device,
             )
         else:
@@ -210,15 +222,17 @@ class AttentionFoolPatchAttacker:
 
         # 动量缓存（若使用 momentum-PGD）
         momentum = torch.zeros_like(patch)
+        images_pixels = self._denormalize(images)
 
-        for _ in range(self.steps):
+        for iter_idx in range(self.steps):
             # 1) 贴 patch
-            x_adv = apply_patch(
-                images=images,
+            patched_pixels = apply_patch(
+                images=images_pixels,
                 patch=patch,
                 top=self.patch_row * self.patch_size,
                 left=self.patch_col * self.patch_size,
             )
+            x_adv = self._normalize(patched_pixels)
 
             # 2) 前向：得到 logits + 各层 attn logits
             logits, attn_logits_list = self.model(x_adv, return_attn=True)
@@ -235,6 +249,7 @@ class AttentionFoolPatchAttacker:
 
             with torch.no_grad():
                 grad = patch.grad
+                step = self._cosine_step_size(iter_idx)
 
                 if self.use_momentum:
                     # 带 L2 归一化的 momentum-PGD
@@ -243,10 +258,10 @@ class AttentionFoolPatchAttacker:
                     g_normed = (g_flat / g_norm).view_as(grad)
 
                     momentum = self.momentum_mu * momentum + g_normed
-                    patch.data = patch.data + self.step_size * momentum.sign()
+                    patch.data = patch.data + step * momentum.sign()
                 else:
                     # 普通 PGD
-                    patch.data = patch.data + self.step_size * grad.sign()
+                    patch.data = patch.data + step * grad.sign()
 
                 # 投影到 [0,1] 像素范围
                 patch.data.clamp_(0.0, 1.0)
@@ -255,11 +270,13 @@ class AttentionFoolPatchAttacker:
                 patch.grad.zero_()
 
         # 最终对抗样本
-        x_adv = apply_patch(
-            images=images,
+        final_pixels = apply_patch(
+            images=images_pixels,
             patch=patch.detach(),
             top=self.patch_row * self.patch_size,
             left=self.patch_col * self.patch_size,
         )
+
+        x_adv = self._normalize(final_pixels)
 
         return x_adv, patch.detach()
