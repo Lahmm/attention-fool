@@ -33,6 +33,8 @@ class ViTWithAttn(nn.Module):
         self.attn_logits: List[torch.Tensor] = []
         self._capture_attn: bool = False
 
+        self._norm_eps = 1e-6
+
         # 注册 hook，在每个 blocks.*.attn.qkv 上算 qk^T / sqrt(d_k)
         self._register_qkv_hooks()
 
@@ -72,6 +74,14 @@ class ViTWithAttn(nn.Module):
             self._qkv_meta[module] = (num_heads, head_dim)
             module.register_forward_hook(self._make_qkv_hook(module))
 
+    def _normalize_head_tokens(self, tensor: torch.Tensor) -> torch.Tensor:
+        """
+        按 head 内 token 的平均 L2 范数进行缩放，确保每个 head 的 Query/Key 平均范数为 1。
+        """
+        norms = tensor.norm(p=2, dim=-1, keepdim=True)  # [B, H, N, 1]
+        mean_norm = norms.mean(dim=-2, keepdim=True)    # [B, H, 1, 1]
+        return tensor / (mean_norm + self._norm_eps)
+
     def _make_qkv_hook(self, qkv_module: nn.Module):
         """
         为指定的 qkv_module 生成一个 forward_hook。
@@ -92,6 +102,10 @@ class ViTWithAttn(nn.Module):
             # [B, N, 3, H, d] -> [3, B, H, N, d]
             qkv = qkv.reshape(B, N, 3, num_heads, head_dim).permute(2, 0, 3, 1, 4)
             q, k, _v = qkv[0], qkv[1], qkv[2]  # [B, H, N, d]
+
+            # 对每个 head 的 query/key 做 L_{1,2} 归一化
+            q = self._normalize_head_tokens(q)
+            k = self._normalize_head_tokens(k)
 
             # dot-product attention logits: [B, H, N, N]
             attn_logits = (q @ k.transpose(-2, -1)) * (head_dim ** -0.5)

@@ -1,0 +1,12 @@
+# Python 编译缓存
+__pycache__/
+*.py[cod]
+*.pyo
+
+# 不跟踪数据与输出
+data/
+outputs/
+
+# 其它常见忽略项（可选）
+*.log
+.DS_Store

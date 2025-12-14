@@ -1,9 +1,53 @@
 # evaluate.py
 import argparse
+from typing import List, Tuple
 
-from evaluation import evaluate_clean_dataset
+import torch
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+
 from nets import ViTWithAttn
 from utils import DEVICE, load_data, load_model_weights
+
+
+def evaluate_clean_dataset(
+    dataloader: DataLoader,
+    model,
+    device: torch.device = DEVICE,
+) -> Tuple[float, List[bool]]:
+    """在攻击或训练前评估一次模型的分类准确率。"""
+    model.eval()
+    dataset_size = len(dataloader.dataset)
+    per_sample_correct: List[bool] = [False] * dataset_size
+
+    clean_correct = 0
+    total = 0
+
+    progress = tqdm(dataloader, desc="Evaluating clean accuracy")
+    with torch.no_grad():
+        for images, labels, indices in progress:
+            images = images.to(device)
+            labels = labels.to(device)
+
+            logits_clean = model(images, return_attn=False)
+            preds_clean = logits_clean.argmax(dim=1)
+            matches = (preds_clean == labels)
+
+            clean_correct += matches.sum().item()
+            total += labels.size(0)
+
+            batch_indices = indices.tolist()
+            for dataset_idx, is_correct in zip(batch_indices, matches.detach().cpu().tolist()):
+                per_sample_correct[dataset_idx] = bool(is_correct)
+
+            if total > 0:
+                progress.set_postfix(acc=f"{clean_correct / total:.4f}")
+
+    progress.close()
+
+    clean_acc = clean_correct / total if total > 0 else 0.0
+    print(f"Clean accuracy on dataset: {clean_acc:.4f}")
+    return clean_acc, per_sample_correct
 
 # 创建模型
 def create_model(num_classes: int) -> ViTWithAttn:

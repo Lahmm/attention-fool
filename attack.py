@@ -1,29 +1,26 @@
 # attack.py
+import math
 from typing import List, Tuple
 import torch
 import torch.nn.functional as F
 
-from utils import DEVICE
+from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
 
 # 工具函数：贴 patch、计算 patch 对应的 token index
 def apply_patch(images: torch.Tensor,patch: torch.Tensor,top: int,left: int,) -> torch.Tensor:
     """
-    把 patch 贴到一批图像的固定位置。
+    把 patch 贴到一批图像的固定位置。要求 patch 与 images 的 batch size 对齐，
+    从而实现 per-image patch。
     :param top:    patch 左上角在图像中的行坐标（像素）
     :param left:   patch 左上角在图像中的列坐标（像素）
     """
     B, C, H, W = images.shape
     _, _, ph, pw = patch.shape
+    if patch.size(0) != B:
+        raise ValueError(f"Patch batch ({patch.size(0)}) 与图像 batch ({B}) 不匹配。")
 
     x_adv = images.clone()
-
-    if patch.size(0) == 1 and B > 1:
-        # 共享一个 universal patch
-        patch_b = patch.expand(B, -1, -1, -1)
-    else:
-        patch_b = patch
-
-    x_adv[:, :, top:top + ph, left:left + pw] = patch_b
+    x_adv[:, :, top:top + ph, left:left + pw] = patch
     return x_adv
 
 
@@ -37,29 +34,52 @@ def get_patch_token_index(img_size: int,patch_size: int,patch_row: int,patch_col
     return token_idx
 
 # Attention-Fool 损失：L_kq / L_kq*
-def compute_attention_fool_loss(attn_logits_list: List[torch.Tensor],key_token_idx: int,cls_only: bool = False,) -> torch.Tensor:
+def compute_attention_fool_loss(
+    attn_logits_list: List[torch.Tensor],
+    key_token_idx: int,
+    cls_only: bool = False,
+    k_last: int | None = None,
+) -> torch.Tensor:
+    """
+    - 对每一层 l、每一个 head h:
+        * 若 cls_only=False: 对所有 query 的 B^{h,l}_{j,i*} 做平均
+        * 若 cls_only=True:  只取 CLS query (j*=0) 对 key=i* 的 B^{h,l}_{j*,i*}
+    - 再在 head 维、layer 维上分别用 log-sum-exp 做 smooth maximum
+    - 可选参数 k_last: 若不为 None,则只在最后 k_last 层上计算该损失(last-k)
+    """
+    # 选择参与损失的层（支持 last-k）
+    if k_last is not None and k_last > 0 and k_last < len(attn_logits_list):
+        selected_attn = attn_logits_list[-k_last:]
+    else:
+        selected_attn = attn_logits_list
 
-    layer_losses = []
+    per_layer_head_losses: List[torch.Tensor] = []
 
-    for attn_logits in attn_logits_list:
-        # attn_logits: [B, H, N, N]
-        B, H, N, _ = attn_logits.shape
-        # 对应 key 的那一列: [B, H, N]
+    for attn_logits in selected_attn:
+        # attn_logits: [B, H, N, N]，对应论文中的 B^{h,l}
+        # 取 key = i* 的那一列: [B, H, N]，N 为 query token 数量
         col = attn_logits[:, :, :, key_token_idx]
 
         if cls_only:
-            L_lh = col[:, :, 0]
+            # 只取 CLS query：假定 CLS token 的 index = 0
+            # 对应 L^{h,l}_{kq*} = B^{h,l}_{j*,i*}
+            L_lh = col[:, :, 0]             # [B, H]
         else:
-            L_lh = torch.logsumexp(col, dim=-1)
+            # 对所有 query j 做平均：L^{h,l}_{kq} = (1/N) \sum_j B^{h,l}_{j,i*}
+            L_lh = col.mean(dim=-1)         # [B, H]
 
-        # head 维 log-sum-exp: [B, H] -> [B]
-        L_l = torch.logsumexp(L_lh, dim=1)
-        layer_losses.append(L_l)
+        per_layer_head_losses.append(L_lh)  # 每层得到 [B, H]
 
-    # layer 维 log-sum-exp: [L, B] -> [B]
-    layer_losses = torch.stack(layer_losses, dim=0)  
-    L = torch.logsumexp(layer_losses, dim=0)      
+    # [L', B, H]，L' 为参与计算的层数
+    hl = torch.stack(per_layer_head_losses, dim=0)
 
+    # 先在 head 维做 log-sum-exp：得到每层的 smooth max，形状 [L', B]
+    L_l = torch.logsumexp(hl, dim=2)
+
+    # 再在 layer 维做 log-sum-exp：得到跨层的 smooth max，形状 [B]
+    L = torch.logsumexp(L_l, dim=0)
+
+    # 对 batch 取平均
     return L.mean()
 
 # Attention-Fool Patch 攻击器
@@ -84,6 +104,7 @@ class AttentionFoolPatchAttacker:
         use_momentum: bool = False,
         momentum_mu: float = 0.9,
         device: torch.device | None = None,
+        k_last: int | None = None,
     ) -> None:
         """
         :param steps:         PGD 迭代步数
@@ -93,6 +114,7 @@ class AttentionFoolPatchAttacker:
         :param use_momentum:  是否使用 momentum-PGD
         :param momentum_mu:   动量衰减系数 μ
         :param device:        设备；若为 None,则使用全局 DEVICE
+        :param k_last:        只在最后 k_last 层上计算 Attention-Fool 损失；若为 None 则使用所有层
         """
         self.model = model
         self.model.eval()
@@ -119,6 +141,22 @@ class AttentionFoolPatchAttacker:
             patch_col=patch_col,
         )
 
+        self.k_last = k_last
+        self.pixel_mean = torch.tensor(IMAGENET_MEAN, dtype=torch.float32, device=self.device).view(1, 3, 1, 1)
+        self.pixel_std = torch.tensor(IMAGENET_STD, dtype=torch.float32, device=self.device).view(1, 3, 1, 1)
+
+    def _denormalize(self, images: torch.Tensor) -> torch.Tensor:
+        return images * self.pixel_std + self.pixel_mean
+
+    def _normalize(self, images: torch.Tensor) -> torch.Tensor:
+        return (images - self.pixel_mean) / self.pixel_std
+
+    def _cosine_step_size(self, iteration: int) -> float:
+        if self.steps <= 1:
+            return self.step_size
+        cos_decay = 0.5 * (1.0 + math.cos(math.pi * iteration / (self.steps - 1)))
+        return self.step_size * cos_decay
+
     # 损失函数
     def _compute_total_loss(
         self,
@@ -143,6 +181,7 @@ class AttentionFoolPatchAttacker:
             attn_logits_list=attn_logits_list,
             key_token_idx=self.key_token_idx,
             cls_only=cls_only,
+            k_last=self.k_last,
         )
 
         if self.loss_type == "attn":
@@ -165,14 +204,15 @@ class AttentionFoolPatchAttacker:
         labels = labels.to(self.device)
 
         #初始化patch #todo 可以考虑制定target pic
+        batch_size = images.size(0)
         if init == "rand":
             patch = torch.rand(
-                1, 3, self.patch_size, self.patch_size,
+                batch_size, 3, self.patch_size, self.patch_size,
                 device=self.device,
             )
         elif init == "zero":
             patch = torch.zeros(
-                1, 3, self.patch_size, self.patch_size,
+                batch_size, 3, self.patch_size, self.patch_size,
                 device=self.device,
             )
         else:
@@ -182,15 +222,17 @@ class AttentionFoolPatchAttacker:
 
         # 动量缓存（若使用 momentum-PGD）
         momentum = torch.zeros_like(patch)
+        images_pixels = self._denormalize(images)
 
-        for _ in range(self.steps):
+        for iter_idx in range(self.steps):
             # 1) 贴 patch
-            x_adv = apply_patch(
-                images=images,
+            patched_pixels = apply_patch(
+                images=images_pixels,
                 patch=patch,
                 top=self.patch_row * self.patch_size,
                 left=self.patch_col * self.patch_size,
             )
+            x_adv = self._normalize(patched_pixels)
 
             # 2) 前向：得到 logits + 各层 attn logits
             logits, attn_logits_list = self.model(x_adv, return_attn=True)
@@ -207,6 +249,7 @@ class AttentionFoolPatchAttacker:
 
             with torch.no_grad():
                 grad = patch.grad
+                step = self._cosine_step_size(iter_idx)
 
                 if self.use_momentum:
                     # 带 L2 归一化的 momentum-PGD
@@ -215,10 +258,10 @@ class AttentionFoolPatchAttacker:
                     g_normed = (g_flat / g_norm).view_as(grad)
 
                     momentum = self.momentum_mu * momentum + g_normed
-                    patch.data = patch.data + self.step_size * momentum.sign()
+                    patch.data = patch.data + step * momentum.sign()
                 else:
                     # 普通 PGD
-                    patch.data = patch.data + self.step_size * grad.sign()
+                    patch.data = patch.data + step * grad.sign()
 
                 # 投影到 [0,1] 像素范围
                 patch.data.clamp_(0.0, 1.0)
@@ -227,11 +270,13 @@ class AttentionFoolPatchAttacker:
                 patch.grad.zero_()
 
         # 最终对抗样本
-        x_adv = apply_patch(
-            images=images,
+        final_pixels = apply_patch(
+            images=images_pixels,
             patch=patch.detach(),
             top=self.patch_row * self.patch_size,
             left=self.patch_col * self.patch_size,
         )
+
+        x_adv = self._normalize(final_pixels)
 
         return x_adv, patch.detach()

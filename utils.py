@@ -9,6 +9,7 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
+from tqdm import tqdm
 
 # 默认数据路径（可以在调用 load_data 时覆盖）
 image_dir = "data/clean_resized_images"
@@ -32,8 +33,6 @@ def get_device() -> torch.device:
     if _mps_available():
         return torch.device("mps")
     return torch.device("cpu")
-
-
 DEVICE: torch.device = get_device()
 
 
@@ -270,12 +269,11 @@ def _build_cifar10_dataset(
     return dataset, num_classes
 
 # 加载数据集
-def load_data(image_dir_arg: str = image_dir, annotations_path_arg: str = annotations_path,
+def load_data(dataset_name: str, image_dir_arg: str = image_dir, annotations_path_arg: str = annotations_path,
     batch_size: int = 16,
     num_workers: int = 4,
     img_size: int = 224,
-    shuffle: bool = False,
-    dataset_name: str = "custom",
+    shuffle: bool = False, # shuffle 用于打乱训练用的数据集
     split: str = "full",
     data_dir_arg: Optional[str] = None,
     val_split: float | int = 0.1,
@@ -283,16 +281,10 @@ def load_data(image_dir_arg: str = image_dir, annotations_path_arg: str = annota
     download: bool = False,
 ) -> Tuple[DataLoader, int]:
     """
-    构建 DataLoader，并返回 (dataloader, num_classes)
-
-    - dataloader: batch 输出为 (images, labels, indices)
-        * images: [B, 3, H, W] 的 float tensor
-        * labels: [B] 的 LongTensor（class_id）
-        * indices: [B] 的 LongTensor，表示样本在数据集中的索引
-    - num_classes: 根据标注文件自动推断出来的类别数（最大 class_id + 1）
+    构建 DataLoader,并返回 (dataloader, num_classes)
     """
     dataset_name = dataset_name.lower()
-
+    # 构建ImageNet自定义数据集
     if dataset_name == "custom":
         # 1) 图像 transform & label 的 target_transform
         transform = _build_transform(img_size=img_size)
@@ -302,14 +294,13 @@ def load_data(image_dir_arg: str = image_dir, annotations_path_arg: str = annota
             transform=transform,
             target_transform=_label_target_transform,  # dict -> int
         )
-
-        # 2) 根据 dataset.samples 自动计算类别数（不写死）
+        # 2) 根据 dataset.samples
         class_ids = [int(sample["class_id"]) for sample in dataset.samples]
         num_classes = max(class_ids) + 1 if class_ids else 0
 
         if split != "full":
             raise ValueError("当前自定义数据集仅支持 split='full'。")
-
+    # 构建 CIFAR-10 数据集
     elif dataset_name == "cifar10":
         dataset, num_classes = _build_cifar10_dataset(
             split=split,
@@ -363,6 +354,60 @@ def save_adversarial_images(
         saved_paths.append(path)
 
     return saved_paths
+
+
+def save_clean_samples(
+    dataloader,
+    correct_mask: List[bool],
+    output_dir: str,
+    max_samples: int | None,
+) -> None:
+    
+    total_clean = sum(correct_mask)
+    if total_clean == 0:
+        print("没有任何正确分类的样本可供保存。")
+        return
+
+    limit = total_clean if max_samples is None else min(total_clean, max_samples)
+    saved_images = 0
+    progress = tqdm(total=limit, desc="Saving clean samples")
+
+    for images, _labels, indices in dataloader:
+        if max_samples is not None and saved_images >= max_samples:
+            break
+
+        mask_list = [correct_mask[idx] for idx in indices.tolist()]
+        if not any(mask_list):
+            continue
+
+        batch_mask = torch.tensor(mask_list, dtype=torch.bool)
+        remaining = limit - saved_images
+        if remaining <= 0:
+            break
+
+        if batch_mask.sum().item() > remaining:
+            true_idx = batch_mask.nonzero(as_tuple=False).view(-1)
+            keep = true_idx[:remaining]
+            new_mask = torch.zeros_like(batch_mask)
+            new_mask[keep] = True
+            batch_mask = new_mask
+
+        clean_images = images[batch_mask]
+        if clean_images.numel() == 0:
+            continue
+
+        saved = save_adversarial_images(
+            clean_images,
+            output_dir=output_dir,
+            prefix="clean",
+            start_index=saved_images,
+        )
+        saved_count = len(saved)
+        saved_images += saved_count
+        progress.update(saved_count)
+
+    progress.close()
+    print(f"保存了 {saved_images} 张干净样本到 {output_dir}")
 
 # 加载模型权重
 def load_model_weights(model: torch.nn.Module, weights_path: Optional[str], device: torch.device = DEVICE) -> None:
