@@ -1,12 +1,9 @@
-# Python 编译缓存
+# Python cache
 __pycache__/
-*.py[cod]
-*.pyo
 
-# 不跟踪数据与输出
-data/
-outputs/
+# IDE settings
+.vscode/
 
-# 其它常见忽略项（可选）
-*.log
-.DS_Store
+# Data and model weights
+data/*
+outputs/*
