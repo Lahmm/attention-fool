@@ -2,19 +2,18 @@
 from functools import lru_cache
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
-from torchvision import datasets, transforms
+from torchvision import transforms
 from torchvision.utils import save_image
 from tqdm import tqdm
 
 # 默认数据路径（可以在调用 load_data 时覆盖）
 image_dir = "data/clean_resized_images"
 annotations_path = "data/image_name_to_class_id_and_name.json"
-CIFAR10_DIR = "data/cifar10"
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -38,29 +37,25 @@ DEVICE: torch.device = get_device()
 
 # 数据集类定义和load函数 
 class ImageDataset(Dataset):
-
-    def __init__(
-        self,
-        image_dir: str = image_dir,
-        annotations_path: str = annotations_path,
+    def __init__(self, image_dir: str = image_dir, annotations_path: str = annotations_path,
         transform = None,
         target_transform = None,
-    ) -> None:
+        ) -> None:
         self.image_dir = Path(image_dir)
         self.annotations_path = Path(annotations_path)
         self.transform = transform
         self.target_transform = target_transform
 
         if not self.image_dir.is_dir():
-            raise ValueError(f"Image directory {self.image_dir} does not exist.")
+            raise ValueError(f"图片地址 {self.image_dir} 不存在")
         if not self.annotations_path.is_file():
-            raise ValueError(f"Annotation file {self.annotations_path} does not exist.")
+            raise ValueError(f"标注文件 {self.annotations_path} 不存在")
 
         with self.annotations_path.open("r", encoding="utf-8") as handle:
             annotations = json.load(handle)
 
         if not isinstance(annotations, dict):
-            raise ValueError("Annotation file must contain a dictionary.")
+            raise ValueError("标注文件是Json格式,内部应该是一个字典")
 
         
         self.samples: List[Dict[str, Any]] = []
@@ -130,8 +125,6 @@ class ImageDataset(Dataset):
 def _build_transform(img_size: int = 224) -> transforms.Compose:
     return transforms.Compose(
         [
-            transforms.Resize(int(img_size * 256 / 224)),
-            transforms.CenterCrop(img_size),
             transforms.ToTensor(),
             transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
         ]
@@ -141,190 +134,39 @@ def _build_transform(img_size: int = 224) -> transforms.Compose:
 def _label_target_transform(label: Dict[str, Any]) -> int:
     return int(label["class_id"])
 
-# 将原本只有 imaghe 和 label 的 Dataset 包装成返回 (image, label, index) 的 Dataset
-class _IndexedSubset(Dataset):
-
-    def __init__(self,
-        base_dataset,
-        indices: List[int],
-        transform = None,
-        target_transform = None,
-    ) -> None:
-        self.base_dataset = base_dataset
-        self.indices = list(indices)
-        self.transform = transform
-        self.target_transform = target_transform
-
-    def __len__(self) -> int:
-        return len(self.indices)
-
-    def __getitem__(self, index: int):
-        dataset_index = self.indices[index]
-        image, label = self.base_dataset[dataset_index]
-
-        if self.transform is not None:
-            image = self.transform(image)
-
-        if self.target_transform is not None:
-            label = self.target_transform(label)
-
-        return image, label, dataset_index
-
-# cifra10 分训练集和测试集处理
-def _cifar10_transforms(img_size: int, train: bool) -> transforms.Compose:
-    if train:
-        return transforms.Compose(
-            [
-                transforms.RandomResizedCrop(img_size, scale=(0.8, 1.0)),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
-            ]
-        )
-    else:
-        resize_size = int(img_size * 256 / 224)
-        return transforms.Compose(
-            [
-                transforms.Resize(resize_size),
-                transforms.CenterCrop(img_size),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
-            ]
-        )
-
-# 训练集划分train/val子集
-@lru_cache(maxsize=None)
-def _cifar10_train_val_indices(val_count: int, seed: int) -> Tuple[List[int], List[int]]:
-    total = 50000  # official CIFAR-10 train split size
-    val_count = max(0, min(val_count, total))
-    generator = torch.Generator().manual_seed(seed)
-    perm = torch.randperm(total, generator=generator).tolist()
-
-    val_indices = perm[:val_count]
-    train_indices = perm[val_count:]
-    return train_indices, val_indices
-
-
-def _resolve_val_count(val_split: float | int, total: int) -> int:
-    if isinstance(val_split, float) and 0.0 < val_split < 1.0:
-        return int(total * val_split)
-    try:
-        count = int(val_split)
-    except (TypeError, ValueError):
-        return 0
-    return max(0, min(count, total))
-
-# 构建cifar10数据集
-def _build_cifar10_dataset(
-    split: str,
-    img_size: int,
-    data_dir_arg: Optional[str],
-    val_split: float | int,
-    seed: int,
-    download: bool,
-):
-    data_root = Path(data_dir_arg or CIFAR10_DIR)
-    split = split.lower()
-
-    if split not in {"train", "val", "test"}:
-        raise ValueError("CIFAR-10 split 必须是 'train'、'val' 或 'test'")
-
-    if split == "test":
-        base_dataset = datasets.CIFAR10(
-            root=data_root,
-            train=False,
-            download=download,
-            transform=None,
-        )
-        indices = list(range(len(base_dataset)))
-        dataset = _IndexedSubset(
-            base_dataset=base_dataset,
-            indices=indices,
-            transform=_cifar10_transforms(img_size, train=False),
-        )
-    else:
-        base_dataset = datasets.CIFAR10(
-            root=data_root,
-            train=True,
-            download=download,
-            transform=None,
-        )
-        val_count = _resolve_val_count(val_split, len(base_dataset))
-        train_indices, val_indices = _cifar10_train_val_indices(val_count=val_count, seed=seed)
-        if split == "train":
-            indices = train_indices
-            transform = _cifar10_transforms(img_size, train=True)
-        else:
-            if val_count == 0:
-                raise ValueError("val_split 需要大于 0 才能构建验证集。")
-            indices = val_indices
-            transform = _cifar10_transforms(img_size, train=False)
-        dataset = _IndexedSubset(
-            base_dataset=base_dataset,
-            indices=indices,
-            transform=transform,
-        )
-
-    num_classes = 10
-    return dataset, num_classes
-
 # 加载数据集
-def load_data(dataset_name: str, image_dir_arg: str = image_dir, annotations_path_arg: str = annotations_path,
+def load_data(image_dir_arg: str = image_dir, annotations_path_arg: str = annotations_path,
     batch_size: int = 16,
     num_workers: int = 4,
     img_size: int = 224,
-    shuffle: bool = False, # shuffle 用于打乱训练用的数据集
-    split: str = "full",
-    data_dir_arg: Optional[str] = None,
-    val_split: float | int = 0.1,
-    seed: int = 42,
-    download: bool = False,
 ) -> Tuple[DataLoader, int]:
     """
     构建 DataLoader,并返回 (dataloader, num_classes)
     """
-    dataset_name = dataset_name.lower()
     # 构建ImageNet自定义数据集
-    if dataset_name == "custom":
-        # 1) 图像 transform & label 的 target_transform
-        transform = _build_transform(img_size=img_size)
-        dataset = ImageDataset(
-            image_dir=image_dir_arg,
-            annotations_path=annotations_path_arg,
-            transform=transform,
-            target_transform=_label_target_transform,  # dict -> int
+    # 1) 图像 transform & label 的 target_transform
+    transform = _build_transform(img_size=img_size)
+    dataset = ImageDataset(
+        image_dir=image_dir_arg,
+        annotations_path=annotations_path_arg,
+        transform=transform,
+        target_transform=_label_target_transform,  # dict -> int
         )
-        # 2) 根据 dataset.samples
-        class_ids = [int(sample["class_id"]) for sample in dataset.samples]
-        num_classes = max(class_ids) + 1 if class_ids else 0
-
-        if split != "full":
-            raise ValueError("当前自定义数据集仅支持 split='full'。")
-    # 构建 CIFAR-10 数据集
-    elif dataset_name == "cifar10":
-        dataset, num_classes = _build_cifar10_dataset(
-            split=split,
-            img_size=img_size,
-            data_dir_arg=data_dir_arg,
-            val_split=val_split,
-            seed=seed,
-            download=download,
-        )
-    else:
-        raise ValueError(f"未知数据集：{dataset_name}")
+    # 2) 根据 dataset.samples
+    class_ids = [int(sample["class_id"]) for sample in dataset.samples]
+    num_classes = max(class_ids) + 1 if class_ids else 0
 
     # 3) 构建 DataLoader
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=shuffle,
         num_workers=num_workers,
         pin_memory=(DEVICE.type == "cuda"),
     )
     return dataloader, num_classes
 
-# 保存攻击后的对抗图像
-def save_adversarial_images(
+# 保存图像内核
+def save_images(
     images: torch.Tensor,
     output_dir: str = "outputs",
     prefix: str = "adv",
@@ -355,8 +197,15 @@ def save_adversarial_images(
 
     return saved_paths
 
+def save_adversarial_images(
+        images: torch.Tensor,
+        output_dir: str,
+        prefix: str,
+        start_index: int):
+    saved_adv = save_images(images=images, output_dir=output_dir, prefix=prefix, start_index=start_index)
+    return saved_adv
 
-def save_clean_samples(
+def save_clean_images(
     dataloader,
     correct_mask: List[bool],
     output_dir: str,
@@ -365,12 +214,12 @@ def save_clean_samples(
     
     total_clean = sum(correct_mask)
     if total_clean == 0:
-        print("没有任何正确分类的样本可供保存。")
+        print("没有任何正确分类的样本可供保存")
         return
 
     limit = total_clean if max_samples is None else min(total_clean, max_samples)
     saved_images = 0
-    progress = tqdm(total=limit, desc="Saving clean samples")
+    progress = tqdm(total=limit, desc="保存干净样本")
 
     for images, _labels, indices in dataloader:
         if max_samples is not None and saved_images >= max_samples:
@@ -396,7 +245,7 @@ def save_clean_samples(
         if clean_images.numel() == 0:
             continue
 
-        saved = save_adversarial_images(
+        saved = save_images(
             clean_images,
             output_dir=output_dir,
             prefix="clean",
@@ -409,14 +258,42 @@ def save_clean_samples(
     progress.close()
     print(f"保存了 {saved_images} 张干净样本到 {output_dir}")
 
-# 加载模型权重
-def load_model_weights(model: torch.nn.Module, weights_path: Optional[str], device: torch.device = DEVICE) -> None:
-    """Load model state dict if a valid path is provided."""
-    if not weights_path:
-        return
-    path = Path(weights_path)
-    if not path.is_file():
-        raise FileNotFoundError(f"权重文件 {path} 不存在。")
-    state = torch.load(path, map_location=device)
-    model.load_state_dict(state, strict=True)
-    print(f"Loaded weights from {path}")
+## 评估正确率
+def evaluate_clean_dataset(
+    dataloader: DataLoader,
+    model,
+    device: torch.device = DEVICE,
+) -> Tuple[float, List[bool]]:
+    """在攻击或训练前评估一次模型的分类准确率。"""
+    model.eval()
+    dataset_size = len(dataloader.dataset)
+    per_sample_correct: List[bool] = [False] * dataset_size
+
+    clean_correct = 0
+    total = 0
+
+    progress = tqdm(dataloader, desc="评估干净样本准确率")
+    with torch.no_grad():
+        for images, labels, indices in progress:
+            images = images.to(device)
+            labels = labels.to(device)
+
+            logits_clean = model(images, return_attn=False)
+            preds_clean = logits_clean.argmax(dim=1)
+            matches = (preds_clean == labels)
+
+            clean_correct += matches.sum().item()
+            total += labels.size(0)
+
+            batch_indices = indices.tolist()
+            for dataset_idx, is_correct in zip(batch_indices, matches.detach().cpu().tolist()):
+                per_sample_correct[dataset_idx] = bool(is_correct)
+
+            if total > 0:
+                progress.set_postfix(acc=f"{clean_correct / total:.4f}")
+
+    progress.close()
+
+    clean_acc = clean_correct / total if total > 0 else 0.0
+    print(f"模型准确率{clean_acc:.4f}")
+    return clean_acc, per_sample_correct

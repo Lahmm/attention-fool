@@ -3,13 +3,15 @@ from typing import Dict, List, Tuple
 import torch
 import torch.nn as nn
 import timm
+from utils import DEVICE
 
-from utils import DEVICE  
+DEFAULT_MODEL_NAME = "vit_base_patch16_224"
+DEFAULT_PRETRAINED = True
 
 class ViTWithAttn(nn.Module):
     def __init__(
         self,
-        model_name: str = "vit_base_patch16_224",
+        model_name: str,
         num_classes: int | None = None,
         pretrained: bool = True,
         device: torch.device | None = None,
@@ -24,7 +26,7 @@ class ViTWithAttn(nn.Module):
             create_kwargs["num_classes"] = num_classes
 
         self.model: nn.Module = timm.create_model(
-            model_name,
+            model_name = model_name,
             pretrained=pretrained,
             **create_kwargs,
         )
@@ -138,3 +140,17 @@ class ViTWithAttn(nn.Module):
             return logits, attn_list
         else:
             return logits
+
+def build_vit_model(
+    num_classes: int,
+    model_name: str = DEFAULT_MODEL_NAME,
+    pretrained: bool = DEFAULT_PRETRAINED,
+    device: torch.device = DEVICE,
+) -> ViTWithAttn:
+    model = ViTWithAttn(
+        model_name=model_name,
+        num_classes=num_classes,
+        pretrained=pretrained,
+        device=device,
+    )
+    return model

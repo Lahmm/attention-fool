@@ -8,70 +8,31 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
-from nets import ViTWithAttn
-from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD, load_model_weights
+from nets import build_vit_model
+from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD, load_data
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Visualize attention maps for existing adversarial images."
-    )
-    parser.add_argument(
-        "--image-dir",
-        type=str,
-        default="outputs",
-        help="Directory containing saved adversarial images.",
-    )
-    parser.add_argument(
-        "--pattern",
-        type=str,
-        default="adv_*.png",
-        help="Filename glob used to select images (e.g., adv_*.png).",
-    )
-    parser.add_argument(
-        "--max-images",
-        type=int,
-        default=5,
-        help="Number of images to visualize (processes first N matches).",
-    )
-    parser.add_argument(
-        "--weights-path",
-        type=str,
-        default=None,
-        help="Checkpoint for ViT classifier.",
-    )
-    parser.add_argument(
-        "--num-classes",
-        type=int,
-        default=10,
-        help="Classifier head dimension (e.g., 10 for CIFAR-10).",
-    )
+    parser = argparse.ArgumentParser(description="Visualize attention maps for existing adversarial images.")
+    parser.add_argument("--image-dir",type=str,default="outputs",help="Directory containing saved adversarial images.")
+    parser.add_argument("--pattern",type=str,default="adv_*.png",help="Filename glob used to select images (e.g., adv_*.png).")
+    parser.add_argument("--max-images",type=int,default=5,help="Number of images to visualize (processes first N matches).",)
+    parser.add_argument("--cls-layer",choices=["first", "last"],default="last",help="Which transformer layer attention to render.")
+    parser.add_argument("--output-dir",type=str,default="outputs/attention_from_images")
     parser.add_argument("--img-size", type=int, default=224)
-    parser.add_argument(
-        "--cls-layer",
-        choices=["first", "last"],
-        default="last",
-        help="Which transformer layer attention to render.",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        default="outputs/attention_from_images",
-        help="Where to store visualization figures.",
-    )
     return parser.parse_args()
 
 
-def build_model(num_classes: int, weights_path: Optional[str]) -> ViTWithAttn:
-    model = ViTWithAttn(
-        model_name="vit_base_patch16_224",
-        num_classes=num_classes,
-        pretrained=True,
-        device=DEVICE,
-    )
-    load_model_weights(model, weights_path)
+def build_model(num_classes: int):
+    model = build_vit_model(num_classes=num_classes)
     model.eval()
     return model
+
+
+def resolve_num_classes() -> int:
+    _, inferred = load_data(
+    )
+    return inferred
 
 
 def list_image_paths(image_dir: Path, pattern: str, max_images: int) -> List[Path]:
@@ -138,8 +99,9 @@ def main():
     args = parse_args()
     image_dir = Path(args.image_dir)
     output_dir = Path(args.output_dir)
+    num_classes = resolve_num_classes()
 
-    model = build_model(num_classes=args.num_classes, weights_path=args.weights_path)
+    model = build_model(num_classes=num_classes)
     image_paths = list_image_paths(image_dir, args.pattern, args.max_images)
 
     for path in image_paths:
