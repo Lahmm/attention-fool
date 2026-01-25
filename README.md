@@ -5,5 +5,5 @@
   - 仅导出被正确分类的干净样本 `python main.py --mode clean --max-attacked-samples 5 --pgd-step-size 0.0313725 --output-dir outputs/clean`
   - 所有模型在nets.py中修改，修改基本模型名称
 ## 可视化注意力
-  - 单张图片 `python visualize_attention_from_images.py --image-dir outputs/clean、 --pattern "adv_*.png" --max-images 5 --cls-layer last --output-dir outputs/attention_from_images`
-  - 模型所有层 `python visualize_attention_all_layers.py --image-path outputs/clean/deit/clean_00000.png`
+  - 单张图片 `python visualize_attention_from_images.py --image-dir outputs/clean --pattern "adv_*.png" --max-images 5 --cls-layer last --output-dir outputs/attention_from_images`
+  - 模型所有层 `python visualize_attention_all_layers.py --image-path outputs/clean/clean_00000.png`
