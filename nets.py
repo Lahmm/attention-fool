@@ -106,8 +106,8 @@ class ViTWithAttn(nn.Module):
             q, k, _v = qkv[0], qkv[1], qkv[2]  # [B, H, N, d]
 
             # 对每个 head 的 query/key 做 L_{1,2} 归一化
-            q = self._normalize_head_tokens(q)
-            k = self._normalize_head_tokens(k)
+            q = self._normalize_head_tokens(q) # 归一化代码，如不用注释即可
+            k = self._normalize_head_tokens(k) 
 
             # dot-product attention logits: [B, H, N, N]
             attn_logits = (q @ k.transpose(-2, -1)) * (head_dim ** -0.5)
