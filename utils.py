@@ -172,6 +172,7 @@ def save_images(
     prefix: str = "adv",
     denormalize: bool = True,
     start_index: int = 0,
+    filenames: List[str] = None,
 ) -> List[Path]:
 
     output_dir_path = Path(output_dir)
@@ -189,8 +190,14 @@ def save_images(
     tensor = torch.clamp(tensor, 0.0, 1.0)
 
     saved_paths: List[Path] = []
+    if filenames is not None and len(filenames) != tensor.size(0):
+        raise ValueError("filenames length must match number of images")
+
     for idx, img in enumerate(tensor):
-        filename = f"{prefix}_{start_index + idx:05d}.png"
+        if filenames is not None:
+            filename = filenames[idx]
+        else:
+            filename = f"{prefix}_{start_index + idx:05d}.png"
         path = output_dir_path / filename
         save_image(img, str(path))
         saved_paths.append(path)
@@ -201,8 +208,15 @@ def save_adversarial_images(
         images: torch.Tensor,
         output_dir: str,
         prefix: str,
-        start_index: int):
-    saved_adv = save_images(images=images, output_dir=output_dir, prefix=prefix, start_index=start_index)
+        start_index: int,
+        filenames: List[str] = None):
+    saved_adv = save_images(
+        images=images,
+        output_dir=output_dir,
+        prefix=prefix,
+        start_index=start_index,
+        filenames=filenames,
+    )
     return saved_adv
 
 def save_clean_images(
@@ -245,11 +259,20 @@ def save_clean_images(
         if clean_images.numel() == 0:
             continue
 
+        batch_mask_list = batch_mask.tolist()
+        selected_indices = [idx for idx, keep in zip(indices.tolist(), batch_mask_list) if keep]
+        dataset = dataloader.dataset
+        filenames = [
+            f"clean_{dataset.samples[dataset_idx]['image_path'].name}"
+            for dataset_idx in selected_indices
+        ]
+
         saved = save_images(
             clean_images,
             output_dir=output_dir,
             prefix="clean",
             start_index=saved_images,
+            filenames=filenames,
         )
         saved_count = len(saved)
         saved_images += saved_count

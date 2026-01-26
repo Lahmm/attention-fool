@@ -1,6 +1,6 @@
 # main.py
 import argparse
-from typing import List, Optional
+from typing import List
 
 import torch
 from tqdm import tqdm
@@ -79,6 +79,14 @@ def attack_correctly_classified_samples(dataloader, model: ViTWithAttn, attacker
         if images_to_attack.numel() == 0:
             continue
 
+        batch_mask_list = batch_mask.tolist()
+        selected_indices = [idx for idx, keep in zip(batch_indices, batch_mask_list) if keep]
+        dataset = dataloader.dataset
+        filenames = [
+            f"adv_{dataset.samples[dataset_idx]['image_path'].name}"
+            for dataset_idx in selected_indices
+        ]
+
         images_to_attack = images_to_attack.to(DEVICE)
         labels_to_attack = labels_to_attack.to(DEVICE)
 
@@ -99,6 +107,7 @@ def attack_correctly_classified_samples(dataloader, model: ViTWithAttn, attacker
             output_dir=output_dir,
             prefix="adv",
             start_index=saved_images,
+            filenames=filenames,
         )
         saved_images += len(saved)
 
