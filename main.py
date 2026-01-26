@@ -22,7 +22,7 @@ def create_attacker(model: ViTWithAttn, img_size: int, pgd_step_size: float) -> 
         use_momentum=False,
         momentum_mu=0.9,
         device=DEVICE,
-        k_last=None
+        attn_layer_set={1,2,3,4,5}
     )
     return attacker
 

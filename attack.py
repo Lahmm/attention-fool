@@ -12,8 +12,7 @@ from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
 def compute_attention_variance_loss(
     attn_logits_list: List[torch.Tensor],
     cls_only: bool = False,
-    attn_layer_index: int = -1,
-    k_last = None,
+    attn_layer_set: set[int] | None = None,
     standardize: str = "center",  # "center" or "zscore"
     eps: float = 1e-12,
 ) -> torch.Tensor:
@@ -23,9 +22,8 @@ def compute_attention_variance_loss(
 
     参数：
     - attn_logits_list: 每层一个 Tensor, 形状 [B, H, N, N]
-    - k_last: 若提供，则使用最后 k 层；否则使用 attn_layer_index
+    - attn_layer_set: 1-based layer indices set; empty set uses all layers
     - cls_only: 是否仅使用 CLS query (query index=0)
-    - attn_layer_index: 使用的层索引(支持负索引)
     - standardize: "center" or "zscore"
     - eps: 数值稳定项
 
@@ -35,20 +33,21 @@ def compute_attention_variance_loss(
     if not attn_logits_list:
         raise ValueError("attn_logits_list is empty")
 
+    if attn_layer_set is None:
+        attn_layer_set = set()
+
     # 选择参与计算的层
-    if k_last is not None and k_last > 0:
-        selected_attn = (
-            attn_logits_list if k_last >= len(attn_logits_list) else attn_logits_list[-k_last:]
-        )
+    if len(attn_layer_set) == 0:
+        selected_attn = attn_logits_list
     else:
-        idx = attn_layer_index
-        if idx < 0:
-            idx = len(attn_logits_list) + idx
-        if idx < 0 or idx >= len(attn_logits_list):
+        num_layers = len(attn_logits_list)
+        invalid = [idx for idx in attn_layer_set if idx < 1 or idx > num_layers]
+        if invalid:
             raise ValueError(
-                f"attn_layer_index {attn_layer_index} out of range for {len(attn_logits_list)} layers"
+                f"attn_layer_set has invalid layer indices {sorted(invalid)} for {num_layers} layers"
             )
-        selected_attn = [attn_logits_list[idx]]
+        layer_indices = sorted(attn_layer_set)
+        selected_attn = [attn_logits_list[idx - 1] for idx in layer_indices]
 
     per_layer_vars: List[torch.Tensor] = []
 
@@ -100,9 +99,8 @@ class AttentionFoolImageAttacker:
         use_momentum: bool = False,
         momentum_mu: float = 0.9,
         device: torch.device | None = None,
-        k_last: int | None = None,
+        attn_layer_set: set[int] | None = None,
         eps: float = 8.0 / 255.0,
-        attn_layer_index: int = -1,
     ) -> None:
         self.model = model
         self.model.eval()
@@ -120,8 +118,7 @@ class AttentionFoolImageAttacker:
         self.use_momentum = use_momentum
         self.momentum_mu = momentum_mu
         self.eps = eps
-        self.attn_layer_index = attn_layer_index
-        self.k_last = k_last
+        self.attn_layer_set = attn_layer_set
 
         self.device = device if device is not None else DEVICE  # 依赖你工程里的 DEVICE
 
@@ -159,8 +156,7 @@ class AttentionFoolImageAttacker:
         attn_var_vec = compute_attention_variance_loss(
             attn_logits_list=attn_logits_list,
             cls_only=cls_only,
-            attn_layer_index=self.attn_layer_index,
-            k_last=self.k_last,
+            attn_layer_set=self.attn_layer_set,
         )  # [1]
         attn_var = attn_var_vec[0]  # 标量
 
@@ -244,4 +240,3 @@ class AttentionFoolImageAttacker:
         x_adv = self._normalize(final_pixels)
 
         return x_adv, delta.detach()
-
