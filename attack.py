@@ -11,7 +11,7 @@ from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
 
 def compute_attention_variance_loss(
     attn_logits_list: List[torch.Tensor],
-    cls_only: bool = False,
+    cls_only: bool = True,
     attn_layer_set: set[int] | None = None,
     standardize: str = "center",  # "center" or "zscore"
     eps: float = 1e-12,
@@ -44,7 +44,7 @@ def compute_attention_variance_loss(
         invalid = [idx for idx in attn_layer_set if idx < 1 or idx > num_layers]
         if invalid:
             raise ValueError(
-                f"attn_layer_set has invalid layer indices {sorted(invalid)} for {num_layers} layers"
+                f"需要{sorted(invalid)}层的注意力对于{num_layers}层的模型不合法"
             )
         layer_indices = sorted(attn_layer_set)
         selected_attn = [attn_logits_list[idx - 1] for idx in layer_indices]
