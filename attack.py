@@ -1,82 +1,197 @@
 # attack.py
 import math
 from typing import List, Tuple
+import numpy as np
 
 import torch
 import torch.nn.functional as F
 
 from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
 
+# 计算注意力权重相关函数
+def attention_weights_from_logits(attn_logits: torch.Tensor) -> np.ndarray:
+    # attn_logits: [B, H, N, N] -> weights: [B, N, N] 多头平均取注意力权重
+    attn_weights = torch.softmax(attn_logits, dim=-1)
+    attn_weights = attn_weights.mean(dim=1)
+    return attn_weights.detach().cpu().numpy()
 
 
-def compute_attention_variance_loss(
-    attn_logits_list: List[torch.Tensor],
-    cls_only: bool = True,
-    attn_layer_set: set[int] | None = None,
-    standardize: str = "center",  # "center" or "zscore"
-    eps: float = 1e-12,
-) -> torch.Tensor:
+def attention_weights_per_head_from_logits(attn_logits: torch.Tensor) -> np.ndarray:
     """
-    计算选定层注意力“logits 空间”的方差均值(不做 softmax),并在计算方差前做一次标准化
-    与原版区别：不再对 batch 维做最终平均；返回每个样本一个值，形状为 [B]
+    将输入的注意力logits(单样本) [B,H,N.N] 转化为每个head的注意力权重矩阵
+    """
+    if attn_logits.dim() != 4:
+        raise ValueError("attn_logits 必须是一个 4D tensor [B, H, N, N].")
+    if attn_logits.size(0) != 1:
+        raise ValueError("每次只能输入一个样本.")
 
-    参数：
-    - attn_logits_list: 每层一个 Tensor, 形状 [B, H, N, N]
-    - attn_layer_set: 1-based layer indices set; empty set uses all layers
-    - cls_only: 是否仅使用 CLS query (query index=0)
-    - standardize: "center" or "zscore"
-    - eps: 数值稳定项
+    attn_weights = torch.softmax(attn_logits, dim=-1)  # [1, H, N, N]
+    return attn_weights[0].detach().cpu().numpy()
 
-    返回：
-    - per-sample 方差张量，形状 [B](对层、head、query 聚合后；不对 batch 聚合)
+# 把矩阵线性归一化到 [0,1]
+def _minmax_normalize(a: np.ndarray) -> np.ndarray:
+    a_min = float(a.min())
+    a_max = float(a.max())
+    return (a - a_min) / (a_max - a_min + 1e-8)
+
+
+# 计算结构相似性指数（SSIM）
+def _ssim(a: np.ndarray, b: np.ndarray, c1: float, c2: float) -> float:
+    mu_a = float(a.mean())
+    mu_b = float(b.mean())
+    var_a = float(a.var())
+    var_b = float(b.var())
+    cov = float(((a - mu_a) * (b - mu_b)).mean())
+    num = (2 * mu_a * mu_b + c1) * (2 * cov + c2)
+    den = (mu_a ** 2 + mu_b ** 2 + c1) * (var_a + var_b + c2)
+    return float(num / (den + 1e-8))
+
+
+def _compute_ssim_matrix(attn_mats: List[np.ndarray], c1: float, c2: float) -> np.ndarray:
+    """
+    对每一层的注意力矩阵做 min-max 归一化
+    计算任意两层之间的 SSIM,形成 num_layers x num_layers 的矩阵
+    对角线填 1.0(层与自身相似度)
+    """
+    num_layers = len(attn_mats)
+    mats = [_minmax_normalize(mat) for mat in attn_mats]
+    ssim_mat = np.zeros((num_layers, num_layers), dtype=np.float32)
+    for i in range(num_layers):
+        for j in range(num_layers):
+            ssim_mat[i, j] = _ssim(mats[i], mats[j], c1=c1, c2=c2)
+    np.fill_diagonal(ssim_mat, 1.0)
+    return ssim_mat
+
+
+def _select_layers_by_threshold(ssim_mat: np.ndarray, threshold: float) -> List[int]:
+    """
+    对每一层，查看它与其他层的相似度是否超过阈值
+    只要该层与任一其他层相似度 > threshold,就选中该层
+    如果最终没有任何层被选中，就回退到选“平均相似度最高”的那一层
+    """
+    num_layers = ssim_mat.shape[0]
+    selected: List[int] = []
+    for i in range(num_layers):
+        row = np.delete(ssim_mat[i], i)
+        if np.any(row > threshold):
+            selected.append(i)
+    if not selected:
+        mean_scores = (ssim_mat.sum(axis=1) - 1.0) / max(num_layers - 1, 1)
+        selected = [int(np.argmax(mean_scores))]
+    return selected
+
+
+def compute_fused_attention_weights(
+    attn_logits_list: List[torch.Tensor],
+    c1: float = 1e-4,
+    c2: float = 9e-4,
+    ssim_threshold: float = 0.8,
+) -> Tuple[np.ndarray, List[int], np.ndarray]:
+    """
+    对单个样本,计算经过SSIM选择的融合注意力
+    返回 (combined_attention, selected_layer_indices, ssim_matrix).
     """
     if not attn_logits_list:
-        raise ValueError("attn_logits_list is empty")
+        raise ValueError("注意力logits为空")
 
-    if attn_layer_set is None:
-        attn_layer_set = set()
+    attn_mats = []
+    for attn_logits in attn_logits_list:
+        weights = attention_weights_from_logits(attn_logits)
+        if weights.ndim != 3 or weights.shape[0] != 1:
+            raise ValueError("期望输入单个样本的注意力logits(批量大小=1)")
+        attn_mats.append(weights[0])
 
-    # 选择参与计算的层
-    if len(attn_layer_set) == 0:
-        selected_attn = attn_logits_list
+    ssim_mat = _compute_ssim_matrix(attn_mats, c1=c1, c2=c2)
+    selected_layers = _select_layers_by_threshold(ssim_mat, ssim_threshold)
+
+    weights = np.ones(len(selected_layers), dtype=np.float32) / max(len(selected_layers), 1)
+    combined = np.zeros_like(attn_mats[0], dtype=np.float32)
+    for idx, w in zip(selected_layers, weights):
+        combined += w * attn_mats[idx]
+
+    return combined, selected_layers, ssim_mat
+
+
+def select_closest_heads_by_jsd(
+    fused_attention: np.ndarray,
+    per_head_attention: np.ndarray,
+    top_k: int = 2,
+    eps: float = 1e-12,
+) -> List[int]:
+    """
+    计算融合注意力与每个头的注意力之间的 JSD,并返回
+    JSD 最小的 top_k 个头的索引
+    """
+    if fused_attention.ndim != 2:
+        raise ValueError("fused_attention must be a 2D [N, N] matrix.")
+
+    heads = per_head_attention
+    if heads.ndim == 4:
+        if heads.shape[0] != 1:
+            raise ValueError("per_head_attention with 4 dims must have batch size 1.")
+        heads = heads[0]
+    if heads.ndim != 3:
+        raise ValueError("per_head_attention must be [H, N, N] or [1, H, N, N].")
+
+    if heads.shape[1:] != fused_attention.shape:
+        raise ValueError("Head attention shape must match fused_attention shape.")
+
+    num_heads = heads.shape[0]
+    if num_heads == 0:
+        raise ValueError("per_head_attention has zero heads.")
+
+    k = min(top_k, num_heads)
+    fused = fused_attention.astype(np.float64, copy=False)
+    fused = np.clip(fused, 0.0, None)
+    fused = fused.reshape(-1)
+    fused = fused / (fused.sum() + eps)
+
+    jsd_scores = np.zeros((num_heads,), dtype=np.float64)
+    for h in range(num_heads):
+        head = heads[h].astype(np.float64, copy=False)
+        head = np.clip(head, 0.0, None)
+        head = head.reshape(-1)
+        head = head / (head.sum() + eps)
+
+        m = 0.5 * (fused + head)
+        kl_fm = np.sum(fused * np.log((fused + eps) / (m + eps)))
+        kl_hm = np.sum(head * np.log((head + eps) / (m + eps)))
+        jsd_scores[h] = 0.5 * (kl_fm + kl_hm)
+
+    closest = np.argsort(jsd_scores)[:k]
+    return [int(i) for i in closest]
+
+
+def build_target_distribution_from_fused(
+    fused_attention: np.ndarray,
+    cls_only: bool = True,
+    map_to_patch: bool = True,
+    eps: float = 1e-12,
+) -> np.ndarray:
+    """
+    从融合的注意力矩阵中构建目标分布
+    如果 cls_only 为 True,则只使用 CLS token 的注意力分布
+    如果 map_to_patch 为 False,则返回完整的注意力分布 (所有token之间的注意力关系)
+    如果 map_to_patch 为 True,则返回 patch token 的注意力分布 (patch 落在那些注意力块上)
+    """
+    if fused_attention.ndim != 2:
+        raise ValueError("fused_attention must be a 2D [N, N] matrix.")
+
+    if not map_to_patch:
+        target = fused_attention.astype(np.float64, copy=False)
+        target = np.clip(target, 0.0, None)
+        target = target / (target.sum() + eps)
+        return target
+
+    if cls_only:
+        target = fused_attention[0, 1:]
     else:
-        num_layers = len(attn_logits_list)
-        invalid = [idx for idx in attn_layer_set if idx < 1 or idx > num_layers]
-        if invalid:
-            raise ValueError(
-                f"需要{sorted(invalid)}层的注意力对于{num_layers}层的模型不合法"
-            )
-        layer_indices = sorted(attn_layer_set)
-        selected_attn = [attn_logits_list[idx - 1] for idx in layer_indices]
+        target = fused_attention[:, 1:].mean(axis=0)
 
-    per_layer_vars: List[torch.Tensor] = []
-
-    for attn_logits in selected_attn:
-        # attn_logits: [B, H, N, N]，最后一维是 key
-        scores = attn_logits
-
-        # 一次标准化（不做 softmax）
-        if standardize == "center":
-            scores = scores - scores.mean(dim=-1, keepdim=True)
-        elif standardize == "zscore":
-            mean = scores.mean(dim=-1, keepdim=True)
-            std = scores.std(dim=-1, keepdim=True, unbiased=False)
-            scores = (scores - mean) / (std + eps)
-        else:
-            raise ValueError(f"Unknown standardize mode: {standardize}")
-
-        # 在 key 维计算方差，并对 head/query 聚合，保留 batch
-        if cls_only:
-            # scores[:, :, 0, :] -> [B, H, N] -> var over key => [B, H] -> mean over head => [B]
-            var = scores[:, :, 0, :].var(dim=-1, unbiased=False).mean(dim=1)  # [B]
-        else:
-            # scores.var(dim=-1) -> [B, H, N(query)] -> mean over head/query => [B]
-            var = scores.var(dim=-1, unbiased=False).mean(dim=(1, 2))  # [B]
-
-        per_layer_vars.append(var)
-
-    layer_vars = torch.stack(per_layer_vars, dim=0)  # [L', B]
-    return layer_vars.mean(dim=0)  # [B]
+    target = target.astype(np.float64, copy=False)
+    target = np.clip(target, 0.0, None)
+    target = target / (target.sum() + eps)
+    return target
 
 
 class AttentionFoolImageAttacker:
@@ -89,27 +204,26 @@ class AttentionFoolImageAttacker:
         self,
         model,
         img_size: int = 224,
-        patch_size: int = 16,
-        patch_row: int = 0,
-        patch_col: int = 0,
         steps: int = 250,
         step_size: float = 8.0 / 255.0,
         lambda_attn: float = 1.0,
-        loss_type: str = "ce+attn",
+        loss_type: str = "ce+attn_target",
         use_momentum: bool = False,
         momentum_mu: float = 0.9,
         device: torch.device | None = None,
         attn_layer_set: set[int] | None = None,
         eps: float = 8.0 / 255.0,
+        attn_target_mode: str = "cls",  # "cls" or "avg"
+        attn_map_to_patch: bool = True,
+        ssim_c1: float = 1e-4,
+        ssim_c2: float = 9e-4,
+        ssim_threshold: float = 0.8,
     ) -> None:
+        
         self.model = model
         self.model.eval()
 
         self.img_size = img_size
-        # patch_* 为兼容保留，整图攻击不使用
-        self.patch_size = patch_size
-        self.patch_row = patch_row
-        self.patch_col = patch_col
 
         self.steps = steps
         self.step_size = step_size
@@ -119,8 +233,10 @@ class AttentionFoolImageAttacker:
         self.momentum_mu = momentum_mu
         self.eps = eps
         self.attn_layer_set = attn_layer_set
+        self.attn_target_mode = attn_target_mode
+        self.attn_map_to_patch = attn_map_to_patch
 
-        self.device = device if device is not None else DEVICE  # 依赖你工程里的 DEVICE
+        self.device = device if device is not None else DEVICE
 
         self.pixel_mean = torch.tensor(IMAGENET_MEAN, dtype=torch.float32, device=self.device).view(1, 3, 1, 1)
         self.pixel_std = torch.tensor(IMAGENET_STD, dtype=torch.float32, device=self.device).view(1, 3, 1, 1)
@@ -152,22 +268,70 @@ class AttentionFoolImageAttacker:
         if self.loss_type == "ce":
             return ce_loss
 
-        cls_only = (self.loss_type == "ce+attn_cls")
-        attn_var_vec = compute_attention_variance_loss(
-            attn_logits_list=attn_logits_list,
-            cls_only=cls_only,
-            attn_layer_set=self.attn_layer_set,
-        )  # [1]
-        attn_var = attn_var_vec[0]  # 标量
+        if self.loss_type in ("attn_target", "ce+attn_target"):
+            # Fused attention from SSIM (layer selection for fusion only; head selection uses attn_layer_set)
+            fused_attention, _selected_layers, _ssim_mat = compute_fused_attention_weights(
+                attn_logits_list=attn_logits_list,
+            )
 
-        attn_term = -attn_var
+            if self.attn_target_mode not in ("cls", "avg"):
+                raise ValueError("attn_target_mode must be 'cls' or 'avg'.")
 
-        if self.loss_type == "attn":
-            return self.lambda_attn * attn_term
-        elif self.loss_type in ("ce+attn", "ce+attn_cls"):
-            return ce_loss + self.lambda_attn * attn_term
+            target_np = build_target_distribution_from_fused(
+                fused_attention=fused_attention,
+                cls_only=(self.attn_target_mode == "cls"),
+                map_to_patch=self.attn_map_to_patch,
+            )
+            target = torch.from_numpy(target_np).to(self.device).float()
 
-        raise ValueError(f"Unknown loss_type: {self.loss_type}")
+            if self.attn_layer_set is None or len(self.attn_layer_set) == 0:
+                layer_indices = list(range(len(attn_logits_list)))
+            else:
+                num_layers = len(attn_logits_list)
+                invalid = [idx for idx in self.attn_layer_set if idx < 1 or idx > num_layers]
+                if invalid:
+                    raise ValueError(
+                        f"attn_layer_set contains invalid layers {sorted(invalid)} for {num_layers} layers."
+                    )
+                layer_indices = [idx - 1 for idx in sorted(self.attn_layer_set)]
+
+            selected_heads: dict[int, list[int]] = {}
+            for layer_idx in layer_indices:
+                per_head_np = attention_weights_per_head_from_logits(attn_logits_list[layer_idx])
+                head_indices = select_closest_heads_by_jsd(
+                    fused_attention=fused_attention,
+                    per_head_attention=per_head_np,
+                )
+                selected_heads[layer_idx] = head_indices
+
+            sim_terms: List[torch.Tensor] = []
+            for layer_idx in layer_indices:
+                attn_logits = attn_logits_list[layer_idx]
+                attn_weights = torch.softmax(attn_logits, dim=-1)  # [1, H, N, N]
+                for h in selected_heads[layer_idx]:
+                    head_attn = attn_weights[:, h, :, :]  # [1, N, N]
+                    if self.attn_map_to_patch:
+                        if self.attn_target_mode == "cls":
+                            vec = head_attn[:, 0, 1:]  # [1, P]
+                        else:
+                            vec = head_attn[:, :, 1:].mean(dim=1)  # [1, P]
+                        vec = vec / (vec.sum(dim=1, keepdim=True) + 1e-12)
+                        sim = (vec * target).sum(dim=1)  # [1]
+                    else:
+                        mat = head_attn
+                        mat = mat / (mat.sum(dim=(1, 2), keepdim=True) + 1e-12)
+                        sim = (mat * target).sum(dim=(1, 2))  # [1]
+                    sim_terms.append(sim)
+
+            if not sim_terms:
+                raise ValueError("No selected heads found for attention target loss.")
+
+            sim_mean = torch.stack(sim_terms, dim=0).mean()
+            attn_loss = -sim_mean
+
+            if self.loss_type == "attn_target":
+                return self.lambda_attn * attn_loss
+            return ce_loss + self.lambda_attn * attn_loss      
 
     def attack_batch(
         self,

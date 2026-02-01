@@ -3,7 +3,6 @@ from functools import lru_cache
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
-
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
