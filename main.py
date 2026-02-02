@@ -23,8 +23,6 @@ def create_attacker(
     steps: int,
     use_momentum: bool,
     momentum_mu: float,
-    attn_target_mode: str,
-    attn_map_to_patch: bool,
     attn_layer_set: set[int],
     ) -> AttentionFoolImageAttacker:
     attacker = AttentionFoolImageAttacker(model=model,img_size=img_size,step_size=pgd_step_size,
@@ -35,8 +33,6 @@ def create_attacker(
         momentum_mu=momentum_mu,
         device=DEVICE,
         attn_layer_set=attn_layer_set,
-        attn_target_mode=attn_target_mode,
-        attn_map_to_patch=attn_map_to_patch,
     )
     return attacker
 
@@ -145,15 +141,12 @@ parser.add_argument("--max-attacked-samples", type=int, default=5, help="Maximum
 parser.add_argument("--pgd-step-size", type=float, default=8.0 / 255.0, help="PGD step size in normalized pixel range [0, 1].")
 parser.add_argument("--output-dir", default="outputs", help="Directory used to store adversarial samples.")
 parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
-parser.add_argument("--loss-type", default="ce+attn_target", help="Loss type (e.g., ce, gap, attn_target, ce+attn_target).")
+parser.add_argument("--loss-type", default="ce+qk_dir", help="Loss type (e.g., ce, ce+qk_dir).")
 parser.add_argument("--lambda-attn", type=float, default=1.0, help="Weight for attention-related loss.")
 parser.add_argument("--steps", type=int, default=250, help="Number of PGD steps.")
 parser.add_argument("--use-momentum", action="store_true", help="Enable momentum in PGD.")
 parser.add_argument("--momentum-mu", type=float, default=0.9, help="Momentum coefficient.")
-parser.add_argument("--attn-layer-set", help="Comma-separated 1-based layer indices for attention ops.")
-parser.add_argument("--attn-target-mode", choices=["cls", "avg"], default="cls", help="Target attention from CLS or average queries.")
-parser.add_argument("--attn-map-to-patch", action="store_true", help="Map target to patch tokens (default).")
-parser.add_argument("--attn-no-map-to-patch", action="store_true", help="Use full attention matrix instead of patch mapping.")
+parser.add_argument("--attn-layer-set", help="Comma-separated 1-based layer indices for QK direction aggregation.")
 
 def main(
         max_attacked_samples: int,
@@ -165,8 +158,7 @@ def main(
         steps: int,
         use_momentum: bool,
         momentum_mu: float,
-        attn_target_mode: str,
-        attn_map_to_patch: bool,
+        attn_layer_set: set[int],
         image_dir: str = IMAGE_DIR,
         annotations_path: str = ANNOTATIONS_PATH,
         img_size: int = DEFAULT_IMG_SIZE,
@@ -190,9 +182,7 @@ def main(
         steps=steps,
         use_momentum=use_momentum,
         momentum_mu=momentum_mu,
-        attn_layer_set={1,2,3,4},
-        attn_target_mode=attn_target_mode,
-        attn_map_to_patch=attn_map_to_patch,
+        attn_layer_set={1,3,6,12},
     )
 
     _, correct_mask = evaluate_clean_dataset(
@@ -221,11 +211,10 @@ def main(
 if __name__ == "__main__":
     print(f"Running on {str(DEVICE)}")
     args = parser.parse_args()
-    attn_map_to_patch = True
-    if args.attn_no_map_to_patch:
-        attn_map_to_patch = False
-    elif args.attn_map_to_patch:
-        attn_map_to_patch = True
+    attn_layer_set: set[int] = set()
+    if args.attn_layer_set:
+        parts = [p.strip() for p in args.attn_layer_set.split(",") if p.strip()]
+        attn_layer_set = {int(p) for p in parts}
     main(
         max_attacked_samples=args.max_attacked_samples,
         pgd_step_size=args.pgd_step_size,
@@ -236,6 +225,5 @@ if __name__ == "__main__":
         steps=args.steps,
         use_momentum=args.use_momentum,
         momentum_mu=args.momentum_mu,
-        attn_target_mode=args.attn_target_mode,
-        attn_map_to_patch=attn_map_to_patch,
+        attn_layer_set=attn_layer_set,
     )
