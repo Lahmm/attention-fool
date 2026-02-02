@@ -327,7 +327,7 @@ class AttentionFoolImageAttacker:
                 raise ValueError("No selected heads found for attention target loss.")
 
             sim_mean = torch.stack(sim_terms, dim=0).mean()
-            attn_loss = -sim_mean
+            attn_loss = sim_mean
 
             if self.loss_type == "attn_target":
                 return self.lambda_attn * attn_loss

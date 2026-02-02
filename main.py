@@ -23,9 +23,9 @@ def create_attacker(
     steps: int,
     use_momentum: bool,
     momentum_mu: float,
-    attn_layer_set: set[int],
     attn_target_mode: str,
     attn_map_to_patch: bool,
+    attn_layer_set: set[int],
     ) -> AttentionFoolImageAttacker:
     attacker = AttentionFoolImageAttacker(model=model,img_size=img_size,step_size=pgd_step_size,
         loss_type=loss_type,
@@ -34,7 +34,7 @@ def create_attacker(
         use_momentum=use_momentum,
         momentum_mu=momentum_mu,
         device=DEVICE,
-        attn_layer_set={1,2,3,4},
+        attn_layer_set=attn_layer_set,
         attn_target_mode=attn_target_mode,
         attn_map_to_patch=attn_map_to_patch,
     )
@@ -165,7 +165,6 @@ def main(
         steps: int,
         use_momentum: bool,
         momentum_mu: float,
-        attn_layer_set: set[int],
         attn_target_mode: str,
         attn_map_to_patch: bool,
         image_dir: str = IMAGE_DIR,
@@ -191,7 +190,7 @@ def main(
         steps=steps,
         use_momentum=use_momentum,
         momentum_mu=momentum_mu,
-        attn_layer_set=attn_layer_set,
+        attn_layer_set={1,2,3,4},
         attn_target_mode=attn_target_mode,
         attn_map_to_patch=attn_map_to_patch,
     )
@@ -237,7 +236,6 @@ if __name__ == "__main__":
         steps=args.steps,
         use_momentum=args.use_momentum,
         momentum_mu=args.momentum_mu,
-        attn_layer_set=args.attn_layer_set,
         attn_target_mode=args.attn_target_mode,
         attn_map_to_patch=attn_map_to_patch,
     )
