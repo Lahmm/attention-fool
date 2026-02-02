@@ -258,6 +258,9 @@ class AttentionFoolImageAttacker:
         logits: torch.Tensor,                     # [1, C]
         attn_logits_list: List[torch.Tensor],     # list of [1, H, N, N]
         labels: torch.Tensor,                     # [1]
+        target: torch.Tensor,                     # [P] or [N, N]
+        selected_heads: dict[int, list[int]],
+        layer_indices: List[int],
     ) -> torch.Tensor:
         """
         返回单样本标量 loss(不涉及 batch 平均)
@@ -269,41 +272,6 @@ class AttentionFoolImageAttacker:
             return ce_loss
 
         if self.loss_type in ("attn_target", "ce+attn_target"):
-            # Fused attention from SSIM (layer selection for fusion only; head selection uses attn_layer_set)
-            fused_attention, _selected_layers, _ssim_mat = compute_fused_attention_weights(
-                attn_logits_list=attn_logits_list,
-            )
-
-            if self.attn_target_mode not in ("cls", "avg"):
-                raise ValueError("attn_target_mode must be 'cls' or 'avg'.")
-
-            target_np = build_target_distribution_from_fused(
-                fused_attention=fused_attention,
-                cls_only=(self.attn_target_mode == "cls"),
-                map_to_patch=self.attn_map_to_patch,
-            )
-            target = torch.from_numpy(target_np).to(self.device).float()
-
-            if self.attn_layer_set is None or len(self.attn_layer_set) == 0:
-                layer_indices = list(range(len(attn_logits_list)))
-            else:
-                num_layers = len(attn_logits_list)
-                invalid = [idx for idx in self.attn_layer_set if idx < 1 or idx > num_layers]
-                if invalid:
-                    raise ValueError(
-                        f"attn_layer_set contains invalid layers {sorted(invalid)} for {num_layers} layers."
-                    )
-                layer_indices = [idx - 1 for idx in sorted(self.attn_layer_set)]
-
-            selected_heads: dict[int, list[int]] = {}
-            for layer_idx in layer_indices:
-                per_head_np = attention_weights_per_head_from_logits(attn_logits_list[layer_idx])
-                head_indices = select_closest_heads_by_jsd(
-                    fused_attention=fused_attention,
-                    per_head_attention=per_head_np,
-                )
-                selected_heads[layer_idx] = head_indices
-
             sim_terms: List[torch.Tensor] = []
             for layer_idx in layer_indices:
                 attn_logits = attn_logits_list[layer_idx]
@@ -362,6 +330,61 @@ class AttentionFoolImageAttacker:
         delta.requires_grad_(True)
         momentum = torch.zeros_like(delta)
 
+        fixed_targets: List[torch.Tensor] = []
+        fixed_selected_heads: List[dict[int, list[int]]] = []
+        fixed_layer_indices: List[List[int]] = []
+
+        if self.loss_type in ("attn_target", "ce+attn_target"):
+            for b in range(B):
+                with torch.no_grad():
+                    clean_pixels_b = images_pixels[b:b+1].clamp(0.0, 1.0)
+                    x_clean_b = self._normalize(clean_pixels_b)
+                    _logits_clean_b, attn_logits_list_clean = self.model(x_clean_b, return_attn=True)
+
+                fused_attention, _selected_layers, _ssim_mat = compute_fused_attention_weights(
+                    attn_logits_list=attn_logits_list_clean,
+                )
+
+                if self.attn_target_mode not in ("cls", "avg"):
+                    raise ValueError("attn_target_mode must be 'cls' or 'avg'.")
+
+                target_np = build_target_distribution_from_fused(
+                    fused_attention=fused_attention,
+                    cls_only=(self.attn_target_mode == "cls"),
+                    map_to_patch=self.attn_map_to_patch,
+                )
+                target = torch.from_numpy(target_np).to(self.device).float()
+
+                num_layers = len(attn_logits_list_clean)
+                if self.attn_layer_set is None or len(self.attn_layer_set) == 0:
+                    max_layers = min(4, num_layers)
+                    layer_indices = list(range(max_layers))
+                else:
+                    invalid = [idx for idx in self.attn_layer_set if idx < 1 or idx > num_layers]
+                    if invalid:
+                        raise ValueError(
+                            f"attn_layer_set contains invalid layers {sorted(invalid)} for {num_layers} layers."
+                        )
+                    layer_indices = [idx - 1 for idx in sorted(self.attn_layer_set)]
+
+                selected_heads: dict[int, list[int]] = {}
+                for layer_idx in layer_indices:
+                    per_head_np = attention_weights_per_head_from_logits(attn_logits_list_clean[layer_idx])
+                    head_indices = select_closest_heads_by_jsd(
+                        fused_attention=fused_attention,
+                        per_head_attention=per_head_np,
+                    )
+                    selected_heads[layer_idx] = head_indices
+
+                fixed_targets.append(target)
+                fixed_selected_heads.append(selected_heads)
+                fixed_layer_indices.append(layer_indices)
+        else:
+            for _ in range(B):
+                fixed_targets.append(torch.empty(0, device=self.device))
+                fixed_selected_heads.append({})
+                fixed_layer_indices.append([])
+
         for iter_idx in range(self.steps):
             step = self._cosine_step_size(iter_idx)
 
@@ -376,6 +399,9 @@ class AttentionFoolImageAttacker:
                     logits=logits_b,
                     attn_logits_list=attn_logits_list_b,
                     labels=labels[b:b+1],
+                    target=fixed_targets[b],
+                    selected_heads=fixed_selected_heads[b],
+                    layer_indices=fixed_layer_indices[b],
                 )
 
                 loss_b.backward()
