@@ -32,13 +32,16 @@ class ViTWithAttn(nn.Module):
         )
 
         # 存放每一层的 attn logits（B, H, N, N）
-        self.attn_logits: List[torch.Tensor] = []
+        self.attn_weights: List[torch.Tensor] = []
         self._capture_attn: bool = False
+        self.token_embeddings: torch.Tensor | None = None
+        self._capture_tokens: bool = False
 
         self._norm_eps = 1e-6
 
         # 注册 hook，在每个 blocks.*.attn.qkv 上算 qk^T / sqrt(d_k)
         self._register_qkv_hooks()
+        self._register_token_hook()
 
         # 搬到设备
         self.to(self.device)
@@ -111,16 +114,39 @@ class ViTWithAttn(nn.Module):
 
             # dot-product attention logits: [B, H, N, N]
             attn_logits = (q @ k.transpose(-2, -1)) * (head_dim ** -0.5)
+            attn_weights = torch.softmax(attn_logits, dim=-1)
 
-            self.attn_logits.append(attn_logits)
+            self.attn_weights.append(attn_weights)
 
         return hook
+
+    def _register_token_hook(self) -> None:
+        """
+        Register a forward hook to capture final token embeddings.
+        Prefer model.norm output; fallback to the last transformer block.
+        """
+        target = None
+        if hasattr(self.model, "norm"):
+            target = getattr(self.model, "norm")
+        elif hasattr(self.model, "blocks") and len(self.model.blocks) > 0:
+            target = self.model.blocks[-1]
+
+        if target is None:
+            return
+
+        def hook(_module: nn.Module, _inputs, output):
+            if not self._capture_tokens:
+                return
+            self.token_embeddings = output
+
+        target.register_forward_hook(hook)
 
     # forward
     def forward(
         self,
         x: torch.Tensor,
         return_attn: bool = False,
+        return_tokens: bool = False,
     ):
         """
         :param x: [B, 3, H, W]
@@ -129,17 +155,25 @@ class ViTWithAttn(nn.Module):
         x = x.to(self.device)
 
         # 清空上一次 forward 的 attention 缓存
-        self.attn_logits = []
+        self.attn_weights = []
         self._capture_attn = return_attn
+        self._capture_tokens = return_tokens
+        self.token_embeddings = None
 
         logits = self.model(x)  # [B, num_classes]
         self._capture_attn = False
+        self._capture_tokens = False
 
+        attn_list = [t for t in self.attn_weights]
+        tokens = self.token_embeddings
+
+        if return_attn and return_tokens:
+            return logits, attn_list, tokens
         if return_attn:
-            attn_list = [t for t in self.attn_logits]
             return logits, attn_list
-        else:
-            return logits
+        if return_tokens:
+            return logits, tokens
+        return logits
 
 def build_vit_model(
     num_classes: int,

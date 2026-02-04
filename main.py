@@ -16,33 +16,74 @@ DEFAULT_IMG_SIZE = 224
 # 构建攻击器
 def create_attacker(
     model: ViTWithAttn,
+    models: List[ViTWithAttn],
     img_size: int,
     pgd_step_size: float,
-    loss_type: str,
-    lambda_attn: float,
+    epsilon: float,
     steps: int,
+    stage1_steps: int,
+    k_common: int,
+    num_views: int,
+    noise_eps: float,
+    importance_method: str,
+    tau: float,
+    lambda_focus: float,
+    lambda_stab: float,
+    lambda_preserve: float,
+    lambda_focus2: float | None,
+    lambda_stab2: float | None,
+    lambda_ce1: float,
+    lambda_var_model: float,
+    lambda_var_aug: float,
+    norm_type: str,
     use_momentum: bool,
     momentum_mu: float,
-    attn_layer_set: set[int],
-    ) -> AttentionFoolImageAttacker:
-    attacker = AttentionFoolImageAttacker(model=model,img_size=img_size,step_size=pgd_step_size,
-        loss_type=loss_type,
-        lambda_attn=lambda_attn,
+    log_every: int,
+) -> AttentionFoolImageAttacker:
+    attacker = AttentionFoolImageAttacker(
+        model=model,
+        models=models,
+        img_size=img_size,
+        step_size=pgd_step_size,
+        eps=epsilon,
         steps=steps,
+        stage1_steps=stage1_steps,
+        k_common=k_common,
+        num_views=num_views,
+        noise_eps=noise_eps,
+        importance_method=importance_method,
+        tau=tau,
+        lambda_focus=lambda_focus,
+        lambda_stab=lambda_stab,
+        lambda_preserve=lambda_preserve,
+        lambda_focus2=lambda_focus2,
+        lambda_stab2=lambda_stab2,
+        lambda_ce1=lambda_ce1,
+        lambda_var_model=lambda_var_model,
+        lambda_var_aug=lambda_var_aug,
+        norm_type=norm_type,
         use_momentum=use_momentum,
         momentum_mu=momentum_mu,
+        log_every=log_every,
         device=DEVICE,
-        attn_layer_set=attn_layer_set,
     )
     return attacker
 
 # 开始攻击
-def attack_correctly_classified_samples(dataloader, model: ViTWithAttn, attacker: AttentionFoolImageAttacker, correct_mask: List[bool],
+def attack_correctly_classified_samples(
+    dataloader,
+    model: ViTWithAttn,
+    attacker: AttentionFoolImageAttacker,
+    correct_mask: List[bool],
     output_dir: str,
     max_attacked_samples: int | None,
+    allowed_indices: set[int] | None = None,
 ) -> None:
     # 对正确分类的样本进行攻击
-    num_candidates = sum(correct_mask)
+    if allowed_indices is None:
+        num_candidates = sum(correct_mask)
+    else:
+        num_candidates = sum(correct_mask[idx] for idx in allowed_indices)
     if num_candidates == 0:
         print("没有任何正确分类的样本可供攻击。")
         return
@@ -60,7 +101,10 @@ def attack_correctly_classified_samples(dataloader, model: ViTWithAttn, attacker
             break
 
         batch_indices = indices.tolist()
-        mask_list = [correct_mask[idx] for idx in batch_indices]
+        if allowed_indices is None:
+            mask_list = [correct_mask[idx] for idx in batch_indices]
+        else:
+            mask_list = [correct_mask[idx] and idx in allowed_indices for idx in batch_indices]
         if not any(mask_list):
             continue
 
@@ -100,7 +144,10 @@ def attack_correctly_classified_samples(dataloader, model: ViTWithAttn, attacker
         images_to_attack = images_to_attack.to(DEVICE)
         labels_to_attack = labels_to_attack.to(DEVICE)
 
-        x_adv, _ = attacker.attack_batch(images_to_attack, labels_to_attack)
+        x_adv, _delta, masks, _patch_indices, extras = attacker.attack_batch(
+            images_to_attack,
+            labels_to_attack,
+        )
 
         with torch.no_grad():
             logits_adv = model(x_adv, return_attn=False)
@@ -121,6 +168,15 @@ def attack_correctly_classified_samples(dataloader, model: ViTWithAttn, attacker
         )
         saved_images += len(saved)
 
+        attacker.save_visualizations(
+            clean_images=images_to_attack,
+            adv_images=x_adv,
+            masks=masks,
+            output_dir=output_dir,
+            filenames=filenames,
+            extras=extras,
+        )
+
         progress.update(attacked_batch)
         success_rate = success_count / attacked if attacked > 0 else 0.0
         progress.set_postfix(success=f"{success_rate:.4f}", attacked=attacked)
@@ -138,27 +194,64 @@ def attack_correctly_classified_samples(dataloader, model: ViTWithAttn, attacker
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--max-attacked-samples", type=int, default=5, help="Maximum number of correctly classified samples to attack.")
-parser.add_argument("--pgd-step-size", type=float, default=8.0 / 255.0, help="PGD step size in normalized pixel range [0, 1].")
+parser.add_argument("--pgd-step-size", type=float, default=1.0 / 255.0, help="PGD step size in normalized pixel range [0, 1].")
+parser.add_argument("--epsilon", type=float, default=8.0 / 255.0, help="L-inf perturbation budget in pixel range [0, 1].")
+parser.add_argument("--ensemble-models", type=str, default=None, help="Comma-separated surrogate model names for ensemble.")
+parser.add_argument("--k-common", dest="k_common", type=int, default=8, help="Top-k common patches.")
+parser.add_argument("--k", dest="k_common", type=int, default=None, help="Alias for --k-common.")
+parser.add_argument("--num-views", type=int, default=None, help="Total number of views (augmentations + noise).")
+parser.add_argument("--num-aug-views", type=int, default=4, help="Legacy: number of light augmentation views.")
+parser.add_argument("--num-noise-views", type=int, default=4, help="Legacy: number of small-noise views.")
+parser.add_argument("--noise-eps", type=float, default=4.0 / 255.0, help="Noise magnitude for stability views.")
+parser.add_argument("--importance-method", type=str, default="grad_token", choices=["grad_token", "legrad", "attn_rollout"], help="Token importance method.")
+parser.add_argument("--tau", type=float, default=0.07, help="Softmax temperature for importance normalization.")
+parser.add_argument("--stage1-steps", type=int, default=0, help="Number of Stage1 evidence amplification steps.")
+parser.add_argument("--lambda-focus", type=float, default=1.0, help="Stage1 focus loss weight.")
+parser.add_argument("--lambda-stab", type=float, default=1.0, help="Stage1 stability loss weight.")
+parser.add_argument("--lambda-preserve", type=float, default=1.0, help="Stage2 preserve loss weight.")
+parser.add_argument("--lambda-focus2", type=float, default=None, help="Stage2 focus loss weight (defaults to lambda-focus).")
+parser.add_argument("--lambda-stab2", type=float, default=None, help="Stage2 stability loss weight (defaults to lambda-stab).")
+parser.add_argument("--lambda-ce1", type=float, default=0.0, help="Stage1 CE weight (default 0).")
+parser.add_argument("--lambda-var-model", type=float, default=1.0, help="Common-evidence variance penalty across models.")
+parser.add_argument("--lambda-var-aug", type=float, default=1.0, help="Common-evidence variance penalty across augmentations.")
+parser.add_argument("--norm-type", type=str, default="linf", choices=["linf", "l2"], help="Perturbation norm constraint.")
+parser.add_argument("--log-every", type=int, default=10, help="Log interval for losses.")
 parser.add_argument("--output-dir", default="outputs", help="Directory used to store adversarial samples.")
 parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
-parser.add_argument("--loss-type", default="ce+qk_dir", help="Loss type (e.g., ce, ce+qk_dir).")
-parser.add_argument("--lambda-attn", type=float, default=1.0, help="Weight for attention-related loss.")
-parser.add_argument("--steps", type=int, default=250, help="Number of PGD steps.")
+parser.add_argument("--steps", type=int, default=100, help="Number of PGD steps.")
 parser.add_argument("--use-momentum", action="store_true", help="Enable momentum in PGD.")
 parser.add_argument("--momentum-mu", type=float, default=0.9, help="Momentum coefficient.")
-parser.add_argument("--attn-layer-set", help="Comma-separated 1-based layer indices for QK direction aggregation.")
+parser.add_argument("--image-path", type=str, default=None, help="Optional image path or filename inside the dataset.")
 
 def main(
         max_attacked_samples: int,
         pgd_step_size: float,
+        epsilon: float,
+        k_common: int,
+        num_views: int | None,
+        num_aug_views: int,
+        num_noise_views: int,
+        noise_eps: float,
+        importance_method: str,
+        tau: float,
+        stage1_steps: int,
+        lambda_focus: float,
+        lambda_stab: float,
+        lambda_preserve: float,
+        lambda_focus2: float | None,
+        lambda_stab2: float | None,
+        lambda_ce1: float,
+        lambda_var_model: float,
+        lambda_var_aug: float,
+        norm_type: str,
+        log_every: int,
         output_dir: str,
         mode: str,
-        loss_type: str,
-        lambda_attn: float,
         steps: int,
         use_momentum: bool,
         momentum_mu: float,
-        attn_layer_set: set[int],
+        image_path: str | None,
+        ensemble_models: str | None,
         image_dir: str = IMAGE_DIR,
         annotations_path: str = ANNOTATIONS_PATH,
         img_size: int = DEFAULT_IMG_SIZE,
@@ -169,26 +262,72 @@ def main(
         annotations_path_arg=annotations_path,
     )
 
-    model = build_vit_model(
-        num_classes=num_classes,
-    )
+    model_names: List[str | None] = []
+    if ensemble_models:
+        model_names = [name.strip() for name in ensemble_models.split(",") if name.strip()]
+    if not model_names:
+        model_names = [None]
+
+    models: List[ViTWithAttn] = []
+    for name in model_names:
+        if name:
+            models.append(build_vit_model(num_classes=num_classes, model_name=name))
+        else:
+            models.append(build_vit_model(num_classes=num_classes))
+    model = models[0]
+
+    if num_views is None:
+        num_views = max(1, num_aug_views + num_noise_views)
 
     attacker = create_attacker(
         model=model,
+        models=models,
         img_size=img_size,
         pgd_step_size=pgd_step_size,
-        loss_type=loss_type,
-        lambda_attn=lambda_attn,
+        epsilon=epsilon,
         steps=steps,
+        stage1_steps=stage1_steps,
+        k_common=k_common,
+        num_views=num_views,
+        noise_eps=noise_eps,
+        importance_method=importance_method,
+        tau=tau,
+        lambda_focus=lambda_focus,
+        lambda_stab=lambda_stab,
+        lambda_preserve=lambda_preserve,
+        lambda_focus2=lambda_focus2,
+        lambda_stab2=lambda_stab2,
+        lambda_ce1=lambda_ce1,
+        lambda_var_model=lambda_var_model,
+        lambda_var_aug=lambda_var_aug,
+        norm_type=norm_type,
         use_momentum=use_momentum,
         momentum_mu=momentum_mu,
-        attn_layer_set={1,3,6,12},
+        log_every=log_every,
     )
 
     _, correct_mask = evaluate_clean_dataset(
         dataloader=dataloader,
         model=model,
     )
+
+    allowed_indices: set[int] | None = None
+    if image_path:
+        from pathlib import Path
+        target = Path(image_path)
+        allowed_indices = set()
+        dataset = dataloader.dataset
+        for idx, sample in enumerate(dataset.samples):
+            sample_path = sample["image_path"]
+            if sample_path == target or sample_path.name == target.name:
+                allowed_indices.add(idx)
+        if not allowed_indices:
+            print(f"Image not found in dataset: {image_path}")
+            return
+        filtered_mask = [False] * len(correct_mask)
+        for idx in allowed_indices:
+            filtered_mask[idx] = correct_mask[idx]
+        correct_mask = filtered_mask
 
     if mode == "clean":
         save_clean_images(
@@ -206,24 +345,39 @@ def main(
             correct_mask=correct_mask,
             output_dir=output_dir,
             max_attacked_samples=max_attacked_samples,
+            allowed_indices=allowed_indices,
         )
 
 if __name__ == "__main__":
     print(f"Running on {str(DEVICE)}")
     args = parser.parse_args()
-    attn_layer_set: set[int] = set()
-    if args.attn_layer_set:
-        parts = [p.strip() for p in args.attn_layer_set.split(",") if p.strip()]
-        attn_layer_set = {int(p) for p in parts}
     main(
         max_attacked_samples=args.max_attacked_samples,
         pgd_step_size=args.pgd_step_size,
+        epsilon=args.epsilon,
+        k_common=args.k_common if args.k_common is not None else 8,
+        num_views=args.num_views,
+        num_aug_views=args.num_aug_views,
+        num_noise_views=args.num_noise_views,
+        noise_eps=args.noise_eps,
+        importance_method=args.importance_method,
+        tau=args.tau,
+        stage1_steps=args.stage1_steps,
+        lambda_focus=args.lambda_focus,
+        lambda_stab=args.lambda_stab,
+        lambda_preserve=args.lambda_preserve,
+        lambda_focus2=args.lambda_focus2,
+        lambda_stab2=args.lambda_stab2,
+        lambda_ce1=args.lambda_ce1,
+        lambda_var_model=args.lambda_var_model,
+        lambda_var_aug=args.lambda_var_aug,
+        norm_type=args.norm_type,
+        log_every=args.log_every,
         output_dir=args.output_dir,
         mode=args.mode,
-        loss_type=args.loss_type,
-        lambda_attn=args.lambda_attn,
         steps=args.steps,
         use_momentum=args.use_momentum,
         momentum_mu=args.momentum_mu,
-        attn_layer_set=attn_layer_set,
+        image_path=args.image_path,
+        ensemble_models=args.ensemble_models,
     )
