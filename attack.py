@@ -330,14 +330,14 @@ class AttentionFoolImageAttacker:
                 region_weights=region_weights,
             )
 
-            total = (
+            objective = (
                 self.lambda_cls * ce_mean
-                + self.lambda_align * align_loss
-                + self.lambda_compact * compact_loss
-                + self.lambda_couple * coupled_loss
+                - self.lambda_align * align_loss
+                - self.lambda_compact * compact_loss
+                - self.lambda_couple * coupled_loss
             )
 
-            grad = torch.autograd.grad(total, delta, retain_graph=False)[0]
+            grad = torch.autograd.grad(objective, delta, retain_graph=False)[0]
             delta, momentum = self._pgd_update(delta, grad, momentum)
             delta = delta.detach()
 
