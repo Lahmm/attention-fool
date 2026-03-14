@@ -1,116 +1,66 @@
-# attack.py
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-import numpy as np
 import torch
 import torch.nn.functional as F
-from PIL import Image
-from torchvision import transforms
 from torchvision.transforms import functional as TF
 from torchvision.utils import make_grid, save_image
 
 from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
 
-try:
-    import lightly.transforms as _lt
-    RandomResize = getattr(_lt, "RandomResize", None)
-    RandomCrop = getattr(_lt, "RandomCrop", None)
-    HorizontalFlip = getattr(_lt, "HorizontalFlip", None)
-    GaussianBlur = getattr(_lt, "GaussianBlur", None)
-    ColorJitter = getattr(_lt, "ColorJitter", None)
-    _LIGHTLY_IMPORT_ERROR: Exception | None = None
-except Exception as exc:
-    RandomResize = RandomCrop = HorizontalFlip = GaussianBlur = ColorJitter = None
-    _LIGHTLY_IMPORT_ERROR = exc
-
 
 class AttentionFoolImageAttacker:
     """
-    Two-stage common-evidence attack with ensemble support.
-    Stage1: amplify common evidence focus.
-    Stage2: mislead classification while preserving evidence focus and stability.
+    Single-model, multi-view attribution concentration attack.
+
+    The perturbation is optimized so that different augmented views of the same
+    adversarial sample:
+    1. are misclassified,
+    2. rely on a shared attribution pattern,
+    3. compress that attribution into a compact region,
+    4. use that compact region to support the wrong decision.
     """
+
     def __init__(
         self,
         model,
-        models: List | None = None,
         img_size: int = 224,
         steps: int = 100,
-        stage1_steps: int = 0,
         step_size: float = 1.0 / 255.0,
         eps: float = 8.0 / 255.0,
-        k_common: int = 8,
+        region_topk: int = 8,
         num_views: int = 8,
         noise_eps: float = 4.0 / 255.0,
-        importance_method: str = "grad_token",
         tau: float = 0.07,
-        lambda_focus: float = 1.0,
-        lambda_stab: float = 1.0,
-        lambda_preserve: float = 1.0,
-        lambda_focus2: float | None = None,
-        lambda_stab2: float | None = None,
-        lambda_ce1: float = 0.0,
-        lambda_var_model: float = 1.0,
-        lambda_var_aug: float = 1.0,
+        lambda_cls: float = 1.0,
+        lambda_align: float = 1.0,
+        lambda_compact: float = 1.0,
+        lambda_couple: float = 1.0,
         norm_type: str = "linf",
         use_momentum: bool = True,
         momentum_mu: float = 0.9,
         log_every: int = 10,
         device: torch.device | None = None,
     ) -> None:
-        self._use_lightly = all([RandomResize, RandomCrop, HorizontalFlip, GaussianBlur, ColorJitter])
-        if not self._use_lightly:
-            if _LIGHTLY_IMPORT_ERROR is not None:
-                reason = f"{_LIGHTLY_IMPORT_ERROR}"
-            else:
-                missing = [name for name, obj in [
-                    ("RandomResize", RandomResize),
-                    ("RandomCrop", RandomCrop),
-                    ("HorizontalFlip", HorizontalFlip),
-                    ("GaussianBlur", GaussianBlur),
-                    ("ColorJitter", ColorJitter),
-                ] if obj is None]
-                reason = f"missing {', '.join(missing)}"
-            print(
-                "Warning: lightly transforms not available; falling back to torchvision transforms "
-                f"({reason})."
-            )
-
         self.model = model
-        if models is None or len(models) == 0:
-            self.models = [model]
-        else:
-            self.models = models
-
-        for m in self.models:
-            m.eval()
+        self.model.eval()
 
         self.img_size = img_size
         self.steps = steps
-        self.stage1_steps = stage1_steps
         self.step_size = step_size
         self.eps = eps
-        self.k_common = k_common
+        self.region_topk = region_topk
         self.num_views = num_views
         self.noise_eps = noise_eps
-        self.importance_method = importance_method
         self.tau = tau
-        self.lambda_focus = lambda_focus
-        self.lambda_stab = lambda_stab
-        self.lambda_preserve = lambda_preserve
-        self.lambda_focus2 = lambda_focus2 if lambda_focus2 is not None else lambda_focus
-        self.lambda_stab2 = lambda_stab2 if lambda_stab2 is not None else lambda_stab
-        self.lambda_ce1 = lambda_ce1
-        self.lambda_var_model = lambda_var_model
-        self.lambda_var_aug = lambda_var_aug
+        self.lambda_cls = lambda_cls
+        self.lambda_align = lambda_align
+        self.lambda_compact = lambda_compact
+        self.lambda_couple = lambda_couple
         self.norm_type = norm_type
         self.use_momentum = use_momentum
         self.momentum_mu = momentum_mu
         self.log_every = log_every
-
         self.device = device if device is not None else DEVICE
 
         patch_size = 16
@@ -121,12 +71,12 @@ class AttentionFoolImageAttacker:
             patch_size = patch_size[0]
         self.patch_size = int(patch_size)
 
-        self.pixel_mean = torch.tensor(IMAGENET_MEAN, dtype=torch.float32, device=self.device).view(1, 3, 1, 1)
-        self.pixel_std = torch.tensor(IMAGENET_STD, dtype=torch.float32, device=self.device).view(1, 3, 1, 1)
-
-        self._to_pil = transforms.ToPILImage()
-        self._to_tensor = transforms.ToTensor()
-        self._pil_aug = self._build_pil_aug()
+        self.pixel_mean = torch.tensor(
+            IMAGENET_MEAN, dtype=torch.float32, device=self.device
+        ).view(1, 3, 1, 1)
+        self.pixel_std = torch.tensor(
+            IMAGENET_STD, dtype=torch.float32, device=self.device
+        ).view(1, 3, 1, 1)
 
     def _denormalize(self, images: torch.Tensor) -> torch.Tensor:
         return images * self.pixel_std + self.pixel_mean
@@ -140,127 +90,16 @@ class AttentionFoolImageAttacker:
             return scores / (scores.sum(dim=-1, keepdim=True) + 1e-12)
         return torch.softmax(scores / tau, dim=-1)
 
-    def _safe_instantiate(self, cls, kwargs_list: List[dict]) -> object:
-        for kwargs in kwargs_list:
-            try:
-                return cls(**kwargs)
-            except TypeError:
-                continue
-        return cls()
-
-    def _build_pil_aug(self) -> transforms.Compose:
-        if self._use_lightly:
-            resize = self._safe_instantiate(
-                RandomResize,
-                [
-                    {"min_size": self.img_size, "max_size": int(self.img_size * 1.1)},
-                    {"size": int(self.img_size * 1.1)},
-                    {"size": self.img_size},
-                ],
-            )
-            crop = self._safe_instantiate(
-                RandomCrop,
-                [
-                    {"size": self.img_size},
-                    {"size": (self.img_size, self.img_size)},
-                ],
-            )
-            flip = self._safe_instantiate(HorizontalFlip, [{"p": 0.5}, {}])
-            blur = self._safe_instantiate(
-                GaussianBlur,
-                [
-                    {"kernel_size": 3, "sigma": (0.1, 0.5)},
-                    {"sigma": (0.1, 0.5)},
-                    {},
-                ],
-            )
-            jitter = self._safe_instantiate(
-                ColorJitter,
-                [
-                    {"brightness": 0.1, "contrast": 0.1, "saturation": 0.1, "hue": 0.02},
-                    {},
-                ],
-            )
-            return transforms.Compose(
-                [
-                    resize,
-                    crop,
-                    flip,
-                    blur,
-                    jitter,
-                    transforms.Resize((self.img_size, self.img_size)),
-                ]
-            )
-
-        # Fallback to torchvision transforms
-        return transforms.Compose(
-            [
-                transforms.RandomResizedCrop(self.img_size, scale=(0.9, 1.0)),
-                transforms.RandomHorizontalFlip(p=0.5),
-                transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.02),
-                transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 0.5)),
-                transforms.Resize((self.img_size, self.img_size)),
-            ]
-        )
-
-    def _attention_rollout(self, attn_list: List[torch.Tensor]) -> torch.Tensor:
-        if not attn_list:
-            raise ValueError("Attention list is empty. Ensure model is called with return_attn=True.")
-
-        num_tokens = attn_list[0].shape[-1]
-        joint = None
-        for attn in attn_list:
-            attn_heads = attn.mean(dim=1)  # [B, N, N]
-            eye = torch.eye(num_tokens, device=attn_heads.device).unsqueeze(0)
-            attn_heads = attn_heads + eye
-            attn_heads = attn_heads / (attn_heads.sum(dim=-1, keepdim=True) + 1e-12)
-            if joint is None:
-                joint = attn_heads
-            else:
-                joint = attn_heads @ joint
-
-        cls_to_patches = joint[:, 0, 1:]
-        return cls_to_patches
-
-    def _apply_pil_aug(self, image: Image.Image) -> torch.Tensor:
-        aug = self._pil_aug(image)
-        if isinstance(aug, torch.Tensor):
-            tensor = aug
-        else:
-            tensor = self._to_tensor(aug)
-        if tensor.dim() == 3:
-            tensor = tensor.unsqueeze(0)
-        tensor = tensor.to(self.device)
-        tensor = tensor.clamp(0.0, 1.0)
-        return self._normalize(tensor)
-
-    def _build_selection_views(self, image_norm: torch.Tensor) -> List[torch.Tensor]:
-        views: List[torch.Tensor] = []
-        image_pixels = self._denormalize(image_norm).clamp(0.0, 1.0)
-        base_pil = self._to_pil(image_pixels.squeeze(0).cpu())
-
-        num_aug = max(1, self.num_views // 2)
-        num_noise = max(0, self.num_views - num_aug)
-
-        for _ in range(num_aug):
-            views.append(self._apply_pil_aug(base_pil))
-
-        for _ in range(num_noise):
-            noise = torch.randn_like(image_pixels) * self.noise_eps
-            noisy_pixels = (image_pixels + noise).clamp(0.0, 1.0)
-            views.append(self._normalize(noisy_pixels))
-
-        return views
+    def _normalize_distribution(self, values: torch.Tensor) -> torch.Tensor:
+        values = torch.clamp(values, min=0.0)
+        return values / (values.sum(dim=-1, keepdim=True) + 1e-12)
 
     def _diff_augment(self, image_pixels: torch.Tensor) -> torch.Tensor:
-        # Differentiable light augmentations on tensor inputs.
         _, _, h, w = image_pixels.shape
         scale = float(torch.empty(1).uniform_(0.9, 1.0))
         ratio = float(torch.empty(1).uniform_(0.9, 1.1))
-        crop_h = max(1, int(h * scale))
-        crop_w = max(1, int(w * scale * ratio))
-        crop_h = min(crop_h, h)
-        crop_w = min(crop_w, w)
+        crop_h = min(h, max(1, int(h * scale)))
+        crop_w = min(w, max(1, int(w * scale * ratio)))
 
         i = int(torch.empty(1).uniform_(0, h - crop_h + 1))
         j = int(torch.empty(1).uniform_(0, w - crop_w + 1))
@@ -282,14 +121,17 @@ class AttentionFoolImageAttacker:
 
         sigma = float(torch.empty(1).uniform_(0.1, 0.5))
         jittered = TF.gaussian_blur(jittered, kernel_size=[3, 3], sigma=[sigma, sigma])
-
         jittered = jittered.clamp(0.0, 1.0)
         return self._normalize(jittered)
 
     def _build_diff_views(self, image_pixels: torch.Tensor) -> List[torch.Tensor]:
-        views: List[torch.Tensor] = []
-        num_aug = max(1, self.num_views // 2)
-        num_noise = max(0, self.num_views - num_aug)
+        views: List[torch.Tensor] = [self._normalize(image_pixels)]
+        if self.num_views <= 1:
+            return views
+
+        remaining = self.num_views - 1
+        num_aug = max(1, remaining // 2)
+        num_noise = max(0, remaining - num_aug)
 
         for _ in range(num_aug):
             views.append(self._diff_augment(image_pixels))
@@ -301,51 +143,119 @@ class AttentionFoolImageAttacker:
 
         return views
 
-    def _compute_common_evidence(
+    def _class_token_attribution_from_logits(
         self,
-        image_norm: torch.Tensor,
+        logits: torch.Tensor,
+        tokens: torch.Tensor,
+        class_indices: torch.Tensor,
+        create_graph: bool,
+    ) -> torch.Tensor:
+        scores = logits.gather(1, class_indices.view(-1, 1)).sum()
+        grads = torch.autograd.grad(
+            scores,
+            tokens,
+            retain_graph=True,
+            create_graph=create_graph,
+        )[0]
+        token_scores = (grads * tokens).abs().sum(dim=-1)
+        token_scores = token_scores[:, 1:]
+        return self._softmax_normalize(token_scores, self.tau)
+
+    def _compute_view_attribution_stack(
+        self,
+        image_pixels: torch.Tensor,
         label: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
-        views = self._build_selection_views(image_norm)
+        create_graph: bool,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        def _inner() -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+            views = self._build_diff_views(image_pixels)
+            logits_list: List[torch.Tensor] = []
+            tokens_list: List[torch.Tensor] = []
+            ce_losses: List[torch.Tensor] = []
 
-        per_model_view: List[torch.Tensor] = []
-        with torch.no_grad():
-            for model in self.models:
-                view_scores: List[torch.Tensor] = []
-                for view in views:
-                    _logits, attn_list = model(view, return_attn=True)
-                    rollout = self._attention_rollout(attn_list)
-                    rollout = rollout / (rollout.sum(dim=-1, keepdim=True) + 1e-12)
-                    view_scores.append(rollout.squeeze(0))
-                per_model_view.append(torch.stack(view_scores, dim=0))
+            for view in views:
+                logits, tokens = self.model(view, return_tokens=True)
+                if tokens is None:
+                    raise RuntimeError("Token embeddings not captured; ensure model supports return_tokens.")
+                logits_list.append(logits)
+                tokens_list.append(tokens)
+                ce_losses.append(F.cross_entropy(logits, label))
 
-        scores = torch.stack(per_model_view, dim=0)  # [M, V, P]
-        mean = scores.mean(dim=(0, 1))
-        mean_per_model = scores.mean(dim=1)
-        var_model = mean_per_model.var(dim=0, unbiased=False) if scores.size(0) > 1 else torch.zeros_like(mean)
-        var_aug = scores.var(dim=1, unbiased=False).mean(dim=0)
+            mean_logits = torch.stack(logits_list, dim=0).mean(dim=0)
+            masked_logits = mean_logits.clone()
+            masked_logits.scatter_(1, label.view(-1, 1), float("-inf"))
+            wrong_class = masked_logits.argmax(dim=1).detach()
 
-        common_score = mean - self.lambda_var_model * var_model - self.lambda_var_aug * var_aug
-        k = min(self.k_common, common_score.numel())
-        topk = torch.topk(common_score, k=k, dim=0).indices
-        W = self._softmax_normalize(common_score, self.tau)
+            wrong_attrs: List[torch.Tensor] = []
+            true_attrs: List[torch.Tensor] = []
+            for logits, tokens in zip(logits_list, tokens_list):
+                wrong_attrs.append(
+                    self._class_token_attribution_from_logits(
+                        logits=logits,
+                        tokens=tokens,
+                        class_indices=wrong_class,
+                        create_graph=create_graph,
+                    ).squeeze(0)
+                )
+                true_attrs.append(
+                    self._class_token_attribution_from_logits(
+                        logits=logits,
+                        tokens=tokens,
+                        class_indices=label,
+                        create_graph=create_graph,
+                    ).squeeze(0)
+                )
 
-        stats = {
-            "mean": mean.detach().cpu(),
-            "var_model": var_model.detach().cpu(),
-            "var_aug": var_aug.detach().cpu(),
-            "common_score": common_score.detach().cpu(),
-        }
-        return topk, W, stats
+            wrong_stack = torch.stack(wrong_attrs, dim=0)
+            true_stack = torch.stack(true_attrs, dim=0)
+            ce_mean = torch.stack(ce_losses).mean()
+            return wrong_stack, true_stack, ce_mean, wrong_class
+
+        if torch.is_grad_enabled():
+            return _inner()
+        with torch.enable_grad():
+            return _inner()
+
+    def _compute_shared_prototype(self, stack: torch.Tensor) -> torch.Tensor:
+        return self._normalize_distribution(stack.mean(dim=0))
+
+    def _js_divergence(self, p: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
+        p = self._normalize_distribution(p)
+        q = self._normalize_distribution(q)
+        m = 0.5 * (p + q)
+        kl_pm = (p * ((p + 1e-12).log() - (m + 1e-12).log())).sum(dim=-1)
+        kl_qm = (q * ((q + 1e-12).log() - (m + 1e-12).log())).sum(dim=-1)
+        return 0.5 * (kl_pm + kl_qm)
+
+    def _compute_align_loss(self, stack: torch.Tensor, prototype: torch.Tensor) -> torch.Tensor:
+        prototype_expanded = prototype.unsqueeze(0).expand_as(stack)
+        return self._js_divergence(stack, prototype_expanded).mean()
+
+    def _compute_compact_loss(self, prototype: torch.Tensor) -> torch.Tensor:
+        return -(prototype * (prototype + 1e-12).log()).sum()
+
+    def _compute_region_weights(self, prototype: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        k = min(self.region_topk, prototype.numel())
+        indices = torch.topk(prototype, k=k, dim=0).indices
+        region_weights = torch.zeros_like(prototype)
+        region_weights[indices] = prototype[indices]
+        region_weights = self._normalize_distribution(region_weights)
+        return indices, region_weights
+
+    def _compute_coupled_loss(
+        self,
+        wrong_stack: torch.Tensor,
+        true_stack: torch.Tensor,
+        region_weights: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        region = region_weights.unsqueeze(0)
+        wrong_mass = (wrong_stack * region).sum(dim=-1).mean()
+        true_mass = (true_stack * region).sum(dim=-1).mean()
+        return true_mass - wrong_mass, wrong_mass, true_mass
 
     def _build_patch_mask(self, patch_indices: torch.Tensor, img_size: int) -> torch.Tensor:
-        num_patches_total = (img_size // self.patch_size) ** 2
-        grid = int(np.sqrt(num_patches_total))
-        if grid * grid != num_patches_total:
-            raise ValueError("Unexpected patch grid size. Check img_size and patch_size.")
-
-        mask = torch.zeros((1, 1, img_size, img_size), device=self.device)
         grid_w = img_size // self.patch_size
+        mask = torch.zeros((1, 1, img_size, img_size), device=self.device)
         for idx in patch_indices.tolist():
             row = idx // grid_w
             col = idx % grid_w
@@ -355,112 +265,6 @@ class AttentionFoolImageAttacker:
             c1 = c0 + self.patch_size
             mask[:, :, r0:r1, c0:c1] = 1.0
         return mask
-
-    def _compute_token_importance(
-        self,
-        model,
-        images_norm: torch.Tensor,
-        labels: torch.Tensor,
-        method: str,
-        tau: float,
-        create_graph: bool,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        if method not in {"grad_token", "legrad", "attn_rollout"}:
-            raise ValueError(f"Unknown importance method: {method}")
-
-        if method in {"grad_token", "legrad"}:
-            if not torch.is_grad_enabled():
-                with torch.enable_grad():
-                    logits, tokens = model(images_norm, return_tokens=True)
-                    if tokens is None:
-                        raise RuntimeError("Token embeddings not captured; ensure model supports return_tokens.")
-                    ce_loss = F.cross_entropy(logits, labels)
-                    grads = torch.autograd.grad(
-                        ce_loss,
-                        tokens,
-                        retain_graph=True,
-                        create_graph=create_graph,
-                    )[0]
-                    scores = (grads * tokens).abs().sum(dim=-1)
-                    scores = scores[:, 1:]
-                    importance = self._softmax_normalize(scores, tau)
-                    return importance, logits, ce_loss
-            else:
-                logits, tokens = model(images_norm, return_tokens=True)
-                if tokens is None:
-                    raise RuntimeError("Token embeddings not captured; ensure model supports return_tokens.")
-                ce_loss = F.cross_entropy(logits, labels)
-                grads = torch.autograd.grad(
-                    ce_loss,
-                    tokens,
-                    retain_graph=True,
-                    create_graph=create_graph,
-                )[0]
-                scores = (grads * tokens).abs().sum(dim=-1)
-                scores = scores[:, 1:]
-                importance = self._softmax_normalize(scores, tau)
-                return importance, logits, ce_loss
-
-        logits, attn_list = model(images_norm, return_attn=True)
-        rollout = self._attention_rollout(attn_list)
-        importance = self._softmax_normalize(rollout, tau)
-        ce_loss = F.cross_entropy(logits, labels)
-        return importance, logits, ce_loss
-
-    def _compute_importance_stack(
-        self,
-        image_pixels: torch.Tensor,
-        label: torch.Tensor,
-        create_graph: bool,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        views = self._build_diff_views(image_pixels)
-        per_model_view: List[torch.Tensor] = []
-        ce_losses: List[torch.Tensor] = []
-
-        for model in self.models:
-            view_scores: List[torch.Tensor] = []
-            for view in views:
-                importance, _logits, ce_loss = self._compute_token_importance(
-                    model=model,
-                    images_norm=view,
-                    labels=label,
-                    method=self.importance_method,
-                    tau=self.tau,
-                    create_graph=create_graph,
-                )
-                view_scores.append(importance.squeeze(0))
-                ce_losses.append(ce_loss)
-            per_model_view.append(torch.stack(view_scores, dim=0))
-
-        stack = torch.stack(per_model_view, dim=0)  # [M, V, P]
-        ce_mean = torch.stack(ce_losses).mean()
-        return stack, ce_mean
-
-    def _compute_focus_loss(
-        self,
-        stack: torch.Tensor,
-        W: torch.Tensor,
-        S_mask: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        if W is not None:
-            weights = W.to(stack.device)
-        else:
-            weights = S_mask.to(stack.device)
-
-        mass = (stack * weights).sum(dim=-1)
-        focus_loss = -torch.log(mass + 1e-6).mean()
-        return focus_loss, mass.mean()
-
-    def _compute_stability_loss(self, stack: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        # stack: [M, V, P]
-        mean_view = stack.mean(dim=1, keepdim=True)
-        var_aug = ((stack - mean_view) ** 2).mean()
-        if stack.size(0) > 1:
-            mean_model = stack.mean(dim=0, keepdim=True)
-            var_model = ((stack - mean_model) ** 2).mean()
-        else:
-            var_model = torch.zeros_like(var_aug)
-        return var_aug, var_model
 
     def _project_delta(self, delta: torch.Tensor) -> torch.Tensor:
         if self.norm_type == "linf":
@@ -472,7 +276,12 @@ class AttentionFoolImageAttacker:
             return (flat * factor).view_as(delta)
         raise ValueError(f"Unknown norm type: {self.norm_type}")
 
-    def _pgd_update(self, delta: torch.Tensor, grad: torch.Tensor, momentum: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _pgd_update(
+        self,
+        delta: torch.Tensor,
+        grad: torch.Tensor,
+        momentum: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         if self.use_momentum:
             grad_norm = grad.abs().mean(dim=(1, 2, 3), keepdim=True) + 1e-12
             momentum = self.momentum_mu * momentum + grad / grad_norm
@@ -483,24 +292,15 @@ class AttentionFoolImageAttacker:
         delta = self._project_delta(delta)
         return delta, momentum
 
-    def _pgd_two_stage(
+    def _pgd_single_stage(
         self,
         image_norm: torch.Tensor,
         label: torch.Tensor,
-        S_indices: torch.Tensor,
-        W: torch.Tensor,
         init: str = "zero",
-    ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
         image_norm = image_norm.to(self.device)
         label = label.to(self.device)
-
         image_pixels = self._denormalize(image_norm).clamp(0.0, 1.0)
-        grid_w = self.img_size // self.patch_size
-        num_patches = grid_w * grid_w
-        S_mask = torch.zeros((1, num_patches), device=self.device)
-        S_mask[:, S_indices] = 1.0
-        W = W.view(1, -1)
-        mask = self._build_patch_mask(S_indices, image_pixels.shape[-1])
 
         if init == "rand":
             delta = torch.empty_like(image_pixels).uniform_(-self.eps, self.eps)
@@ -509,57 +309,32 @@ class AttentionFoolImageAttacker:
             delta = torch.zeros_like(image_pixels)
         else:
             raise ValueError(f"Unknown init type: {init}")
+
         momentum = torch.zeros_like(delta)
-
-        logs: Dict[str, List[float]] = {"stage1": [], "stage2": []}
-
-        for step in range(self.stage1_steps):
-            delta.requires_grad_(True)
-            adv_pixels = (image_pixels + delta).clamp(0.0, 1.0)
-            stack, ce_mean = self._compute_importance_stack(adv_pixels, label, create_graph=True)
-            focus_loss, mass_mean = self._compute_focus_loss(stack, W, S_mask)
-            var_aug, var_model = self._compute_stability_loss(stack)
-            stab_loss = var_aug + var_model
-            total = self.lambda_focus * focus_loss + self.lambda_stab * stab_loss + self.lambda_ce1 * ce_mean
-
-            grad = torch.autograd.grad(total, delta, retain_graph=False)[0]
-            delta, momentum = self._pgd_update(delta, grad, momentum)
-            delta = delta.detach()
-
-            if self.log_every > 0 and (step + 1) % self.log_every == 0:
-                logs["stage1"].append(
-                    float(total.detach().cpu())
-                )
-                print(
-                    f"Stage1[{step + 1}/{self.stage1_steps}] "
-                    f"L_focus={focus_loss.item():.4f} "
-                    f"L_stab={stab_loss.item():.4f} "
-                    f"L_ce={ce_mean.item():.4f} "
-                    f"mass={mass_mean.item():.4f}"
-                )
-
-        if self.stage1_steps == 0:
-            A_ref = W.detach()
-        else:
-            with torch.no_grad():
-                adv_pixels = (image_pixels + delta).clamp(0.0, 1.0)
-                stack, _ = self._compute_importance_stack(adv_pixels, label, create_graph=False)
-                A_ref = stack.mean(dim=(0, 1)).detach()
 
         for step in range(self.steps):
             delta.requires_grad_(True)
             adv_pixels = (image_pixels + delta).clamp(0.0, 1.0)
-            stack, ce_mean = self._compute_importance_stack(adv_pixels, label, create_graph=True)
-            focus_loss, mass_mean = self._compute_focus_loss(stack, W, S_mask)
-            var_aug, var_model = self._compute_stability_loss(stack)
-            stab_loss = var_aug + var_model
-            preserve_loss = ((stack - A_ref) ** 2).mean()
+            wrong_stack, true_stack, ce_mean, wrong_class = self._compute_view_attribution_stack(
+                image_pixels=adv_pixels,
+                label=label,
+                create_graph=True,
+            )
+            wrong_prototype = self._compute_shared_prototype(wrong_stack)
+            align_loss = self._compute_align_loss(wrong_stack, wrong_prototype)
+            compact_loss = self._compute_compact_loss(wrong_prototype)
+            region_indices, region_weights = self._compute_region_weights(wrong_prototype)
+            coupled_loss, wrong_mass, true_mass = self._compute_coupled_loss(
+                wrong_stack=wrong_stack,
+                true_stack=true_stack,
+                region_weights=region_weights,
+            )
 
             total = (
-                ce_mean
-                + self.lambda_focus2 * focus_loss
-                + self.lambda_stab2 * stab_loss
-                + self.lambda_preserve * preserve_loss
+                self.lambda_cls * ce_mean
+                + self.lambda_align * align_loss
+                + self.lambda_compact * compact_loss
+                + self.lambda_couple * coupled_loss
             )
 
             grad = torch.autograd.grad(total, delta, retain_graph=False)[0]
@@ -567,30 +342,35 @@ class AttentionFoolImageAttacker:
             delta = delta.detach()
 
             if self.log_every > 0 and (step + 1) % self.log_every == 0:
-                logs["stage2"].append(float(total.detach().cpu()))
                 print(
-                    f"Stage2[{step + 1}/{self.steps}] "
-                    f"L_ce={ce_mean.item():.4f} "
-                    f"L_focus={focus_loss.item():.4f} "
-                    f"L_stab={stab_loss.item():.4f} "
-                    f"L_preserve={preserve_loss.item():.4f} "
-                    f"mass={mass_mean.item():.4f}"
+                    f"Attack[{step + 1}/{self.steps}] "
+                    f"L_cls={ce_mean.item():.4f} "
+                    f"L_align={align_loss.item():.4f} "
+                    f"L_compact={compact_loss.item():.4f} "
+                    f"L_couple={coupled_loss.item():.4f} "
+                    f"wrong_mass={wrong_mass.item():.4f} "
+                    f"true_mass={true_mass.item():.4f}"
                 )
 
         adv_pixels = (image_pixels + delta).clamp(0.0, 1.0)
         adv_norm = self._normalize(adv_pixels)
-
-        with torch.no_grad():
-            stack, _ = self._compute_importance_stack(adv_pixels, label, create_graph=False)
-            A_stage2 = stack.mean(dim=(0, 1)).detach()
-            per_model = stack.mean(dim=1).detach()
+        wrong_stack, true_stack, _ce_mean, wrong_class = self._compute_view_attribution_stack(
+            image_pixels=adv_pixels,
+            label=label,
+            create_graph=False,
+        )
+        wrong_prototype = self._compute_shared_prototype(wrong_stack).detach()
+        true_prototype = self._compute_shared_prototype(true_stack).detach()
+        region_indices, region_weights = self._compute_region_weights(wrong_prototype)
+        mask = self._build_patch_mask(region_indices, adv_pixels.shape[-1])
 
         extra = {
-            "A_ref": A_ref.cpu(),
-            "A_stage2": A_stage2.cpu(),
-            "per_model": per_model.cpu(),
+            "wrong_prototype": wrong_prototype.cpu(),
+            "true_prototype": true_prototype.cpu(),
+            "region_weights": region_weights.detach().cpu(),
+            "wrong_class": wrong_class.detach().cpu(),
         }
-        return adv_norm, delta, mask.detach(), extra
+        return adv_norm, delta.detach(), mask.detach(), region_indices.detach(), extra
 
     def attack_batch(
         self,
@@ -610,13 +390,11 @@ class AttentionFoolImageAttacker:
         for idx in range(images.size(0)):
             image = images[idx:idx + 1]
             label = labels[idx:idx + 1]
-            S_indices, W, stats = self._compute_common_evidence(image, label)
-            adv, delta, mask, extra = self._pgd_two_stage(image, label, S_indices, W, init=init)
+            adv, delta, mask, region_indices, extra = self._pgd_single_stage(image, label, init=init)
             adv_list.append(adv)
             delta_list.append(delta)
             mask_list.append(mask)
-            patch_indices_list.append(S_indices)
-            extra.update(stats)
+            patch_indices_list.append(region_indices)
             extra_list.append(extra)
 
         x_adv = torch.cat(adv_list, dim=0)
@@ -650,6 +428,7 @@ class AttentionFoolImageAttacker:
         return grid
 
     def _map_to_image(self, values: torch.Tensor) -> torch.Tensor:
+        values = values.view(-1)
         grid_w = self.img_size // self.patch_size
         map_2d = values.view(1, 1, grid_w, grid_w)
         map_2d = map_2d - map_2d.min()
@@ -690,38 +469,22 @@ class AttentionFoolImageAttacker:
                 continue
 
             extra = extras[idx]
-            mean_map = self._map_to_image(extra["mean"].to(self.device))
-            var_model = self._map_to_image(extra["var_model"].to(self.device))
-            var_aug = self._map_to_image(extra["var_aug"].to(self.device))
-            common = self._map_to_image(extra["common_score"].to(self.device))
+            wrong_proto = self._map_to_image(extra["wrong_prototype"].to(self.device))
+            true_proto = self._map_to_image(extra["true_prototype"].to(self.device))
+            region_map = self._map_to_image(extra["region_weights"].to(self.device))
+            diff_map = (wrong_proto - true_proto).abs()
             mask_1c = masks[idx:idx + 1].to(self.device)[:, :1, :, :]
-            overlay = mean_map.clone()
+            overlay = wrong_proto.clone()
             red = torch.tensor([1.0, 0.0, 0.0], device=overlay.device).view(1, 3, 1, 1)
             overlay = overlay * (1.0 - 0.4 * mask_1c) + red * (0.4 * mask_1c)
             overlay = overlay.clamp(0.0, 1.0)
             evidence_grid = make_grid(
-                torch.cat([mean_map, var_model, var_aug, common, overlay], dim=0),
+                torch.cat([wrong_proto, true_proto, region_map, diff_map, overlay], dim=0),
                 nrow=3,
                 padding=2,
             )
             ev_path = output_dir_path / f"evidence_{stem}.png"
             save_image(evidence_grid, str(ev_path))
             saved.append(ev_path)
-
-            A_ref = self._map_to_image(extra["A_ref"].to(self.device))
-            A_stage2 = self._map_to_image(extra["A_stage2"].to(self.device))
-            diff = (A_stage2 - A_ref).abs()
-            stage_grid = make_grid(torch.cat([A_ref, A_stage2, diff], dim=0), nrow=3, padding=2)
-            st_path = output_dir_path / f"stage_{stem}.png"
-            save_image(stage_grid, str(st_path))
-            saved.append(st_path)
-
-            per_model = extra.get("per_model")
-            if per_model is not None and per_model.size(0) > 1:
-                maps = [self._map_to_image(per_model[i].to(self.device)) for i in range(per_model.size(0))]
-                model_grid = make_grid(torch.cat(maps, dim=0), nrow=min(4, len(maps)), padding=2)
-                md_path = output_dir_path / f"ensemble_{stem}.png"
-                save_image(model_grid, str(md_path))
-                saved.append(md_path)
 
         return saved
