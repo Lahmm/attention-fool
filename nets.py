@@ -30,6 +30,7 @@ class ViTWithAttn(nn.Module):
             pretrained=pretrained,
             **create_kwargs,
         )
+        self._disable_fused_attention()
 
         # 存放每一层的 attn logits（B, H, N, N）
         self.attn_weights: List[torch.Tensor] = []
@@ -45,6 +46,19 @@ class ViTWithAttn(nn.Module):
 
         # 搬到设备
         self.to(self.device)
+
+    def _disable_fused_attention(self) -> None:
+        """
+        Disable timm fused attention kernels.
+
+        The attack computes gradients of token attributions with respect to the
+        input image, which requires higher-order derivatives through the
+        attention stack. PyTorch's efficient scaled-dot-product attention kernel
+        used by timm ViTs does not support this derivative path.
+        """
+        for module in self.model.modules():
+            if hasattr(module, "fused_attn"):
+                module.fused_attn = False
 
     # 注册 hook：在每个 blocks.*.attn.qkv 上挂一个 forward_hook
     def _register_qkv_hooks(self) -> None:
@@ -122,24 +136,36 @@ class ViTWithAttn(nn.Module):
 
     def _register_token_hook(self) -> None:
         """
-        Register a forward hook to capture final token embeddings.
-        Prefer model.norm output; fallback to the last transformer block.
+        Register a hook to capture token embeddings that still influence the
+        final CLS decision through at least one transformer block.
+
+        Prefer the input to the last transformer block; gradients from the
+        classifier to patch tokens are typically non-zero there. Falling back to
+        model.norm output would often yield zero gradients on patch tokens
+        because the head only reads the CLS token at that stage.
         """
-        target = None
-        if hasattr(self.model, "norm"):
-            target = getattr(self.model, "norm")
-        elif hasattr(self.model, "blocks") and len(self.model.blocks) > 0:
+        if hasattr(self.model, "blocks") and len(self.model.blocks) > 0:
             target = self.model.blocks[-1]
 
-        if target is None:
+            def pre_hook(_module: nn.Module, inputs):
+                if not self._capture_tokens:
+                    return
+                if not inputs:
+                    return
+                self.token_embeddings = inputs[0]
+
+            target.register_forward_pre_hook(pre_hook)
             return
 
-        def hook(_module: nn.Module, _inputs, output):
-            if not self._capture_tokens:
-                return
-            self.token_embeddings = output
+        if hasattr(self.model, "norm"):
+            target = getattr(self.model, "norm")
 
-        target.register_forward_hook(hook)
+            def hook(_module: nn.Module, _inputs, output):
+                if not self._capture_tokens:
+                    return
+                self.token_embeddings = output
+
+            target.register_forward_hook(hook)
 
     # forward
     def forward(
