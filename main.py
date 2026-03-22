@@ -16,7 +16,7 @@ DEFAULT_IMG_SIZE = 224
 def create_attacker(
     model: ViTWithAttn,
     img_size: int,
-    pgd_step_size: float,
+    step_size: float,
     epsilon: float,
     region_topk: int,
     num_views: int,
@@ -27,7 +27,6 @@ def create_attacker(
     lambda_compact: float,
     lambda_couple: float,
     norm_type: str,
-    use_momentum: bool,
     momentum_mu: float,
     log_every: int,
     steps: int,
@@ -35,7 +34,7 @@ def create_attacker(
     return AttentionFoolImageAttacker(
         model=model,
         img_size=img_size,
-        step_size=pgd_step_size,
+        step_size=step_size,
         eps=epsilon,
         region_topk=region_topk,
         num_views=num_views,
@@ -46,7 +45,6 @@ def create_attacker(
         lambda_compact=lambda_compact,
         lambda_couple=lambda_couple,
         norm_type=norm_type,
-        use_momentum=use_momentum,
         momentum_mu=momentum_mu,
         log_every=log_every,
         steps=steps,
@@ -169,7 +167,7 @@ def attack_correctly_classified_samples(
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--max-attacked-samples", type=int, default=5, help="Maximum number of correctly classified samples to attack.")
-parser.add_argument("--pgd-step-size", type=float, default=1.0 / 255.0, help="PGD step size in normalized pixel range [0, 1].")
+parser.add_argument("--step-size", type=float, default=1.0 / 255.0, help="MI-FGSM step size in normalized pixel range [0, 1].")
 parser.add_argument("--epsilon", type=float, default=8.0 / 255.0, help="Perturbation budget in pixel range [0, 1].")
 parser.add_argument("--region-topk", type=int, default=8, help="Number of patches used to define the compact shared region.")
 parser.add_argument("--num-views", type=int, default=8, help="Number of augmented views used during optimization.")
@@ -180,18 +178,17 @@ parser.add_argument("--lambda-align", type=float, default=1.0, help="View attrib
 parser.add_argument("--lambda-compact", type=float, default=1.0, help="Compact attribution loss weight.")
 parser.add_argument("--lambda-couple", type=float, default=1.0, help="Wrong-vs-true attribution coupling loss weight.")
 parser.add_argument("--norm-type", type=str, default="linf", choices=["linf", "l2"], help="Perturbation norm constraint.")
-parser.add_argument("--log-every", type=int, default=10, help="Log interval for losses.")
+parser.add_argument("--log-every", type=int, default=50, help="Log interval for losses.")
 parser.add_argument("--output-dir", default="outputs", help="Directory used to store adversarial samples.")
 parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
-parser.add_argument("--steps", type=int, default=100, help="Number of PGD steps.")
-parser.add_argument("--use-momentum", action="store_true", help="Enable momentum in PGD.")
-parser.add_argument("--momentum-mu", type=float, default=0.9, help="Momentum coefficient.")
+parser.add_argument("--steps", type=int, default=50, help="Number of MI-FGSM steps.")
+parser.add_argument("--momentum-mu", type=float, default=0.9, help="MI-FGSM momentum decay factor.")
 parser.add_argument("--image-path", type=str, default=None, help="Optional image path or filename inside the dataset.")
 
 
 def main(
     max_attacked_samples: int,
-    pgd_step_size: float,
+    step_size: float,
     epsilon: float,
     region_topk: int,
     num_views: int,
@@ -206,7 +203,6 @@ def main(
     output_dir: str,
     mode: str,
     steps: int,
-    use_momentum: bool,
     momentum_mu: float,
     image_path: str | None,
     image_dir: str = IMAGE_DIR,
@@ -222,7 +218,7 @@ def main(
     attacker = create_attacker(
         model=model,
         img_size=img_size,
-        pgd_step_size=pgd_step_size,
+        step_size=step_size,
         epsilon=epsilon,
         region_topk=region_topk,
         num_views=num_views,
@@ -233,7 +229,6 @@ def main(
         lambda_compact=lambda_compact,
         lambda_couple=lambda_couple,
         norm_type=norm_type,
-        use_momentum=use_momentum,
         momentum_mu=momentum_mu,
         log_every=log_every,
         steps=steps,
@@ -286,7 +281,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     main(
         max_attacked_samples=args.max_attacked_samples,
-        pgd_step_size=args.pgd_step_size,
+        step_size=args.step_size,
         epsilon=args.epsilon,
         region_topk=args.region_topk,
         num_views=args.num_views,
@@ -301,7 +296,6 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         mode=args.mode,
         steps=args.steps,
-        use_momentum=args.use_momentum,
         momentum_mu=args.momentum_mu,
         image_path=args.image_path,
     )

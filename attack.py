@@ -37,7 +37,6 @@ class AttentionFoolImageAttacker:
         lambda_compact: float = 1.0,
         lambda_couple: float = 1.0,
         norm_type: str = "linf",
-        use_momentum: bool = True,
         momentum_mu: float = 0.9,
         log_every: int = 10,
         device: torch.device | None = None,
@@ -58,7 +57,6 @@ class AttentionFoolImageAttacker:
         self.lambda_compact = lambda_compact
         self.lambda_couple = lambda_couple
         self.norm_type = norm_type
-        self.use_momentum = use_momentum
         self.momentum_mu = momentum_mu
         self.log_every = log_every
         self.device = device if device is not None else DEVICE
@@ -276,23 +274,20 @@ class AttentionFoolImageAttacker:
             return (flat * factor).view_as(delta)
         raise ValueError(f"Unknown norm type: {self.norm_type}")
 
-    def _pgd_update(
+    def _mifgsm_update(
         self,
         delta: torch.Tensor,
         grad: torch.Tensor,
         momentum: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        if self.use_momentum:
-            grad_norm = grad.abs().mean(dim=(1, 2, 3), keepdim=True) + 1e-12
-            momentum = self.momentum_mu * momentum + grad / grad_norm
-            update = momentum
-        else:
-            update = grad
-        delta = delta + self.step_size * update.sign()
+        grad_norm = grad.abs().mean(dim=(1, 2, 3), keepdim=True) + 1e-12
+        normalized_grad = grad / grad_norm
+        momentum = self.momentum_mu * momentum + normalized_grad
+        delta = delta + self.step_size * momentum.sign()
         delta = self._project_delta(delta)
         return delta, momentum
 
-    def _pgd_single_stage(
+    def _mifgsm_single_stage(
         self,
         image_norm: torch.Tensor,
         label: torch.Tensor,
@@ -338,7 +333,7 @@ class AttentionFoolImageAttacker:
             )
 
             grad = torch.autograd.grad(objective, delta, retain_graph=False)[0]
-            delta, momentum = self._pgd_update(delta, grad, momentum)
+            delta, momentum = self._mifgsm_update(delta, grad, momentum)
             delta = delta.detach()
 
             if self.log_every > 0 and (step + 1) % self.log_every == 0:
@@ -390,7 +385,7 @@ class AttentionFoolImageAttacker:
         for idx in range(images.size(0)):
             image = images[idx:idx + 1]
             label = labels[idx:idx + 1]
-            adv, delta, mask, region_indices, extra = self._pgd_single_stage(image, label, init=init)
+            adv, delta, mask, region_indices, extra = self._mifgsm_single_stage(image, label, init=init)
             adv_list.append(adv)
             delta_list.append(delta)
             mask_list.append(mask)

@@ -1,10 +1,10 @@
 # Attention-fool
 ## 流程
   - `pip install -r requirements.txt` 安装依赖，确保各脚本可运行。
-  - 生成对抗样本 `python main.py --mode attack --max-attacked-samples 5 --attn-no-map-to-patch --output-dir outputs/attack`
+  - 生成对抗样本 `python main.py --mode attack --max-attacked-samples 5 --output-dir outputs/attack`
 > 当指令中添加attn-map-to-patch时(默认为True),可以使用--attn-target-mode(cls or avg),当--attn-no-map-to-patch时,--attn-target-mode不生效
 
-  - 仅导出被正确分类的干净样本 `python main.py --mode clean --max-attacked-samples 5 --pgd-step-size 0.0313725 --output-dir outputs/clean`
+  - 仅导出被正确分类的干净样本 `python main.py --mode clean --max-attacked-samples 5 --step-size 0.0313725 --output-dir outputs/clean`
   - 所有模型在nets.py中修改，修改基本模型名称
 ## 可视化注意力
   - 单张图片 `python visualize_attention_from_images.py --image-dir outputs/clean --pattern "adv_*.png" --max-images 5 --cls-layer last --output-dir outputs/attention_from_images`
