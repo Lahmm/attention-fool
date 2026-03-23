@@ -11,14 +11,13 @@ from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
 
 class AttentionFoolImageAttacker:
     """
-    Single-model, multi-view attribution concentration attack.
+    Single-model, multi-view stable-evidence suppression attack.
 
     The perturbation is optimized so that different augmented views of the same
     adversarial sample:
     1. are misclassified,
-    2. rely on a shared attribution pattern,
-    3. compress that attribution into a compact region,
-    4. use that compact region to support the wrong decision.
+    2. identify the clean sample's stable true-class evidence,
+    3. suppress that evidence under perturbation across multiple views.
     """
 
     def __init__(
@@ -28,14 +27,15 @@ class AttentionFoolImageAttacker:
         steps: int = 100,
         step_size: float = 1.0 / 255.0,
         eps: float = 8.0 / 255.0,
-        region_topk: int = 8,
+        stable_topk: int = 8,
         num_views: int = 8,
         noise_eps: float = 4.0 / 255.0,
         tau: float = 0.07,
         lambda_cls: float = 1.0,
         lambda_align: float = 1.0,
-        lambda_compact: float = 1.0,
-        lambda_couple: float = 1.0,
+        lambda_support: float = 1.0,
+        lambda_consistency: float = 1.0,
+        stable_score_alpha: float = 0.5,
         norm_type: str = "linf",
         momentum_mu: float = 0.9,
         log_every: int = 10,
@@ -48,14 +48,15 @@ class AttentionFoolImageAttacker:
         self.steps = steps
         self.step_size = step_size
         self.eps = eps
-        self.region_topk = region_topk
+        self.stable_topk = stable_topk
         self.num_views = num_views
         self.noise_eps = noise_eps
         self.tau = tau
         self.lambda_cls = lambda_cls
         self.lambda_align = lambda_align
-        self.lambda_compact = lambda_compact
-        self.lambda_couple = lambda_couple
+        self.lambda_support = lambda_support
+        self.lambda_consistency = lambda_consistency
+        self.stable_score_alpha = stable_score_alpha
         self.norm_type = norm_type
         self.momentum_mu = momentum_mu
         self.log_every = log_every
@@ -141,7 +142,7 @@ class AttentionFoolImageAttacker:
 
         return views
 
-    def _class_token_attribution_from_logits(
+    def _class_token_support_from_logits(
         self,
         logits: torch.Tensor,
         tokens: torch.Tensor,
@@ -155,47 +156,52 @@ class AttentionFoolImageAttacker:
             retain_graph=True,
             create_graph=create_graph,
         )[0]
-        token_scores = (grads * tokens).abs().sum(dim=-1)
-        token_scores = token_scores[:, 1:]
-        return self._softmax_normalize(token_scores, self.tau)
+        # Keep only positive token evidence for the selected class so the
+        # suppression loss directly targets supportive evidence.
+        token_support = torch.relu(grads * tokens).sum(dim=-1)
+        return token_support[:, 1:]
 
-    def _compute_view_attribution_stack(
+    def _class_token_attribution_from_logits(
+        self,
+        logits: torch.Tensor,
+        tokens: torch.Tensor,
+        class_indices: torch.Tensor,
+        create_graph: bool,
+    ) -> torch.Tensor:
+        token_support = self._class_token_support_from_logits(
+            logits=logits,
+            tokens=tokens,
+            class_indices=class_indices,
+            create_graph=create_graph,
+        )
+        return self._softmax_normalize(token_support, self.tau)
+
+    def _compute_true_class_view_data(
         self,
         image_pixels: torch.Tensor,
         label: torch.Tensor,
         create_graph: bool,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        def _inner() -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        def _inner() -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
             views = self._build_diff_views(image_pixels)
-            logits_list: List[torch.Tensor] = []
-            tokens_list: List[torch.Tensor] = []
+            attr_list: List[torch.Tensor] = []
+            support_list: List[torch.Tensor] = []
             ce_losses: List[torch.Tensor] = []
 
             for view in views:
                 logits, tokens = self.model(view, return_tokens=True)
                 if tokens is None:
                     raise RuntimeError("Token embeddings not captured; ensure model supports return_tokens.")
-                logits_list.append(logits)
-                tokens_list.append(tokens)
                 ce_losses.append(F.cross_entropy(logits, label))
-
-            mean_logits = torch.stack(logits_list, dim=0).mean(dim=0)
-            masked_logits = mean_logits.clone()
-            masked_logits.scatter_(1, label.view(-1, 1), float("-inf"))
-            wrong_class = masked_logits.argmax(dim=1).detach()
-
-            wrong_attrs: List[torch.Tensor] = []
-            true_attrs: List[torch.Tensor] = []
-            for logits, tokens in zip(logits_list, tokens_list):
-                wrong_attrs.append(
-                    self._class_token_attribution_from_logits(
+                support_list.append(
+                    self._class_token_support_from_logits(
                         logits=logits,
                         tokens=tokens,
-                        class_indices=wrong_class,
+                        class_indices=label,
                         create_graph=create_graph,
                     ).squeeze(0)
                 )
-                true_attrs.append(
+                attr_list.append(
                     self._class_token_attribution_from_logits(
                         logits=logits,
                         tokens=tokens,
@@ -204,10 +210,10 @@ class AttentionFoolImageAttacker:
                     ).squeeze(0)
                 )
 
-            wrong_stack = torch.stack(wrong_attrs, dim=0)
-            true_stack = torch.stack(true_attrs, dim=0)
+            attr_stack = torch.stack(attr_list, dim=0)
+            support_stack = torch.stack(support_list, dim=0)
             ce_mean = torch.stack(ce_losses).mean()
-            return wrong_stack, true_stack, ce_mean, wrong_class
+            return attr_stack, support_stack, ce_mean
 
         if torch.is_grad_enabled():
             return _inner()
@@ -229,40 +235,50 @@ class AttentionFoolImageAttacker:
         prototype_expanded = prototype.unsqueeze(0).expand_as(stack)
         return self._js_divergence(stack, prototype_expanded).mean()
 
-    def _compute_compact_loss(self, prototype: torch.Tensor) -> torch.Tensor:
-        return -(prototype * (prototype + 1e-12).log()).sum()
-
-    def _compute_region_weights(self, prototype: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        k = min(self.region_topk, prototype.numel())
-        indices = torch.topk(prototype, k=k, dim=0).indices
-        region_weights = torch.zeros_like(prototype)
-        region_weights[indices] = prototype[indices]
-        region_weights = self._normalize_distribution(region_weights)
-        return indices, region_weights
-
-    def _compute_coupled_loss(
+    def _select_stable_tokens(
         self,
-        wrong_stack: torch.Tensor,
-        true_stack: torch.Tensor,
-        region_weights: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        region = region_weights.unsqueeze(0)
-        wrong_mass = (wrong_stack * region).sum(dim=-1).mean()
-        true_mass = (true_stack * region).sum(dim=-1).mean()
-        return true_mass - wrong_mass, wrong_mass, true_mass
+        clean_attr_stack: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        mean_attr = clean_attr_stack.mean(dim=0)
+        std_attr = clean_attr_stack.std(dim=0, unbiased=False)
+        stable_score = torch.clamp(mean_attr - self.stable_score_alpha * std_attr, min=0.0)
 
-    def _build_patch_mask(self, patch_indices: torch.Tensor, img_size: int) -> torch.Tensor:
-        grid_w = img_size // self.patch_size
-        mask = torch.zeros((1, 1, img_size, img_size), device=self.device)
-        for idx in patch_indices.tolist():
-            row = idx // grid_w
-            col = idx % grid_w
-            r0 = row * self.patch_size
-            r1 = r0 + self.patch_size
-            c0 = col * self.patch_size
-            c1 = c0 + self.patch_size
-            mask[:, :, r0:r1, c0:c1] = 1.0
-        return mask
+        k = min(self.stable_topk, stable_score.numel())
+        if k <= 0:
+            raise ValueError("stable_topk must be positive.")
+
+        stable_indices = torch.topk(stable_score, k=k, dim=0).indices
+        stable_mask = torch.zeros_like(stable_score)
+        stable_mask[stable_indices] = 1.0
+
+        stable_weights = torch.zeros_like(stable_score)
+        stable_weights[stable_indices] = stable_score[stable_indices]
+        if stable_weights.sum() <= 0:
+            stable_weights[stable_indices] = mean_attr[stable_indices]
+        stable_weights = self._normalize_distribution(stable_weights)
+        return stable_indices, stable_mask, stable_weights, stable_score
+
+    def _compute_support_suppression_loss(
+        self,
+        support_stack: torch.Tensor,
+        stable_weights: torch.Tensor,
+        clean_support_baseline: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        per_view_support = (support_stack * stable_weights.unsqueeze(0)).sum(dim=-1)
+        normalized_support = per_view_support / (clean_support_baseline + 1e-12)
+        return normalized_support.mean(), per_view_support
+
+    def _prototype_to_dense_map(self, values: torch.Tensor) -> torch.Tensor:
+        values = values.view(-1)
+        grid_w = self.img_size // self.patch_size
+        map_2d = values.view(1, 1, grid_w, grid_w)
+        map_2d = map_2d - map_2d.min()
+        map_2d = map_2d / (map_2d.max() + 1e-12)
+        return F.interpolate(map_2d, size=(self.img_size, self.img_size), mode="nearest")
+
+    def _compute_entropy(self, prototype: torch.Tensor) -> torch.Tensor:
+        prototype = self._normalize_distribution(prototype)
+        return -(prototype * (prototype + 1e-12).log()).sum()
 
     def _project_delta(self, delta: torch.Tensor) -> torch.Tensor:
         if self.norm_type == "linf":
@@ -306,30 +322,43 @@ class AttentionFoolImageAttacker:
             raise ValueError(f"Unknown init type: {init}")
 
         momentum = torch.zeros_like(delta)
+        clean_attr_stack, clean_support_stack, _ = self._compute_true_class_view_data(
+            image_pixels=image_pixels,
+            label=label,
+            create_graph=False,
+        )
+        clean_prototype = self._compute_shared_prototype(clean_attr_stack).detach()
+        stable_indices, stable_mask, stable_weights, stable_score = self._select_stable_tokens(
+            clean_attr_stack.detach()
+        )
+        clean_support_mean = clean_support_stack.mean(dim=0).detach()
+        clean_support_baseline = (
+            (clean_support_stack.detach() * stable_weights.unsqueeze(0)).sum(dim=-1).mean().detach().clamp_min(1e-12)
+        )
 
         for step in range(self.steps):
             delta.requires_grad_(True)
             adv_pixels = (image_pixels + delta).clamp(0.0, 1.0)
-            wrong_stack, true_stack, ce_mean, wrong_class = self._compute_view_attribution_stack(
+            true_attr_stack, true_support_stack, ce_mean = self._compute_true_class_view_data(
                 image_pixels=adv_pixels,
                 label=label,
                 create_graph=True,
             )
-            wrong_prototype = self._compute_shared_prototype(wrong_stack)
-            align_loss = self._compute_align_loss(wrong_stack, wrong_prototype)
-            compact_loss = self._compute_compact_loss(wrong_prototype)
-            region_indices, region_weights = self._compute_region_weights(wrong_prototype)
-            coupled_loss, wrong_mass, true_mass = self._compute_coupled_loss(
-                wrong_stack=wrong_stack,
-                true_stack=true_stack,
-                region_weights=region_weights,
+            true_prototype = self._compute_shared_prototype(true_attr_stack)
+            align_loss = self._compute_align_loss(true_attr_stack, true_prototype)
+            support_loss, per_view_support = self._compute_support_suppression_loss(
+                support_stack=true_support_stack,
+                stable_weights=stable_weights,
+                clean_support_baseline=clean_support_baseline,
             )
+            normalized_support = per_view_support / (clean_support_baseline + 1e-12)
+            consistency_loss = normalized_support.std(unbiased=False)
 
             objective = (
                 self.lambda_cls * ce_mean
                 - self.lambda_align * align_loss
-                - self.lambda_compact * compact_loss
-                - self.lambda_couple * coupled_loss
+                - self.lambda_support * support_loss
+                - self.lambda_consistency * consistency_loss
             )
 
             grad = torch.autograd.grad(objective, delta, retain_graph=False)[0]
@@ -341,31 +370,37 @@ class AttentionFoolImageAttacker:
                     f"Attack[{step + 1}/{self.steps}] "
                     f"L_cls={ce_mean.item():.4f} "
                     f"L_align={align_loss.item():.4f} "
-                    f"L_compact={compact_loss.item():.4f} "
-                    f"L_couple={coupled_loss.item():.4f} "
-                    f"wrong_mass={wrong_mass.item():.4f} "
-                    f"true_mass={true_mass.item():.4f}"
+                    f"L_support={support_loss.item():.4f} "
+                    f"L_consistency={consistency_loss.item():.4f} "
+                    f"support_ratio={normalized_support.mean().item():.4f} "
+                    f"H_clean={self._compute_entropy(clean_prototype).item():.4f} "
+                    f"H_adv={self._compute_entropy(true_prototype).item():.4f}"
                 )
 
         adv_pixels = (image_pixels + delta).clamp(0.0, 1.0)
         adv_norm = self._normalize(adv_pixels)
-        wrong_stack, true_stack, _ce_mean, wrong_class = self._compute_view_attribution_stack(
+        adv_attr_stack, adv_support_stack, _ce_mean = self._compute_true_class_view_data(
             image_pixels=adv_pixels,
             label=label,
             create_graph=False,
         )
-        wrong_prototype = self._compute_shared_prototype(wrong_stack).detach()
-        true_prototype = self._compute_shared_prototype(true_stack).detach()
-        region_indices, region_weights = self._compute_region_weights(wrong_prototype)
-        mask = self._build_patch_mask(region_indices, adv_pixels.shape[-1])
+        adv_true_prototype = self._compute_shared_prototype(adv_attr_stack).detach()
+        adv_support_mean = adv_support_stack.mean(dim=0).detach()
+        dense_map = self._prototype_to_dense_map(stable_weights)
+        support_drop = torch.clamp(clean_support_mean - adv_support_mean, min=0.0)
 
         extra = {
-            "wrong_prototype": wrong_prototype.cpu(),
-            "true_prototype": true_prototype.cpu(),
-            "region_weights": region_weights.detach().cpu(),
-            "wrong_class": wrong_class.detach().cpu(),
+            "clean_true_prototype": clean_prototype.cpu(),
+            "adv_true_prototype": adv_true_prototype.cpu(),
+            "stable_token_weights": stable_weights.detach().cpu(),
+            "stable_token_mask": stable_mask.detach().cpu(),
+            "stable_token_score": stable_score.detach().cpu(),
+            "stable_token_indices": stable_indices.detach().cpu(),
+            "clean_true_support": clean_support_mean.cpu(),
+            "adv_true_support": adv_support_mean.cpu(),
+            "support_drop": support_drop.cpu(),
         }
-        return adv_norm, delta.detach(), mask.detach(), region_indices.detach(), extra
+        return adv_norm, delta.detach(), dense_map.detach(), stable_indices.detach(), extra
 
     def attack_batch(
         self,
@@ -378,41 +413,41 @@ class AttentionFoolImageAttacker:
 
         adv_list: List[torch.Tensor] = []
         delta_list: List[torch.Tensor] = []
-        mask_list: List[torch.Tensor] = []
-        patch_indices_list: List[torch.Tensor] = []
+        dense_map_list: List[torch.Tensor] = []
+        stable_indices_list: List[torch.Tensor] = []
         extra_list: List[Dict[str, torch.Tensor]] = []
 
         for idx in range(images.size(0)):
             image = images[idx:idx + 1]
             label = labels[idx:idx + 1]
-            adv, delta, mask, region_indices, extra = self._mifgsm_single_stage(image, label, init=init)
+            adv, delta, dense_map, stable_indices, extra = self._mifgsm_single_stage(image, label, init=init)
             adv_list.append(adv)
             delta_list.append(delta)
-            mask_list.append(mask)
-            patch_indices_list.append(region_indices)
+            dense_map_list.append(dense_map)
+            stable_indices_list.append(stable_indices)
             extra_list.append(extra)
 
         x_adv = torch.cat(adv_list, dim=0)
         delta = torch.cat(delta_list, dim=0)
-        masks = torch.cat(mask_list, dim=0)
-        return x_adv, delta, masks, patch_indices_list, extra_list
+        dense_maps = torch.cat(dense_map_list, dim=0)
+        return x_adv, delta, dense_maps, stable_indices_list, extra_list
 
     def _build_vis_grid(
         self,
         clean_norm: torch.Tensor,
         adv_norm: torch.Tensor,
-        mask: torch.Tensor,
+        dense_map: torch.Tensor,
     ) -> torch.Tensor:
         clean = self._denormalize(clean_norm).clamp(0.0, 1.0)
         adv = self._denormalize(adv_norm).clamp(0.0, 1.0)
         diff = (adv - clean).abs()
         diff_vis = (diff / (self.eps + 1e-12)).clamp(0.0, 1.0)
 
-        mask_1c = mask.to(clean.device)[:, :1, :, :]
+        map_1c = dense_map.to(clean.device)[:, :1, :, :]
         overlay = clean.clone()
         red = torch.tensor([1.0, 0.0, 0.0], device=overlay.device).view(1, 3, 1, 1)
         alpha = 0.4
-        overlay = overlay * (1.0 - alpha * mask_1c) + red * (alpha * mask_1c)
+        overlay = overlay * (1.0 - alpha * map_1c) + red * (alpha * map_1c)
         overlay = overlay.clamp(0.0, 1.0)
 
         grid = make_grid(
@@ -423,19 +458,13 @@ class AttentionFoolImageAttacker:
         return grid
 
     def _map_to_image(self, values: torch.Tensor) -> torch.Tensor:
-        values = values.view(-1)
-        grid_w = self.img_size // self.patch_size
-        map_2d = values.view(1, 1, grid_w, grid_w)
-        map_2d = map_2d - map_2d.min()
-        map_2d = map_2d / (map_2d.max() + 1e-12)
-        up = F.interpolate(map_2d, size=(self.img_size, self.img_size), mode="nearest")
-        return up.repeat(1, 3, 1, 1)
+        return self._prototype_to_dense_map(values).repeat(1, 3, 1, 1)
 
     def save_visualizations(
         self,
         clean_images: torch.Tensor,
         adv_images: torch.Tensor,
-        masks: torch.Tensor,
+        dense_maps: torch.Tensor,
         output_dir: str,
         filenames: List[str] | None = None,
         extras: List[Dict[str, torch.Tensor]] | None = None,
@@ -448,7 +477,7 @@ class AttentionFoolImageAttacker:
             grid = self._build_vis_grid(
                 clean_images[idx:idx + 1],
                 adv_images[idx:idx + 1],
-                masks[idx:idx + 1],
+                dense_maps[idx:idx + 1],
             )
             if filenames is not None:
                 stem = Path(filenames[idx]).stem
@@ -464,17 +493,17 @@ class AttentionFoolImageAttacker:
                 continue
 
             extra = extras[idx]
-            wrong_proto = self._map_to_image(extra["wrong_prototype"].to(self.device))
-            true_proto = self._map_to_image(extra["true_prototype"].to(self.device))
-            region_map = self._map_to_image(extra["region_weights"].to(self.device))
-            diff_map = (wrong_proto - true_proto).abs()
-            mask_1c = masks[idx:idx + 1].to(self.device)[:, :1, :, :]
-            overlay = wrong_proto.clone()
+            clean_proto = self._map_to_image(extra["clean_true_prototype"].to(self.device))
+            adv_proto = self._map_to_image(extra["adv_true_prototype"].to(self.device))
+            stable_map = self._map_to_image(extra["stable_token_weights"].to(self.device))
+            support_drop_map = self._map_to_image(extra["support_drop"].to(self.device))
+            map_1c = dense_maps[idx:idx + 1].to(self.device)[:, :1, :, :]
+            overlay = clean_proto.clone()
             red = torch.tensor([1.0, 0.0, 0.0], device=overlay.device).view(1, 3, 1, 1)
-            overlay = overlay * (1.0 - 0.4 * mask_1c) + red * (0.4 * mask_1c)
+            overlay = overlay * (1.0 - 0.4 * map_1c) + red * (0.4 * map_1c)
             overlay = overlay.clamp(0.0, 1.0)
             evidence_grid = make_grid(
-                torch.cat([wrong_proto, true_proto, region_map, diff_map, overlay], dim=0),
+                torch.cat([clean_proto, adv_proto, stable_map, support_drop_map, overlay], dim=0),
                 nrow=3,
                 padding=2,
             )
