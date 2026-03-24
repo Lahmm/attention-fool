@@ -94,25 +94,11 @@ class AttentionFoolImageAttacker:
         return values / (values.sum(dim=-1, keepdim=True) + 1e-12)
 
     def _diff_augment(self, image_pixels: torch.Tensor) -> torch.Tensor:
-        _, _, h, w = image_pixels.shape
-        scale = float(torch.empty(1).uniform_(0.9, 1.0))
-        ratio = float(torch.empty(1).uniform_(0.9, 1.1))
-        crop_h = min(h, max(1, int(h * scale)))
-        crop_w = min(w, max(1, int(w * scale * ratio)))
-
-        i = int(torch.empty(1).uniform_(0, h - crop_h + 1))
-        j = int(torch.empty(1).uniform_(0, w - crop_w + 1))
-        cropped = image_pixels[:, :, i:i + crop_h, j:j + crop_w]
-        resized = F.interpolate(cropped, size=(h, w), mode="bilinear", align_corners=False)
-
-        if float(torch.rand(1)) < 0.5:
-            resized = torch.flip(resized, dims=[3])
-
         brightness = 1.0 + float(torch.empty(1).uniform_(-0.1, 0.1))
         contrast = 1.0 + float(torch.empty(1).uniform_(-0.1, 0.1))
         saturation = 1.0 + float(torch.empty(1).uniform_(-0.1, 0.1))
 
-        jittered = resized * brightness
+        jittered = image_pixels * brightness
         mean = jittered.mean(dim=(2, 3), keepdim=True)
         jittered = (jittered - mean) * contrast + mean
         gray = jittered.mean(dim=1, keepdim=True)
