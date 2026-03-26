@@ -165,7 +165,7 @@ parser.add_argument("--step-size", type=float, default=1.0 / 255.0, help="MI-FGS
 parser.add_argument("--epsilon", type=float, default=8.0 / 255.0, help="Perturbation budget in pixel range [0, 1].")
 parser.add_argument("--num-views", type=int, default=8, help="Number of augmented views used during optimization.")
 parser.add_argument("--noise-eps", type=float, default=4.0 / 255.0, help="Noise magnitude for noisy views.")
-parser.add_argument("--tau", type=float, default=0.07, help="Softmax temperature for token attribution normalization.")
+parser.add_argument("--tau", type=float, default=0.25, help="Softmax temperature for token attribution normalization.")
 parser.add_argument("--lambda-cls", type=float, default=1.0, help="Misclassification loss weight.")
 parser.add_argument("--lambda-support", type=float, default=1.0, help="Clean-prototype true-class support suppression weight.")
 parser.add_argument("--norm-type", type=str, default="linf", choices=["linf", "l2"], help="Perturbation norm constraint.")

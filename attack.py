@@ -199,8 +199,8 @@ class AttentionFoolImageAttacker:
             return _inner()
 
     def _compute_shared_prototype(self, stack: torch.Tensor) -> torch.Tensor:
-        # Linearly aggregate multi-view clean attributions and normalize only
-        # when converting to a weighting vector.
+        # Linearly aggregate multi-view token evidence (e.g. support values)
+        # and normalize only when converting to a weighting vector.
         return self._normalize_distribution(stack.sum(dim=0))
 
     def _compute_prototype_suppression_loss(
@@ -267,13 +267,13 @@ class AttentionFoolImageAttacker:
             raise ValueError(f"Unknown init type: {init}")
 
         momentum = torch.zeros_like(delta)
-        clean_attr_stack, clean_support_stack, _ = self._compute_true_class_view_data(
+        _clean_attr_stack, clean_support_stack, _ = self._compute_true_class_view_data(
             image_pixels=image_pixels,
             label=label,
             create_graph=False,
         )
-        clean_prototype = self._compute_shared_prototype(clean_attr_stack).detach()
-        prototype_raw = clean_attr_stack.sum(dim=0).detach()
+        clean_prototype = self._compute_shared_prototype(clean_support_stack).detach()
+        prototype_raw = clean_support_stack.sum(dim=0).detach()
         prototype_weights = self._normalize_distribution(prototype_raw).detach()
         prototype_indices = torch.arange(
             prototype_weights.numel(),
@@ -306,7 +306,7 @@ class AttentionFoolImageAttacker:
 
             objective = (
                 self.lambda_cls * ce_mean
-                - self.lambda_support * support_loss
+                + self.lambda_support * support_loss
             )
 
             grad = torch.autograd.grad(objective, delta, retain_graph=False)[0]
@@ -324,12 +324,12 @@ class AttentionFoolImageAttacker:
 
         adv_pixels = (image_pixels + delta).clamp(0.0, 1.0)
         adv_norm = self._normalize(adv_pixels)
-        adv_attr_stack, adv_support_stack, _ce_mean = self._compute_true_class_view_data(
+        _adv_attr_stack, adv_support_stack, _ce_mean = self._compute_true_class_view_data(
             image_pixels=adv_pixels,
             label=label,
             create_graph=False,
         )
-        adv_true_prototype = self._compute_shared_prototype(adv_attr_stack).detach()
+        adv_true_prototype = self._compute_shared_prototype(adv_support_stack).detach()
         adv_support_mean = adv_support_stack.mean(dim=0).detach()
         dense_map = self._prototype_to_dense_map(prototype_weights)
         support_drop = torch.clamp(clean_support_mean - adv_support_mean, min=0.0)
