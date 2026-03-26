@@ -18,15 +18,11 @@ def create_attacker(
     img_size: int,
     step_size: float,
     epsilon: float,
-    stable_topk: int,
     num_views: int,
     noise_eps: float,
     tau: float,
     lambda_cls: float,
-    lambda_align: float,
     lambda_support: float,
-    lambda_consistency: float,
-    stable_score_alpha: float,
     norm_type: str,
     momentum_mu: float,
     log_every: int,
@@ -37,15 +33,11 @@ def create_attacker(
         img_size=img_size,
         step_size=step_size,
         eps=epsilon,
-        stable_topk=stable_topk,
         num_views=num_views,
         noise_eps=noise_eps,
         tau=tau,
         lambda_cls=lambda_cls,
-        lambda_align=lambda_align,
         lambda_support=lambda_support,
-        lambda_consistency=lambda_consistency,
-        stable_score_alpha=stable_score_alpha,
         norm_type=norm_type,
         momentum_mu=momentum_mu,
         log_every=log_every,
@@ -171,15 +163,11 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--max-attacked-samples", type=int, default=5, help="Maximum number of correctly classified samples to attack.")
 parser.add_argument("--step-size", type=float, default=1.0 / 255.0, help="MI-FGSM step size in normalized pixel range [0, 1].")
 parser.add_argument("--epsilon", type=float, default=8.0 / 255.0, help="Perturbation budget in pixel range [0, 1].")
-parser.add_argument("--stable-topk", type=int, default=8, help="Number of clean-sample stable tokens to suppress.")
 parser.add_argument("--num-views", type=int, default=8, help="Number of augmented views used during optimization.")
 parser.add_argument("--noise-eps", type=float, default=4.0 / 255.0, help="Noise magnitude for noisy views.")
 parser.add_argument("--tau", type=float, default=0.07, help="Softmax temperature for token attribution normalization.")
 parser.add_argument("--lambda-cls", type=float, default=1.0, help="Misclassification loss weight.")
-parser.add_argument("--lambda-align", type=float, default=1.0, help="View attribution alignment loss weight for the true class.")
-parser.add_argument("--lambda-support", type=float, default=1.0, help="Stable-token true-class support suppression weight.")
-parser.add_argument("--lambda-consistency", type=float, default=1.0, help="Cross-view consistency weight for stable-token suppression.")
-parser.add_argument("--stable-score-alpha", type=float, default=0.5, help="Stability penalty used when selecting clean stable tokens.")
+parser.add_argument("--lambda-support", type=float, default=1.0, help="Clean-prototype true-class support suppression weight.")
 parser.add_argument("--norm-type", type=str, default="linf", choices=["linf", "l2"], help="Perturbation norm constraint.")
 parser.add_argument("--log-every", type=int, default=50, help="Log interval for losses.")
 parser.add_argument("--output-dir", default="outputs", help="Directory used to store adversarial samples.")
@@ -193,15 +181,11 @@ def main(
     max_attacked_samples: int,
     step_size: float,
     epsilon: float,
-    stable_topk: int,
     num_views: int,
     noise_eps: float,
     tau: float,
     lambda_cls: float,
-    lambda_align: float,
     lambda_support: float,
-    lambda_consistency: float,
-    stable_score_alpha: float,
     norm_type: str,
     log_every: int,
     output_dir: str,
@@ -224,15 +208,11 @@ def main(
         img_size=img_size,
         step_size=step_size,
         epsilon=epsilon,
-        stable_topk=stable_topk,
         num_views=num_views,
         noise_eps=noise_eps,
         tau=tau,
         lambda_cls=lambda_cls,
-        lambda_align=lambda_align,
         lambda_support=lambda_support,
-        lambda_consistency=lambda_consistency,
-        stable_score_alpha=stable_score_alpha,
         norm_type=norm_type,
         momentum_mu=momentum_mu,
         log_every=log_every,
@@ -288,15 +268,11 @@ if __name__ == "__main__":
         max_attacked_samples=args.max_attacked_samples,
         step_size=args.step_size,
         epsilon=args.epsilon,
-        stable_topk=args.stable_topk,
         num_views=args.num_views,
         noise_eps=args.noise_eps,
         tau=args.tau,
         lambda_cls=args.lambda_cls,
-        lambda_align=args.lambda_align,
         lambda_support=args.lambda_support,
-        lambda_consistency=args.lambda_consistency,
-        stable_score_alpha=args.stable_score_alpha,
         norm_type=args.norm_type,
         log_every=args.log_every,
         output_dir=args.output_dir,

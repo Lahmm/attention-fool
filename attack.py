@@ -11,13 +11,13 @@ from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
 
 class AttentionFoolImageAttacker:
     """
-    Single-model, multi-view stable-evidence suppression attack.
+    Single-model, multi-view clean-prototype suppression attack.
 
     The perturbation is optimized so that different augmented views of the same
     adversarial sample:
     1. are misclassified,
-    2. identify the clean sample's stable true-class evidence,
-    3. suppress that evidence under perturbation across multiple views.
+    2. identify the clean sample's shared true-class attribution prototype,
+    3. suppress that prototype evidence under perturbation across multiple views.
     """
 
     def __init__(
@@ -27,15 +27,11 @@ class AttentionFoolImageAttacker:
         steps: int = 100,
         step_size: float = 1.0 / 255.0,
         eps: float = 8.0 / 255.0,
-        stable_topk: int = 8,
         num_views: int = 8,
         noise_eps: float = 4.0 / 255.0,
         tau: float = 0.07,
         lambda_cls: float = 1.0,
-        lambda_align: float = 1.0,
         lambda_support: float = 1.0,
-        lambda_consistency: float = 1.0,
-        stable_score_alpha: float = 0.5,
         norm_type: str = "linf",
         momentum_mu: float = 0.9,
         log_every: int = 10,
@@ -48,15 +44,11 @@ class AttentionFoolImageAttacker:
         self.steps = steps
         self.step_size = step_size
         self.eps = eps
-        self.stable_topk = stable_topk
         self.num_views = num_views
         self.noise_eps = noise_eps
         self.tau = tau
         self.lambda_cls = lambda_cls
-        self.lambda_align = lambda_align
         self.lambda_support = lambda_support
-        self.lambda_consistency = lambda_consistency
-        self.stable_score_alpha = stable_score_alpha
         self.norm_type = norm_type
         self.momentum_mu = momentum_mu
         self.log_every = log_every
@@ -207,50 +199,17 @@ class AttentionFoolImageAttacker:
             return _inner()
 
     def _compute_shared_prototype(self, stack: torch.Tensor) -> torch.Tensor:
-        return self._normalize_distribution(stack.mean(dim=0))
+        # Linearly aggregate multi-view clean attributions and normalize only
+        # when converting to a weighting vector.
+        return self._normalize_distribution(stack.sum(dim=0))
 
-    def _js_divergence(self, p: torch.Tensor, q: torch.Tensor) -> torch.Tensor:
-        p = self._normalize_distribution(p)
-        q = self._normalize_distribution(q)
-        m = 0.5 * (p + q)
-        kl_pm = (p * ((p + 1e-12).log() - (m + 1e-12).log())).sum(dim=-1)
-        kl_qm = (q * ((q + 1e-12).log() - (m + 1e-12).log())).sum(dim=-1)
-        return 0.5 * (kl_pm + kl_qm)
-
-    def _compute_align_loss(self, stack: torch.Tensor, prototype: torch.Tensor) -> torch.Tensor:
-        prototype_expanded = prototype.unsqueeze(0).expand_as(stack)
-        return self._js_divergence(stack, prototype_expanded).mean()
-
-    def _select_stable_tokens(
-        self,
-        clean_attr_stack: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        mean_attr = clean_attr_stack.mean(dim=0)
-        std_attr = clean_attr_stack.std(dim=0, unbiased=False)
-        stable_score = torch.clamp(mean_attr - self.stable_score_alpha * std_attr, min=0.0)
-
-        k = min(self.stable_topk, stable_score.numel())
-        if k <= 0:
-            raise ValueError("stable_topk must be positive.")
-
-        stable_indices = torch.topk(stable_score, k=k, dim=0).indices
-        stable_mask = torch.zeros_like(stable_score)
-        stable_mask[stable_indices] = 1.0
-
-        stable_weights = torch.zeros_like(stable_score)
-        stable_weights[stable_indices] = stable_score[stable_indices]
-        if stable_weights.sum() <= 0:
-            stable_weights[stable_indices] = mean_attr[stable_indices]
-        stable_weights = self._normalize_distribution(stable_weights)
-        return stable_indices, stable_mask, stable_weights, stable_score
-
-    def _compute_support_suppression_loss(
+    def _compute_prototype_suppression_loss(
         self,
         support_stack: torch.Tensor,
-        stable_weights: torch.Tensor,
+        prototype_weights: torch.Tensor,
         clean_support_baseline: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        per_view_support = (support_stack * stable_weights.unsqueeze(0)).sum(dim=-1)
+        per_view_support = (support_stack * prototype_weights.unsqueeze(0)).sum(dim=-1)
         normalized_support = per_view_support / (clean_support_baseline + 1e-12)
         return normalized_support.mean(), per_view_support
 
@@ -314,12 +273,20 @@ class AttentionFoolImageAttacker:
             create_graph=False,
         )
         clean_prototype = self._compute_shared_prototype(clean_attr_stack).detach()
-        stable_indices, stable_mask, stable_weights, stable_score = self._select_stable_tokens(
-            clean_attr_stack.detach()
+        prototype_raw = clean_attr_stack.sum(dim=0).detach()
+        prototype_weights = self._normalize_distribution(prototype_raw).detach()
+        prototype_indices = torch.arange(
+            prototype_weights.numel(),
+            device=prototype_weights.device,
+            dtype=torch.long,
         )
         clean_support_mean = clean_support_stack.mean(dim=0).detach()
         clean_support_baseline = (
-            (clean_support_stack.detach() * stable_weights.unsqueeze(0)).sum(dim=-1).mean().detach().clamp_min(1e-12)
+            (clean_support_stack.detach() * prototype_weights.unsqueeze(0))
+            .sum(dim=-1)
+            .mean()
+            .detach()
+            .clamp_min(1e-12)
         )
 
         for step in range(self.steps):
@@ -330,21 +297,16 @@ class AttentionFoolImageAttacker:
                 label=label,
                 create_graph=True,
             )
-            true_prototype = self._compute_shared_prototype(true_attr_stack)
-            align_loss = self._compute_align_loss(true_attr_stack, true_prototype)
-            support_loss, per_view_support = self._compute_support_suppression_loss(
+            support_loss, per_view_support = self._compute_prototype_suppression_loss(
                 support_stack=true_support_stack,
-                stable_weights=stable_weights,
+                prototype_weights=prototype_weights,
                 clean_support_baseline=clean_support_baseline,
             )
             normalized_support = per_view_support / (clean_support_baseline + 1e-12)
-            consistency_loss = normalized_support.std(unbiased=False)
 
             objective = (
                 self.lambda_cls * ce_mean
-                - self.lambda_align * align_loss
                 - self.lambda_support * support_loss
-                - self.lambda_consistency * consistency_loss
             )
 
             grad = torch.autograd.grad(objective, delta, retain_graph=False)[0]
@@ -355,12 +317,9 @@ class AttentionFoolImageAttacker:
                 print(
                     f"Attack[{step + 1}/{self.steps}] "
                     f"L_cls={ce_mean.item():.4f} "
-                    f"L_align={align_loss.item():.4f} "
-                    f"L_support={support_loss.item():.4f} "
-                    f"L_consistency={consistency_loss.item():.4f} "
+                    f"L_proto={support_loss.item():.4f} "
                     f"support_ratio={normalized_support.mean().item():.4f} "
-                    f"H_clean={self._compute_entropy(clean_prototype).item():.4f} "
-                    f"H_adv={self._compute_entropy(true_prototype).item():.4f}"
+                    f"H_clean={self._compute_entropy(clean_prototype).item():.4f}"
                 )
 
         adv_pixels = (image_pixels + delta).clamp(0.0, 1.0)
@@ -372,21 +331,24 @@ class AttentionFoolImageAttacker:
         )
         adv_true_prototype = self._compute_shared_prototype(adv_attr_stack).detach()
         adv_support_mean = adv_support_stack.mean(dim=0).detach()
-        dense_map = self._prototype_to_dense_map(stable_weights)
+        dense_map = self._prototype_to_dense_map(prototype_weights)
         support_drop = torch.clamp(clean_support_mean - adv_support_mean, min=0.0)
 
         extra = {
             "clean_true_prototype": clean_prototype.cpu(),
             "adv_true_prototype": adv_true_prototype.cpu(),
-            "stable_token_weights": stable_weights.detach().cpu(),
-            "stable_token_mask": stable_mask.detach().cpu(),
-            "stable_token_score": stable_score.detach().cpu(),
-            "stable_token_indices": stable_indices.detach().cpu(),
+            "prototype_raw": prototype_raw.detach().cpu(),
+            "prototype_weights": prototype_weights.detach().cpu(),
+            # Kept for backward compatibility with old visualization keys.
+            "stable_token_weights": prototype_weights.detach().cpu(),
+            "stable_token_mask": torch.ones_like(prototype_weights).detach().cpu(),
+            "stable_token_score": prototype_raw.detach().cpu(),
+            "stable_token_indices": prototype_indices.detach().cpu(),
             "clean_true_support": clean_support_mean.cpu(),
             "adv_true_support": adv_support_mean.cpu(),
             "support_drop": support_drop.cpu(),
         }
-        return adv_norm, delta.detach(), dense_map.detach(), stable_indices.detach(), extra
+        return adv_norm, delta.detach(), dense_map.detach(), prototype_indices.detach(), extra
 
     def attack_batch(
         self,
