@@ -13,6 +13,11 @@ ANNOTATIONS_PATH = "data/image_name_to_class_id_and_name.json"
 DEFAULT_IMG_SIZE = 224
 
 
+def parse_indices(value: str) -> tuple[int, ...]:
+    parts = [p.strip() for p in value.split(",") if p.strip()]
+    return tuple(int(p) for p in parts)
+
+
 def create_attacker(
     model: ViTWithAttn,
     img_size: int,
@@ -20,7 +25,6 @@ def create_attacker(
     epsilon: float,
     num_views: int,
     noise_eps: float,
-    tau: float,
     lambda_cls: float,
     lambda_support: float,
     norm_type: str,
@@ -35,7 +39,6 @@ def create_attacker(
         eps=epsilon,
         num_views=num_views,
         noise_eps=noise_eps,
-        tau=tau,
         lambda_cls=lambda_cls,
         lambda_support=lambda_support,
         norm_type=norm_type,
@@ -165,9 +168,8 @@ parser.add_argument("--step-size", type=float, default=1.0 / 255.0, help="MI-FGS
 parser.add_argument("--epsilon", type=float, default=8.0 / 255.0, help="Perturbation budget in pixel range [0, 1].")
 parser.add_argument("--num-views", type=int, default=8, help="Number of augmented views used during optimization.")
 parser.add_argument("--noise-eps", type=float, default=4.0 / 255.0, help="Noise magnitude for noisy views.")
-parser.add_argument("--tau", type=float, default=0.25, help="Softmax temperature for token attribution normalization.")
 parser.add_argument("--lambda-cls", type=float, default=1.0, help="Misclassification loss weight.")
-parser.add_argument("--lambda-support", type=float, default=1.0, help="Clean-prototype true-class support suppression weight.")
+parser.add_argument("--lambda-support", type=float, default=1.0, help="Clean/adv prototype distance weight.")
 parser.add_argument("--norm-type", type=str, default="linf", choices=["linf", "l2"], help="Perturbation norm constraint.")
 parser.add_argument("--log-every", type=int, default=50, help="Log interval for losses.")
 parser.add_argument("--output-dir", default="outputs", help="Directory used to store adversarial samples.")
@@ -175,6 +177,7 @@ parser.add_argument("--mode", choices=["attack", "clean"], default="attack", hel
 parser.add_argument("--steps", type=int, default=50, help="Number of MI-FGSM steps.")
 parser.add_argument("--momentum-mu", type=float, default=0.9, help="MI-FGSM momentum decay factor.")
 parser.add_argument("--image-path", type=str, default=None, help="Optional image path or filename inside the dataset.")
+parser.add_argument("--token-block-indices", type=str, default="0,1,2,3", help="Comma-separated transformer block indices used for token support.")
 
 
 def main(
@@ -183,7 +186,6 @@ def main(
     epsilon: float,
     num_views: int,
     noise_eps: float,
-    tau: float,
     lambda_cls: float,
     lambda_support: float,
     norm_type: str,
@@ -193,6 +195,7 @@ def main(
     steps: int,
     momentum_mu: float,
     image_path: str | None,
+    token_block_indices: tuple[int, ...],
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -202,7 +205,10 @@ def main(
         annotations_path_arg=annotations_path,
     )
 
-    model = build_vit_model(num_classes=num_classes)
+    model = build_vit_model(
+        num_classes=num_classes,
+        token_block_indices=token_block_indices,
+    )
     attacker = create_attacker(
         model=model,
         img_size=img_size,
@@ -210,7 +216,6 @@ def main(
         epsilon=epsilon,
         num_views=num_views,
         noise_eps=noise_eps,
-        tau=tau,
         lambda_cls=lambda_cls,
         lambda_support=lambda_support,
         norm_type=norm_type,
@@ -270,7 +275,6 @@ if __name__ == "__main__":
         epsilon=args.epsilon,
         num_views=args.num_views,
         noise_eps=args.noise_eps,
-        tau=args.tau,
         lambda_cls=args.lambda_cls,
         lambda_support=args.lambda_support,
         norm_type=args.norm_type,
@@ -280,4 +284,5 @@ if __name__ == "__main__":
         steps=args.steps,
         momentum_mu=args.momentum_mu,
         image_path=args.image_path,
+        token_block_indices=parse_indices(args.token_block_indices),
     )

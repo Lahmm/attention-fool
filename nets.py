@@ -7,6 +7,7 @@ from utils import DEVICE
 
 DEFAULT_MODEL_NAME = "vit_base_patch16_224"
 DEFAULT_PRETRAINED = True
+DEFAULT_TOKEN_BLOCK_INDICES = (0, 1, 2, 3)
 
 class ViTWithAttn(nn.Module):
     def __init__(
@@ -14,11 +15,13 @@ class ViTWithAttn(nn.Module):
         model_name: str,
         num_classes: int | None = None,
         pretrained: bool = True,
+        token_block_indices: Tuple[int, ...] = DEFAULT_TOKEN_BLOCK_INDICES,
         device: torch.device | None = None,
     ) -> None:
         super().__init__()
 
         self.device = device if device is not None else DEVICE
+        self.token_block_indices = token_block_indices
 
         create_kwargs = {}
         if num_classes is not None:
@@ -35,14 +38,15 @@ class ViTWithAttn(nn.Module):
         # 存放每一层的 attn logits（B, H, N, N）
         self.attn_weights: List[torch.Tensor] = []
         self._capture_attn: bool = False
-        self.token_embeddings: torch.Tensor | None = None
+        self.token_embeddings: Dict[int, torch.Tensor] = {}
         self._capture_tokens: bool = False
+        self._token_capture_indices: List[int] = []
 
         self._norm_eps = 1e-6
 
         # 注册 hook，在每个 blocks.*.attn.qkv 上算 qk^T / sqrt(d_k)
         self._register_qkv_hooks()
-        self._register_token_hook()
+        self._register_token_hooks()
 
         # 搬到设备
         self.to(self.device)
@@ -134,36 +138,40 @@ class ViTWithAttn(nn.Module):
 
         return hook
 
-    def _register_token_hook(self) -> None:
+    def _register_token_hooks(self) -> None:
         """
-        Register a hook to capture token embeddings that still influence the
-        final CLS decision through at least one transformer block.
-
-        Prefer the input to the last transformer block; gradients from the
-        classifier to patch tokens are typically non-zero there. Falling back to
-        model.norm output would often yield zero gradients on patch tokens
-        because the head only reads the CLS token at that stage.
+        Register hooks to capture token embeddings from configurable
+        transformer block inputs.
         """
         if hasattr(self.model, "blocks") and len(self.model.blocks) > 0:
-            target = self.model.blocks[-1]
+            num_blocks = len(self.model.blocks)
+            selected: List[int] = []
+            for idx in self.token_block_indices:
+                block_idx = idx + num_blocks if idx < 0 else idx
+                block_idx = max(0, min(num_blocks - 1, block_idx))
+                if block_idx not in selected:
+                    selected.append(block_idx)
+            self._token_capture_indices = selected
 
-            def pre_hook(_module: nn.Module, inputs):
-                if not self._capture_tokens:
-                    return
-                if not inputs:
-                    return
-                self.token_embeddings = inputs[0]
+            for block_idx in self._token_capture_indices:
+                target = self.model.blocks[block_idx]
 
-            target.register_forward_pre_hook(pre_hook)
+                def pre_hook(_module: nn.Module, inputs, key=block_idx):
+                    if not self._capture_tokens or not inputs:
+                        return
+                    self.token_embeddings[key] = inputs[0]
+
+                target.register_forward_pre_hook(pre_hook)
             return
 
         if hasattr(self.model, "norm"):
             target = getattr(self.model, "norm")
+            self._token_capture_indices = [-1]
 
-            def hook(_module: nn.Module, _inputs, output):
+            def hook(_module: nn.Module, _inputs, output, key=-1):
                 if not self._capture_tokens:
                     return
-                self.token_embeddings = output
+                self.token_embeddings[key] = output
 
             target.register_forward_hook(hook)
 
@@ -184,14 +192,14 @@ class ViTWithAttn(nn.Module):
         self.attn_weights = []
         self._capture_attn = return_attn
         self._capture_tokens = return_tokens
-        self.token_embeddings = None
+        self.token_embeddings = {}
 
         logits = self.model(x)  # [B, num_classes]
         self._capture_attn = False
         self._capture_tokens = False
 
         attn_list = [t for t in self.attn_weights]
-        tokens = self.token_embeddings
+        tokens = [self.token_embeddings[idx] for idx in self._token_capture_indices if idx in self.token_embeddings]
 
         if return_attn and return_tokens:
             return logits, attn_list, tokens
@@ -205,12 +213,14 @@ def build_vit_model(
     num_classes: int,
     model_name: str = DEFAULT_MODEL_NAME,
     pretrained: bool = DEFAULT_PRETRAINED,
+    token_block_indices: Tuple[int, ...] = DEFAULT_TOKEN_BLOCK_INDICES,
     device: torch.device = DEVICE,
 ) -> ViTWithAttn:
     model = ViTWithAttn(
         model_name=model_name,
         num_classes=num_classes,
         pretrained=pretrained,
+        token_block_indices=token_block_indices,
         device=device,
     )
     return model
