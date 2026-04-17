@@ -6,7 +6,7 @@ import torch
 from tqdm import tqdm
 
 from attack import AttentionFoolPatchAttacker
-from nets import ViTWithAttn, build_vit_model
+from nets import ViTWithHook, build_vit_model
 from utils import DEVICE, load_data, save_adversarial_images, save_clean_images, evaluate_clean_dataset
 
 IMAGE_DIR = "data/clean_resized_images"
@@ -14,7 +14,7 @@ ANNOTATIONS_PATH = "data/image_name_to_class_id_and_name.json"
 DEFAULT_IMG_SIZE = 224
 
 # 构建攻击器
-def create_attacker(model: ViTWithAttn, img_size: int, pgd_step_size: float) -> AttentionFoolPatchAttacker:
+def create_attacker(model: ViTWithHook, img_size: int, pgd_step_size: float) -> AttentionFoolPatchAttacker:
     attacker = AttentionFoolPatchAttacker(model=model,img_size=img_size,step_size=pgd_step_size,
         loss_type="ce+attn",
         lambda_attn=1.0,                                  
@@ -27,7 +27,7 @@ def create_attacker(model: ViTWithAttn, img_size: int, pgd_step_size: float) -> 
     return attacker
 
 # 开始攻击
-def attack_correctly_classified_samples(dataloader, model: ViTWithAttn, attacker: AttentionFoolPatchAttacker, correct_mask: List[bool],
+def attack_correctly_classified_samples(dataloader, model: ViTWithHook, attacker: AttentionFoolPatchAttacker, correct_mask: List[bool],
     output_dir: str,
     max_attacked_samples: int | None,
 ) -> None:
