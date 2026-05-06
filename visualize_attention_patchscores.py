@@ -3,14 +3,24 @@ import math
 from pathlib import Path
 from typing import List, Optional
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
 
 from nets import build_vit_model, ViTWithHook, DEFAULT_MODEL_NAME
-from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD, load_data
+from utils import (
+    DEVICE,
+    IMAGENET_MEAN,
+    IMAGENET_STD,
+    last_vit_foreground_background_from_tokens,
+    load_data,
+)
 
 
 def parse_args():
@@ -20,6 +30,9 @@ def parse_args():
     parser.add_argument("--max-images",type=int,default=5,help="Process first N matched images.")
     parser.add_argument("--block-index",type=int,default=-1,help="Transformer block index to visualize. Supports negative index; -1 means last block.")
     parser.add_argument("--img-size", type=int, default=224)
+    parser.add_argument("--fft-topk", type=int, default=1, help="Per-channel Top-K stable patch count used by FFT selection.")
+    parser.add_argument("--fft-alpha", type=float, default=0.6, help="FFT stability heatmap overlay opacity.")
+    parser.add_argument("--overlap-top-ratio", type=float, default=0.2, help="Top fraction used to mark high FFT, attention, and patch-score regions in the overlap panel.")
     parser.add_argument("--output-dir",type=str,default=f"outputs/attention_patchscores_{DEFAULT_MODEL_NAME}",help="Directory where visualization figures are saved.")
     parser.add_argument("--num-classes", type=int, default=None)
     parser.add_argument("--dataset-dir", type=str, default="data/clean_resized_images")
@@ -60,14 +73,21 @@ def list_image_paths(image_dir: Path, pattern: str, max_images: int) -> List[Pat
     return paths[:max_images] if max_images is not None else paths
 
 
-def preprocess_image(path: Path, img_size: int) -> torch.Tensor:
+def load_rgb_image(path: Path, img_size: int) -> np.ndarray:
     image = Image.open(path).convert("RGB")
     image = image.resize((img_size, img_size), Image.BICUBIC)
-    np_img = np.array(image).astype(np.float32) / 255.0
-    tensor = torch.from_numpy(np_img).permute(2, 0, 1)
+    return np.array(image).astype(np.float32) / 255.0
+
+
+def preprocess_rgb(rgb: np.ndarray) -> torch.Tensor:
+    tensor = torch.from_numpy(rgb).permute(2, 0, 1)
     mean = torch.tensor(IMAGENET_MEAN).view(3, 1, 1)
     std = torch.tensor(IMAGENET_STD).view(3, 1, 1)
     return (tensor - mean) / std
+
+
+def preprocess_image(path: Path, img_size: int) -> torch.Tensor:
+    return preprocess_rgb(load_rgb_image(path, img_size))
 
 
 def resolve_block_index(block_index: int, total_blocks: int) -> int:
@@ -83,7 +103,7 @@ def tokens_to_heatmap(token_scores: torch.Tensor, img_size: int) -> np.ndarray:
     if grid_size * grid_size != num_tokens:
         raise ValueError(f"Token count {num_tokens} is not a square number.")
     grid = token_scores.reshape(grid_size, grid_size)
-    grid = grid / (grid.max() + 1e-8)
+    grid = (grid - grid.min()) / (grid.max() - grid.min() + 1e-8)
     grid = F.interpolate(
         grid.unsqueeze(0).unsqueeze(0),
         size=(img_size, img_size),
@@ -113,28 +133,6 @@ def compute_maps(
     return attn_map, av_map
 
 
-def compute_patch_token_pca_rgb(tokens_last_block: torch.Tensor, img_size: int) -> np.ndarray:
-    # tokens_last_block: [B, N, D], use one image and patch tokens only
-    patch_tokens = tokens_last_block[0, 1:, :]  # [N_patch, D]
-    num_patches = patch_tokens.size(0)
-    grid_size = int(math.sqrt(num_patches))
-    if grid_size * grid_size != num_patches:
-        raise ValueError(f"Patch token count {num_patches} is not a square number.")
-
-    x = patch_tokens - patch_tokens.mean(dim=0, keepdim=True)
-    _u, _s, vh = torch.linalg.svd(x, full_matrices=False)
-    comps = vh[:3, :].transpose(0, 1)  # [D, 3]
-    proj = x @ comps  # [N_patch, 3]
-
-    pmin = proj.min(dim=0, keepdim=True).values
-    pmax = proj.max(dim=0, keepdim=True).values
-    proj = (proj - pmin) / (pmax - pmin + 1e-8)
-
-    rgb = proj.reshape(grid_size, grid_size, 3).permute(2, 0, 1).unsqueeze(0)  # [1, 3, g, g]
-    rgb = F.interpolate(rgb, size=(img_size, img_size), mode="nearest")
-    return rgb.squeeze(0).permute(1, 2, 0).cpu().numpy()
-
-
 def compute_patch_score_maps(tokens_last_block: torch.Tensor, img_size: int) -> tuple[np.ndarray, np.ndarray]:
     # tokens_last_block: [B, N, D], use one image
     cls_token = tokens_last_block[:, 0, :]      # [B, D]
@@ -160,17 +158,93 @@ def compute_patch_score_maps(tokens_last_block: torch.Tensor, img_size: int) -> 
     return score_map_2d, overlay_map
 
 
+def normalize_map(score_map: np.ndarray) -> np.ndarray:
+    return (score_map - score_map.min()) / (score_map.max() - score_map.min() + 1e-8)
+
+
+def make_fft_stability_overlay(
+    image: np.ndarray,
+    score_map: np.ndarray,
+    alpha: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    alpha = float(np.clip(alpha, 0.0, 1.0))
+    score = normalize_map(score_map)
+    heatmap = plt.get_cmap("viridis")(score)[..., :3].astype(np.float32)
+    overlay = (1.0 - alpha) * image + alpha * heatmap
+    return np.clip(overlay, 0.0, 1.0), score
+
+
+def top_ratio_mask(score_map: np.ndarray, top_ratio: float) -> np.ndarray:
+    if not (0.0 < top_ratio <= 1.0):
+        raise ValueError(f"top_ratio must be in (0, 1], got {top_ratio}.")
+    threshold = np.quantile(score_map.reshape(-1), 1.0 - top_ratio)
+    return score_map >= threshold
+
+
+def make_mechanism_overlap_overlay(
+    image: np.ndarray,
+    fft_score_map: np.ndarray,
+    attn_map: np.ndarray,
+    patch_score_map: np.ndarray,
+    top_ratio: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
+    fft_high = top_ratio_mask(normalize_map(fft_score_map), top_ratio)
+    attn_high = top_ratio_mask(normalize_map(attn_map), top_ratio)
+    patch_high = top_ratio_mask(normalize_map(patch_score_map), top_ratio)
+    attn_patch_high = attn_high & patch_high
+    all_high = fft_high & attn_high & patch_high
+
+    overlay = image * 0.30
+    fft_color = np.array([0.65, 0.0, 1.0], dtype=np.float32)
+    attn_patch_color = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+    both_color = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+
+    overlay[fft_high] = 0.35 * overlay[fft_high] + 0.65 * fft_color
+    overlay[attn_patch_high] = 0.32 * overlay[attn_patch_high] + 0.68 * attn_patch_color
+    overlay[all_high] = 0.12 * overlay[all_high] + 0.88 * both_color
+
+    attn_patch_count = float(attn_patch_high.sum())
+    fft_capture_ratio = float(all_high.sum()) / attn_patch_count if attn_patch_count > 0 else 0.0
+    fft_high_count = float(fft_high.sum())
+    fft_precision_ratio = float(all_high.sum()) / fft_high_count if fft_high_count > 0 else 0.0
+    return (
+        np.clip(overlay, 0.0, 1.0),
+        fft_high,
+        attn_high,
+        patch_high,
+        fft_capture_ratio,
+        fft_precision_ratio,
+    )
+
+
+def draw_binary_contour(
+    ax,
+    mask: np.ndarray,
+    color: str,
+    linewidth: float,
+    linestyle: str = "solid",
+) -> None:
+    if mask.any() and (~mask).any():
+        ax.contour(mask.astype(np.float32), levels=[0.5], colors=color, linewidths=linewidth, linestyles=linestyle)
+
+
 def save_triptych(
     original: np.ndarray,
     attn_map: np.ndarray,
     av_map: np.ndarray,
-    pca_rgb_map: np.ndarray,
+    fft_overlay: np.ndarray,
+    mechanism_overlap_overlay: np.ndarray,
+    fft_high_mask: np.ndarray,
+    attn_high_mask: np.ndarray,
+    patch_high_mask: np.ndarray,
+    fft_capture_ratio: float,
+    fft_precision_ratio: float,
     patch_score_map_2d: np.ndarray,
     patch_score_overlay_map: np.ndarray,
     output_path: Path,
     title: str,
 ) -> None:
-    fig, axes = plt.subplots(1, 5, figsize=(24, 5))
+    fig, axes = plt.subplots(1, 6, figsize=(36, 6.5))
 
     axes[0].imshow(original)
     axes[0].set_title("Input")
@@ -190,9 +264,18 @@ def save_triptych(
     cbar2 = fig.colorbar(hm2, ax=axes[2], fraction=0.046, pad=0.04)
     cbar2.set_label("Normalized score")
 
-    axes[3].imshow(pca_rgb_map)
-    axes[3].set_title("Patch Token PCA-RGB")
+    axes[3].imshow(fft_overlay)
+    axes[3].set_title("FFT Stability Selection")
     axes[3].axis("off")
+    sm = plt.cm.ScalarMappable(cmap="viridis", norm=plt.Normalize(vmin=0.0, vmax=1.0))
+    sm.set_array([])
+    cbar_fft = fig.colorbar(
+        sm,
+        ax=axes[3],
+        fraction=0.046,
+        pad=0.04,
+    )
+    cbar_fft.set_label("Selection frequency")
 
     axes[4].imshow(original, alpha=0.6)
     patch_score_vis = (patch_score_overlay_map - patch_score_overlay_map.min()) / (
@@ -213,10 +296,33 @@ def save_triptych(
     cbar3 = fig.colorbar(hm3, ax=axes[4], fraction=0.046, pad=0.04)
     cbar3.set_label("Normalized score")
 
+    axes[5].imshow(mechanism_overlap_overlay)
+    draw_binary_contour(axes[5], fft_high_mask, color="magenta", linewidth=2.4)
+    draw_binary_contour(axes[5], attn_high_mask, color="cyan", linewidth=2.2)
+    draw_binary_contour(axes[5], patch_high_mask, color="gold", linewidth=2.2)
+    axes[5].set_title(
+        "Mechanism Overlap\n"
+        f"High A & Patch in high FFT: {fft_capture_ratio:.1%}"
+    )
+    axes[5].axis("off")
+    axes[5].legend(
+        handles=[
+            Patch(facecolor="magenta", edgecolor="black", label="High FFT"),
+            Patch(facecolor="cyan", edgecolor="black", label="High Attn"),
+            Patch(facecolor="gold", edgecolor="black", label="High Patch"),
+            Patch(facecolor="white", edgecolor="black", label="All high"),
+        ],
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.20),
+        ncol=4,
+        fontsize=8,
+        framealpha=0.92,
+    )
+
     fig.suptitle(title)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0.0, 0.08, 1.0, 0.94))
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path)
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -233,8 +339,8 @@ def main():
 
     for path in image_paths:
         print(f"Processing {path}")
-        tensor = preprocess_image(path, args.img_size).unsqueeze(0).to(DEVICE)
-        original = np.array(Image.open(path).convert("RGB"))
+        original = load_rgb_image(path, args.img_size)
+        tensor = preprocess_rgb(original).unsqueeze(0).to(DEVICE)
 
         with torch.no_grad():
             logits, attn_list, value_list, token_list = model(
@@ -260,11 +366,36 @@ def main():
             values=value_list[block_idx],
             img_size=args.img_size,
         )
-        tokens_last_block = token_list[-1]
-        pca_rgb_map = compute_patch_token_pca_rgb(tokens_last_block, args.img_size)
+        tokens_for_block = token_list[block_idx]
+        fft_maps = last_vit_foreground_background_from_tokens(
+            tokens=tokens_for_block,
+            topk=args.fft_topk,
+            has_cls_token=True,
+            img_size=args.img_size,
+        )
+        fft_score_map = fft_maps["score_map"][0].detach().cpu().numpy()
+        fft_overlay, fft_stability_map = make_fft_stability_overlay(
+            image=original,
+            score_map=fft_score_map,
+            alpha=args.fft_alpha,
+        )
         patch_score_map_2d, patch_score_overlay_map = compute_patch_score_maps(
-            tokens_last_block,
+            tokens_for_block,
             args.img_size,
+        )
+        (
+            mechanism_overlap_overlay,
+            fft_high_mask,
+            attn_high_mask,
+            patch_high_mask,
+            fft_capture_ratio,
+            fft_precision_ratio,
+        ) = make_mechanism_overlap_overlay(
+            image=original,
+            fft_score_map=fft_stability_map,
+            attn_map=attn_map,
+            patch_score_map=patch_score_overlay_map,
+            top_ratio=args.overlap_top_ratio,
         )
 
         output_path = output_dir / f"{path.stem}_block_{block_idx:02d}_patchscores.png"
@@ -273,7 +404,13 @@ def main():
             original,
             attn_map,
             av_map,
-            pca_rgb_map,
+            fft_overlay,
+            mechanism_overlap_overlay,
+            fft_high_mask,
+            attn_high_mask,
+            patch_high_mask,
+            fft_capture_ratio,
+            fft_precision_ratio,
             patch_score_map_2d,
             patch_score_overlay_map,
             output_path,

@@ -1,10 +1,12 @@
 # utils.py
 from functools import lru_cache
+import math
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import torch
+import torch.nn.functional as F
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
@@ -17,6 +19,266 @@ annotations_path = "data/image_name_to_class_id_and_name.json"
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
+def gaussian_kernel_1d(
+    kernel_size: int,
+    sigma: float | None = None,
+    device: torch.device | None = None,
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """Gaussian low-pass mask along the hidden/channel axis."""
+    if kernel_size <= 0:
+        raise ValueError(f"kernel_size must be positive, got {kernel_size}.")
+
+    if sigma is None:
+        sigma = kernel_size ** 0.5
+    if sigma <= 0:
+        raise ValueError(f"sigma must be positive, got {sigma}.")
+
+    x = torch.arange(
+        -kernel_size // 2 + 1,
+        kernel_size // 2 + 1,
+        device=device,
+        dtype=dtype,
+    )
+    kernel = torch.exp(-0.5 * (x / sigma) ** 2)
+    return kernel / torch.max(kernel)
+
+
+def _as_fft_float_dtype(dtype: torch.dtype) -> torch.dtype:
+    if dtype == torch.float64:
+        return torch.float64
+    return torch.float32
+
+
+def _split_patch_tokens(
+    tokens: torch.Tensor,
+    has_cls_token: bool = True,
+) -> torch.Tensor:
+    if tokens.ndim != 3:
+        raise ValueError(f"tokens must have shape [B, N, D], got {tuple(tokens.shape)}.")
+    if has_cls_token:
+        if tokens.size(1) < 2:
+            raise ValueError("tokens must contain CLS plus at least one patch token.")
+        return tokens[:, 1:, :]
+    return tokens
+
+
+def last_vit_low_pass_patch_features(
+    patch_features: torch.Tensor,
+    sigma: float | None = None,
+) -> torch.Tensor:
+    """
+    Apply channel-wise 1D FFT Gaussian low-pass filtering.
+
+    patch_features: [B, N_patch, D]. FFT is applied on D, not on the 2D patch grid.
+    """
+    if patch_features.ndim != 3:
+        raise ValueError(
+            f"patch_features must have shape [B, N_patch, D], got {tuple(patch_features.shape)}."
+        )
+    if not torch.is_floating_point(patch_features):
+        raise TypeError("patch_features must be a floating point tensor.")
+
+    hidden_dim = patch_features.size(-1)
+    work_dtype = _as_fft_float_dtype(patch_features.dtype)
+    x = patch_features.to(dtype=work_dtype)
+    kernel = gaussian_kernel_1d(
+        hidden_dim,
+        sigma=sigma,
+        device=x.device,
+        dtype=x.dtype,
+    ).view(1, 1, hidden_dim)
+
+    x_fft = torch.fft.fft(x, dim=-1)
+    x_fft = torch.fft.fftshift(x_fft, dim=-1)
+    x_fft = x_fft * kernel
+    x_fft = torch.fft.ifftshift(x_fft, dim=-1)
+    x_low = torch.fft.ifft(x_fft, dim=-1).real
+    return x_low.to(dtype=patch_features.dtype)
+
+
+def last_vit_channel_stability_scores(
+    patch_features: torch.Tensor,
+    sigma: float | None = None,
+) -> torch.Tensor:
+    """
+    Compute channel-wise FFT stability scores for each patch/channel.
+
+    Returns scores with shape [B, N_patch, D], following the official form:
+    S = x / abs(x_low - x).
+    """
+    x_low = last_vit_low_pass_patch_features(patch_features, sigma=sigma)
+    return patch_features / torch.abs(x_low - patch_features)
+
+
+def last_vit_channel_topk_indices(
+    patch_features: torch.Tensor,
+    topk: int = 1,
+    sigma: float | None = None,
+) -> torch.Tensor:
+    """
+    Select the most stable patch per channel with per-channel Top-K.
+
+    Returns indices with shape [B, topk, D], indexing the patch dimension.
+    """
+    if patch_features.ndim != 3:
+        raise ValueError(
+            f"patch_features must have shape [B, N_patch, D], got {tuple(patch_features.shape)}."
+        )
+    num_patches = patch_features.size(1)
+    if topk <= 0 or topk > num_patches:
+        raise ValueError(f"topk must be in [1, {num_patches}], got {topk}.")
+
+    scores = last_vit_channel_stability_scores(
+        patch_features,
+        sigma=sigma,
+    )
+    _values, indices = torch.topk(scores, k=topk, dim=1, largest=True)
+    return indices
+
+
+def last_vit_stable_patch_frequency(
+    tokens: torch.Tensor,
+    topk: int = 1,
+    has_cls_token: bool = True,
+    sigma: float | None = None,
+) -> torch.Tensor:
+    """
+    Convert channel Top-K selections into a patch-level foreground score.
+
+    The score is the fraction of hidden channels that selected each patch. Higher
+    values indicate patches that are more stable under channel-wise low-pass
+    filtering and are treated as foreground-like by the FFT heuristic.
+    """
+    patch_features = _split_patch_tokens(tokens, has_cls_token=has_cls_token)
+    indices = last_vit_channel_topk_indices(
+        patch_features,
+        topk=topk,
+        sigma=sigma,
+    )
+
+    batch_size, num_patches, hidden_dim = patch_features.shape
+    counts = torch.zeros(
+        batch_size,
+        num_patches,
+        device=patch_features.device,
+        dtype=patch_features.dtype,
+    )
+    flat_indices = indices.reshape(batch_size, -1)
+    increments = torch.ones_like(flat_indices, dtype=counts.dtype)
+    counts.scatter_add_(1, flat_indices, increments)
+    return counts / float(hidden_dim)
+
+
+def last_vit_foreground_background_masks(
+    foreground_scores: torch.Tensor,
+    foreground_ratio: float = 0.3,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Build binary foreground/background masks from FFT patch scores.
+
+    foreground_scores must be [B, N_patch]. The top foreground_ratio patches are
+    foreground; the remaining patches are background.
+    """
+    if foreground_scores.ndim != 2:
+        raise ValueError(
+            f"foreground_scores must have shape [B, N_patch], got {tuple(foreground_scores.shape)}."
+        )
+    if not (0.0 < foreground_ratio <= 1.0):
+        raise ValueError(f"foreground_ratio must be in (0, 1], got {foreground_ratio}.")
+
+    batch_size, num_patches = foreground_scores.shape
+    keep = max(1, int(math.ceil(num_patches * foreground_ratio)))
+    _values, top_indices = torch.topk(foreground_scores, k=keep, dim=1, largest=True)
+
+    foreground_mask = torch.zeros(
+        batch_size,
+        num_patches,
+        device=foreground_scores.device,
+        dtype=torch.bool,
+    )
+    foreground_mask.scatter_(1, top_indices, torch.ones_like(top_indices, dtype=torch.bool))
+    background_mask = ~foreground_mask
+    return foreground_mask, background_mask
+
+
+def last_vit_patch_scores_to_image_map(
+    patch_scores: torch.Tensor,
+    img_size: int | Tuple[int, int] = 224,
+    mode: str = "bilinear",
+) -> torch.Tensor:
+    """Upsample square-grid patch scores [B, N_patch] to image maps [B, H, W]."""
+    if patch_scores.ndim != 2:
+        raise ValueError(f"patch_scores must have shape [B, N_patch], got {tuple(patch_scores.shape)}.")
+
+    num_patches = patch_scores.size(1)
+    grid_size = int(math.sqrt(num_patches))
+    if grid_size * grid_size != num_patches:
+        raise ValueError(f"Patch token count {num_patches} is not a square number.")
+
+    if isinstance(img_size, int):
+        output_size = (img_size, img_size)
+    else:
+        output_size = img_size
+
+    grid = patch_scores.reshape(patch_scores.size(0), 1, grid_size, grid_size)
+    kwargs = {"size": output_size, "mode": mode}
+    if mode in {"linear", "bilinear", "bicubic", "trilinear"}:
+        kwargs["align_corners"] = False
+    return F.interpolate(grid, **kwargs).squeeze(1)
+
+
+def last_vit_foreground_background_from_tokens(
+    tokens: torch.Tensor,
+    topk: int = 1,
+    has_cls_token: bool = True,
+    foreground_ratio: float = 0.3,
+    img_size: int | Tuple[int, int] | None = None,
+    sigma: float | None = None,
+) -> Dict[str, torch.Tensor]:
+    """
+    End-to-end FFT foreground/background separation from encoder tokens.
+
+    Returns patch-level scores and masks. If img_size is provided, also returns
+    image-level score_map, foreground_map, and background_map.
+    """
+    foreground_scores = last_vit_stable_patch_frequency(
+        tokens=tokens,
+        topk=topk,
+        has_cls_token=has_cls_token,
+        sigma=sigma,
+    )
+    foreground_mask, background_mask = last_vit_foreground_background_masks(
+        foreground_scores=foreground_scores,
+        foreground_ratio=foreground_ratio,
+    )
+
+    result: Dict[str, torch.Tensor] = {
+        "foreground_scores": foreground_scores,
+        "foreground_mask": foreground_mask,
+        "background_mask": background_mask,
+    }
+
+    if img_size is not None:
+        result["score_map"] = last_vit_patch_scores_to_image_map(
+            foreground_scores,
+            img_size=img_size,
+            mode="bilinear",
+        )
+        result["foreground_map"] = last_vit_patch_scores_to_image_map(
+            foreground_mask.to(dtype=foreground_scores.dtype),
+            img_size=img_size,
+            mode="nearest",
+        ).to(dtype=torch.bool)
+        result["background_map"] = last_vit_patch_scores_to_image_map(
+            background_mask.to(dtype=foreground_scores.dtype),
+            img_size=img_size,
+            mode="nearest",
+        ).to(dtype=torch.bool)
+
+    return result
 
 
 # 选择device
