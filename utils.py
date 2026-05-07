@@ -46,6 +46,117 @@ def gaussian_kernel_1d(
     return kernel / torch.max(kernel)
 
 
+def circular_low_pass_mask_2d(
+    height: int,
+    width: int,
+    cutoff_ratio: float = 0.15,
+    transition_ratio: float = 0.04,
+    device: torch.device | None = None,
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """Build a centered circular 2D FFT low-pass mask."""
+    if height <= 0 or width <= 0:
+        raise ValueError(f"height and width must be positive, got {(height, width)}.")
+    if not (0.0 < cutoff_ratio <= 0.5):
+        raise ValueError(f"cutoff_ratio must be in (0, 0.5], got {cutoff_ratio}.")
+    if transition_ratio < 0.0:
+        raise ValueError(f"transition_ratio must be non-negative, got {transition_ratio}.")
+
+    yy = torch.arange(
+        -height // 2 + 1,
+        height // 2 + 1,
+        device=device,
+        dtype=dtype,
+    ).view(height, 1)
+    xx = torch.arange(
+        -width // 2 + 1,
+        width // 2 + 1,
+        device=device,
+        dtype=dtype,
+    ).view(1, width)
+    radius = torch.sqrt((yy / max(height, 1)) ** 2 + (xx / max(width, 1)) ** 2)
+
+    if transition_ratio == 0.0:
+        return (radius <= cutoff_ratio).to(dtype=dtype)
+
+    transition = max(transition_ratio, torch.finfo(dtype).eps)
+    return torch.sigmoid((cutoff_ratio - radius) / transition)
+
+
+def image_2d_fft_low_high_maps(
+    image: torch.Tensor,
+    cutoff_ratio: float = 0.15,
+    transition_ratio: float = 0.04,
+) -> Dict[str, torch.Tensor]:
+    """
+    Compute model-independent image-space 2D FFT low/high frequency maps.
+
+    image must be RGB or grayscale in [C, H, W] or [B, C, H, W]. The FFT is
+    applied on the spatial dimensions of a grayscale image, unlike the ViT token
+    stability helpers that operate on hidden channels.
+    """
+    if image.ndim == 3:
+        image = image.unsqueeze(0)
+        squeeze_batch = True
+    elif image.ndim == 4:
+        squeeze_batch = False
+    else:
+        raise ValueError(f"image must have shape [C,H,W] or [B,C,H,W], got {tuple(image.shape)}.")
+
+    if not torch.is_floating_point(image):
+        raise TypeError("image must be a floating point tensor.")
+
+    channels = image.size(1)
+    if channels == 1:
+        gray = image[:, 0]
+    elif channels == 3:
+        weights = torch.tensor(
+            [0.2989, 0.5870, 0.1140],
+            device=image.device,
+            dtype=image.dtype,
+        ).view(1, 3, 1, 1)
+        gray = (image * weights).sum(dim=1)
+    else:
+        gray = image.mean(dim=1)
+
+    height, width = gray.shape[-2:]
+    work_dtype = _as_fft_float_dtype(gray.dtype)
+    gray_work = gray.to(dtype=work_dtype)
+    mask = circular_low_pass_mask_2d(
+        height,
+        width,
+        cutoff_ratio=cutoff_ratio,
+        transition_ratio=transition_ratio,
+        device=gray_work.device,
+        dtype=gray_work.dtype,
+    ).view(1, height, width)
+
+    fft = torch.fft.fft2(gray_work, dim=(-2, -1))
+    fft_shifted = torch.fft.fftshift(fft, dim=(-2, -1))
+    low_fft = fft_shifted * mask
+    high_fft = fft_shifted * (1.0 - mask)
+    low = torch.fft.ifft2(torch.fft.ifftshift(low_fft, dim=(-2, -1)), dim=(-2, -1)).real
+    high = torch.fft.ifft2(torch.fft.ifftshift(high_fft, dim=(-2, -1)), dim=(-2, -1)).real
+
+    low_energy = low.abs()
+    high_energy = high.abs()
+    total_energy = low_energy + high_energy + 1e-8
+    low_ratio = low_energy / total_energy
+    high_ratio = high_energy / total_energy
+
+    result: Dict[str, torch.Tensor] = {
+        "low": low.to(dtype=image.dtype),
+        "high": high.to(dtype=image.dtype),
+        "low_energy": low_energy.to(dtype=image.dtype),
+        "high_energy": high_energy.to(dtype=image.dtype),
+        "low_ratio": low_ratio.to(dtype=image.dtype),
+        "high_ratio": high_ratio.to(dtype=image.dtype),
+    }
+    if squeeze_batch:
+        result = {key: value.squeeze(0) for key, value in result.items()}
+    return result
+
+
 def _as_fft_float_dtype(dtype: torch.dtype) -> torch.dtype:
     if dtype == torch.float64:
         return torch.float64
@@ -335,6 +446,7 @@ class ImageDataset(Dataset):
                 continue
 
             sample = {
+                "image_name": image_name,
                 "image_path": image_path,
                 "class_id": label_info.get("class_id"),
                 "class_name": label_info.get("class_name"),
@@ -434,6 +546,7 @@ def save_images(
     prefix: str = "adv",
     denormalize: bool = True,
     start_index: int = 0,
+    filenames: List[str] | None = None,
 ) -> List[Path]:
 
     output_dir_path = Path(output_dir)
@@ -449,10 +562,17 @@ def save_images(
         tensor = tensor * std + mean
 
     tensor = torch.clamp(tensor, 0.0, 1.0)
+    if filenames is not None and len(filenames) != tensor.size(0):
+        raise ValueError(f"filenames length ({len(filenames)}) must match image batch size ({tensor.size(0)}).")
 
     saved_paths: List[Path] = []
     for idx, img in enumerate(tensor):
-        filename = f"{prefix}_{start_index + idx:05d}.png"
+        if filenames is None:
+            filename = f"{prefix}_{start_index + idx:05d}.png"
+        else:
+            original_name = Path(filenames[idx]).name
+            separator = "" if prefix.endswith("_") else "_"
+            filename = f"{prefix}{separator}{original_name}"
         path = output_dir_path / filename
         save_image(img, str(path))
         saved_paths.append(path)
@@ -463,8 +583,15 @@ def save_adversarial_images(
         images: torch.Tensor,
         output_dir: str,
         prefix: str,
-        start_index: int):
-    saved_adv = save_images(images=images, output_dir=output_dir, prefix=prefix, start_index=start_index)
+        start_index: int,
+        filenames: List[str] | None = None):
+    saved_adv = save_images(
+        images=images,
+        output_dir=output_dir,
+        prefix=prefix,
+        start_index=start_index,
+        filenames=filenames,
+    )
     return saved_adv
 
 def save_clean_images(
@@ -506,12 +633,18 @@ def save_clean_images(
         clean_images = images[batch_mask]
         if clean_images.numel() == 0:
             continue
+        selected_indices = indices[batch_mask].tolist()
+        filenames = [
+            str(dataloader.dataset.samples[dataset_idx]["image_name"])
+            for dataset_idx in selected_indices
+        ]
 
         saved = save_images(
             clean_images,
             output_dir=output_dir,
             prefix="clean",
             start_index=saved_images,
+            filenames=filenames,
         )
         saved_count = len(saved)
         saved_images += saved_count

@@ -81,6 +81,11 @@ def attack_correctly_classified_samples(
 
         images_to_attack = images[batch_mask].to(DEVICE)
         labels_to_attack = labels[batch_mask].to(DEVICE)
+        selected_dataset_indices = indices[batch_mask].tolist()
+        filenames = [
+            str(dataloader.dataset.samples[dataset_idx]["image_name"])
+            for dataset_idx in selected_dataset_indices
+        ]
 
         if images_to_attack.numel() == 0:
             continue
@@ -102,6 +107,7 @@ def attack_correctly_classified_samples(
             output_dir=output_dir,
             prefix="adv",
             start_index=saved_images,
+            filenames=filenames,
         )
         saved_images += len(saved)
 

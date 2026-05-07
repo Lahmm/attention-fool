@@ -18,9 +18,18 @@ from utils import (
     DEVICE,
     IMAGENET_MEAN,
     IMAGENET_STD,
+    image_2d_fft_low_high_maps,
     last_vit_foreground_background_from_tokens,
     load_data,
 )
+
+HEATMAP_CMAP = "turbo"
+TITLE_FONT_SIZE = 15
+COLORBAR_LABEL_SIZE = 13
+COLORBAR_TICK_SIZE = 11
+OVERLAP_LEGEND_FONT_SIZE = 11
+PATCH_SCORE_DISPLAY_MIN = 0.5
+PATCH_SCORE_DISPLAY_MAX = 1.0
 
 
 def parse_args():
@@ -30,18 +39,22 @@ def parse_args():
     parser.add_argument("--max-images",type=int,default=5,help="Process first N matched images.")
     parser.add_argument("--block-index",type=int,default=-1,help="Transformer block index to visualize. Supports negative index; -1 means last block.")
     parser.add_argument("--img-size", type=int, default=224)
+    parser.add_argument("--model-name", type=str, default=DEFAULT_MODEL_NAME, help="timm model name used for visualization.")
     parser.add_argument("--fft-topk", type=int, default=1, help="Per-channel Top-K stable patch count used by FFT selection.")
     parser.add_argument("--fft-alpha", type=float, default=0.6, help="FFT stability heatmap overlay opacity.")
+    parser.add_argument("--image-fft-alpha", type=float, default=0.70, help="Image-space 2D FFT low/high overlay opacity.")
+    parser.add_argument("--image-fft-cutoff-ratio", type=float, default=0.15, help="Circular low-pass cutoff ratio for image-space 2D FFT.")
+    parser.add_argument("--image-fft-transition-ratio", type=float, default=0.04, help="Soft transition width for image-space 2D FFT low-pass mask.")
     parser.add_argument("--overlap-top-ratio", type=float, default=0.2, help="Top fraction used to mark high FFT, attention, and patch-score regions in the overlap panel.")
-    parser.add_argument("--output-dir",type=str,default=f"outputs/attention_patchscores_{DEFAULT_MODEL_NAME}",help="Directory where visualization figures are saved.")
+    parser.add_argument("--output-dir",type=str,default=None,help="Directory where visualization figures are saved.")
     parser.add_argument("--num-classes", type=int, default=None)
     parser.add_argument("--dataset-dir", type=str, default="data/clean_resized_images")
     parser.add_argument("--annotations-path",type=str,default="data/image_name_to_class_id_and_name.json")
     return parser.parse_args()
 
 
-def build_model(num_classes: int) -> ViTWithHook:
-    model = build_vit_model(num_classes=num_classes)
+def build_model(num_classes: int, model_name: str) -> ViTWithHook:
+    model = build_vit_model(num_classes=num_classes, model_name=model_name)
     model.eval()
     return model
 
@@ -169,9 +182,22 @@ def make_fft_stability_overlay(
 ) -> tuple[np.ndarray, np.ndarray]:
     alpha = float(np.clip(alpha, 0.0, 1.0))
     score = normalize_map(score_map)
-    heatmap = plt.get_cmap("viridis")(score)[..., :3].astype(np.float32)
+    heatmap = plt.get_cmap(HEATMAP_CMAP)(score)[..., :3].astype(np.float32)
     overlay = (1.0 - alpha) * image + alpha * heatmap
     return np.clip(overlay, 0.0, 1.0), score
+
+
+def make_image_frequency_overlay(
+    image: np.ndarray,
+    high_ratio_map: np.ndarray,
+    alpha: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    alpha = float(np.clip(alpha, 0.0, 1.0))
+    high_ratio = normalize_map(np.clip(high_ratio_map, 0.0, 1.0))
+    high_ratio = np.clip((high_ratio - 0.5) * 1.8 + 0.5, 0.0, 1.0)
+    heatmap = plt.get_cmap(HEATMAP_CMAP)(high_ratio)[..., :3].astype(np.float32)
+    overlay = (1.0 - alpha) * image + alpha * heatmap
+    return np.clip(overlay, 0.0, 1.0), high_ratio
 
 
 def top_ratio_mask(score_map: np.ndarray, top_ratio: float) -> np.ndarray:
@@ -228,11 +254,18 @@ def draw_binary_contour(
         ax.contour(mask.astype(np.float32), levels=[0.5], colors=color, linewidths=linewidth, linestyles=linestyle)
 
 
+def style_colorbar(cbar, label: str) -> None:
+    cbar.set_label(label, fontsize=COLORBAR_LABEL_SIZE)
+    cbar.ax.tick_params(labelsize=COLORBAR_TICK_SIZE)
+
+
 def save_triptych(
     original: np.ndarray,
     attn_map: np.ndarray,
     av_map: np.ndarray,
     fft_overlay: np.ndarray,
+    image_fft_overlay: np.ndarray,
+    image_fft_high_ratio: np.ndarray,
     mechanism_overlap_overlay: np.ndarray,
     fft_high_mask: np.ndarray,
     attn_high_mask: np.ndarray,
@@ -243,69 +276,101 @@ def save_triptych(
     patch_score_overlay_map: np.ndarray,
     output_path: Path,
     title: str,
+    image_fft_cutoff_ratio: float,
 ) -> None:
-    fig, axes = plt.subplots(1, 6, figsize=(36, 6.5))
+    fig, axes_grid = plt.subplots(
+        2,
+        4,
+        figsize=(24, 13.5),
+        gridspec_kw={"hspace": 0.46, "wspace": 0.22},
+    )
+    axes = axes_grid.reshape(-1)
 
     axes[0].imshow(original)
-    axes[0].set_title("Input")
+    axes[0].set_title("Input", fontsize=TITLE_FONT_SIZE)
     axes[0].axis("off")
 
     axes[1].imshow(original)
-    hm1 = axes[1].imshow(attn_map, cmap="jet", alpha=0.6, vmin=0.0, vmax=1.0)
-    axes[1].set_title("Attention Scores")
+    hm1 = axes[1].imshow(attn_map, cmap=HEATMAP_CMAP, alpha=0.6, vmin=0.0, vmax=1.0)
+    axes[1].set_title("Attention Scores", fontsize=TITLE_FONT_SIZE)
     axes[1].axis("off")
     cbar1 = fig.colorbar(hm1, ax=axes[1], fraction=0.046, pad=0.04)
-    cbar1.set_label("Normalized score")
+    style_colorbar(cbar1, "Normalized score")
 
     axes[2].imshow(original)
-    hm2 = axes[2].imshow(av_map, cmap="jet", alpha=0.6, vmin=0.0, vmax=1.0)
-    axes[2].set_title("A@V Scores")
+    hm2 = axes[2].imshow(av_map, cmap=HEATMAP_CMAP, alpha=0.6, vmin=0.0, vmax=1.0)
+    axes[2].set_title("A@V Scores", fontsize=TITLE_FONT_SIZE)
     axes[2].axis("off")
     cbar2 = fig.colorbar(hm2, ax=axes[2], fraction=0.046, pad=0.04)
-    cbar2.set_label("Normalized score")
+    style_colorbar(cbar2, "Normalized score")
 
-    axes[3].imshow(fft_overlay)
-    axes[3].set_title("FFT Stability Selection")
+    axes[3].imshow(image_fft_overlay)
+    axes[3].set_title(
+        "Image 2D FFT Low/High\n"
+        f"Low to high frequency ratio | cutoff {image_fft_cutoff_ratio:.2f}",
+        fontsize=TITLE_FONT_SIZE,
+    )
     axes[3].axis("off")
-    sm = plt.cm.ScalarMappable(cmap="viridis", norm=plt.Normalize(vmin=0.0, vmax=1.0))
-    sm.set_array([])
-    cbar_fft = fig.colorbar(
-        sm,
+    sm_img_fft = plt.cm.ScalarMappable(cmap=HEATMAP_CMAP, norm=plt.Normalize(vmin=0.0, vmax=1.0))
+    sm_img_fft.set_array(image_fft_high_ratio)
+    cbar_img_fft = fig.colorbar(
+        sm_img_fft,
         ax=axes[3],
         fraction=0.046,
         pad=0.04,
     )
-    cbar_fft.set_label("Selection frequency")
+    style_colorbar(cbar_img_fft, "High-frequency ratio")
 
-    axes[4].imshow(original, alpha=0.6)
-    patch_score_vis = (patch_score_overlay_map - patch_score_overlay_map.min()) / (
-        patch_score_overlay_map.max() - patch_score_overlay_map.min() + 1e-8
+    axes[4].imshow(fft_overlay)
+    axes[4].set_title("Token FFT Stability Selection", fontsize=TITLE_FONT_SIZE)
+    axes[4].axis("off")
+    sm = plt.cm.ScalarMappable(cmap=HEATMAP_CMAP, norm=plt.Normalize(vmin=0.0, vmax=1.0))
+    sm.set_array([])
+    cbar_fft = fig.colorbar(
+        sm,
+        ax=axes[4],
+        fraction=0.046,
+        pad=0.04,
     )
-    hm3 = axes[4].imshow(
+    style_colorbar(cbar_fft, "Selection frequency")
+
+    axes[5].imshow(original)
+    patch_score_cmap = plt.get_cmap(HEATMAP_CMAP).copy()
+    patch_score_cmap.set_bad(alpha=0.0)
+    patch_score_vis = np.ma.masked_less(
+        patch_score_overlay_map,
+        PATCH_SCORE_DISPLAY_MIN,
+    )
+    hm3 = axes[5].imshow(
         patch_score_vis,
-        cmap="jet",
-        alpha=0.6,
-        vmin=0.0,
-        vmax=1.0,
+        cmap=patch_score_cmap,
+        alpha=0.70,
+        vmin=PATCH_SCORE_DISPLAY_MIN,
+        vmax=PATCH_SCORE_DISPLAY_MAX,
         interpolation="bilinear",
     )
-    axes[4].set_title(
-        f"Patch Score Overlay\nMin: {patch_score_map_2d.min():.3f}, Max: {patch_score_map_2d.max():.3f}"
-    )
-    axes[4].axis("off")
-    cbar3 = fig.colorbar(hm3, ax=axes[4], fraction=0.046, pad=0.04)
-    cbar3.set_label("Normalized score")
-
-    axes[5].imshow(mechanism_overlap_overlay)
-    draw_binary_contour(axes[5], fft_high_mask, color="magenta", linewidth=2.4)
-    draw_binary_contour(axes[5], attn_high_mask, color="cyan", linewidth=2.2)
-    draw_binary_contour(axes[5], patch_high_mask, color="gold", linewidth=2.2)
     axes[5].set_title(
-        "Mechanism Overlap\n"
-        f"High A & Patch in high FFT: {fft_capture_ratio:.1%}"
+        "Patch Score Overlay\n"
+        f"Shown: {PATCH_SCORE_DISPLAY_MIN:.1f}-{PATCH_SCORE_DISPLAY_MAX:.1f} | "
+        f"Raw min/max: {patch_score_map_2d.min():.3f}/{patch_score_map_2d.max():.3f}",
+        fontsize=TITLE_FONT_SIZE,
     )
     axes[5].axis("off")
-    axes[5].legend(
+    cbar3 = fig.colorbar(hm3, ax=axes[5], fraction=0.046, pad=0.04)
+    cbar3.set_ticks([0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
+    style_colorbar(cbar3, "Normalized score")
+
+    axes[6].imshow(mechanism_overlap_overlay)
+    draw_binary_contour(axes[6], fft_high_mask, color="magenta", linewidth=2.4)
+    draw_binary_contour(axes[6], attn_high_mask, color="cyan", linewidth=2.2)
+    draw_binary_contour(axes[6], patch_high_mask, color="gold", linewidth=2.2)
+    axes[6].set_title(
+        "Mechanism Overlap\n"
+        f"High A & Patch in high FFT: {fft_capture_ratio:.1%}",
+        fontsize=TITLE_FONT_SIZE,
+    )
+    axes[6].axis("off")
+    axes[6].legend(
         handles=[
             Patch(facecolor="magenta", edgecolor="black", label="High FFT"),
             Patch(facecolor="cyan", edgecolor="black", label="High Attn"),
@@ -315,12 +380,14 @@ def save_triptych(
         loc="lower center",
         bbox_to_anchor=(0.5, -0.20),
         ncol=4,
-        fontsize=8,
+        fontsize=OVERLAP_LEGEND_FONT_SIZE,
         framealpha=0.92,
     )
+    axes[7].axis("off")
 
-    fig.suptitle(title)
-    fig.tight_layout(rect=(0.0, 0.08, 1.0, 0.94))
+    fig.suptitle(title, fontsize=17)
+    fig.tight_layout(rect=(0.0, 0.04, 1.0, 0.95), h_pad=4.0, w_pad=1.4)
+    fig.subplots_adjust(hspace=0.46)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
@@ -329,12 +396,13 @@ def save_triptych(
 def main():
     args = parse_args()
     image_dir = Path(args.image_dir)
-    output_dir = Path(args.output_dir)
+    default_output_dir = f"outputs/attention_patchscores_{args.model_name}"
+    output_dir = Path(args.output_dir) if args.output_dir is not None else Path(default_output_dir)
     dataset_dir = Path(args.dataset_dir)
     annotations_path = Path(args.annotations_path)
     num_classes = resolve_num_classes(args.num_classes, dataset_dir, annotations_path, args.img_size)
 
-    model = build_model(num_classes=num_classes)
+    model = build_model(num_classes=num_classes, model_name=args.model_name)
     image_paths = list_image_paths(image_dir, args.pattern, args.max_images)
 
     for path in image_paths:
@@ -379,6 +447,17 @@ def main():
             score_map=fft_score_map,
             alpha=args.fft_alpha,
         )
+        image_fft_maps = image_2d_fft_low_high_maps(
+            torch.from_numpy(original).permute(2, 0, 1),
+            cutoff_ratio=args.image_fft_cutoff_ratio,
+            transition_ratio=args.image_fft_transition_ratio,
+        )
+        image_fft_high_ratio = image_fft_maps["high_ratio"].detach().cpu().numpy()
+        image_fft_overlay, image_fft_high_ratio = make_image_frequency_overlay(
+            image=original,
+            high_ratio_map=image_fft_high_ratio,
+            alpha=args.image_fft_alpha,
+        )
         patch_score_map_2d, patch_score_overlay_map = compute_patch_score_maps(
             tokens_for_block,
             args.img_size,
@@ -405,6 +484,8 @@ def main():
             attn_map,
             av_map,
             fft_overlay,
+            image_fft_overlay,
+            image_fft_high_ratio,
             mechanism_overlap_overlay,
             fft_high_mask,
             attn_high_mask,
@@ -415,6 +496,7 @@ def main():
             patch_score_overlay_map,
             output_path,
             title,
+            args.image_fft_cutoff_ratio,
         )
         print(f"Saved visualization to {output_path}")
 
