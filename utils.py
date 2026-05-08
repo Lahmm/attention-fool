@@ -283,38 +283,6 @@ def last_vit_stable_patch_frequency(
     return counts / float(hidden_dim)
 
 
-def last_vit_foreground_background_masks(
-    foreground_scores: torch.Tensor,
-    foreground_ratio: float = 0.3,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Build binary foreground/background masks from FFT patch scores.
-
-    foreground_scores must be [B, N_patch]. The top foreground_ratio patches are
-    foreground; the remaining patches are background.
-    """
-    if foreground_scores.ndim != 2:
-        raise ValueError(
-            f"foreground_scores must have shape [B, N_patch], got {tuple(foreground_scores.shape)}."
-        )
-    if not (0.0 < foreground_ratio <= 1.0):
-        raise ValueError(f"foreground_ratio must be in (0, 1], got {foreground_ratio}.")
-
-    batch_size, num_patches = foreground_scores.shape
-    keep = max(1, int(math.ceil(num_patches * foreground_ratio)))
-    _values, top_indices = torch.topk(foreground_scores, k=keep, dim=1, largest=True)
-
-    foreground_mask = torch.zeros(
-        batch_size,
-        num_patches,
-        device=foreground_scores.device,
-        dtype=torch.bool,
-    )
-    foreground_mask.scatter_(1, top_indices, torch.ones_like(top_indices, dtype=torch.bool))
-    background_mask = ~foreground_mask
-    return foreground_mask, background_mask
-
-
 def last_vit_patch_scores_to_image_map(
     patch_scores: torch.Tensor,
     img_size: int | Tuple[int, int] = 224,
@@ -345,49 +313,33 @@ def last_vit_foreground_background_from_tokens(
     tokens: torch.Tensor,
     topk: int = 1,
     has_cls_token: bool = True,
-    foreground_ratio: float = 0.3,
     img_size: int | Tuple[int, int] | None = None,
     sigma: float | None = None,
 ) -> Dict[str, torch.Tensor]:
     """
-    End-to-end FFT foreground/background separation from encoder tokens.
+    End-to-end FFT stability selection from encoder tokens.
 
-    Returns patch-level scores and masks. If img_size is provided, also returns
-    image-level score_map, foreground_map, and background_map.
+    Returns patch-level selection-frequency scores. If img_size is provided,
+    also returns an image-level score_map.
     """
-    foreground_scores = last_vit_stable_patch_frequency(
+    stability_scores = last_vit_stable_patch_frequency(
         tokens=tokens,
         topk=topk,
         has_cls_token=has_cls_token,
         sigma=sigma,
     )
-    foreground_mask, background_mask = last_vit_foreground_background_masks(
-        foreground_scores=foreground_scores,
-        foreground_ratio=foreground_ratio,
-    )
 
     result: Dict[str, torch.Tensor] = {
-        "foreground_scores": foreground_scores,
-        "foreground_mask": foreground_mask,
-        "background_mask": background_mask,
+        "foreground_scores": stability_scores,
+        "stability_scores": stability_scores,
     }
 
     if img_size is not None:
         result["score_map"] = last_vit_patch_scores_to_image_map(
-            foreground_scores,
+            stability_scores,
             img_size=img_size,
             mode="bilinear",
         )
-        result["foreground_map"] = last_vit_patch_scores_to_image_map(
-            foreground_mask.to(dtype=foreground_scores.dtype),
-            img_size=img_size,
-            mode="nearest",
-        ).to(dtype=torch.bool)
-        result["background_map"] = last_vit_patch_scores_to_image_map(
-            background_mask.to(dtype=foreground_scores.dtype),
-            img_size=img_size,
-            mode="nearest",
-        ).to(dtype=torch.bool)
 
     return result
 

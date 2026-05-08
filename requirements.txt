@@ -1,13 +1,12 @@
-# 深度学习与模型
+# Deep learning and model zoo
 torch>=2.0.0
 torchvision>=0.15.0
 timm>=1.0.0
 
-# 工具与数据处理
+# Data and image processing
 numpy>=1.23.0
 Pillow>=9.0.0
 tqdm>=4.64.0
 
-# 配置与可视化（可选，但推荐保留）
-pyyaml>=6.0
+# Visualization
 matplotlib>=3.7.0

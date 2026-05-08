@@ -1,20 +1,35 @@
-# transfer_eval.py
 import argparse
 import json
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import timm
 import torch
 from PIL import Image
+from timm.data import resolve_data_config
+from timm.data.transforms_factory import create_transform
 from tqdm import tqdm
-from torchvision import transforms
 
-from nets import build_vit_model
-from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
+from utils import DEVICE
 
-black_model_list = [
+DEFAULT_BLACK_BOX_MODELS = [
     "deit_base_patch16_224",
+    "beit_base_patch16_224",
+    "swin_tiny_patch4_window7_224",
+    "pvt_v2_b2",
+    "cait_s24_224",
+    "levit_256",
+    "pit_s_224",
+    "crossvit_15_240",
 ]
+
+
+def parse_model_names(value: str) -> List[str]:
+    model_names = [item.strip() for item in value.split(",") if item.strip()]
+    if not model_names:
+        raise argparse.ArgumentTypeError("model-name must contain at least one model.")
+    return model_names
+
 
 def load_annotations(path: Path) -> Dict[str, Dict[str, int | str]]:
     with path.open("r", encoding="utf-8") as handle:
@@ -22,20 +37,6 @@ def load_annotations(path: Path) -> Dict[str, Dict[str, int | str]]:
     if not isinstance(data, dict):
         raise ValueError("annotations must be a json dict")
     return data
-
-
-def build_transform() -> transforms.Compose:
-    return transforms.Compose(
-        [
-            transforms.ToTensor(),
-            transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
-        ]
-    )
-
-
-def infer_num_classes(annotations: Dict[str, Dict[str, int | str]]) -> int:
-    class_ids = [int(info["class_id"]) for info in annotations.values()]
-    return max(class_ids) + 1 if class_ids else 0
 
 
 def collect_images(image_dir: Path, prefix: str) -> List[Path]:
@@ -52,22 +53,28 @@ def extract_original_name(filename: str, prefix: str) -> str:
     return filename[len(prefix):]
 
 
+def build_black_box_model(model_name: str):
+    model = timm.create_model(model_name, pretrained=True)
+    model.to(DEVICE)
+    model.eval()
+    config = resolve_data_config({}, model=model)
+    transform = create_transform(**config)
+    return model, transform
+
+
 def evaluate(
     image_paths: List[Path],
     annotations: Dict[str, Dict[str, int | str]],
     prefix: str,
-    model_name: str
-) -> Tuple[int, int]:
-    transform = build_transform()
-    num_classes = infer_num_classes(annotations)
-    model = build_vit_model(num_classes=num_classes, model_name=model_name)
-    model.eval()
+    model_name: str,
+) -> Tuple[int, int, int]:
+    model, transform = build_black_box_model(model_name)
 
     correct = 0
     total = 0
     skipped = 0
 
-    progress = tqdm(image_paths, desc="迁移攻击测试")
+    progress = tqdm(image_paths, desc=f"transfer eval {model_name}")
     with torch.no_grad():
         for path in progress:
             original_name = extract_original_name(path.name, prefix)
@@ -78,7 +85,7 @@ def evaluate(
 
             image = Image.open(path).convert("RGB")
             tensor = transform(image).unsqueeze(0).to(DEVICE)
-            logits = model(tensor, return_attn=False)
+            logits = model(tensor)
             pred = logits.argmax(dim=1).item()
             target = int(label_info["class_id"])
             correct += int(pred == target)
@@ -87,28 +94,83 @@ def evaluate(
             if total > 0:
                 progress.set_postfix(acc=f"{correct / total:.4f}", skipped=skipped)
 
-    return correct, total
+    return correct, total, skipped
 
 
-def main(image_dir: str, annotations_path: str, prefix: str) -> None:
+def main(
+    image_dir: str,
+    annotations_path: str,
+    prefix: str,
+    model_names: List[str],
+) -> None:
     image_dir_path = Path(image_dir)
     annotations = load_annotations(Path(annotations_path))
     image_paths = collect_images(image_dir_path, prefix)
     if not image_paths:
         print("no matching images found")
         return
-    
-    for black_model in black_model_list:
-        correct, total = evaluate(image_paths, annotations, prefix, model_name=black_model)
+
+    print(f"Device: {DEVICE}")
+    print(f"Images: {len(image_paths)}")
+    print(f"Black-box models: {', '.join(model_names)}")
+
+    asr_by_model: Dict[str, float] = {}
+    metrics_by_model: Dict[str, Dict[str, float | int]] = {}
+
+    for black_model in model_names:
+        correct, total, skipped = evaluate(
+            image_paths=image_paths,
+            annotations=annotations,
+            prefix=prefix,
+            model_name=black_model,
+        )
         acc = correct / total if total > 0 else 0.0
-        asr = 1.0 - acc
-        print(f"评估样本量={total} 正确个数={correct} 准确率={acc:.4f} ASR={asr:.4f} (黑盒模型={black_model})")
+        asr = 1.0 - acc if total > 0 else 0.0
+        asr_by_model[black_model] = asr
+        metrics_by_model[black_model] = {
+            "asr": asr,
+            "acc": acc,
+            "correct": correct,
+            "total": total,
+            "skipped": skipped,
+        }
+        print(
+            f"model={black_model} total={total} skipped={skipped} "
+            f"correct={correct} acc={acc:.4f} ASR={asr:.4f}"
+        )
+
+    print("ASR by model:")
+    print({model_name: round(asr, 6) for model_name, asr in asr_by_model.items()})
+    print("Metrics by model:")
+    print(
+        {
+            model_name: {
+                "asr": round(float(metrics["asr"]), 6),
+                "acc": round(float(metrics["acc"]), 6),
+                "correct": int(metrics["correct"]),
+                "total": int(metrics["total"]),
+                "skipped": int(metrics["skipped"]),
+            }
+            for model_name, metrics in metrics_by_model.items()
+        }
+    )
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Evaluate predictions on adversarial or clean samples.")
+    parser = argparse.ArgumentParser(description="Evaluate transferability on adversarial or clean samples.")
     parser.add_argument("--image-dir", type=str, default="outputs/attack", help="Directory with saved images.")
     parser.add_argument("--annotations-path", type=str, default="data/image_name_to_class_id_and_name.json")
     parser.add_argument("--prefix", type=str, default="adv_", help="Filename prefix used to infer original names.")
+    parser.add_argument(
+        "--model-name",
+        type=parse_model_names,
+        default=DEFAULT_BLACK_BOX_MODELS,
+        help="Black-box timm model name(s), comma-separated for multiple models.",
+    )
     args = parser.parse_args()
-    main(args.image_dir, args.annotations_path, args.prefix)
+    main(
+        image_dir=args.image_dir,
+        annotations_path=args.annotations_path,
+        prefix=args.prefix,
+        model_names=args.model_name,
+    )
