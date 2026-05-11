@@ -82,12 +82,13 @@ class MIFGSMAttacker:
         return self._normalize(adv_pixels)
 
 
-class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
+class FFTCCAttacker(MIFGSMAttacker):
     """
-    MI-FGSM with FFT-stability pollution and multi-layer CLS residual drift.
+    MI-FGSM with FFT-guided foreground/background contrast collapse.
 
-    The attack uses one white-box model. FFT stability weights are computed once
-    from clean tokens, then held fixed during the iterative pixel-space attack.
+    Clean-token FFT stability defines foreground-like/background-like soft
+    patch groups. The attack minimizes their patch-CLS alignment gap across
+    selected residual-stream layers.
     """
 
     def __init__(
@@ -98,8 +99,7 @@ class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
         steps: int = 10,
         decay: float = 1.0,
         layers: tuple[int, ...] = (-4, -2, -1),
-        lambda_pollution: float = 1.0,
-        lambda_residual: float = 1.0,
+        lambda_contrast: float = 1.0,
         fft_topk: int = 1,
         device: torch.device | None = None,
     ) -> None:
@@ -117,8 +117,7 @@ class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
             raise ValueError(f"fft_topk must be positive, got {fft_topk}.")
 
         self.layers = tuple(int(layer) for layer in layers)
-        self.lambda_pollution = float(lambda_pollution)
-        self.lambda_residual = float(lambda_residual)
+        self.lambda_contrast = float(lambda_contrast)
         self.fft_topk = int(fft_topk)
 
     @staticmethod
@@ -132,21 +131,14 @@ class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
                 resolved.append(idx)
         return resolved
 
-    @staticmethod
-    def _weighted_mean(values: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
-        weighted_sum = (values * weights).sum(dim=1)
-        normalizer = weights.sum(dim=1).clamp_min(1e-12)
-        return weighted_sum / normalizer
-
     def _build_clean_guides(
         self,
         images: torch.Tensor,
-    ) -> tuple[list[int], dict[int, torch.Tensor], dict[int, torch.Tensor]]:
+    ) -> tuple[list[int], dict[int, torch.Tensor]]:
         with torch.no_grad():
             _logits_clean, token_list_clean = self.model(images, return_tokens=True)
 
         layer_indices = self._resolve_layers(self.layers, len(token_list_clean))
-        clean_cls: dict[int, torch.Tensor] = {}
         fft_weights: dict[int, torch.Tensor] = {}
 
         for layer_idx in layer_indices:
@@ -156,20 +148,29 @@ class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
                 topk=self.fft_topk,
                 has_cls_token=True,
             ).detach()
-            clean_cls[layer_idx] = tokens[:, 0, :].detach()
-            fft_weights[layer_idx] = weights.clamp(0.0, 1.0)
+            fft_weights[layer_idx] = self._normalize_weights(weights)
 
-        return layer_indices, clean_cls, fft_weights
+        return layer_indices, fft_weights
+
+    @staticmethod
+    def _normalize_weights(weights: torch.Tensor) -> torch.Tensor:
+        min_vals = weights.min(dim=1, keepdim=True).values
+        max_vals = weights.max(dim=1, keepdim=True).values
+        return (weights - min_vals) / (max_vals - min_vals).clamp_min(1e-12)
+
+    @staticmethod
+    def _weighted_mean(values: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
+        weighted_sum = (values * weights).sum(dim=1)
+        normalizer = weights.sum(dim=1).clamp_min(1e-12)
+        return weighted_sum / normalizer
 
     def _feature_losses(
         self,
         token_list_adv: list[torch.Tensor],
         layer_indices: list[int],
-        clean_cls: dict[int, torch.Tensor],
         fft_weights: dict[int, torch.Tensor],
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        pollution_terms = []
-        residual_terms = []
+    ) -> torch.Tensor:
+        contrast_terms = []
 
         for layer_idx in layer_indices:
             tokens_adv = token_list_adv[layer_idx]
@@ -178,20 +179,18 @@ class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
 
             cls_for_patch = cls_adv.unsqueeze(1).expand_as(patch_adv)
             patch_cls_cos = F.cosine_similarity(patch_adv, cls_for_patch, dim=-1)
-            high_weights = fft_weights[layer_idx].to(device=patch_cls_cos.device, dtype=patch_cls_cos.dtype)
-            low_weights = 1.0 - high_weights
+            fg_weights = fft_weights[layer_idx].to(
+                device=patch_cls_cos.device,
+                dtype=patch_cls_cos.dtype,
+            )
+            bg_weights = 1.0 - fg_weights
 
-            high_stability_align = self._weighted_mean(patch_cls_cos, high_weights)
-            low_stability_align = self._weighted_mean(patch_cls_cos, low_weights)
-            pollution_terms.append((low_stability_align - high_stability_align).mean())
+            fg_align = self._weighted_mean(patch_cls_cos, fg_weights)
+            bg_align = self._weighted_mean(patch_cls_cos, bg_weights)
+            contrast_terms.append(-torch.abs(fg_align - bg_align).mean())
 
-            clean_cls_layer = clean_cls[layer_idx].to(device=cls_adv.device, dtype=cls_adv.dtype)
-            cls_cos = F.cosine_similarity(cls_adv, clean_cls_layer, dim=-1)
-            residual_terms.append((1.0 - cls_cos).mean())
-
-        pollution_loss = torch.stack(pollution_terms).mean()
-        residual_loss = torch.stack(residual_terms).mean()
-        return pollution_loss, residual_loss
+        contrast_loss = torch.stack(contrast_terms).mean()
+        return contrast_loss
 
     def attack_batch(
         self,
@@ -201,7 +200,7 @@ class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
         images = images.to(self.device)
         labels = labels.to(self.device)
 
-        layer_indices, clean_cls, fft_weights = self._build_clean_guides(images)
+        layer_indices, fft_weights = self._build_clean_guides(images)
         clean_pixels = self._denormalize(images).detach()
         adv_pixels = clean_pixels.clone().detach()
         momentum = torch.zeros_like(adv_pixels)
@@ -213,16 +212,14 @@ class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
                 return_tokens=True,
             )
             ce_loss = F.cross_entropy(logits_adv, labels)
-            pollution_loss, residual_loss = self._feature_losses(
+            contrast_loss = self._feature_losses(
                 token_list_adv=token_list_adv,
                 layer_indices=layer_indices,
-                clean_cls=clean_cls,
                 fft_weights=fft_weights,
             )
             loss = (
                 ce_loss
-                + self.lambda_pollution * pollution_loss
-                + self.lambda_residual * residual_loss
+                + self.lambda_contrast * contrast_loss
             )
 
             grad = torch.autograd.grad(loss, adv_pixels)[0]
