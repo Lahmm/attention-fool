@@ -163,7 +163,7 @@ def parse_args():
     parser.add_argument("--steps", type=int, default=10, help="Number of MI-FGSM iterations.")
     parser.add_argument("--decay", type=float, default=1.0, help="Momentum decay factor.")
     parser.add_argument("--layers", type=parse_layers, default=(-4, -2, -1), help='Comma-separated token layers for feature losses, e.g. "-4,-2,-1".')
-    parser.add_argument("--lambda-pollution", type=float, default=1.0, help="Weight for low-stability token pollution loss.")
+    parser.add_argument("--lambda-pollution", type=float, default=1.0, help="Weight for FFT-stable patch score and attention-value pollution loss.")
     parser.add_argument("--lambda-residual", type=float, default=1.0, help="Weight for multi-layer CLS residual drift loss.")
     parser.add_argument("--fft-topk", type=int, default=1, help="Per-channel Top-K stable patch count used for FFT stability weights.")
     parser.add_argument("--output-dir", default="outputs", help="Directory used to store adversarial samples.")
