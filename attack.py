@@ -84,14 +84,14 @@ class MIFGSMAttacker:
 
 class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
     """
-    MI-FGSM with attention-weighted block-wise contrast pollution.
+    MI-FGSM with block-wise FFT-stable patch score pollution.
 
-    For each selected deep block, FFT stability selects the patch regions to
-    pollute. The attack raises those patches' patch-to-CLS score and their
-    attention-weighted value contribution so the block loses the contrast
-    between subject-like CLS information and stable comparison regions.
-    Multi-layer CLS drift keeps the perturbation accumulating before the final
-    block instead of only attacking the last output.
+    For each selected deep block, FFT stability alone selects the patch regions
+    to pollute. The attack raises those patches' patch-to-CLS score so the
+    block loses the contrast between subject-like CLS information and stable
+    comparison regions. Multi-layer CLS drift keeps the perturbation
+    accumulating before the final block instead of only attacking the last
+    output.
     """
 
     def __init__(
@@ -165,10 +165,8 @@ class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
 
         return layer_indices, clean_cls, fft_weights
 
-    def _attention_weighted_contrast_loss(
+    def _fft_stable_patch_score_loss(
         self,
-        attn_list_adv: list[torch.Tensor],
-        value_list_adv: list[torch.Tensor],
         token_list_adv: list[torch.Tensor],
         layer_indices: list[int],
         fft_weights: dict[int, torch.Tensor],
@@ -177,15 +175,12 @@ class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
 
         for layer_idx in layer_indices:
             tokens_adv = token_list_adv[layer_idx]
-            attn_logits = attn_list_adv[layer_idx]
-            values_adv = value_list_adv[layer_idx]
 
             cls_adv = tokens_adv[:, 0, :]
             patch_adv = tokens_adv[:, 1:, :]
             cls_for_patch = cls_adv.unsqueeze(1).expand_as(patch_adv)
             patch_cls_cos = F.cosine_similarity(patch_adv, cls_for_patch, dim=-1)
 
-            attn_weights = torch.softmax(attn_logits, dim=-1)
             high_fft = fft_weights[layer_idx].to(
                 device=patch_cls_cos.device,
                 dtype=patch_cls_cos.dtype,
@@ -193,20 +188,7 @@ class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
             target_weights = high_fft
 
             patch_score_term = self._weighted_mean(patch_cls_cos, target_weights).mean()
-
-            cls_patch_contrib = attn_weights[:, :, 0, 1:].unsqueeze(-1) * values_adv[:, :, 1:, :]
-            cls_patch_contrib = cls_patch_contrib.permute(0, 2, 1, 3).reshape(
-                patch_adv.size(0),
-                patch_adv.size(1),
-                -1,
-            )
-            if cls_patch_contrib.size(-1) == cls_adv.size(-1):
-                cls_ref = cls_adv.detach().unsqueeze(1).expand_as(cls_patch_contrib)
-                contribution_scores = F.cosine_similarity(cls_patch_contrib, cls_ref, dim=-1)
-                contribution_term = self._weighted_mean(contribution_scores, target_weights).mean()
-                contrast_terms.append(0.5 * (patch_score_term + contribution_term))
-            else:
-                contrast_terms.append(patch_score_term)
+            contrast_terms.append(patch_score_term)
 
         return torch.stack(contrast_terms).mean()
 
@@ -243,16 +225,12 @@ class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
 
         for _step in range(self.steps):
             adv_pixels.requires_grad_(True)
-            logits_adv, attn_list_adv, value_list_adv, token_list_adv = self.model(
+            logits_adv, token_list_adv = self.model(
                 self._normalize(adv_pixels),
-                return_attn=True,
-                return_values=True,
                 return_tokens=True,
             )
             ce_loss = F.cross_entropy(logits_adv, labels)
-            pollution_loss = self._attention_weighted_contrast_loss(
-                attn_list_adv=attn_list_adv,
-                value_list_adv=value_list_adv,
+            pollution_loss = self._fft_stable_patch_score_loss(
                 token_list_adv=token_list_adv,
                 layer_indices=layer_indices,
                 fft_weights=fft_weights,

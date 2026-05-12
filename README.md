@@ -5,7 +5,7 @@
 - Install dependencies: `pip install -r requirements.txt`
 - Generate adversarial samples with MI-FGSM:
   `python main.py --mode attack --max-attacked-samples 5 --epsilon 0.0313725 --steps 10 --decay 1.0 --output-dir outputs/attack`
-- Generate adversarial samples with attention-weighted FFT residual pollution MI-FGSM:
+- Generate adversarial samples with FFT-stable patch score residual pollution MI-FGSM:
   `python main.py --mode attack --attack-type fft-residual-pollution --max-attacked-samples 5 --epsilon 0.0313725 --steps 10 --decay 1.0 --layers=-4,-2,-1 --lambda-pollution 1.0 --lambda-residual 1.0 --fft-topk 1 --output-dir outputs/attack_fft_residual`
 - Export correctly classified clean samples:
   `python main.py --mode clean --max-attacked-samples 5 --output-dir outputs/clean`
