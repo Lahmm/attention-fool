@@ -162,3 +162,4 @@ DEFAULT_MODEL_NAME = "vit_base_patch16_224"
 ```
 
 迁移评估中的黑盒模型由 `transfer_eval.py` 的 `--model-name` 控制，不会使用 `nets.py` 的 hook 包装。
+这是ds
