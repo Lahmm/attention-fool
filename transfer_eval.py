@@ -1,4 +1,5 @@
 import argparse
+from contextlib import nullcontext
 import json
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -8,6 +9,7 @@ import torch
 from PIL import Image
 from timm.data import resolve_data_config
 from timm.data.transforms_factory import create_transform
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from utils import DEVICE
@@ -62,34 +64,113 @@ def build_black_box_model(model_name: str):
     return model, transform
 
 
+class TransferImageDataset(Dataset):
+    def __init__(self, samples: List[Tuple[Path, int]], transform) -> None:
+        self.samples = samples
+        self.transform = transform
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, index: int):
+        path, target = self.samples[index]
+        with Image.open(path) as image:
+            image = image.convert("RGB")
+            tensor = self.transform(image)
+        return tensor, int(target)
+
+
+def build_transfer_samples(
+    image_paths: List[Path],
+    annotations: Dict[str, Dict[str, int | str]],
+    prefix: str,
+) -> Tuple[List[Tuple[Path, int]], int]:
+    samples: List[Tuple[Path, int]] = []
+    skipped = 0
+    for path in image_paths:
+        original_name = extract_original_name(path.name, prefix)
+        label_info = annotations.get(original_name)
+        if label_info is None:
+            skipped += 1
+            continue
+        samples.append((path, int(label_info["class_id"])))
+    return samples, skipped
+
+
+def build_dataloader(
+    samples: List[Tuple[Path, int]],
+    transform,
+    batch_size: int,
+    num_workers: int,
+    prefetch_factor: int,
+) -> DataLoader:
+    dataset = TransferImageDataset(samples=samples, transform=transform)
+    kwargs = {
+        "batch_size": batch_size,
+        "shuffle": False,
+        "num_workers": num_workers,
+        "pin_memory": (DEVICE.type == "cuda"),
+        "persistent_workers": num_workers > 0,
+    }
+    if num_workers > 0:
+        kwargs["prefetch_factor"] = prefetch_factor
+    return DataLoader(dataset, **kwargs)
+
+
+def configure_eval_runtime(use_tf32: bool) -> None:
+    if DEVICE.type != "cuda":
+        return
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.matmul.allow_tf32 = use_tf32
+    torch.backends.cudnn.allow_tf32 = use_tf32
+    if use_tf32:
+        torch.set_float32_matmul_precision("high")
+
+
 def evaluate(
     image_paths: List[Path],
     annotations: Dict[str, Dict[str, int | str]],
     prefix: str,
     model_name: str,
+    batch_size: int,
+    num_workers: int,
+    prefetch_factor: int,
+    use_amp: bool,
 ) -> Tuple[int, int, int]:
     model, transform = build_black_box_model(model_name)
+    samples, skipped = build_transfer_samples(
+        image_paths=image_paths,
+        annotations=annotations,
+        prefix=prefix,
+    )
+    if not samples:
+        return 0, 0, skipped
+
+    dataloader = build_dataloader(
+        samples=samples,
+        transform=transform,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
+    )
 
     correct = 0
     total = 0
-    skipped = 0
 
-    progress = tqdm(image_paths, desc=f"transfer eval {model_name}")
-    with torch.no_grad():
-        for path in progress:
-            original_name = extract_original_name(path.name, prefix)
-            label_info = annotations.get(original_name)
-            if label_info is None:
-                skipped += 1
-                continue
+    autocast_context = (
+        torch.cuda.amp.autocast if DEVICE.type == "cuda" and use_amp else nullcontext
+    )
+    progress = tqdm(dataloader, desc=f"transfer eval {model_name}")
+    with torch.inference_mode():
+        for images, targets in progress:
+            images = images.to(DEVICE, non_blocking=True)
+            targets = targets.to(DEVICE, non_blocking=True)
 
-            image = Image.open(path).convert("RGB")
-            tensor = transform(image).unsqueeze(0).to(DEVICE)
-            logits = model(tensor)
-            pred = logits.argmax(dim=1).item()
-            target = int(label_info["class_id"])
-            correct += int(pred == target)
-            total += 1
+            with autocast_context():
+                logits = model(images)
+            preds = logits.argmax(dim=1)
+            correct += (preds == targets).sum().item()
+            total += targets.size(0)
 
             if total > 0:
                 progress.set_postfix(acc=f"{correct / total:.4f}", skipped=skipped)
@@ -102,7 +183,13 @@ def main(
     annotations_path: str,
     prefix: str,
     model_names: List[str],
+    batch_size: int,
+    num_workers: int,
+    prefetch_factor: int,
+    use_amp: bool,
+    use_tf32: bool,
 ) -> None:
+    configure_eval_runtime(use_tf32=use_tf32)
     image_dir_path = Path(image_dir)
     annotations = load_annotations(Path(annotations_path))
     image_paths = collect_images(image_dir_path, prefix)
@@ -113,6 +200,12 @@ def main(
     print(f"Device: {DEVICE}")
     print(f"Images: {len(image_paths)}")
     print(f"Black-box models: {', '.join(model_names)}")
+    print(
+        f"DataLoader: batch_size={batch_size} num_workers={num_workers} "
+        f"prefetch_factor={prefetch_factor}"
+    )
+    if DEVICE.type == "cuda":
+        print(f"CUDA eval: amp={use_amp} tf32={use_tf32}")
 
     asr_by_model: Dict[str, float] = {}
     metrics_by_model: Dict[str, Dict[str, float | int]] = {}
@@ -123,6 +216,10 @@ def main(
             annotations=annotations,
             prefix=prefix,
             model_name=black_model,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            prefetch_factor=prefetch_factor,
+            use_amp=use_amp,
         )
         acc = correct / total if total > 0 else 0.0
         asr = 1.0 - acc if total > 0 else 0.0
@@ -161,6 +258,11 @@ if __name__ == "__main__":
     parser.add_argument("--image-dir", type=str, default="outputs/attack", help="Directory with saved images.")
     parser.add_argument("--annotations-path", type=str, default="data/image_name_to_class_id_and_name.json")
     parser.add_argument("--prefix", type=str, default="adv_", help="Filename prefix used to infer original names.")
+    parser.add_argument("--batch-size", type=int, default=64, help="Images per inference batch.")
+    parser.add_argument("--num-workers", type=int, default=8, help="DataLoader worker processes for image decode/transform.")
+    parser.add_argument("--prefetch-factor", type=int, default=4, help="Batches prefetched per DataLoader worker.")
+    parser.add_argument("--amp", action="store_true", help="Use CUDA fp16 autocast for faster transfer evaluation.")
+    parser.add_argument("--no-tf32", action="store_true", help="Disable TF32 matmul/cudnn on CUDA.")
     parser.add_argument(
         "--model-name",
         type=parse_model_names,
@@ -173,4 +275,9 @@ if __name__ == "__main__":
         annotations_path=args.annotations_path,
         prefix=args.prefix,
         model_names=args.model_name,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        prefetch_factor=args.prefetch_factor,
+        use_amp=args.amp,
+        use_tf32=not args.no_tf32,
     )

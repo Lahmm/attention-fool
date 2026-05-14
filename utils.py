@@ -464,6 +464,7 @@ def _label_target_transform(label: Dict[str, Any]) -> int:
 def load_data(image_dir_arg: str = image_dir, annotations_path_arg: str = annotations_path,
     batch_size: int = 16,
     num_workers: int = 4,
+    prefetch_factor: int = 4,
     img_size: int = 224,
 ) -> Tuple[DataLoader, int]:
     """
@@ -488,6 +489,8 @@ def load_data(image_dir_arg: str = image_dir, annotations_path_arg: str = annota
         batch_size=batch_size,
         num_workers=num_workers,
         pin_memory=(DEVICE.type == "cuda"),
+        persistent_workers=num_workers > 0,
+        prefetch_factor=prefetch_factor if num_workers > 0 else None,
     )
     return dataloader, num_classes
 
@@ -620,10 +623,10 @@ def evaluate_clean_dataset(
     total = 0
 
     progress = tqdm(dataloader, desc="评估干净样本准确率")
-    with torch.no_grad():
+    with torch.inference_mode():
         for images, labels, indices in progress:
-            images = images.to(device)
-            labels = labels.to(device)
+            images = images.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
 
             logits_clean = model(images, return_attn=False)
             preds_clean = logits_clean.argmax(dim=1)

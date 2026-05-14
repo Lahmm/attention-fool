@@ -68,7 +68,7 @@ loss = CE - lambda_contrast * mean_l |fg_align_l - bg_align_l|
 运行示例：
 
 ```powershell
-python main.py --mode attack --attack-type fft-cc --max-attacked-samples 20 --epsilon 0.062745 --steps 10 --decay 1.0 --layers=-4,-2,-1 --lambda-contrast 1.0 --fft-topk 1 --output-dir outputs/attack/fft_cc
+python main.py --mode attack --attack-type fft-cc --max-attacked-samples 20 --epsilon 0.062745 --steps 10 --decay 1.0 --layers=-4,-2,-1 --lambda-contrast 1.0 --fft-topk 1 --output-dir outputs/attack/fftcc
 ```
 
 参数说明：
@@ -90,8 +90,16 @@ PowerShell 中带负数的 `--layers` 建议写成等号形式：
 对保存好的对抗样本做多黑盒模型评估：
 
 ```powershell
-python transfer_eval.py --image-dir outputs/attack/fft_cc --prefix adv_
+python transfer_eval.py --image-dir outputs/attack/fftcc --prefix adv_
 ```
+
+迁移评估默认会批量推理，建议在 4090 上从下面的配置开始试：
+
+```powershell
+python transfer_eval.py --image-dir outputs/attack/fftcc --prefix adv_ --batch-size 128 --num-workers 8 --prefetch-factor 4
+```
+
+如果显存足够，可以继续提高 `--batch-size`；如果 CPU 图像解码仍然吃紧，可以把 `--num-workers` 调到 12 或 16。`--amp` 会启用 fp16 autocast，速度通常更快，但可能让极少数边界样本的预测发生变化。
 
 默认黑盒模型包括：
 
@@ -109,7 +117,7 @@ crossvit_15_240
 也可以手动指定模型，多个模型用逗号分隔：
 
 ```powershell
-python transfer_eval.py --image-dir outputs/attack/fft_cc --prefix adv_ --model-name deit_base_patch16_224,swin_tiny_patch4_window7_224,pvt_v2_b2,cait_s24_224
+python transfer_eval.py --image-dir outputs/attack/fftcc --prefix adv_ --model-name deit_base_patch16_224,swin_tiny_patch4_window7_224,pvt_v2_b2,cait_s24_224
 ```
 
 评估结束后会输出每个模型的 `acc`、`ASR`，并额外给出字典形式的攻击成功率：
@@ -117,6 +125,12 @@ python transfer_eval.py --image-dir outputs/attack/fft_cc --prefix adv_ --model-
 ```text
 ASR by model:
 {'deit_base_patch16_224': 0.75, ...}
+```
+
+记录迁移评估结果时，需要把对抗样本目录传给 `record_experiment.py`。Excel 会写到 `outputs/excel`，文件名由对抗样本目录唯一确定，例如 `outputs_attack_fftcc.xlsx`：
+
+```powershell
+python transfer_eval.py --image-dir outputs/attack/fftcc --prefix adv_ | python record_experiment.py . fftcc '{"epsilon":0.062745,"steps":10}' outputs/attack/fftcc
 ```
 
 ## 可视化
@@ -141,7 +155,7 @@ python visualize_attention_patchscores.py --image-dir outputs/clean --pattern "c
 可视化对抗样本：
 
 ```powershell
-python visualize_attention_patchscores.py --image-dir outputs/attack/fft_cc --pattern "adv_*" --model-name deit_base_patch16_224 --output-dir outputs/vis_adv_deit_base_patch16_224
+python visualize_attention_patchscores.py --image-dir outputs/attack/fftcc --pattern "adv_*" --model-name deit_base_patch16_224 --output-dir outputs/vis_adv_deit_base_patch16_224
 ```
 
 常用参数：

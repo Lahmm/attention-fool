@@ -1,4 +1,6 @@
 import argparse
+import shutil
+from pathlib import Path
 from typing import List
 
 import torch
@@ -17,6 +19,13 @@ from utils import (
 IMAGE_DIR = "data/clean_resized_images"
 ANNOTATIONS_PATH = "data/image_name_to_class_id_and_name.json"
 DEFAULT_IMG_SIZE = 224
+ATTACK_OUTPUT_DIR_NAMES = {
+    "mifgsm": "mifgsm",
+    "fft-cc": "fftcc",
+    "fft-cc-v2": "fftccv2",
+    "fft-cc-v3": "fftccv3",
+    "fft-cc-imgfft": "fftccimgfft",
+}
 
 
 def create_attacker(
@@ -100,12 +109,42 @@ def parse_layers(value: str) -> tuple[int, ...]:
     return layers
 
 
+def expected_attack_output_dir(attack_type: str) -> Path:
+    return Path("outputs") / "attack" / ATTACK_OUTPUT_DIR_NAMES[attack_type]
+
+
+def validate_attack_output_dir(attack_type: str, output_dir: str | None) -> Path:
+    expected = expected_attack_output_dir(attack_type)
+    if output_dir is None:
+        raise ValueError(
+            f"Attack mode requires --output-dir. For attack_type={attack_type}, "
+            f"use --output-dir {expected.as_posix()}."
+        )
+
+    provided = Path(output_dir).expanduser()
+    if provided.resolve() != expected.resolve():
+        raise ValueError(
+            f"Invalid --output-dir for attack_type={attack_type}: {provided}. "
+            f"Expected exactly: {expected.as_posix()}"
+        )
+    return provided
+
+
+def clear_directory_contents(directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    for child in directory.iterdir():
+        if child.is_symlink() or child.is_file():
+            child.unlink()
+        elif child.is_dir():
+            shutil.rmtree(child)
+
+
 def attack_correctly_classified_samples(
     dataloader,
     model: ViTWithHook,
     attacker: MIFGSMAttacker,
     correct_mask: List[bool],
-    output_dir: str,
+    output_dir: str | None,
     max_attacked_samples: int | None,
 ) -> None:
     num_candidates = sum(correct_mask)
@@ -143,8 +182,8 @@ def attack_correctly_classified_samples(
                 new_mask[keep_true_indices] = True
                 batch_mask = new_mask
 
-        images_to_attack = images[batch_mask].to(DEVICE)
-        labels_to_attack = labels[batch_mask].to(DEVICE)
+        images_to_attack = images[batch_mask].to(DEVICE, non_blocking=True)
+        labels_to_attack = labels[batch_mask].to(DEVICE, non_blocking=True)
         selected_dataset_indices = indices[batch_mask].tolist()
         filenames = [
             str(dataloader.dataset.samples[dataset_idx]["image_name"])
@@ -156,7 +195,7 @@ def attack_correctly_classified_samples(
 
         x_adv = attacker.attack_batch(images_to_attack, labels_to_attack)
 
-        with torch.no_grad():
+        with torch.inference_mode():
             logits_adv = model(x_adv, return_attn=False)
             preds_adv = logits_adv.argmax(dim=1)
 
@@ -204,11 +243,14 @@ def parse_args():
     parser.add_argument("--lambda-attn", type=float, default=0.3, help="Weight for attention-aware loss (fft-cc-v2).")
     parser.add_argument("--lambda-patch-score", type=float, default=0.2, help="Weight for patch score inversion loss (fft-cc-v2).")
     parser.add_argument("--fft-topk", type=int, default=1, help="Per-channel Top-K stable patch count used for FFT stability weights.")
-    parser.add_argument("--output-dir", default="outputs", help="Directory used to store adversarial samples.")
+    parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode this is required and must match outputs/attack/<attack-name>.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
     parser.add_argument("--annotations-path", default=ANNOTATIONS_PATH, help="Path to image label annotations.")
     parser.add_argument("--img-size", type=int, default=DEFAULT_IMG_SIZE, help="Input image size.")
+    parser.add_argument("--batch-size", type=int, default=16, help="DataLoader batch size for clean eval and attack batches.")
+    parser.add_argument("--num-workers", type=int, default=4, help="DataLoader worker processes for image decode/transform.")
+    parser.add_argument("--prefetch-factor", type=int, default=4, help="Batches prefetched per DataLoader worker.")
     return parser.parse_args()
 
 
@@ -224,15 +266,29 @@ def main(
     lambda_attn: float,
     lambda_patch_score: float,
     fft_topk: int,
-    output_dir: str,
+    output_dir: str | None,
     mode: str,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
+    batch_size: int = 16,
+    num_workers: int = 4,
+    prefetch_factor: int = 4,
 ) -> None:
+    if mode == "attack":
+        resolved_output_dir = validate_attack_output_dir(
+            attack_type=attack_type,
+            output_dir=output_dir,
+        )
+    else:
+        resolved_output_dir = Path(output_dir) if output_dir is not None else Path("outputs") / "clean"
+
     dataloader, num_classes = load_data(
         image_dir_arg=image_dir,
         annotations_path_arg=annotations_path,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
         img_size=img_size,
     )
     model = build_vit_model(num_classes=num_classes)
@@ -258,17 +314,20 @@ def main(
         save_clean_images(
             dataloader=dataloader,
             correct_mask=correct_mask,
-            output_dir=output_dir,
+            output_dir=str(resolved_output_dir),
             max_samples=max_attacked_samples,
         )
         return
+
+    clear_directory_contents(resolved_output_dir)
+    print(f"Cleared adversarial output directory: {resolved_output_dir}")
 
     attack_correctly_classified_samples(
         dataloader=dataloader,
         model=model,
         attacker=attacker,
         correct_mask=correct_mask,
-        output_dir=output_dir,
+        output_dir=str(resolved_output_dir),
         max_attacked_samples=max_attacked_samples,
     )
 
@@ -293,4 +352,7 @@ if __name__ == "__main__":
         image_dir=args.image_dir,
         annotations_path=args.annotations_path,
         img_size=args.img_size,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        prefetch_factor=args.prefetch_factor,
     )
