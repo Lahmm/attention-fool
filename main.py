@@ -4,7 +4,7 @@ from typing import List
 import torch
 from tqdm import tqdm
 
-from attack import FFTCCAttacker, MIFGSMAttacker
+from attack import FFTCCAttacker, FFTCCAttackerV2, FFTCCAttackerV3, MIFGSMAttacker
 from nets import ViTWithHook, build_vit_model
 from utils import (
     DEVICE,
@@ -28,10 +28,38 @@ def create_attacker(
     decay: float,
     layers: tuple[int, ...],
     lambda_contrast: float,
+    lambda_attn: float,
+    lambda_patch_score: float,
     fft_topk: int,
 ) -> MIFGSMAttacker:
     if attack_type == "fft-cc":
         return FFTCCAttacker(
+            model=model,
+            epsilon=epsilon,
+            step_size=step_size,
+            steps=steps,
+            decay=decay,
+            layers=layers,
+            lambda_contrast=lambda_contrast,
+            fft_topk=fft_topk,
+            device=DEVICE,
+        )
+    if attack_type == "fft-cc-v2":
+        return FFTCCAttackerV2(
+            model=model,
+            epsilon=epsilon,
+            step_size=step_size,
+            steps=steps,
+            decay=decay,
+            layers=layers,
+            lambda_contrast=lambda_contrast,
+            lambda_attn=lambda_attn,
+            lambda_patch_score=lambda_patch_score,
+            fft_topk=fft_topk,
+            device=DEVICE,
+        )
+    if attack_type == "fft-cc-v3":
+        return FFTCCAttackerV3(
             model=model,
             epsilon=epsilon,
             step_size=step_size,
@@ -155,13 +183,15 @@ def attack_correctly_classified_samples(
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate adversarial samples with MI-FGSM.")
     parser.add_argument("--max-attacked-samples", type=int, default=5, help="Maximum number of correctly classified samples to attack.")
-    parser.add_argument("--attack-type", choices=["mifgsm", "fft-cc"], default="mifgsm", help="Attack objective to use.")
+    parser.add_argument("--attack-type", choices=["mifgsm", "fft-cc", "fft-cc-v2", "fft-cc-v3"], default="mifgsm", help="Attack objective to use.")
     parser.add_argument("--epsilon", type=float, default=8.0 / 255.0, help="L_inf perturbation budget in pixel range [0, 1].")
     parser.add_argument("--step-size", type=float, default=None, help="MI-FGSM step size in pixel range [0, 1]. Defaults to epsilon / steps.")
     parser.add_argument("--steps", type=int, default=10, help="Number of MI-FGSM iterations.")
     parser.add_argument("--decay", type=float, default=1.0, help="Momentum decay factor.")
     parser.add_argument("--layers", type=parse_layers, default=(-4, -2, -1), help='Comma-separated token layers for feature losses, e.g. "-4,-2,-1".')
     parser.add_argument("--lambda-contrast", type=float, default=1.0, help="Weight for FFT foreground/background contrast collapse loss.")
+    parser.add_argument("--lambda-attn", type=float, default=0.3, help="Weight for attention-aware loss (fft-cc-v2).")
+    parser.add_argument("--lambda-patch-score", type=float, default=0.2, help="Weight for patch score inversion loss (fft-cc-v2).")
     parser.add_argument("--fft-topk", type=int, default=1, help="Per-channel Top-K stable patch count used for FFT stability weights.")
     parser.add_argument("--output-dir", default="outputs", help="Directory used to store adversarial samples.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
@@ -180,6 +210,8 @@ def main(
     decay: float,
     layers: tuple[int, ...],
     lambda_contrast: float,
+    lambda_attn: float,
+    lambda_patch_score: float,
     fft_topk: int,
     output_dir: str,
     mode: str,
@@ -202,6 +234,8 @@ def main(
         decay=decay,
         layers=layers,
         lambda_contrast=lambda_contrast,
+        lambda_attn=lambda_attn,
+        lambda_patch_score=lambda_patch_score,
         fft_topk=fft_topk,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
@@ -240,6 +274,8 @@ if __name__ == "__main__":
         decay=args.decay,
         layers=args.layers,
         lambda_contrast=args.lambda_contrast,
+        lambda_attn=args.lambda_attn,
+        lambda_patch_score=args.lambda_patch_score,
         fft_topk=args.fft_topk,
         output_dir=args.output_dir,
         mode=args.mode,
