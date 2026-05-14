@@ -5,6 +5,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 
 MODEL_COLS = [
@@ -93,23 +94,24 @@ def excel_path_for_adv_dir(repo_path: Path, adv_dir: Path) -> Path:
     return excel_dir / f"{stem}.xlsx"
 
 
-def main() -> None:
-    args = parse_args()
-    repo_path = Path(args.repo_path).expanduser().resolve()
-    adv_dir = validate_adv_dir(repo_path, args.adv_dir)
-    params_dict = json.loads(args.params)
-
-    eval_output = sys.stdin.read()
-    results = parse_eval_output(eval_output)
+def record_results(
+    repo_path: Path,
+    exp_name: str,
+    params_dict: dict[str, Any],
+    adv_dir_arg: str | Path,
+    asr_by_model: dict[str, float],
+) -> Path:
+    repo_path = repo_path.expanduser().resolve()
+    adv_dir = validate_adv_dir(repo_path, str(adv_dir_arg))
+    results: dict[str, Any] = dict(asr_by_model)
     if not results:
-        print("ERROR: no results parsed")
-        sys.exit(1)
+        raise ValueError("no ASR results to record")
 
-    avg_asr = sum(results.values()) / len(results)
+    avg_asr = sum(float(value) for value in asr_by_model.values()) / len(asr_by_model)
     relative_adv_dir = adv_dir.relative_to(repo_path)
     results["avg"] = avg_asr
     results["git_head"] = get_git_head(repo_path)
-    results["exp_name"] = args.exp_name
+    results["exp_name"] = exp_name
     results["adv_dir"] = relative_adv_dir.as_posix()
     results["adv_image_count"] = count_images(adv_dir)
     results["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -119,8 +121,11 @@ def main() -> None:
 
     df = pd.DataFrame([results])
     meta_cols = ["exp_name", "timestamp", "git_head", "adv_dir", "adv_image_count", "avg"]
-    param_cols = [key for key in params_dict.keys() if key not in MODEL_COLS + meta_cols]
-    final_cols = [col for col in (meta_cols + param_cols + MODEL_COLS) if col in df.columns]
+    dynamic_model_cols = MODEL_COLS + [
+        key for key in asr_by_model.keys() if key not in MODEL_COLS
+    ]
+    param_cols = [key for key in params_dict.keys() if key not in dynamic_model_cols + meta_cols]
+    final_cols = [col for col in (meta_cols + param_cols + dynamic_model_cols) if col in df.columns]
     df = df[final_cols]
 
     excel_path = excel_path_for_adv_dir(repo_path, adv_dir)
@@ -134,6 +139,27 @@ def main() -> None:
     for model_name in MODEL_COLS:
         if model_name in results:
             print(f"  {model_name}: {results[model_name]:.4f}")
+    return excel_path
+
+
+def main() -> None:
+    args = parse_args()
+    repo_path = Path(args.repo_path).expanduser().resolve()
+    params_dict = json.loads(args.params)
+
+    eval_output = sys.stdin.read()
+    results = parse_eval_output(eval_output)
+    if not results:
+        print("ERROR: no results parsed")
+        sys.exit(1)
+
+    record_results(
+        repo_path=repo_path,
+        exp_name=args.exp_name,
+        params_dict=params_dict,
+        adv_dir_arg=args.adv_dir,
+        asr_by_model=results,
+    )
 
 
 if __name__ == "__main__":

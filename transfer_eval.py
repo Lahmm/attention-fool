@@ -12,6 +12,7 @@ from timm.data.transforms_factory import create_transform
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
+from record_experiment import record_results
 from utils import DEVICE
 
 DEFAULT_BLACK_BOX_MODELS = [
@@ -127,6 +128,10 @@ def configure_eval_runtime(use_tf32: bool) -> None:
         torch.set_float32_matmul_precision("high")
 
 
+def infer_exp_name(image_dir: Path) -> str:
+    return image_dir.name or "transfer_eval"
+
+
 def evaluate(
     image_paths: List[Path],
     annotations: Dict[str, Dict[str, int | str]],
@@ -188,6 +193,8 @@ def main(
     prefetch_factor: int,
     use_amp: bool,
     use_tf32: bool,
+    record_excel: bool,
+    exp_name: str | None,
 ) -> None:
     configure_eval_runtime(use_tf32=use_tf32)
     image_dir_path = Path(image_dir)
@@ -252,6 +259,31 @@ def main(
         }
     )
 
+    if record_excel:
+        repo_path = Path(__file__).resolve().parent
+        resolved_image_dir = image_dir_path.resolve()
+        record_params = {
+            "image_dir": resolved_image_dir.relative_to(repo_path).as_posix()
+            if resolved_image_dir.is_relative_to(repo_path)
+            else str(resolved_image_dir),
+            "prefix": prefix,
+            "model_name": ",".join(model_names),
+            "batch_size": batch_size,
+            "num_workers": num_workers,
+            "prefetch_factor": prefetch_factor,
+            "amp": use_amp,
+            "tf32": use_tf32,
+            "num_images": len(image_paths),
+        }
+        excel_path = record_results(
+            repo_path=repo_path,
+            exp_name=exp_name or infer_exp_name(image_dir_path),
+            params_dict=record_params,
+            adv_dir_arg=image_dir_path,
+            asr_by_model=asr_by_model,
+        )
+        print(f"Recorded transfer eval to Excel: {excel_path}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate transferability on adversarial or clean samples.")
@@ -263,6 +295,8 @@ if __name__ == "__main__":
     parser.add_argument("--prefetch-factor", type=int, default=4, help="Batches prefetched per DataLoader worker.")
     parser.add_argument("--amp", action="store_true", help="Use CUDA fp16 autocast for faster transfer evaluation.")
     parser.add_argument("--no-tf32", action="store_true", help="Disable TF32 matmul/cudnn on CUDA.")
+    parser.add_argument("--exp-name", default=None, help="Experiment name recorded in the Excel output. Defaults to the image-dir name.")
+    parser.add_argument("--no-record", action="store_true", help="Disable automatic Excel recording.")
     parser.add_argument(
         "--model-name",
         type=parse_model_names,
@@ -280,4 +314,6 @@ if __name__ == "__main__":
         prefetch_factor=args.prefetch_factor,
         use_amp=args.amp,
         use_tf32=not args.no_tf32,
+        record_excel=not args.no_record,
+        exp_name=args.exp_name,
     )

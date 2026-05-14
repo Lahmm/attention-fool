@@ -127,10 +127,10 @@ ASR by model:
 {'deit_base_patch16_224': 0.75, ...}
 ```
 
-记录迁移评估结果时，需要把对抗样本目录传给 `record_experiment.py`。Excel 会写到 `outputs/excel`，文件名由对抗样本目录唯一确定，例如 `outputs_attack_fftcc.xlsx`：
+迁移评估结束后会自动记录结果。Excel 会写到 `outputs/excel`，文件名由对抗样本目录唯一确定，例如 `outputs_attack_fftcc.xlsx`。实验名默认使用对抗样本目录名，也可以用 `--exp-name` 指定：
 
 ```powershell
-python transfer_eval.py --image-dir outputs/attack/fftcc --prefix adv_ | python record_experiment.py . fftcc '{"epsilon":0.062745,"steps":10}' outputs/attack/fftcc
+python transfer_eval.py --image-dir outputs/attack/fftcc --prefix adv_ --exp-name fftcc
 ```
 
 ## 可视化
