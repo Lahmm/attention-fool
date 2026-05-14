@@ -612,3 +612,55 @@ class FFTCCAttackerV3(FFTCCAttacker):
                 )
 
         return self._normalize(adv_pixels)
+
+class FFTCCAttackerImgFFT(FFTCCAttacker):
+    def __init__(self, model, epsilon=16.0/255.0, step_size=None, steps=10, decay=1.0,
+                 layers=(-4,-2,-1), lambda_contrast=1.0, fft_cutoff=0.15,
+                 fft_transition=0.04, device=None):
+        super().__init__(model=model, epsilon=epsilon, step_size=step_size, steps=steps,
+                         decay=decay, layers=layers, lambda_contrast=lambda_contrast,
+                         fft_topk=1, device=device)
+        self.fft_cutoff = float(fft_cutoff)
+        self.fft_transition = float(fft_transition)
+
+    def _image_fft_patch_weights(self, clean_pixels):
+        from utils import image_2d_fft_low_high_maps
+        fft_maps = image_2d_fft_low_high_maps(clean_pixels, cutoff_ratio=self.fft_cutoff,
+                                               transition_ratio=self.fft_transition)
+        low_ratio = fft_maps["low_ratio"]
+        b, h, w = low_ratio.shape
+        patch_h, patch_w = h // 14, w // 14
+        low_reshaped = low_ratio.view(b, 14, patch_h, 14, patch_w)
+        patch_low = low_reshaped.mean(dim=(2, 4))
+        patch_weights = patch_low.reshape(b, -1)
+        patch_weights = self._normalize_weights(patch_weights)
+        weights_dict = {}
+        for layer_idx in range(12):
+            weights_dict[layer_idx] = patch_weights
+        return weights_dict
+
+    def attack_batch(self, images, labels):
+        import torch.nn.functional as F
+        images = images.to(self.device)
+        labels = labels.to(self.device)
+        clean_pixels = self._denormalize(images).detach()
+        fft_weights = self._image_fft_patch_weights(clean_pixels)
+        layer_indices = self._resolve_layers(self.layers, self.model.num_blocks)
+        adv_pixels = clean_pixels.clone().detach()
+        momentum = torch.zeros_like(adv_pixels)
+        for _step in range(self.steps):
+            adv_pixels.requires_grad_(True)
+            logits_adv, token_list_adv = self.model(self._normalize(adv_pixels), return_tokens=True)
+            ce_loss = F.cross_entropy(logits_adv, labels)
+            contrast_loss = self._feature_losses(token_list_adv=token_list_adv,
+                                                  layer_indices=layer_indices,
+                                                  fft_weights=fft_weights)
+            loss = ce_loss + self.lambda_contrast * contrast_loss
+            grad = torch.autograd.grad(loss, adv_pixels)[0]
+            grad = self._normalize_grad(grad)
+            momentum = self.decay * momentum + grad
+            with torch.no_grad():
+                adv_pixels = adv_pixels + self.step_size * momentum.sign()
+                delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
+                adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0).detach()
+        return self._normalize(adv_pixels)

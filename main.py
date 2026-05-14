@@ -4,7 +4,7 @@ from typing import List
 import torch
 from tqdm import tqdm
 
-from attack import FFTCCAttacker, FFTCCAttackerV2, FFTCCAttackerV3, MIFGSMAttacker
+from attack import FFTCCAttacker, FFTCCAttackerV2, FFTCCAttackerV3, FFTCCAttackerImgFFT, MIFGSMAttacker
 from nets import ViTWithHook, build_vit_model
 from utils import (
     DEVICE,
@@ -68,6 +68,17 @@ def create_attacker(
             layers=layers,
             lambda_contrast=lambda_contrast,
             fft_topk=fft_topk,
+            device=DEVICE,
+        )
+    if attack_type == "fft-cc-imgfft":
+        return FFTCCAttackerImgFFT(
+            model=model,
+            epsilon=epsilon,
+            step_size=step_size,
+            steps=steps,
+            decay=decay,
+            layers=layers,
+            lambda_contrast=lambda_contrast,
             device=DEVICE,
         )
     if attack_type != "mifgsm":
@@ -183,7 +194,7 @@ def attack_correctly_classified_samples(
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate adversarial samples with MI-FGSM.")
     parser.add_argument("--max-attacked-samples", type=int, default=5, help="Maximum number of correctly classified samples to attack.")
-    parser.add_argument("--attack-type", choices=["mifgsm", "fft-cc", "fft-cc-v2", "fft-cc-v3"], default="mifgsm", help="Attack objective to use.")
+    parser.add_argument("--attack-type", choices=["mifgsm", "fft-cc", "fft-cc-v2", "fft-cc-v3", "fft-cc-imgfft"], default="mifgsm", help="Attack objective to use.")
     parser.add_argument("--epsilon", type=float, default=8.0 / 255.0, help="L_inf perturbation budget in pixel range [0, 1].")
     parser.add_argument("--step-size", type=float, default=None, help="MI-FGSM step size in pixel range [0, 1]. Defaults to epsilon / steps.")
     parser.add_argument("--steps", type=int, default=10, help="Number of MI-FGSM iterations.")
