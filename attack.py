@@ -102,6 +102,7 @@ class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
         steps: int = 10,
         decay: float = 1.0,
         layers: tuple[int, ...] = (-4, -2, -1),
+        lambda_ce: float = 1.0,
         lambda_pollution: float = 1.0,
         lambda_residual: float = 1.0,
         fft_topk: int = 1,
@@ -121,6 +122,7 @@ class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
             raise ValueError(f"fft_topk must be positive, got {fft_topk}.")
 
         self.layers = tuple(int(layer) for layer in layers)
+        self.lambda_ce = float(lambda_ce)
         self.lambda_pollution = float(lambda_pollution)
         self.lambda_residual = float(lambda_residual)
         self.fft_topk = int(fft_topk)
@@ -241,7 +243,7 @@ class FFTResidualPollutionMIFGSMAttacker(MIFGSMAttacker):
                 clean_cls=clean_cls,
             )
             loss = (
-                ce_loss
+                self.lambda_ce * ce_loss
                 + self.lambda_pollution * pollution_loss
                 + self.lambda_residual * residual_loss
             )

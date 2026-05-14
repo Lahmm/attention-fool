@@ -27,6 +27,7 @@ def create_attacker(
     steps: int,
     decay: float,
     layers: tuple[int, ...],
+    lambda_ce: float,
     lambda_pollution: float,
     lambda_residual: float,
     fft_topk: int,
@@ -39,6 +40,7 @@ def create_attacker(
             steps=steps,
             decay=decay,
             layers=layers,
+            lambda_ce=lambda_ce,
             lambda_pollution=lambda_pollution,
             lambda_residual=lambda_residual,
             fft_topk=fft_topk,
@@ -156,13 +158,14 @@ def attack_correctly_classified_samples(
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate adversarial samples with MI-FGSM.")
-    parser.add_argument("--max-attacked-samples", type=int, default=5, help="Maximum number of correctly classified samples to attack.")
+    parser.add_argument("--max-attacked-samples", type=int, default=20, help="Maximum number of correctly classified samples to attack.")
     parser.add_argument("--attack-type", choices=["mifgsm", "fft-residual-pollution"], default="mifgsm", help="Attack objective to use.")
-    parser.add_argument("--epsilon", type=float, default=8.0 / 255.0, help="L_inf perturbation budget in pixel range [0, 1].")
+    parser.add_argument("--epsilon", type=float, default=16.0 / 255.0, help="L_inf perturbation budget in pixel range [0, 1].")
     parser.add_argument("--step-size", type=float, default=None, help="MI-FGSM step size in pixel range [0, 1]. Defaults to epsilon / steps.")
     parser.add_argument("--steps", type=int, default=10, help="Number of MI-FGSM iterations.")
     parser.add_argument("--decay", type=float, default=1.0, help="Momentum decay factor.")
     parser.add_argument("--layers", type=parse_layers, default=(-4, -2, -1), help='Comma-separated token layers for feature losses, e.g. "-4,-2,-1".')
+    parser.add_argument("--lambda-ce", type=float, default=1.0, help="Weight for cross-entropy classification loss. Use 0 to disable CE attack.")
     parser.add_argument("--lambda-pollution", type=float, default=1.0, help="Weight for FFT-stable patch score pollution loss.")
     parser.add_argument("--lambda-residual", type=float, default=1.0, help="Weight for multi-layer CLS residual drift loss.")
     parser.add_argument("--fft-topk", type=int, default=1, help="Per-channel Top-K stable patch count used for FFT stability weights.")
@@ -182,6 +185,7 @@ def main(
     steps: int,
     decay: float,
     layers: tuple[int, ...],
+    lambda_ce: float,
     lambda_pollution: float,
     lambda_residual: float,
     fft_topk: int,
@@ -205,6 +209,7 @@ def main(
         steps=steps,
         decay=decay,
         layers=layers,
+        lambda_ce=lambda_ce,
         lambda_pollution=lambda_pollution,
         lambda_residual=lambda_residual,
         fft_topk=fft_topk,
@@ -244,6 +249,7 @@ if __name__ == "__main__":
         steps=args.steps,
         decay=args.decay,
         layers=args.layers,
+        lambda_ce=args.lambda_ce,
         lambda_pollution=args.lambda_pollution,
         lambda_residual=args.lambda_residual,
         fft_topk=args.fft_topk,
