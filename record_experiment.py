@@ -22,7 +22,7 @@ IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Record transfer-eval results into an Excel file.")
+    parser = argparse.ArgumentParser(description="Record transfer-eval results into an csv file.")
     parser.add_argument("repo_path", help="Repository root.")
     parser.add_argument("exp_name", help="Experiment name.")
     parser.add_argument("params", help="JSON object with experiment parameters.")
@@ -86,12 +86,12 @@ def count_images(adv_dir: Path) -> int:
     )
 
 
-def excel_path_for_adv_dir(repo_path: Path, adv_dir: Path) -> Path:
+def csv_path_for_adv_dir(repo_path: Path, adv_dir: Path) -> Path:
     relative = adv_dir.resolve().relative_to(repo_path.resolve())
     stem = re.sub(r"[^A-Za-z0-9._-]+", "_", relative.as_posix()).strip("_")
-    excel_dir = repo_path / "outputs" / "excel"
-    excel_dir.mkdir(parents=True, exist_ok=True)
-    return excel_dir / f"{stem}.xlsx"
+    csv_dir = repo_path / "outputs" / "csv"
+    csv_dir.mkdir(parents=True, exist_ok=True)
+    return csv_dir / f"{stem}.xlsx"
 
 
 def record_results(
@@ -128,18 +128,18 @@ def record_results(
     final_cols = [col for col in (meta_cols + param_cols + dynamic_model_cols) if col in df.columns]
     df = df[final_cols]
 
-    excel_path = excel_path_for_adv_dir(repo_path, adv_dir)
-    if excel_path.exists():
-        existing = pd.read_excel(excel_path)
+    csv_path = csv_path_for_adv_dir(repo_path, adv_dir)
+    if csv_path.exists():
+        existing = pd.read_csv(csv_path)
         df = pd.concat([existing, df], ignore_index=True)
 
-    df.to_excel(excel_path, index=False)
-    print(f"Saved to {excel_path}")
+    df.to_csv(csv_path, index=False)
+    print(f"Saved to {csv_path}")
     print(f"Avg ASR: {avg_asr:.4f}")
     for model_name in MODEL_COLS:
         if model_name in results:
             print(f"  {model_name}: {results[model_name]:.4f}")
-    return excel_path
+    return csv_path
 
 
 def main() -> None:
