@@ -6,7 +6,7 @@ from typing import List
 import torch
 from tqdm import tqdm
 
-from attack import FFTCCAttacker, FFTCCAttackerV2, FFTCCAttackerV3, FFTCCAttackerImgFFT, MIFGSMAttacker
+from attack import FFTCCAttacker, FFTCCAttackerV2, FFTCCAttackerV3, FFTCCAttackerImgFFT, FFTCCAttackerPCGrad, FFTForwardPassAttacker, MIFGSMAttacker
 from nets import ViTWithHook, build_vit_model
 from utils import (
     DEVICE,
@@ -25,6 +25,8 @@ ATTACK_OUTPUT_DIR_NAMES = {
     "fft-cc-v2": "fftccv2",
     "fft-cc-v3": "fftccv3",
     "fft-cc-imgfft": "fftccimgfft",
+    "fft-cc-pcgrad": "fftccpcgrad",
+    "fft-fpass": "fftfpass",
 }
 
 
@@ -40,7 +42,48 @@ def create_attacker(
     lambda_attn: float,
     lambda_patch_score: float,
     fft_topk: int,
+    pcgrad_mode: str = "asymmetric",
+    fpass_mode: str = "combined",
+    warmup_steps: int = 3,
+    grad_l2_norm: float = 1.0,
+    ti_sigma: float = 0.0,
+    spectral_cutoff: float = 0.15,
+    spectral_transition: float = 0.04,
 ) -> MIFGSMAttacker:
+    if attack_type == "fft-cc-pcgrad":
+        return FFTCCAttackerPCGrad(
+            model=model,
+            epsilon=epsilon,
+            step_size=step_size,
+            steps=steps,
+            decay=decay,
+            layers=layers,
+            lambda_contrast=lambda_contrast,
+            fft_topk=fft_topk,
+            pcgrad_mode=pcgrad_mode,
+            warmup_steps=warmup_steps,
+            grad_l2_norm=grad_l2_norm,
+            ti_sigma=ti_sigma,
+            device=DEVICE,
+        )
+    if attack_type == "fft-fpass":
+        # pcgrad_mode maps to ForwardPass "mode", but has a different default
+        fpass_mode = fpass_mode if fpass_mode in ("hardmask", "softmask", "spectral", "combined") else "combined"
+        return FFTForwardPassAttacker(
+            model=model,
+            epsilon=epsilon,
+            step_size=step_size,
+            steps=steps,
+            decay=decay,
+            layers=layers,
+            fft_topk=fft_topk,
+            lambda_mask=lambda_contrast,
+            mode=fpass_mode,
+            spectral_cutoff=spectral_cutoff,
+            spectral_transition=spectral_transition,
+            ti_sigma=ti_sigma,
+            device=DEVICE,
+        )
     if attack_type == "fft-cc":
         return FFTCCAttacker(
             model=model,
@@ -123,6 +166,9 @@ def validate_attack_output_dir(attack_type: str, output_dir: str | None) -> Path
 
     provided = Path(output_dir).expanduser()
     if provided.resolve() != expected.resolve():
+        # For fft-cc-pcgrad variants, allow subdirectories
+        if attack_type == "fft-cc-pcgrad" and str(provided.resolve()).startswith(str(expected.resolve())):
+            return provided
         raise ValueError(
             f"Invalid --output-dir for attack_type={attack_type}: {provided}. "
             f"Expected exactly: {expected.as_posix()}"
@@ -233,7 +279,7 @@ def attack_correctly_classified_samples(
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate adversarial samples with MI-FGSM.")
     parser.add_argument("--max-attacked-samples", type=int, default=5, help="Maximum number of correctly classified samples to attack.")
-    parser.add_argument("--attack-type", choices=["mifgsm", "fft-cc", "fft-cc-v2", "fft-cc-v3", "fft-cc-imgfft"], default="mifgsm", help="Attack objective to use.")
+    parser.add_argument("--attack-type", choices=["mifgsm", "fft-cc", "fft-cc-v2", "fft-cc-v3", "fft-cc-imgfft", "fft-cc-pcgrad", "fft-fpass"], default="mifgsm", help="Attack objective to use.")
     parser.add_argument("--epsilon", type=float, default=8.0 / 255.0, help="L_inf perturbation budget in pixel range [0, 1].")
     parser.add_argument("--step-size", type=float, default=None, help="MI-FGSM step size in pixel range [0, 1]. Defaults to epsilon / steps.")
     parser.add_argument("--steps", type=int, default=10, help="Number of MI-FGSM iterations.")
@@ -243,6 +289,13 @@ def parse_args():
     parser.add_argument("--lambda-attn", type=float, default=0.3, help="Weight for attention-aware loss (fft-cc-v2).")
     parser.add_argument("--lambda-patch-score", type=float, default=0.2, help="Weight for patch score inversion loss (fft-cc-v2).")
     parser.add_argument("--fft-topk", type=int, default=1, help="Per-channel Top-K stable patch count used for FFT stability weights.")
+    parser.add_argument("--pcgrad-mode", type=str, default="asymmetric", choices=["asymmetric", "symmetric", "none", "orthogonalize", "adaptive", "modulate"], help="PCGrad gradient surgery mode (fft-cc-pcgrad).")
+    parser.add_argument("--fpass-mode", type=str, default="combined", choices=["hardmask", "softmask", "spectral", "combined"], help="FT-ForwardPass operation mode (fft-fpass).")
+    parser.add_argument("--warmup-steps", type=int, default=3, help="Pure-CE steps before adding feature losses (fft-cc-pcgrad).")
+    parser.add_argument("--grad-l2-norm", type=float, default=1.0, help="L2 target norm per gradient before PCGrad surgery (fft-cc-pcgrad).")
+    parser.add_argument("--ti-sigma", type=float, default=0.0, help="TI-FGSM Gaussian kernel sigma for gradient smoothing. 0=disabled (fft-cc-pcgrad / fft-fpass).")
+    parser.add_argument("--spectral-cutoff", type=float, default=0.15, help="Low-pass cutoff ratio for spectral perturbation filtering (fft-fpass).")
+    parser.add_argument("--spectral-transition", type=float, default=0.04, help="Transition width for spectral filter (fft-fpass).")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode this is required and must match outputs/attack/<attack-name>.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
@@ -268,6 +321,13 @@ def main(
     fft_topk: int,
     output_dir: str | None,
     mode: str,
+    pcgrad_mode: str = "asymmetric",
+    fpass_mode: str = "combined",
+    warmup_steps: int = 3,
+    grad_l2_norm: float = 1.0,
+    ti_sigma: float = 0.0,
+    spectral_cutoff: float = 0.15,
+    spectral_transition: float = 0.04,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -304,6 +364,13 @@ def main(
         lambda_attn=lambda_attn,
         lambda_patch_score=lambda_patch_score,
         fft_topk=fft_topk,
+        pcgrad_mode=pcgrad_mode,
+        fpass_mode=fpass_mode,
+        warmup_steps=warmup_steps,
+        grad_l2_norm=grad_l2_norm,
+        ti_sigma=ti_sigma,
+        spectral_cutoff=spectral_cutoff,
+        spectral_transition=spectral_transition,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
         dataloader=dataloader,
@@ -347,6 +414,13 @@ if __name__ == "__main__":
         lambda_attn=args.lambda_attn,
         lambda_patch_score=args.lambda_patch_score,
         fft_topk=args.fft_topk,
+        pcgrad_mode=args.pcgrad_mode,
+        fpass_mode=args.fpass_mode,
+        warmup_steps=args.warmup_steps,
+        grad_l2_norm=args.grad_l2_norm,
+        ti_sigma=args.ti_sigma,
+        spectral_cutoff=args.spectral_cutoff,
+        spectral_transition=args.spectral_transition,
         output_dir=args.output_dir,
         mode=args.mode,
         image_dir=args.image_dir,

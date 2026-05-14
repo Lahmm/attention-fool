@@ -664,3 +664,393 @@ class FFTCCAttackerImgFFT(FFTCCAttacker):
                 delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
                 adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0).detach()
         return self._normalize(adv_pixels)
+
+
+class FFTCCAttackerPCGrad(FFTCCAttackerV2):
+    """
+    FFT-CC with PCGrad gradient surgery to resolve CE / feature loss conflicts.
+
+    Core improvements over V2:
+    - Asymmetric PCGrad: contrast gradient is projected away from conflicting CE directions
+    - Warmup phase: pure CE iterations before adding feature losses
+    - Per-task L2 gradient normalization before PCGrad
+    - TI-FGSM gradient smoothing
+    """
+
+    def __init__(
+        self,
+        model,
+        epsilon: float = 16.0 / 255.0,
+        step_size: float | None = None,
+        steps: int = 10,
+        decay: float = 1.0,
+        layers: tuple[int, ...] = (-6, -5, -4, -3, -2, -1),
+        lambda_contrast: float = 1.0,
+        fft_topk: int = 3,
+        fft_update_interval: int = 3,
+        pcgrad_mode: str = "asymmetric",
+        warmup_steps: int = 3,
+        grad_l2_norm: float = 1.0,
+        ti_sigma: float = 0.0,
+        device=None,
+    ):
+        super().__init__(
+            model=model, epsilon=epsilon, step_size=step_size, steps=steps,
+            decay=decay, layers=layers, lambda_contrast=lambda_contrast,
+            lambda_attn=0.0, lambda_patch_score=0.0, fft_topk=fft_topk,
+            fft_update_interval=fft_update_interval, input_diversity=False,
+            device=device,
+        )
+        valid_modes = ("asymmetric", "symmetric", "none", "orthogonalize", "adaptive", "modulate")
+        if pcgrad_mode not in valid_modes:
+            raise ValueError(f"pcgrad_mode must be one of {valid_modes}, got {pcgrad_mode!r}.")
+        self.pcgrad_mode = pcgrad_mode
+        self.warmup_steps = int(warmup_steps)
+        self.grad_l2_norm = float(grad_l2_norm)
+        self.ti_sigma = float(ti_sigma)
+        self._ti_kernel = None
+        if self.ti_sigma > 0:
+            self._ti_kernel = self._build_ti_kernel(self.ti_sigma)
+
+    @staticmethod
+    def _build_ti_kernel(sigma):
+        radius = int(3 * sigma)
+        x = torch.arange(-radius, radius + 1, dtype=torch.float32)
+        g1d = torch.exp(-0.5 * (x / sigma) ** 2)
+        g1d = g1d / g1d.sum()
+        g2d = g1d[:, None] @ g1d[None, :]
+        return g2d.view(1, 1, g2d.size(0), g2d.size(1))
+
+    def _smooth_grad(self, grad):
+        if self._ti_kernel is None or self.ti_sigma <= 0:
+            return grad
+        kernel = self._ti_kernel.to(grad.device, grad.dtype)
+        kernel = kernel.repeat(grad.size(1), 1, 1, 1)
+        pad = kernel.size(2) // 2
+        return F.conv2d(F.pad(grad, (pad, pad, pad, pad), mode="reflect"), kernel, groups=grad.size(1))
+
+    @staticmethod
+    def _l2_normalize_grad(grad, target_norm=1.0):
+        flat = grad.reshape(grad.size(0), -1)
+        return (flat / flat.norm(dim=1, keepdim=True).clamp_min(1e-12) * target_norm).reshape_as(grad)
+
+    def _pcgrad_combine(self, g_ce, g_contrast):
+        B = g_ce.size(0)
+        flat_ce = g_ce.reshape(B, -1)
+        flat_ct = g_contrast.reshape(B, -1)
+        dot = (flat_ce * flat_ct).sum(dim=1)
+        n_ce = flat_ce.norm(dim=1).clamp_min(1e-12)
+        n_ct = flat_ct.norm(dim=1).clamp_min(1e-12)
+        cos_sim = dot / (n_ce * n_ct)
+        avg_cos = cos_sim.mean().item()
+        conflict = cos_sim < 0
+
+        if self.pcgrad_mode in ("none",) or not conflict.any():
+            return g_ce + self.lambda_contrast * g_contrast, avg_cos
+        if self.pcgrad_mode == "orthogonalize":
+            g_ct_res = flat_ct - (dot / (n_ce ** 2)).unsqueeze(1) * flat_ce
+            return (flat_ce + self.lambda_contrast * g_ct_res).reshape_as(g_ce), avg_cos
+        if self.pcgrad_mode == "adaptive":
+            return (flat_ce + self.lambda_contrast * torch.clamp(cos_sim, min=0.0)[:, None] * flat_ct).reshape_as(g_ce), avg_cos
+        if self.pcgrad_mode == "symmetric":
+            proj_c2t = (dot / (n_ct ** 2)).unsqueeze(1) * flat_ct
+            proj_t2c = (dot / (n_ce ** 2)).unsqueeze(1) * flat_ce
+            return (torch.where(conflict[:, None], flat_ce - proj_c2t, flat_ce)
+                    + self.lambda_contrast * torch.where(conflict[:, None], flat_ct - proj_t2c, flat_ct)).reshape_as(g_ce), avg_cos
+        proj = (dot / (n_ce ** 2)).unsqueeze(1) * flat_ce
+        return (flat_ce + self.lambda_contrast * torch.where(conflict[:, None], flat_ct - proj, flat_ct)).reshape_as(g_ce), avg_cos
+
+    def _build_modulation_map(self, token_list_adv, layer_indices, fft_weights, img_size):
+        avg_fg = torch.stack([fft_weights[li] for li in layer_indices]).mean(dim=0)
+        B, N = avg_fg.shape
+        gs = int(N ** 0.5)
+        grid = avg_fg.reshape(B, 1, gs, gs)
+        grid = (grid - grid.amin(dim=(1, 2, 3), keepdim=True)) / (grid.amax(dim=(1, 2, 3), keepdim=True) - grid.amin(dim=(1, 2, 3), keepdim=True) + 1e-8)
+        return F.interpolate(grid, size=(img_size, img_size), mode="bilinear", align_corners=False).detach()
+
+    def attack_batch(self, images, labels):
+        images = images.to(self.device)
+        labels = labels.to(self.device)
+        layer_indices, fft_weights = self._build_clean_guides(images)
+        clean_pixels = self._denormalize(images).detach()
+        adv_pixels = clean_pixels.clone().detach()
+        momentum = torch.zeros_like(adv_pixels)
+        self._last_cosine_log = []
+
+        for step_idx in range(self.steps):
+            adv_pixels = adv_pixels.detach().requires_grad_(True)
+            logits_adv, token_list_adv = self.model(self._normalize(adv_pixels), return_tokens=True)
+            ce_loss = F.cross_entropy(logits_adv, labels)
+            g_ce = torch.autograd.grad(ce_loss, adv_pixels, retain_graph=True)[0]
+
+            if step_idx < self.warmup_steps:
+                grad, avg_cos = g_ce, 1.0
+            elif self.pcgrad_mode == "modulate":
+                mod = self._build_modulation_map(token_list_adv, layer_indices, fft_weights, clean_pixels.size(-1))
+                grad = (g_ce * (1.0 + self.lambda_contrast * mod)).detach()
+                avg_cos = 0.0
+            else:
+                ct_loss = self._directional_contrast_loss(token_list_adv, layer_indices, fft_weights)
+                g_ct = torch.autograd.grad(ct_loss, adv_pixels, retain_graph=False)[0]
+                grad, avg_cos = self._pcgrad_combine(self._l2_normalize_grad(g_ce, self.grad_l2_norm), self._l2_normalize_grad(g_ct, self.grad_l2_norm))
+
+            self._last_cosine_log.append((step_idx, avg_cos))
+            grad = self._smooth_grad(self._normalize_grad(grad))
+            momentum = self.decay * momentum + grad
+            with torch.no_grad():
+                adv_pixels = adv_pixels + self.step_size * momentum.sign()
+                delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
+                adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
+            if self.fft_update_interval > 0 and (step_idx + 1) % self.fft_update_interval == 0:
+                with torch.no_grad():
+                    _, tu = self.model(self._normalize(adv_pixels), return_tokens=True)
+                fft_weights = self._update_fft_weights(tu, layer_indices, fft_weights)
+
+        cos_vals = [c for _, c in self._last_cosine_log]
+        print(f"  [PCGrad] conflicts={sum(1 for c in cos_vals if c < 0)}/{len(cos_vals)} mean_cos={sum(cos_vals)/len(cos_vals):.4f}")
+        return self._normalize(adv_pixels)
+
+
+class FFTForwardPassAttacker(MIFGSMAttacker):
+    """
+    FFT-guided forward-pass-aware attack with single CE gradient.
+
+    Modes (mutually exclusive, set via *mode*):
+      - "hardmask":  zero-out CE gradient on background (low-FFT) pixels
+      - "softmask":  continuous FFT weighting of CE gradient
+      - "spectral":  low-pass filter the *perturbation* each step
+      - "combined":  softmask + spectral
+
+    Core improvement over FFT-CC: no extra feature losses → no gradient interference.
+    """
+
+    def __init__(
+        self,
+        model,
+        epsilon: float = 16.0 / 255.0,
+        step_size: float | None = None,
+        steps: int = 10,
+        decay: float = 1.0,
+        layers: tuple[int, ...] = (-6, -5, -4, -3, -2, -1),
+        fft_topk: int = 1,
+        lambda_mask: float = 1.0,
+        mode: str = "combined",
+        spectral_cutoff: float = 0.15,
+        spectral_transition: float = 0.04,
+        ti_sigma: float = 0.0,
+        device: torch.device | None = None,
+    ) -> None:
+        super().__init__(
+            model=model,
+            epsilon=epsilon,
+            step_size=step_size,
+            steps=steps,
+            decay=decay,
+            device=device,
+        )
+        if not layers:
+            raise ValueError("layers must contain at least one layer index.")
+        valid_modes = ("hardmask", "softmask", "spectral", "combined")
+        if mode not in valid_modes:
+            raise ValueError(f"mode must be one of {valid_modes}, got {mode!r}.")
+
+        self.layers = tuple(int(l) for l in layers)
+        self.fft_topk = int(fft_topk)
+        self.lambda_mask = float(lambda_mask)
+        self.mode = mode
+        self.spectral_cutoff = float(spectral_cutoff)
+        self.spectral_transition = float(spectral_transition)
+        self.ti_sigma = float(ti_sigma)
+
+        self._ti_kernel: torch.Tensor | None = None
+        if self.ti_sigma > 0:
+            self._ti_kernel = self._build_ti_kernel(self.ti_sigma)
+
+    # ------------------------------------------------------------------
+    # TI-FGSM helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _build_ti_kernel(sigma: float) -> torch.Tensor:
+        radius = int(3 * sigma)
+        x = torch.arange(-radius, radius + 1, dtype=torch.float32)
+        g1d = torch.exp(-0.5 * (x / sigma) ** 2)
+        g1d = g1d / g1d.sum()
+        g2d = g1d[:, None] @ g1d[None, :]
+        return g2d.view(1, 1, g2d.size(0), g2d.size(1))
+
+    def _smooth_grad(self, grad: torch.Tensor) -> torch.Tensor:
+        if self._ti_kernel is None or self.ti_sigma <= 0:
+            return grad
+        kernel = self._ti_kernel.to(grad.device, grad.dtype)
+        kernel = kernel.repeat(grad.size(1), 1, 1, 1)
+        pad = kernel.size(2) // 2
+        padded = F.pad(grad, (pad, pad, pad, pad), mode="reflect")
+        return F.conv2d(padded, kernel, groups=grad.size(1))
+
+    # ------------------------------------------------------------------
+    # Layer resolution  (shared logic from FFTCCAttacker)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _resolve_layers(layers: tuple[int, ...], num_layers: int) -> list[int]:
+        resolved: list[int] = []
+        for layer in layers:
+            idx = layer if layer >= 0 else num_layers + layer
+            if idx < 0 or idx >= num_layers:
+                raise ValueError(
+                    f"Invalid layer index {layer}; model has {num_layers} layers."
+                )
+            if idx not in resolved:
+                resolved.append(idx)
+        return resolved
+
+    @staticmethod
+    def _normalize_weights(weights: torch.Tensor) -> torch.Tensor:
+        min_vals = weights.min(dim=1, keepdim=True).values
+        max_vals = weights.max(dim=1, keepdim=True).values
+        return (weights - min_vals) / (max_vals - min_vals).clamp_min(1e-12)
+
+    # ------------------------------------------------------------------
+    # FFT mask builder
+    # ------------------------------------------------------------------
+    def _build_fft_mask(
+        self,
+        images: torch.Tensor,
+        mode: str,
+    ) -> tuple[list[int], torch.Tensor | None]:
+        """Compute per-pixel mask from FFT foreground scores.
+
+        Returns:
+            layer_indices: list of resolved layer indices
+            mask: [B, 1, H, W] in [0,1] or None for spectral-only mode
+        """
+        if mode == "spectral":
+            # No spatial mask needed
+            with torch.no_grad():
+                _logits, token_list = self.model(images, return_tokens=True)
+            layer_indices = self._resolve_layers(self.layers, len(token_list))
+            return layer_indices, None
+
+        with torch.no_grad():
+            _logits, token_list = self.model(images, return_tokens=True)
+
+        layer_indices = self._resolve_layers(self.layers, len(token_list))
+
+        from utils import last_vit_stable_patch_frequency
+
+        # Average FFT foreground scores across selected layers
+        all_scores: list[torch.Tensor] = []
+        for layer_idx in layer_indices:
+            tokens = token_list[layer_idx].detach()
+            scores = last_vit_stable_patch_frequency(
+                tokens=tokens, topk=self.fft_topk, has_cls_token=True,
+            ).detach()  # [B, N_patches]
+            all_scores.append(scores)
+        avg = torch.stack(all_scores).mean(dim=0)  # [B, N_patches]
+        avg = self._normalize_weights(avg)
+
+        B, N = avg.shape
+        grid_size = int(N ** 0.5)
+        if grid_size * grid_size != N:
+            raise ValueError(f"Patch count {N} not a square.")
+
+        grid = avg.reshape(B, 1, grid_size, grid_size)  # [B, 1, 14, 14]
+
+        if mode == "hardmask":
+            # Top-K binary mask: keep top fraction of patches as foreground
+            k = max(1, int(grid_size * grid_size * 0.3))
+            flat = grid.reshape(B, -1)
+            threshold = flat.kthvalue(grid_size * grid_size - k + 1, dim=1).values
+            mask = (flat >= threshold.unsqueeze(1)).float()
+            mask = mask.reshape(B, 1, grid_size, grid_size)
+        else:
+            # softmask / combined: use continuous scores
+            mask = grid
+
+        # Upsample to image space
+        img_size = max(images.shape[2], images.shape[3])
+        mask = F.interpolate(
+            mask, size=(img_size, img_size),
+            mode="bilinear", align_corners=False,
+        )  # [B, 1, H, W]
+        return layer_indices, mask
+
+    # ------------------------------------------------------------------
+    # Spectral perturbation filtering
+    # ------------------------------------------------------------------
+    def _spectral_filter_delta(
+        self, delta: torch.Tensor,
+    ) -> torch.Tensor:
+        """Low-pass filter the perturbation delta to remove high-freq overfitting."""
+        from utils import image_2d_fft_low_high_maps
+
+        # image_2d_fft expects [C,H,W] or [B,C,H,W]
+        maps = image_2d_fft_low_high_maps(
+            delta,
+            cutoff_ratio=self.spectral_cutoff,
+            transition_ratio=self.spectral_transition,
+        )
+        # low_ratio is per-pixel from grayscale conversion
+        # We use it as a per-pixel filter weight
+        low_ratio = maps["low_ratio"]  # [B, H, W] or [H, W]
+        img_ref = delta if delta.ndim == 4 else delta.unsqueeze(0)
+        filter_weights = low_ratio.to(delta.dtype)
+        if filter_weights.ndim == 2:
+            filter_weights = filter_weights.unsqueeze(0)
+        filter_weights = filter_weights.unsqueeze(1)  # [B, 1, H, W]
+
+        # Blend original + low-passed
+        # delta_low = delta * filter_weights  (approximate low-pass)
+        return delta * (0.5 + 0.5 * filter_weights)
+
+    # ------------------------------------------------------------------
+    # Attack loop
+    # ------------------------------------------------------------------
+    def attack_batch(
+        self,
+        images: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> torch.Tensor:
+        images = images.to(self.device)
+        labels = labels.to(self.device)
+
+        # Build FFT mask from clean forward pass
+        layer_indices, fft_mask = self._build_fft_mask(images, self.mode)
+
+        clean_pixels = self._denormalize(images).detach()
+        adv_pixels = clean_pixels.clone().detach()
+        momentum = torch.zeros_like(adv_pixels)
+
+        for _step in range(self.steps):
+            adv_pixels = adv_pixels.detach().requires_grad_(True)
+
+            logits = self.model(
+                self._normalize(adv_pixels), return_attn=False,
+            )
+            loss = F.cross_entropy(logits, labels)
+
+            grad = torch.autograd.grad(loss, adv_pixels)[0]
+
+            # Apply spatial mask if applicable
+            if fft_mask is not None:
+                mask = fft_mask.to(grad.device, grad.dtype)
+                if self.mode == "hardmask":
+                    grad = grad * mask
+                else:  # softmask / combined
+                    grad = grad * (1.0 + self.lambda_mask * mask)
+
+            # Normalize and momentum
+            grad = self._normalize_grad(grad)
+            grad = self._smooth_grad(grad)
+            momentum = self.decay * momentum + grad
+
+            with torch.no_grad():
+                adv_pixels = adv_pixels + self.step_size * momentum.sign()
+                delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
+
+                # Spectral filtering of perturbation
+                if self.mode in ("spectral", "combined"):
+                    delta = self._spectral_filter_delta(delta)
+
+                adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
+
+        return self._normalize(adv_pixels)
