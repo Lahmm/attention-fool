@@ -167,7 +167,7 @@ def validate_attack_output_dir(attack_type: str, output_dir: str | None) -> Path
     provided = Path(output_dir).expanduser()
     if provided.resolve() != expected.resolve():
         # For fft-cc-pcgrad variants, allow subdirectories
-        if attack_type == "fft-cc-pcgrad" and str(provided.resolve()).startswith(str(expected.resolve())):
+        if attack_type in ("fft-cc-pcgrad", "fft-fpass") and str(provided.resolve()).startswith(str(expected.resolve())):
             return provided
         raise ValueError(
             f"Invalid --output-dir for attack_type={attack_type}: {provided}. "
