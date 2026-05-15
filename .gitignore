@@ -10,5 +10,6 @@ outputs/*
 
 .DS_Store
 
-# Claude Code local settings
+# Claude Code config (personal per-workspace, not tracked by git)
+CLAUDE.md
 .claude/settings.local.json
