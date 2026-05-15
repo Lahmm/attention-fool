@@ -811,6 +811,285 @@ class FFTCCAttackerPCGrad(FFTCCAttackerV2):
         return self._normalize(adv_pixels)
 
 
+class LazyAggregationAttacker(MIFGSMAttacker):
+    """
+    Lazy aggregation hijack attack for ViTs.
+
+    Clean attention, token norm, token FFT stability, and image low-frequency
+    structure define foreground patches and background anchor patches. During
+    attack, a single anchor loss pushes CLS aggregation toward anchors and away
+    from foreground while CE keeps the white-box attack moving.
+    """
+
+    def __init__(
+        self,
+        model,
+        epsilon: float = 16.0 / 255.0,
+        step_size: float | None = None,
+        steps: int = 20,
+        decay: float = 1.0,
+        layers: tuple[int, ...] = (-6, -5, -4, -3, -2, -1),
+        anchor_top_ratio: float = 0.25,
+        fg_top_ratio: float = 0.25,
+        lambda_anchor: float = 1.0,
+        warmup_steps: int = 3,
+        grad_combine: str = "pcgrad_asymmetric",
+        fft_topk: int = 1,
+        spectral_cutoff: float = 0.15,
+        spectral_transition: float = 0.04,
+        grad_l2_norm: float = 1.0,
+        device: torch.device | None = None,
+    ) -> None:
+        super().__init__(
+            model=model,
+            epsilon=epsilon,
+            step_size=step_size,
+            steps=steps,
+            decay=decay,
+            device=device,
+        )
+        if not layers:
+            raise ValueError("layers must contain at least one layer index.")
+        if not (0.0 < anchor_top_ratio < 1.0):
+            raise ValueError(f"anchor_top_ratio must be in (0, 1), got {anchor_top_ratio}.")
+        if not (0.0 < fg_top_ratio < 1.0):
+            raise ValueError(f"fg_top_ratio must be in (0, 1), got {fg_top_ratio}.")
+        if fft_topk <= 0:
+            raise ValueError(f"fft_topk must be positive, got {fft_topk}.")
+        valid_combine = ("pcgrad_asymmetric", "sum", "ce")
+        if grad_combine not in valid_combine:
+            raise ValueError(f"grad_combine must be one of {valid_combine}, got {grad_combine!r}.")
+
+        self.layers = tuple(int(layer) for layer in layers)
+        self.anchor_top_ratio = float(anchor_top_ratio)
+        self.fg_top_ratio = float(fg_top_ratio)
+        self.lambda_anchor = float(lambda_anchor)
+        self.warmup_steps = int(warmup_steps)
+        self.grad_combine = grad_combine
+        self.fft_topk = int(fft_topk)
+        self.spectral_cutoff = float(spectral_cutoff)
+        self.spectral_transition = float(spectral_transition)
+        self.grad_l2_norm = float(grad_l2_norm)
+
+    @staticmethod
+    def _resolve_layers(layers: tuple[int, ...], num_layers: int) -> list[int]:
+        return FFTCCAttacker._resolve_layers(layers, num_layers)
+
+    @staticmethod
+    def _normalize_weights(weights: torch.Tensor) -> torch.Tensor:
+        return FFTCCAttacker._normalize_weights(weights)
+
+    @staticmethod
+    def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        weights = mask.to(device=values.device, dtype=values.dtype)
+        while weights.ndim < values.ndim:
+            weights = weights.unsqueeze(-1)
+        return (values * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1e-12)
+
+    @staticmethod
+    def _select_top_mask(scores: torch.Tensor, ratio: float) -> torch.Tensor:
+        num_patches = scores.size(1)
+        k = max(1, min(num_patches, int(round(num_patches * ratio))))
+        top_idx = torch.topk(scores, k=k, dim=1, largest=True).indices
+        mask = torch.zeros_like(scores, dtype=torch.bool)
+        return mask.scatter(1, top_idx, True)
+
+    @staticmethod
+    def _scale_term(term: torch.Tensor) -> torch.Tensor:
+        scale = term.detach().abs().mean().clamp_min(1e-6)
+        return term / scale
+
+    @staticmethod
+    def _l2_normalize_grad(grad: torch.Tensor, target_norm: float = 1.0) -> torch.Tensor:
+        flat = grad.reshape(grad.size(0), -1)
+        normed = flat / flat.norm(dim=1, keepdim=True).clamp_min(1e-12)
+        return (normed * target_norm).reshape_as(grad)
+
+    def _image_low_frequency_patch_score(self, clean_pixels: torch.Tensor, num_patches: int) -> torch.Tensor:
+        from utils import image_2d_fft_low_high_maps
+
+        fft_maps = image_2d_fft_low_high_maps(
+            clean_pixels,
+            cutoff_ratio=self.spectral_cutoff,
+            transition_ratio=self.spectral_transition,
+        )
+        low_ratio = fft_maps["low_ratio"]
+        grid_size = int(num_patches ** 0.5)
+        if grid_size * grid_size != num_patches:
+            raise ValueError(f"Patch count {num_patches} is not a square.")
+
+        bsz, height, width = low_ratio.shape
+        pooled = F.adaptive_avg_pool2d(low_ratio.view(bsz, 1, height, width), (grid_size, grid_size))
+        return self._normalize_weights(pooled.view(bsz, -1))
+
+    def _build_clean_guides(
+        self,
+        images: torch.Tensor,
+        clean_pixels: torch.Tensor,
+    ) -> tuple[list[int], dict[int, torch.Tensor], dict[int, torch.Tensor]]:
+        with torch.no_grad():
+            _logits, attn_logits_list, token_list = self.model(
+                images,
+                return_attn=True,
+                return_tokens=True,
+            )
+
+        layer_indices = self._resolve_layers(self.layers, len(token_list))
+        first_layer = layer_indices[0]
+        num_patches = token_list[first_layer].size(1) - 1
+        image_low = self._image_low_frequency_patch_score(clean_pixels, num_patches)
+
+        fg_masks: dict[int, torch.Tensor] = {}
+        anchor_masks: dict[int, torch.Tensor] = {}
+        for layer_idx in layer_indices:
+            tokens = token_list[layer_idx].detach()
+            patches = tokens[:, 1:, :]
+            patch_norm = self._normalize_weights(patches.norm(dim=-1))
+            fft_score = last_vit_stable_patch_frequency(
+                tokens=tokens,
+                topk=self.fft_topk,
+                has_cls_token=True,
+            ).detach()
+            fft_score = self._normalize_weights(fft_score)
+
+            attn = F.softmax(attn_logits_list[layer_idx].detach(), dim=-1)
+            cls_attn = self._normalize_weights(attn[:, :, 0, 1:].mean(dim=1))
+
+            fg_score = self._normalize_weights(cls_attn + patch_norm + fft_score)
+            fg_mask = self._select_top_mask(fg_score, self.fg_top_ratio)
+
+            anchor_score = self._normalize_weights((1.0 - fg_score) + image_low + (1.0 - cls_attn))
+            anchor_score = anchor_score.masked_fill(fg_mask, -1.0)
+            anchor_mask = self._select_top_mask(anchor_score, self.anchor_top_ratio)
+
+            fg_masks[layer_idx] = fg_mask.detach()
+            anchor_masks[layer_idx] = anchor_mask.detach()
+
+        return layer_indices, fg_masks, anchor_masks
+
+    def _anchor_loss(
+        self,
+        attn_logits_list: list[torch.Tensor],
+        token_list: list[torch.Tensor],
+        layer_indices: list[int],
+        fg_masks: dict[int, torch.Tensor],
+        anchor_masks: dict[int, torch.Tensor],
+    ) -> torch.Tensor:
+        layer_terms = []
+        for layer_idx in layer_indices:
+            tokens = token_list[layer_idx]
+            cls = tokens[:, 0, :]
+            patches = tokens[:, 1:, :]
+            fg_mask = fg_masks[layer_idx].to(device=patches.device)
+            anchor_mask = anchor_masks[layer_idx].to(device=patches.device)
+
+            attn = F.softmax(attn_logits_list[layer_idx], dim=-1)
+            cls_attn = attn[:, :, 0, 1:].mean(dim=1)
+            route_score = (
+                (cls_attn * anchor_mask.to(cls_attn.dtype)).sum(dim=1)
+                - (cls_attn * fg_mask.to(cls_attn.dtype)).sum(dim=1)
+            )
+
+            patch_norm = patches.norm(dim=-1)
+            norm_score = (
+                self._masked_mean(patch_norm, anchor_mask)
+                - self._masked_mean(patch_norm, fg_mask)
+            )
+
+            anchor_mean = self._masked_mean(patches, anchor_mask)
+            fg_mean = self._masked_mean(patches, fg_mask)
+            align_score = (
+                F.cosine_similarity(cls, anchor_mean, dim=-1)
+                - F.cosine_similarity(cls, fg_mean, dim=-1)
+            )
+
+            score = (
+                self._scale_term(route_score)
+                + self._scale_term(norm_score)
+                + self._scale_term(align_score)
+            )
+            layer_terms.append(-score.mean())
+
+        return torch.stack(layer_terms).mean()
+
+    def _combine_grads(self, g_ce: torch.Tensor, g_anchor: torch.Tensor) -> tuple[torch.Tensor, float]:
+        if self.grad_combine == "ce":
+            return g_ce, 1.0
+
+        g_ce = self._l2_normalize_grad(g_ce, self.grad_l2_norm)
+        g_anchor = self._l2_normalize_grad(g_anchor, self.grad_l2_norm)
+        if self.grad_combine == "sum":
+            flat_ce = g_ce.reshape(g_ce.size(0), -1)
+            flat_anchor = g_anchor.reshape(g_anchor.size(0), -1)
+            cos = (flat_ce * flat_anchor).sum(dim=1) / (
+                flat_ce.norm(dim=1).clamp_min(1e-12) * flat_anchor.norm(dim=1).clamp_min(1e-12)
+            )
+            return g_ce + self.lambda_anchor * g_anchor, cos.mean().item()
+
+        batch_size = g_ce.size(0)
+        flat_ce = g_ce.reshape(batch_size, -1)
+        flat_anchor = g_anchor.reshape(batch_size, -1)
+        dot = (flat_ce * flat_anchor).sum(dim=1)
+        ce_norm_sq = flat_ce.pow(2).sum(dim=1).clamp_min(1e-12)
+        anchor_norm = flat_anchor.norm(dim=1).clamp_min(1e-12)
+        ce_norm = flat_ce.norm(dim=1).clamp_min(1e-12)
+        cos = dot / (ce_norm * anchor_norm)
+        conflict = cos < 0
+        projection = (dot / ce_norm_sq).unsqueeze(1) * flat_ce
+        flat_anchor = torch.where(conflict[:, None], flat_anchor - projection, flat_anchor)
+        return (flat_ce + self.lambda_anchor * flat_anchor).reshape_as(g_ce), cos.mean().item()
+
+    def attack_batch(
+        self,
+        images: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> torch.Tensor:
+        images = images.to(self.device)
+        labels = labels.to(self.device)
+
+        clean_pixels = self._denormalize(images).detach()
+        layer_indices, fg_masks, anchor_masks = self._build_clean_guides(images, clean_pixels)
+        adv_pixels = clean_pixels.clone().detach()
+        momentum = torch.zeros_like(adv_pixels)
+        self._last_cosine_log = []
+
+        for step_idx in range(self.steps):
+            adv_pixels = adv_pixels.detach().requires_grad_(True)
+            logits_adv, attn_logits_adv, token_list_adv = self.model(
+                self._normalize(adv_pixels),
+                return_attn=True,
+                return_tokens=True,
+            )
+            ce_loss = F.cross_entropy(logits_adv, labels)
+            g_ce = torch.autograd.grad(ce_loss, adv_pixels, retain_graph=True)[0]
+
+            if step_idx < self.warmup_steps:
+                grad, avg_cos = g_ce, 1.0
+            else:
+                anchor_loss = self._anchor_loss(
+                    attn_logits_list=attn_logits_adv,
+                    token_list=token_list_adv,
+                    layer_indices=layer_indices,
+                    fg_masks=fg_masks,
+                    anchor_masks=anchor_masks,
+                )
+                g_anchor = torch.autograd.grad(anchor_loss, adv_pixels, retain_graph=False)[0]
+                grad, avg_cos = self._combine_grads(g_ce, g_anchor)
+
+            self._last_cosine_log.append((step_idx, avg_cos))
+            grad = self._normalize_grad(grad)
+            momentum = self.decay * momentum + grad
+
+            with torch.no_grad():
+                adv_pixels = adv_pixels + self.step_size * momentum.sign()
+                delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
+                adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
+
+        cos_vals = [c for _, c in self._last_cosine_log]
+        print(f"  [LazyAgg] conflicts={sum(1 for c in cos_vals if c < 0)}/{len(cos_vals)} mean_cos={sum(cos_vals)/len(cos_vals):.4f}")
+        return self._normalize(adv_pixels)
+
+
 class FFTForwardPassAttacker(MIFGSMAttacker):
     """
     FFT-guided forward-pass-aware attack with single CE gradient.

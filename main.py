@@ -6,7 +6,7 @@ from typing import List
 import torch
 from tqdm import tqdm
 
-from attack import FFTCCAttacker, FFTCCAttackerV2, FFTCCAttackerV3, FFTCCAttackerImgFFT, FFTCCAttackerPCGrad, FFTForwardPassAttacker, MIFGSMAttacker
+from attack import FFTCCAttacker, FFTCCAttackerV2, FFTCCAttackerV3, FFTCCAttackerImgFFT, FFTCCAttackerPCGrad, FFTForwardPassAttacker, LazyAggregationAttacker, MIFGSMAttacker
 from nets import ViTWithHook, build_vit_model
 from utils import (
     DEVICE,
@@ -27,6 +27,7 @@ ATTACK_OUTPUT_DIR_NAMES = {
     "fft-cc-imgfft": "fftccimgfft",
     "fft-cc-pcgrad": "fftccpcgrad",
     "fft-fpass": "fftfpass",
+    "lazy-agg": "lazyagg",
 }
 
 
@@ -49,7 +50,30 @@ def create_attacker(
     ti_sigma: float = 0.0,
     spectral_cutoff: float = 0.15,
     spectral_transition: float = 0.04,
+    anchor_top_ratio: float = 0.25,
+    fg_top_ratio: float = 0.25,
+    lambda_anchor: float = 1.0,
+    grad_combine: str = "pcgrad_asymmetric",
 ) -> MIFGSMAttacker:
+    if attack_type == "lazy-agg":
+        return LazyAggregationAttacker(
+            model=model,
+            epsilon=epsilon,
+            step_size=step_size,
+            steps=steps,
+            decay=decay,
+            layers=layers,
+            anchor_top_ratio=anchor_top_ratio,
+            fg_top_ratio=fg_top_ratio,
+            lambda_anchor=lambda_anchor,
+            warmup_steps=warmup_steps,
+            grad_combine=grad_combine,
+            fft_topk=fft_topk,
+            spectral_cutoff=spectral_cutoff,
+            spectral_transition=spectral_transition,
+            grad_l2_norm=grad_l2_norm,
+            device=DEVICE,
+        )
     if attack_type == "fft-cc-pcgrad":
         return FFTCCAttackerPCGrad(
             model=model,
@@ -167,7 +191,7 @@ def validate_attack_output_dir(attack_type: str, output_dir: str | None) -> Path
     provided = Path(output_dir).expanduser()
     if provided.resolve() != expected.resolve():
         # For fft-cc-pcgrad variants, allow subdirectories
-        if attack_type in ("fft-cc-pcgrad", "fft-fpass") and str(provided.resolve()).startswith(str(expected.resolve())):
+        if attack_type in ("fft-cc-pcgrad", "fft-fpass", "lazy-agg") and str(provided.resolve()).startswith(str(expected.resolve())):
             return provided
         raise ValueError(
             f"Invalid --output-dir for attack_type={attack_type}: {provided}. "
@@ -279,7 +303,7 @@ def attack_correctly_classified_samples(
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate adversarial samples with MI-FGSM.")
     parser.add_argument("--max-attacked-samples", type=int, default=5, help="Maximum number of correctly classified samples to attack.")
-    parser.add_argument("--attack-type", choices=["mifgsm", "fft-cc", "fft-cc-v2", "fft-cc-v3", "fft-cc-imgfft", "fft-cc-pcgrad", "fft-fpass"], default="mifgsm", help="Attack objective to use.")
+    parser.add_argument("--attack-type", choices=["mifgsm", "fft-cc", "fft-cc-v2", "fft-cc-v3", "fft-cc-imgfft", "fft-cc-pcgrad", "fft-fpass", "lazy-agg"], default="mifgsm", help="Attack objective to use.")
     parser.add_argument("--epsilon", type=float, default=8.0 / 255.0, help="L_inf perturbation budget in pixel range [0, 1].")
     parser.add_argument("--step-size", type=float, default=None, help="MI-FGSM step size in pixel range [0, 1]. Defaults to epsilon / steps.")
     parser.add_argument("--steps", type=int, default=10, help="Number of MI-FGSM iterations.")
@@ -296,6 +320,10 @@ def parse_args():
     parser.add_argument("--ti-sigma", type=float, default=0.0, help="TI-FGSM Gaussian kernel sigma for gradient smoothing. 0=disabled (fft-cc-pcgrad / fft-fpass).")
     parser.add_argument("--spectral-cutoff", type=float, default=0.15, help="Low-pass cutoff ratio for spectral perturbation filtering (fft-fpass).")
     parser.add_argument("--spectral-transition", type=float, default=0.04, help="Transition width for spectral filter (fft-fpass).")
+    parser.add_argument("--anchor-top-ratio", type=float, default=0.25, help="Top patch ratio used for lazy-agg background anchors.")
+    parser.add_argument("--fg-top-ratio", type=float, default=0.25, help="Top patch ratio used for lazy-agg foreground patches.")
+    parser.add_argument("--lambda-anchor", type=float, default=1.0, help="Weight for lazy-agg aggregation hijack loss.")
+    parser.add_argument("--grad-combine", type=str, default="pcgrad_asymmetric", choices=["pcgrad_asymmetric", "sum", "ce"], help="Gradient combination strategy for lazy-agg.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode this is required and must match outputs/attack/<attack-name>.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
@@ -304,7 +332,15 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=16, help="DataLoader batch size for clean eval and attack batches.")
     parser.add_argument("--num-workers", type=int, default=4, help="DataLoader worker processes for image decode/transform.")
     parser.add_argument("--prefetch-factor", type=int, default=4, help="Batches prefetched per DataLoader worker.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.attack_type == "lazy-agg":
+        if args.epsilon == 8.0 / 255.0:
+            args.epsilon = 16.0 / 255.0
+        if args.steps == 10:
+            args.steps = 20
+        if args.layers == (-4, -2, -1):
+            args.layers = (-6, -5, -4, -3, -2, -1)
+    return args
 
 
 def main(
@@ -328,6 +364,10 @@ def main(
     ti_sigma: float = 0.0,
     spectral_cutoff: float = 0.15,
     spectral_transition: float = 0.04,
+    anchor_top_ratio: float = 0.25,
+    fg_top_ratio: float = 0.25,
+    lambda_anchor: float = 1.0,
+    grad_combine: str = "pcgrad_asymmetric",
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -371,6 +411,10 @@ def main(
         ti_sigma=ti_sigma,
         spectral_cutoff=spectral_cutoff,
         spectral_transition=spectral_transition,
+        anchor_top_ratio=anchor_top_ratio,
+        fg_top_ratio=fg_top_ratio,
+        lambda_anchor=lambda_anchor,
+        grad_combine=grad_combine,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
         dataloader=dataloader,
@@ -421,6 +465,10 @@ if __name__ == "__main__":
         ti_sigma=args.ti_sigma,
         spectral_cutoff=args.spectral_cutoff,
         spectral_transition=args.spectral_transition,
+        anchor_top_ratio=args.anchor_top_ratio,
+        fg_top_ratio=args.fg_top_ratio,
+        lambda_anchor=args.lambda_anchor,
+        grad_combine=args.grad_combine,
         output_dir=args.output_dir,
         mode=args.mode,
         image_dir=args.image_dir,
