@@ -842,6 +842,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         input_diversity: bool = True,
         dim_resize_range: tuple[float, float] = (0.85, 1.0),
         si_scales: int = 1,
+        nesterov: bool = True,
         device: torch.device | None = None,
     ) -> None:
         super().__init__(
@@ -880,6 +881,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.si_scales = int(si_scales)
         if self.si_scales <= 0:
             raise ValueError(f"si_scales must be positive, got {si_scales}.")
+        self.nesterov = bool(nesterov)
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
 
     @staticmethod
@@ -1124,10 +1126,16 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             )
 
         for step_idx in range(self.steps):
-            adv_pixels = adv_pixels.detach().requires_grad_(True)
+            grad_pixels = adv_pixels.detach()
+            if self.nesterov and step_idx > 0:
+                with torch.no_grad():
+                    grad_pixels = grad_pixels + self.decay * self.step_size * momentum.sign()
+                    delta = torch.clamp(grad_pixels - clean_pixels, -self.epsilon, self.epsilon)
+                    grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
+            grad_pixels = grad_pixels.detach().requires_grad_(True)
             if self.grad_combine == "anchor_modulate":
                 ce_terms = []
-                norm_adv = self._normalize(adv_pixels)
+                norm_adv = self._normalize(grad_pixels)
                 for scale_idx in range(self.si_scales):
                     scale = float(2 ** scale_idx)
                     logits_adv = self.model(
@@ -1140,12 +1148,12 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 token_list_adv = None
             else:
                 logits_adv, attn_logits_adv, token_list_adv = self.model(
-                    self._input_diversity(self._normalize(adv_pixels)),
+                    self._input_diversity(self._normalize(grad_pixels)),
                     return_attn=True,
                     return_tokens=True,
                 )
                 ce_loss = F.cross_entropy(logits_adv, labels)
-            g_ce = torch.autograd.grad(ce_loss, adv_pixels, retain_graph=True)[0]
+            g_ce = torch.autograd.grad(ce_loss, grad_pixels, retain_graph=True)[0]
 
             if step_idx < self.warmup_steps:
                 grad, avg_cos = g_ce, 1.0
@@ -1160,7 +1168,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     fg_masks=fg_masks,
                     anchor_masks=anchor_masks,
                 )
-                g_anchor = torch.autograd.grad(anchor_loss, adv_pixels, retain_graph=False)[0]
+                g_anchor = torch.autograd.grad(anchor_loss, grad_pixels, retain_graph=False)[0]
                 grad, avg_cos = self._combine_grads(g_ce, g_anchor)
 
             self._last_cosine_log.append((step_idx, avg_cos))

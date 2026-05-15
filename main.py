@@ -55,6 +55,7 @@ def create_attacker(
     lambda_anchor: float = 1.0,
     grad_combine: str = "anchor_modulate",
     si_scales: int = 1,
+    nesterov: bool = True,
 ) -> MIFGSMAttacker:
     if attack_type == "lazy-agg":
         return LazyAggregationAttacker(
@@ -75,6 +76,7 @@ def create_attacker(
             grad_l2_norm=grad_l2_norm,
             ti_sigma=ti_sigma if ti_sigma > 0 else 3.0,
             si_scales=si_scales,
+            nesterov=nesterov,
             device=DEVICE,
         )
     if attack_type == "fft-cc-pcgrad":
@@ -328,6 +330,7 @@ def parse_args():
     parser.add_argument("--lambda-anchor", type=float, default=1.0, help="Weight for lazy-agg aggregation hijack loss.")
     parser.add_argument("--grad-combine", type=str, default="anchor_modulate", choices=["pcgrad_asymmetric", "sum", "ce", "anchor_modulate"], help="Gradient combination strategy for lazy-agg.")
     parser.add_argument("--si-scales", type=int, default=1, help="Number of scale-invariant CE gradients averaged by lazy-agg anchor_modulate.")
+    parser.add_argument("--no-nesterov", action="store_true", help="Disable lazy-agg NI-FGSM style lookahead gradients.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode this is required and must match outputs/attack/<attack-name>.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
@@ -373,6 +376,7 @@ def main(
     lambda_anchor: float = 1.0,
     grad_combine: str = "anchor_modulate",
     si_scales: int = 1,
+    nesterov: bool = True,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -421,6 +425,7 @@ def main(
         lambda_anchor=lambda_anchor,
         grad_combine=grad_combine,
         si_scales=si_scales,
+        nesterov=nesterov,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
         dataloader=dataloader,
@@ -476,6 +481,7 @@ if __name__ == "__main__":
         lambda_anchor=args.lambda_anchor,
         grad_combine=args.grad_combine,
         si_scales=args.si_scales,
+        nesterov=not args.no_nesterov,
         output_dir=args.output_dir,
         mode=args.mode,
         image_dir=args.image_dir,
