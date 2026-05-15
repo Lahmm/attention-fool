@@ -96,6 +96,7 @@ epsilon=16/255, steps=20, decay=1.0, layers=-6,-5,-4,-3,-2,-1
 anchor_top_ratio=0.25, fg_top_ratio=0.25, lambda_anchor=1.0
 warmup_steps=3, grad_combine=anchor_modulate
 input_diversity=True, ti_sigma=3.0, si_scales=1, nesterov=True, eot_iter=1
+perturb_smooth_sigma=0.0
 ```
 
 运行示例：
@@ -128,6 +129,8 @@ EOT2 的 500 样本 Avg ASR 若接近或超过 0.62，可继续围绕下面参�
 --ti-sigma 5
 --dim-resize-range 0.75,1.0
 --dim-resize-range 0.9,1.0
+--perturb-smooth-sigma 0.5
+--perturb-smooth-sigma 1.0
 ```
 
 ## 迁移攻击评估

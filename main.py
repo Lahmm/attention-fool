@@ -58,6 +58,7 @@ def create_attacker(
     nesterov: bool = True,
     eot_iter: int = 1,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
+    perturb_smooth_sigma: float = 0.0,
 ) -> MIFGSMAttacker:
     if attack_type == "lazy-agg":
         return LazyAggregationAttacker(
@@ -81,6 +82,7 @@ def create_attacker(
             si_scales=si_scales,
             nesterov=nesterov,
             eot_iter=eot_iter,
+            perturb_smooth_sigma=perturb_smooth_sigma,
             device=DEVICE,
         )
     if attack_type == "fft-cc-pcgrad":
@@ -347,6 +349,7 @@ def parse_args():
     parser.add_argument("--no-nesterov", action="store_true", help="Disable lazy-agg NI-FGSM style lookahead gradients.")
     parser.add_argument("--eot-iter", type=int, default=1, help="Number of DIM samples averaged per SI scale by lazy-agg anchor_modulate.")
     parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0), help='DIM resize scale range for lazy-agg, e.g. "0.85,1.0".')
+    parser.add_argument("--perturb-smooth-sigma", type=float, default=0.0, help="Gaussian sigma for optional lazy-agg perturbation smoothing after each step. 0=disabled.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode this is required and must match outputs/attack/<attack-name>.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
@@ -395,6 +398,7 @@ def main(
     nesterov: bool = True,
     eot_iter: int = 1,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
+    perturb_smooth_sigma: float = 0.0,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -446,6 +450,7 @@ def main(
         nesterov=nesterov,
         eot_iter=eot_iter,
         dim_resize_range=dim_resize_range,
+        perturb_smooth_sigma=perturb_smooth_sigma,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
         dataloader=dataloader,
@@ -504,6 +509,7 @@ if __name__ == "__main__":
         nesterov=not args.no_nesterov,
         eot_iter=args.eot_iter,
         dim_resize_range=args.dim_resize_range,
+        perturb_smooth_sigma=args.perturb_smooth_sigma,
         output_dir=args.output_dir,
         mode=args.mode,
         image_dir=args.image_dir,
