@@ -324,14 +324,14 @@ def main(
             "tf32": use_tf32,
             "num_images": len(image_paths),
         }
-        excel_path = record_results(
+        csv_path = record_results(
             repo_path=repo_path,
             exp_name=exp_name or infer_exp_name(image_dir_path),
             params_dict=record_params,
             adv_dir_arg=image_dir_path,
             asr_by_model=asr_by_model,
         )
-        print(f"Recorded transfer eval to Excel: {excel_path}")
+        print(f"Recorded transfer eval to CSV: {csv_path}")
 
 
 if __name__ == "__main__":

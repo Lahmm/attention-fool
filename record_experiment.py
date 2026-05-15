@@ -91,7 +91,7 @@ def csv_path_for_adv_dir(repo_path: Path, adv_dir: Path) -> Path:
     stem = re.sub(r"[^A-Za-z0-9._-]+", "_", relative.as_posix()).strip("_")
     csv_dir = repo_path / "outputs" / "csv"
     csv_dir.mkdir(parents=True, exist_ok=True)
-    return csv_dir / f"{stem}.xlsx"
+    return csv_dir / f"{stem}.csv"
 
 
 def record_results(
