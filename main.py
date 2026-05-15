@@ -53,7 +53,7 @@ def create_attacker(
     anchor_top_ratio: float = 0.25,
     fg_top_ratio: float = 0.25,
     lambda_anchor: float = 1.0,
-    grad_combine: str = "pcgrad_asymmetric",
+    grad_combine: str = "anchor_modulate",
 ) -> MIFGSMAttacker:
     if attack_type == "lazy-agg":
         return LazyAggregationAttacker(
@@ -323,7 +323,7 @@ def parse_args():
     parser.add_argument("--anchor-top-ratio", type=float, default=0.25, help="Top patch ratio used for lazy-agg background anchors.")
     parser.add_argument("--fg-top-ratio", type=float, default=0.25, help="Top patch ratio used for lazy-agg foreground patches.")
     parser.add_argument("--lambda-anchor", type=float, default=1.0, help="Weight for lazy-agg aggregation hijack loss.")
-    parser.add_argument("--grad-combine", type=str, default="pcgrad_asymmetric", choices=["pcgrad_asymmetric", "sum", "ce"], help="Gradient combination strategy for lazy-agg.")
+    parser.add_argument("--grad-combine", type=str, default="anchor_modulate", choices=["pcgrad_asymmetric", "sum", "ce", "anchor_modulate"], help="Gradient combination strategy for lazy-agg.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode this is required and must match outputs/attack/<attack-name>.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
@@ -367,7 +367,7 @@ def main(
     anchor_top_ratio: float = 0.25,
     fg_top_ratio: float = 0.25,
     lambda_anchor: float = 1.0,
-    grad_combine: str = "pcgrad_asymmetric",
+    grad_combine: str = "anchor_modulate",
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,

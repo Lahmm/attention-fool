@@ -856,7 +856,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             raise ValueError(f"fg_top_ratio must be in (0, 1), got {fg_top_ratio}.")
         if fft_topk <= 0:
             raise ValueError(f"fft_topk must be positive, got {fft_topk}.")
-        valid_combine = ("pcgrad_asymmetric", "sum", "ce")
+        valid_combine = ("pcgrad_asymmetric", "sum", "ce", "anchor_modulate")
         if grad_combine not in valid_combine:
             raise ValueError(f"grad_combine must be one of {valid_combine}, got {grad_combine!r}.")
 
@@ -1039,6 +1039,24 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         flat_anchor = torch.where(conflict[:, None], flat_anchor - projection, flat_anchor)
         return (flat_ce + self.lambda_anchor * flat_anchor).reshape_as(g_ce), cos.mean().item()
 
+    def _build_anchor_modulation_map(
+        self,
+        fg_masks: dict[int, torch.Tensor],
+        anchor_masks: dict[int, torch.Tensor],
+        layer_indices: list[int],
+        img_size: int,
+    ) -> torch.Tensor:
+        anchor = torch.stack([anchor_masks[layer_idx].float() for layer_idx in layer_indices]).mean(dim=0)
+        foreground = torch.stack([fg_masks[layer_idx].float() for layer_idx in layer_indices]).mean(dim=0)
+        token_map = anchor + 0.5 * foreground
+        token_map = self._normalize_weights(token_map)
+        batch_size, num_patches = token_map.shape
+        grid_size = int(num_patches ** 0.5)
+        if grid_size * grid_size != num_patches:
+            raise ValueError(f"Patch count {num_patches} is not a square.")
+        grid = token_map.view(batch_size, 1, grid_size, grid_size)
+        return F.interpolate(grid, size=(img_size, img_size), mode="bilinear", align_corners=False).detach()
+
     def attack_batch(
         self,
         images: torch.Tensor,
@@ -1052,6 +1070,14 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         adv_pixels = clean_pixels.clone().detach()
         momentum = torch.zeros_like(adv_pixels)
         self._last_cosine_log = []
+        anchor_modulation = None
+        if self.grad_combine == "anchor_modulate":
+            anchor_modulation = self._build_anchor_modulation_map(
+                fg_masks=fg_masks,
+                anchor_masks=anchor_masks,
+                layer_indices=layer_indices,
+                img_size=clean_pixels.size(-1),
+            )
 
         for step_idx in range(self.steps):
             adv_pixels = adv_pixels.detach().requires_grad_(True)
@@ -1065,6 +1091,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
 
             if step_idx < self.warmup_steps:
                 grad, avg_cos = g_ce, 1.0
+            elif self.grad_combine == "anchor_modulate":
+                grad = g_ce * (1.0 + self.lambda_anchor * anchor_modulation.to(g_ce.device, g_ce.dtype))
+                avg_cos = 1.0
             else:
                 anchor_loss = self._anchor_loss(
                     attn_logits_list=attn_logits_adv,
