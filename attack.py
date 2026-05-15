@@ -843,6 +843,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         dim_resize_range: tuple[float, float] = (0.85, 1.0),
         si_scales: int = 1,
         nesterov: bool = True,
+        eot_iter: int = 1,
         device: torch.device | None = None,
     ) -> None:
         super().__init__(
@@ -882,6 +883,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if self.si_scales <= 0:
             raise ValueError(f"si_scales must be positive, got {si_scales}.")
         self.nesterov = bool(nesterov)
+        self.eot_iter = int(eot_iter)
+        if self.eot_iter <= 0:
+            raise ValueError(f"eot_iter must be positive, got {eot_iter}.")
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
 
     @staticmethod
@@ -1138,11 +1142,12 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 norm_adv = self._normalize(grad_pixels)
                 for scale_idx in range(self.si_scales):
                     scale = float(2 ** scale_idx)
-                    logits_adv = self.model(
-                        self._input_diversity(norm_adv / scale),
-                        return_attn=False,
-                    )
-                    ce_terms.append(F.cross_entropy(logits_adv, labels))
+                    for _eot_idx in range(self.eot_iter):
+                        logits_adv = self.model(
+                            self._input_diversity(norm_adv / scale),
+                            return_attn=False,
+                        )
+                        ce_terms.append(F.cross_entropy(logits_adv, labels))
                 ce_loss = torch.stack(ce_terms).mean()
                 attn_logits_adv = None
                 token_list_adv = None
