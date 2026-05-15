@@ -104,6 +104,32 @@ input_diversity=True, ti_sigma=3.0, si_scales=1, nesterov=True, eot_iter=1
 python main.py --mode attack --attack-type lazy-agg --max-attacked-samples 50 --decay 1.0 --output-dir outputs/attack/lazyagg
 ```
 
+当前推荐先复现实验配置：
+
+```powershell
+python main.py --mode attack --attack-type lazy-agg --max-attacked-samples 500 --steps 80 --decay 1.0 --si-scales 2 --output-dir outputs/attack/lazyagg/si2_s80_500
+python transfer_eval.py --image-dir outputs/attack/lazyagg/si2_s80_500 --prefix adv_ --batch-size 128 --num-workers 8 --prefetch-factor 4 --exp-name lazyagg_si2_s80_500
+```
+
+若要评估 EOT 收益，使用：
+
+```powershell
+python main.py --mode attack --attack-type lazy-agg --max-attacked-samples 500 --steps 80 --decay 1.0 --si-scales 2 --eot-iter 2 --output-dir outputs/attack/lazyagg/eot2_si2_s80_500
+python transfer_eval.py --image-dir outputs/attack/lazyagg/eot2_si2_s80_500 --prefix adv_ --batch-size 128 --num-workers 8 --prefetch-factor 4 --exp-name lazyagg_eot2_si2_s80_500
+```
+
+EOT2 的 500 样本 Avg ASR 若接近或超过 0.62，可继续围绕下面参数搜索：
+
+```powershell
+--steps 100
+--steps 120
+--eot-iter 3
+--ti-sigma 2
+--ti-sigma 5
+--dim-resize-range 0.75,1.0
+--dim-resize-range 0.9,1.0
+```
+
 ## 迁移攻击评估
 
 对保存好的对抗样本做多黑盒模型评估：
