@@ -72,6 +72,7 @@ def create_attacker(
             spectral_cutoff=spectral_cutoff,
             spectral_transition=spectral_transition,
             grad_l2_norm=grad_l2_norm,
+            ti_sigma=ti_sigma if ti_sigma > 0 else 3.0,
             device=DEVICE,
         )
     if attack_type == "fft-cc-pcgrad":

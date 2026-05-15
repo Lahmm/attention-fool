@@ -838,6 +838,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         spectral_cutoff: float = 0.15,
         spectral_transition: float = 0.04,
         grad_l2_norm: float = 1.0,
+        ti_sigma: float = 3.0,
+        input_diversity: bool = True,
+        dim_resize_range: tuple[float, float] = (0.85, 1.0),
         device: torch.device | None = None,
     ) -> None:
         super().__init__(
@@ -870,6 +873,43 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.spectral_cutoff = float(spectral_cutoff)
         self.spectral_transition = float(spectral_transition)
         self.grad_l2_norm = float(grad_l2_norm)
+        self.ti_sigma = float(ti_sigma)
+        self.input_diversity = bool(input_diversity)
+        self.dim_resize_range = tuple(float(r) for r in dim_resize_range)
+        self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
+
+    @staticmethod
+    def _build_ti_kernel(sigma: float) -> torch.Tensor:
+        radius = int(3 * sigma)
+        x = torch.arange(-radius, radius + 1, dtype=torch.float32)
+        g1d = torch.exp(-0.5 * (x / sigma) ** 2)
+        g1d = g1d / g1d.sum()
+        g2d = g1d[:, None] @ g1d[None, :]
+        return g2d.view(1, 1, g2d.size(0), g2d.size(1))
+
+    def _smooth_grad(self, grad: torch.Tensor) -> torch.Tensor:
+        if self._ti_kernel is None or self.ti_sigma <= 0:
+            return grad
+        kernel = self._ti_kernel.to(grad.device, grad.dtype).repeat(grad.size(1), 1, 1, 1)
+        pad = kernel.size(2) // 2
+        return F.conv2d(F.pad(grad, (pad, pad, pad, pad), mode="reflect"), kernel, groups=grad.size(1))
+
+    def _input_diversity(self, images: torch.Tensor) -> torch.Tensor:
+        if not self.input_diversity:
+            return images
+        batch_size, channels, height, width = images.shape
+        lo, hi = self.dim_resize_range
+        scale = lo + (hi - lo) * torch.rand(1, device=images.device)
+        new_h = max(1, min(height, int(round(height * scale.item()))))
+        new_w = max(1, min(width, int(round(width * scale.item()))))
+        resized = F.interpolate(images, size=(new_h, new_w), mode="bilinear", align_corners=False)
+        pad_h = height - new_h
+        pad_w = width - new_w
+        top = torch.randint(0, pad_h + 1, (1,), device=images.device).item() if pad_h > 0 else 0
+        left = torch.randint(0, pad_w + 1, (1,), device=images.device).item() if pad_w > 0 else 0
+        bottom = pad_h - top
+        right = pad_w - left
+        return F.pad(resized, (left, right, top, bottom), value=0.0)
 
     @staticmethod
     def _resolve_layers(layers: tuple[int, ...], num_layers: int) -> list[int]:
@@ -1082,7 +1122,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         for step_idx in range(self.steps):
             adv_pixels = adv_pixels.detach().requires_grad_(True)
             logits_adv, attn_logits_adv, token_list_adv = self.model(
-                self._normalize(adv_pixels),
+                self._input_diversity(self._normalize(adv_pixels)),
                 return_attn=True,
                 return_tokens=True,
             )
@@ -1106,7 +1146,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 grad, avg_cos = self._combine_grads(g_ce, g_anchor)
 
             self._last_cosine_log.append((step_idx, avg_cos))
-            grad = self._normalize_grad(grad)
+            grad = self._smooth_grad(self._normalize_grad(grad))
             momentum = self.decay * momentum + grad
 
             with torch.no_grad():
