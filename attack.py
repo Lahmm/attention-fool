@@ -841,7 +841,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         ti_sigma: float = 3.0,
         input_diversity: bool = True,
         dim_resize_range: tuple[float, float] = (0.85, 1.0),
-        si_scales: int = 5,
+        si_scales: int = 1,
         device: torch.device | None = None,
     ) -> None:
         super().__init__(

@@ -54,6 +54,7 @@ def create_attacker(
     fg_top_ratio: float = 0.25,
     lambda_anchor: float = 1.0,
     grad_combine: str = "anchor_modulate",
+    si_scales: int = 1,
 ) -> MIFGSMAttacker:
     if attack_type == "lazy-agg":
         return LazyAggregationAttacker(
@@ -73,6 +74,7 @@ def create_attacker(
             spectral_transition=spectral_transition,
             grad_l2_norm=grad_l2_norm,
             ti_sigma=ti_sigma if ti_sigma > 0 else 3.0,
+            si_scales=si_scales,
             device=DEVICE,
         )
     if attack_type == "fft-cc-pcgrad":
@@ -325,6 +327,7 @@ def parse_args():
     parser.add_argument("--fg-top-ratio", type=float, default=0.25, help="Top patch ratio used for lazy-agg foreground patches.")
     parser.add_argument("--lambda-anchor", type=float, default=1.0, help="Weight for lazy-agg aggregation hijack loss.")
     parser.add_argument("--grad-combine", type=str, default="anchor_modulate", choices=["pcgrad_asymmetric", "sum", "ce", "anchor_modulate"], help="Gradient combination strategy for lazy-agg.")
+    parser.add_argument("--si-scales", type=int, default=1, help="Number of scale-invariant CE gradients averaged by lazy-agg anchor_modulate.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode this is required and must match outputs/attack/<attack-name>.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
@@ -369,6 +372,7 @@ def main(
     fg_top_ratio: float = 0.25,
     lambda_anchor: float = 1.0,
     grad_combine: str = "anchor_modulate",
+    si_scales: int = 1,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -416,6 +420,7 @@ def main(
         fg_top_ratio=fg_top_ratio,
         lambda_anchor=lambda_anchor,
         grad_combine=grad_combine,
+        si_scales=si_scales,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
         dataloader=dataloader,
@@ -470,6 +475,7 @@ if __name__ == "__main__":
         fg_top_ratio=args.fg_top_ratio,
         lambda_anchor=args.lambda_anchor,
         grad_combine=args.grad_combine,
+        si_scales=args.si_scales,
         output_dir=args.output_dir,
         mode=args.mode,
         image_dir=args.image_dir,
