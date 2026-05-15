@@ -59,6 +59,7 @@ def create_attacker(
     eot_iter: int = 1,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
     perturb_smooth_sigma: float = 0.0,
+    ensemble_models: tuple[ViTWithHook, ...] = (),
 ) -> MIFGSMAttacker:
     if attack_type == "lazy-agg":
         return LazyAggregationAttacker(
@@ -83,6 +84,7 @@ def create_attacker(
             nesterov=nesterov,
             eot_iter=eot_iter,
             perturb_smooth_sigma=perturb_smooth_sigma,
+            ensemble_models=ensemble_models,
             device=DEVICE,
         )
     if attack_type == "fft-cc-pcgrad":
@@ -195,6 +197,10 @@ def parse_float_range(value: str) -> tuple[float, float]:
     if not (0.0 < lo <= hi <= 1.0):
         raise argparse.ArgumentTypeError("range values must satisfy 0 < low <= high <= 1.")
     return lo, hi
+
+
+def parse_model_names(value: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
 def expected_attack_output_dir(attack_type: str) -> Path:
@@ -350,6 +356,7 @@ def parse_args():
     parser.add_argument("--eot-iter", type=int, default=1, help="Number of DIM samples averaged per SI scale by lazy-agg anchor_modulate.")
     parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0), help='DIM resize scale range for lazy-agg, e.g. "0.85,1.0".')
     parser.add_argument("--perturb-smooth-sigma", type=float, default=0.0, help="Gaussian sigma for optional lazy-agg perturbation smoothing after each step. 0=disabled.")
+    parser.add_argument("--ensemble-source-models", type=parse_model_names, default=(), help="Comma-separated extra lazy-agg source models whose CE gradients are averaged with the primary ViT.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode this is required and must match outputs/attack/<attack-name>.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
@@ -399,6 +406,7 @@ def main(
     eot_iter: int = 1,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
     perturb_smooth_sigma: float = 0.0,
+    ensemble_source_models: tuple[str, ...] = (),
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -423,6 +431,12 @@ def main(
         img_size=img_size,
     )
     model = build_vit_model(num_classes=num_classes)
+    ensemble_models: tuple[ViTWithHook, ...] = ()
+    if attack_type == "lazy-agg" and ensemble_source_models:
+        ensemble_models = tuple(
+            build_vit_model(num_classes=num_classes, model_name=model_name)
+            for model_name in ensemble_source_models
+        )
     attacker = create_attacker(
         model=model,
         attack_type=attack_type,
@@ -451,6 +465,7 @@ def main(
         eot_iter=eot_iter,
         dim_resize_range=dim_resize_range,
         perturb_smooth_sigma=perturb_smooth_sigma,
+        ensemble_models=ensemble_models,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
         dataloader=dataloader,
@@ -510,6 +525,7 @@ if __name__ == "__main__":
         eot_iter=args.eot_iter,
         dim_resize_range=args.dim_resize_range,
         perturb_smooth_sigma=args.perturb_smooth_sigma,
+        ensemble_source_models=args.ensemble_source_models,
         output_dir=args.output_dir,
         mode=args.mode,
         image_dir=args.image_dir,

@@ -845,6 +845,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         nesterov: bool = True,
         eot_iter: int = 1,
         perturb_smooth_sigma: float = 0.0,
+        ensemble_models: tuple[torch.nn.Module, ...] | None = None,
         device: torch.device | None = None,
     ) -> None:
         super().__init__(
@@ -888,6 +889,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if self.eot_iter <= 0:
             raise ValueError(f"eot_iter must be positive, got {eot_iter}.")
         self.perturb_smooth_sigma = float(perturb_smooth_sigma)
+        self.ensemble_models = tuple(ensemble_models or ())
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
         self._perturb_kernel = (
             self._build_ti_kernel(self.perturb_smooth_sigma)
@@ -1154,14 +1156,16 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             if self.grad_combine == "anchor_modulate":
                 ce_terms = []
                 norm_adv = self._normalize(grad_pixels)
+                source_models = (self.model, *self.ensemble_models)
                 for scale_idx in range(self.si_scales):
                     scale = float(2 ** scale_idx)
                     for _eot_idx in range(self.eot_iter):
-                        logits_adv = self.model(
-                            self._input_diversity(norm_adv / scale),
-                            return_attn=False,
-                        )
-                        ce_terms.append(F.cross_entropy(logits_adv, labels))
+                        for source_model in source_models:
+                            logits_adv = source_model(
+                                self._input_diversity(norm_adv / scale),
+                                return_attn=False,
+                            )
+                            ce_terms.append(F.cross_entropy(logits_adv, labels))
                 ce_loss = torch.stack(ce_terms).mean()
                 attn_logits_adv = None
                 token_list_adv = None

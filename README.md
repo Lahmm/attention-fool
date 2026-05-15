@@ -131,6 +131,7 @@ EOT2 的 500 样本 Avg ASR 若接近或超过 0.62，可继续围绕下面参�
 --dim-resize-range 0.9,1.0
 --perturb-smooth-sigma 0.5
 --perturb-smooth-sigma 1.0
+--ensemble-source-models deit_base_patch16_224
 ```
 
 ## 迁移攻击评估
