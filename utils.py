@@ -17,8 +17,8 @@ from tqdm import tqdm
 image_dir = "data/clean_resized_images"
 annotations_path = "data/image_name_to_class_id_and_name.json"
 
-IMAGENET_MEAN = (0.485, 0.456, 0.406)
-IMAGENET_STD = (0.229, 0.224, 0.225)
+IMAGENET_MEAN = (0.5, 0.5, 0.5)
+IMAGENET_STD = (0.5, 0.5, 0.5)
 
 
 def gaussian_kernel_1d(
