@@ -841,6 +841,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         ti_sigma: float = 3.0,
         input_diversity: bool = True,
         dim_resize_range: tuple[float, float] = (0.85, 1.0),
+        si_scales: int = 5,
         device: torch.device | None = None,
     ) -> None:
         super().__init__(
@@ -876,6 +877,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.ti_sigma = float(ti_sigma)
         self.input_diversity = bool(input_diversity)
         self.dim_resize_range = tuple(float(r) for r in dim_resize_range)
+        self.si_scales = int(si_scales)
+        if self.si_scales <= 0:
+            raise ValueError(f"si_scales must be positive, got {si_scales}.")
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
 
     @staticmethod
@@ -1121,12 +1125,26 @@ class LazyAggregationAttacker(MIFGSMAttacker):
 
         for step_idx in range(self.steps):
             adv_pixels = adv_pixels.detach().requires_grad_(True)
-            logits_adv, attn_logits_adv, token_list_adv = self.model(
-                self._input_diversity(self._normalize(adv_pixels)),
-                return_attn=True,
-                return_tokens=True,
-            )
-            ce_loss = F.cross_entropy(logits_adv, labels)
+            if self.grad_combine == "anchor_modulate":
+                ce_terms = []
+                norm_adv = self._normalize(adv_pixels)
+                for scale_idx in range(self.si_scales):
+                    scale = float(2 ** scale_idx)
+                    logits_adv = self.model(
+                        self._input_diversity(norm_adv / scale),
+                        return_attn=False,
+                    )
+                    ce_terms.append(F.cross_entropy(logits_adv, labels))
+                ce_loss = torch.stack(ce_terms).mean()
+                attn_logits_adv = None
+                token_list_adv = None
+            else:
+                logits_adv, attn_logits_adv, token_list_adv = self.model(
+                    self._input_diversity(self._normalize(adv_pixels)),
+                    return_attn=True,
+                    return_tokens=True,
+                )
+                ce_loss = F.cross_entropy(logits_adv, labels)
             g_ce = torch.autograd.grad(ce_loss, adv_pixels, retain_graph=True)[0]
 
             if step_idx < self.warmup_steps:
