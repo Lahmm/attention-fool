@@ -9,7 +9,7 @@ import torch
 from PIL import Image
 from timm.data import resolve_data_config
 from timm.data.transforms_factory import create_transform
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 from tqdm import tqdm
 
 from record_experiment import record_results
@@ -98,6 +98,20 @@ def build_transfer_samples(
     return samples, skipped
 
 
+def pre_cache_tensors(
+    samples: List[Tuple[Path, int]],
+    transform,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Pre-transform all images to tensors in RAM to eliminate per-model disk I/O."""
+    images_list = []
+    labels_list = []
+    for path, label in tqdm(samples, desc="pre-cache", leave=False):
+        img = Image.open(path).convert("RGB")
+        images_list.append(transform(img))
+        labels_list.append(label)
+    return torch.stack(images_list), torch.tensor(labels_list)
+
+
 def build_dataloader(
     samples: List[Tuple[Path, int]],
     transform,
@@ -105,7 +119,29 @@ def build_dataloader(
     num_workers: int,
     prefetch_factor: int,
 ) -> DataLoader:
+    """On-the-fly image loading (fallback when pre-caching is disabled)."""
     dataset = TransferImageDataset(samples=samples, transform=transform)
+    kwargs = {
+        "batch_size": batch_size,
+        "shuffle": False,
+        "num_workers": num_workers,
+        "pin_memory": (DEVICE.type == "cuda"),
+        "persistent_workers": num_workers > 0,
+    }
+    if num_workers > 0:
+        kwargs["prefetch_factor"] = prefetch_factor
+    return DataLoader(dataset, **kwargs)
+
+
+def build_cached_dataloader(
+    images: torch.Tensor,
+    labels: torch.Tensor,
+    batch_size: int,
+    num_workers: int,
+    prefetch_factor: int,
+) -> DataLoader:
+    """Pre-cached tensor loading (fast path, eliminates per-model disk I/O)."""
+    dataset = TensorDataset(images, labels)
     kwargs = {
         "batch_size": batch_size,
         "shuffle": False,
@@ -141,6 +177,7 @@ def evaluate(
     num_workers: int,
     prefetch_factor: int,
     use_amp: bool,
+    pre_cache: bool = True,
 ) -> Tuple[int, int, int]:
     model, transform = build_black_box_model(model_name)
     samples, skipped = build_transfer_samples(
@@ -151,13 +188,23 @@ def evaluate(
     if not samples:
         return 0, 0, skipped
 
-    dataloader = build_dataloader(
-        samples=samples,
-        transform=transform,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        prefetch_factor=prefetch_factor,
-    )
+    if pre_cache:
+        images_cached, labels_cached = pre_cache_tensors(samples, transform)
+        dataloader = build_cached_dataloader(
+            images=images_cached,
+            labels=labels_cached,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            prefetch_factor=prefetch_factor,
+        )
+    else:
+        dataloader = build_dataloader(
+            samples=samples,
+            transform=transform,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            prefetch_factor=prefetch_factor,
+        )
 
     correct = 0
     total = 0
@@ -178,7 +225,7 @@ def evaluate(
             total += targets.size(0)
 
             if total > 0:
-                progress.set_postfix(acc=f"{correct / total:.4f}", skipped=skipped)
+                progress.set_postfix(acc=f"{correct / total:.4f}")
 
     return correct, total, skipped
 
@@ -195,6 +242,7 @@ def main(
     use_tf32: bool,
     record_excel: bool,
     exp_name: str | None,
+    pre_cache: bool = True,
 ) -> None:
     configure_eval_runtime(use_tf32=use_tf32)
     image_dir_path = Path(image_dir)
@@ -227,6 +275,7 @@ def main(
             num_workers=num_workers,
             prefetch_factor=prefetch_factor,
             use_amp=use_amp,
+            pre_cache=pre_cache,
         )
         acc = correct / total if total > 0 else 0.0
         asr = 1.0 - acc if total > 0 else 0.0
@@ -290,13 +339,14 @@ if __name__ == "__main__":
     parser.add_argument("--image-dir", type=str, default="outputs/attack", help="Directory with saved images.")
     parser.add_argument("--annotations-path", type=str, default="data/image_name_to_class_id_and_name.json")
     parser.add_argument("--prefix", type=str, default="adv_", help="Filename prefix used to infer original names.")
-    parser.add_argument("--batch-size", type=int, default=64, help="Images per inference batch.")
+    parser.add_argument("--batch-size", type=int, default=256, help="Images per inference batch.")
     parser.add_argument("--num-workers", type=int, default=8, help="DataLoader worker processes for image decode/transform.")
     parser.add_argument("--prefetch-factor", type=int, default=4, help="Batches prefetched per DataLoader worker.")
     parser.add_argument("--amp", action="store_true", help="Use CUDA fp16 autocast for faster transfer evaluation.")
     parser.add_argument("--no-tf32", action="store_true", help="Disable TF32 matmul/cudnn on CUDA.")
     parser.add_argument("--exp-name", default=None, help="Experiment name recorded in the Excel output. Defaults to the image-dir name.")
     parser.add_argument("--no-record", action="store_true", help="Disable automatic Excel recording.")
+    parser.add_argument("--no-pre-cache", action="store_true", help="Disable pre-caching images in RAM (slower, lower memory).")
     parser.add_argument(
         "--model-name",
         type=parse_model_names,
@@ -316,4 +366,5 @@ if __name__ == "__main__":
         use_tf32=not args.no_tf32,
         record_excel=not args.no_record,
         exp_name=args.exp_name,
+        pre_cache=not args.no_pre_cache,
     )
