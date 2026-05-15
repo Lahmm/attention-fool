@@ -1008,7 +1008,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 + self._scale_term(norm_score)
                 + self._scale_term(align_score)
             )
-            layer_terms.append(-score.mean())
+            layer_terms.append(score.mean())
 
         return torch.stack(layer_terms).mean()
 
