@@ -1,7 +1,8 @@
 import argparse
+import csv
 import math
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import matplotlib
 
@@ -20,6 +21,8 @@ from utils import (
     IMAGENET_STD,
     image_2d_fft_low_high_maps,
     last_vit_foreground_background_from_tokens,
+    last_vit_patch_scores_to_image_map,
+    last_vit_stable_patch_frequency,
     load_data,
 )
 
@@ -38,6 +41,7 @@ def parse_args():
     parser.add_argument("--pattern",type=str,default="*",help='Filename glob in --image-dir (e.g., "adv_*.png" or "clean_*.png").')
     parser.add_argument("--max-images",type=int,default=5,help="Process first N matched images.")
     parser.add_argument("--block-index",type=int,default=-1,help="Transformer block index to visualize. Supports negative index; -1 means last block.")
+    parser.add_argument("--block-indices", type=parse_block_indices, default=None, help='Comma-separated block indices for CSV stats, e.g. "-6,-5,-4,-3,-2,-1".')
     parser.add_argument("--img-size", type=int, default=224)
     parser.add_argument("--model-name", type=str, default=DEFAULT_MODEL_NAME, help="timm model name used for visualization.")
     parser.add_argument("--fft-topk", type=int, default=1, help="Per-channel Top-K stable patch count used by FFT selection.")
@@ -47,10 +51,20 @@ def parse_args():
     parser.add_argument("--image-fft-transition-ratio", type=float, default=0.04, help="Soft transition width for image-space 2D FFT low-pass mask.")
     parser.add_argument("--overlap-top-ratio", type=float, default=0.2, help="Top fraction used to mark high FFT, attention, and patch-score regions in the overlap panel.")
     parser.add_argument("--output-dir",type=str,default=None,help="Directory where visualization figures are saved.")
+    parser.add_argument("--no-save-images", action="store_true", help="Only compute CSV statistics; do not save visualization images.")
+    parser.add_argument("--stats-csv", type=str, default=None, help="Path for per-image/per-layer CSV statistics.")
+    parser.add_argument("--summary-csv", type=str, default=None, help="Path for per-model/per-layer summary CSV statistics.")
     parser.add_argument("--num-classes", type=int, default=None)
     parser.add_argument("--dataset-dir", type=str, default="data/clean_resized_images")
     parser.add_argument("--annotations-path",type=str,default="data/image_name_to_class_id_and_name.json")
     return parser.parse_args()
+
+
+def parse_block_indices(value: str) -> tuple[int, ...]:
+    indices = tuple(int(item.strip()) for item in value.split(",") if item.strip())
+    if not indices:
+        raise argparse.ArgumentTypeError("block indices must contain at least one integer.")
+    return indices
 
 
 def build_model(num_classes: int, model_name: str) -> ViTWithHook:
@@ -108,6 +122,387 @@ def resolve_block_index(block_index: int, total_blocks: int) -> int:
     if resolved < 0 or resolved >= total_blocks:
         raise ValueError(f"Invalid --block-index {block_index}, total blocks={total_blocks}.")
     return resolved
+
+
+def is_square_token_count(num_tokens: int) -> bool:
+    if num_tokens <= 0:
+        return False
+    grid_size = int(math.sqrt(num_tokens))
+    return grid_size * grid_size == num_tokens
+
+
+def safe_float(value: Any) -> float:
+    try:
+        if value is None:
+            return float("nan")
+        return float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def pearson_corr(a: np.ndarray, b: np.ndarray) -> float:
+    x = np.asarray(a, dtype=np.float64).reshape(-1)
+    y = np.asarray(b, dtype=np.float64).reshape(-1)
+    valid = np.isfinite(x) & np.isfinite(y)
+    x = x[valid]
+    y = y[valid]
+    if x.size < 2 or np.std(x) < 1e-12 or np.std(y) < 1e-12:
+        return float("nan")
+    return float(np.corrcoef(x, y)[0, 1])
+
+
+def rankdata(values: np.ndarray) -> np.ndarray:
+    flat = np.asarray(values, dtype=np.float64).reshape(-1)
+    order = np.argsort(flat, kind="mergesort")
+    ranks = np.empty_like(flat, dtype=np.float64)
+    sorted_vals = flat[order]
+    start = 0
+    while start < flat.size:
+        end = start + 1
+        while end < flat.size and sorted_vals[end] == sorted_vals[start]:
+            end += 1
+        ranks[order[start:end]] = 0.5 * (start + end - 1)
+        start = end
+    return ranks.reshape(values.shape)
+
+
+def spearman_corr(a: np.ndarray, b: np.ndarray) -> float:
+    return pearson_corr(rankdata(a), rankdata(b))
+
+
+def jaccard(mask_a: np.ndarray, mask_b: np.ndarray) -> float:
+    union = mask_a | mask_b
+    if not union.any():
+        return 0.0
+    return float((mask_a & mask_b).sum() / union.sum())
+
+
+def mask_mean(score_map: np.ndarray, mask: np.ndarray) -> float:
+    if not mask.any():
+        return float("nan")
+    return float(np.asarray(score_map, dtype=np.float64)[mask].mean())
+
+
+class GenericAttentionCapture:
+    """Capture qkv outputs and matching block outputs across timm ViT-like models."""
+
+    def __init__(self, model: ViTWithHook) -> None:
+        self.model = model.model
+        self.module_dict = dict(self.model.named_modules())
+        self.records: list[dict[str, Any]] = []
+        self.handles = []
+        self._discover_records()
+
+    def _discover_records(self) -> None:
+        for qkv_name, qkv_module in self.module_dict.items():
+            if not qkv_name.endswith("attn.qkv"):
+                continue
+            attn_name = qkv_name.rsplit(".qkv", 1)[0]
+            block_name = qkv_name.rsplit(".attn.qkv", 1)[0]
+            attn_module = self.module_dict.get(attn_name)
+            block_module = self.module_dict.get(block_name)
+            if attn_module is None or block_module is None:
+                continue
+            record = {
+                "index": len(self.records),
+                "qkv_name": qkv_name,
+                "block_name": block_name,
+                "attn_module": attn_module,
+                "block_module": block_module,
+                "num_heads": getattr(attn_module, "num_heads", None),
+                "qkv": None,
+                "tokens": None,
+            }
+            self.records.append(record)
+
+    def __enter__(self):
+        for record in self.records:
+            self.handles.append(record["attn_module"].qkv.register_forward_hook(self._qkv_hook(record)))
+            self.handles.append(record["block_module"].register_forward_hook(self._block_hook(record)))
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        for handle in self.handles:
+            handle.remove()
+        self.handles.clear()
+
+    def reset(self) -> None:
+        for record in self.records:
+            record["qkv"] = None
+            record["tokens"] = None
+
+    @staticmethod
+    def _qkv_hook(record: dict[str, Any]):
+        def hook(_module, _inputs, output):
+            record["qkv"] = output.detach() if isinstance(output, torch.Tensor) else None
+
+        return hook
+
+    @staticmethod
+    def _block_hook(record: dict[str, Any]):
+        def hook(_module, _inputs, output):
+            if isinstance(output, torch.Tensor):
+                record["tokens"] = output.detach()
+            elif isinstance(output, (list, tuple)) and output and isinstance(output[0], torch.Tensor):
+                record["tokens"] = output[0].detach()
+            else:
+                record["tokens"] = None
+
+        return hook
+
+
+def qkv_to_attn_logits(qkv: torch.Tensor, num_heads: int | None) -> torch.Tensor:
+    if qkv.ndim != 3 or num_heads is None or num_heads <= 0:
+        raise ValueError(f"Unsupported qkv shape/heads: shape={tuple(qkv.shape)}, heads={num_heads}.")
+    bsz, num_tokens, hidden = qkv.shape
+    if hidden % (3 * int(num_heads)) != 0:
+        raise ValueError(f"qkv hidden size {hidden} is not divisible by 3*num_heads={3 * int(num_heads)}.")
+    head_dim = hidden // (3 * int(num_heads))
+    qkv_view = qkv.reshape(bsz, num_tokens, 3, int(num_heads), head_dim).permute(2, 0, 3, 1, 4)
+    q, k = qkv_view[0], qkv_view[1]
+    return (q @ k.transpose(-2, -1)) * (head_dim ** -0.5)
+
+
+def flatten_tokens(tokens: torch.Tensor) -> torch.Tensor:
+    if tokens.ndim == 3:
+        return tokens
+    if tokens.ndim == 4:
+        bsz, height, width, channels = tokens.shape
+        return tokens.reshape(bsz, height * width, channels)
+    raise ValueError(f"Unsupported token shape: {tuple(tokens.shape)}.")
+
+
+def normalized_patch_scores(scores: torch.Tensor, img_size: int) -> np.ndarray:
+    score_map = last_vit_patch_scores_to_image_map(scores, img_size=img_size, mode="bilinear")[0]
+    return normalize_map(score_map.detach().cpu().numpy())
+
+
+def compute_cls_stats(
+    record: dict[str, Any],
+    img_size: int,
+    fft_topk: int,
+    overlap_top_ratio: float,
+) -> dict[str, Any]:
+    tokens = flatten_tokens(record["tokens"])
+    qkv = record["qkv"]
+    num_patches = tokens.size(1) - 1
+    if qkv is None:
+        raise ValueError("Missing qkv output.")
+    if num_patches <= 0 or not is_square_token_count(num_patches):
+        raise ValueError(f"CLS mode requires square patch tokens, got token count {tokens.size(1)}.")
+
+    attn_logits = qkv_to_attn_logits(qkv, record["num_heads"])
+    attn_weights = torch.softmax(attn_logits, dim=-1)
+    attn_scores = attn_weights[:, :, 0, 1:].mean(dim=1)
+    attn_map = normalized_patch_scores(attn_scores, img_size)
+
+    cls_token = tokens[:, 0, :]
+    patch_tokens = tokens[:, 1:, :]
+    cls_token_expanded = cls_token.unsqueeze(1).expand_as(patch_tokens)
+    patch_scores = F.cosine_similarity(patch_tokens, cls_token_expanded, dim=-1)
+    patch_map = normalized_patch_scores(patch_scores, img_size)
+
+    fft_scores = last_vit_stable_patch_frequency(tokens=tokens, topk=fft_topk, has_cls_token=True)
+    fft_map = normalized_patch_scores(fft_scores, img_size)
+
+    return compute_overlap_stats(
+        attn_map=attn_map,
+        patch_map=patch_map,
+        fft_map=fft_map,
+        top_ratio=overlap_top_ratio,
+        metric_mode="cls",
+    )
+
+
+def compute_no_cls_stats(
+    record: dict[str, Any],
+    img_size: int,
+    fft_topk: int,
+    overlap_top_ratio: float,
+) -> dict[str, Any]:
+    tokens = flatten_tokens(record["tokens"])
+    num_patches = tokens.size(1)
+    if num_patches <= 0 or not is_square_token_count(num_patches):
+        raise ValueError(f"no-CLS mode requires square token grid, got token count {num_patches}.")
+
+    token_norm = tokens.norm(dim=-1)
+    attn_map = normalized_patch_scores(token_norm, img_size)
+    centered = tokens - tokens.mean(dim=1, keepdim=True)
+    patch_scores = centered.norm(dim=-1)
+    patch_map = normalized_patch_scores(patch_scores, img_size)
+    fft_scores = last_vit_stable_patch_frequency(tokens=tokens, topk=fft_topk, has_cls_token=False)
+    fft_map = normalized_patch_scores(fft_scores, img_size)
+    return compute_overlap_stats(
+        attn_map=attn_map,
+        patch_map=patch_map,
+        fft_map=fft_map,
+        top_ratio=overlap_top_ratio,
+        metric_mode="no_cls",
+    )
+
+
+def compute_overlap_stats(
+    attn_map: np.ndarray,
+    patch_map: np.ndarray,
+    fft_map: np.ndarray,
+    top_ratio: float,
+    metric_mode: str,
+) -> dict[str, Any]:
+    attn_high = top_ratio_mask(normalize_map(attn_map), top_ratio)
+    patch_high = top_ratio_mask(normalize_map(patch_map), top_ratio)
+    fft_high = top_ratio_mask(normalize_map(fft_map), top_ratio)
+    attn_patch_high = attn_high & patch_high
+    all_high = attn_patch_high & fft_high
+
+    foreground_mean = mask_mean(fft_map, attn_patch_high)
+    anchor_mean = mask_mean(fft_map, ~(attn_high | patch_high))
+    return {
+        "metric_mode": metric_mode,
+        "attn_patch_jaccard": jaccard(attn_high, patch_high),
+        "fft_capture_ratio": float(all_high.sum() / attn_patch_high.sum()) if attn_patch_high.any() else 0.0,
+        "fft_precision_ratio": float(all_high.sum() / fft_high.sum()) if fft_high.any() else 0.0,
+        "attn_fft_corr": pearson_corr(attn_map, fft_map),
+        "patch_fft_corr": pearson_corr(patch_map, fft_map),
+        "attn_patch_corr": pearson_corr(attn_map, patch_map),
+        "attn_fft_spearman": spearman_corr(attn_map, fft_map),
+        "patch_fft_spearman": spearman_corr(patch_map, fft_map),
+        "attn_patch_spearman": spearman_corr(attn_map, patch_map),
+        "foreground_mean": foreground_mean,
+        "anchor_mean": anchor_mean,
+        "foreground_anchor_separation": foreground_mean - anchor_mean,
+    }
+
+
+STATS_FIELDS = [
+    "model_name",
+    "image_name",
+    "block_index",
+    "resolved_block_index",
+    "block_name",
+    "metric_mode",
+    "pred_class",
+    "attn_patch_jaccard",
+    "fft_capture_ratio",
+    "fft_precision_ratio",
+    "attn_fft_corr",
+    "patch_fft_corr",
+    "attn_patch_corr",
+    "attn_fft_spearman",
+    "patch_fft_spearman",
+    "attn_patch_spearman",
+    "foreground_mean",
+    "anchor_mean",
+    "foreground_anchor_separation",
+    "error",
+]
+
+
+def summarize_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    metrics = [
+        "attn_patch_jaccard",
+        "fft_capture_ratio",
+        "fft_precision_ratio",
+        "attn_fft_corr",
+        "patch_fft_corr",
+        "attn_patch_corr",
+        "foreground_anchor_separation",
+    ]
+    grouped: dict[tuple[str, int, int, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        key = (
+            str(row["model_name"]),
+            int(row["block_index"]),
+            int(row["resolved_block_index"]),
+            str(row.get("metric_mode", "")),
+        )
+        grouped.setdefault(key, []).append(row)
+
+    summary_rows = []
+    for (model_name, block_index, resolved_block_index, metric_mode), group in sorted(grouped.items()):
+        out: dict[str, Any] = {
+            "model_name": model_name,
+            "block_index": block_index,
+            "resolved_block_index": resolved_block_index,
+            "metric_mode": metric_mode,
+            "records": len(group),
+            "errors": sum(1 for row in group if row.get("error")),
+        }
+        for metric in metrics:
+            values = np.array([safe_float(row.get(metric)) for row in group], dtype=np.float64)
+            values = values[np.isfinite(values)]
+            if values.size == 0:
+                out[f"{metric}_mean"] = float("nan")
+                out[f"{metric}_median"] = float("nan")
+                out[f"{metric}_std"] = float("nan")
+                out[f"{metric}_p25"] = float("nan")
+                out[f"{metric}_p75"] = float("nan")
+                continue
+            out[f"{metric}_mean"] = float(values.mean())
+            out[f"{metric}_median"] = float(np.median(values))
+            out[f"{metric}_std"] = float(values.std(ddof=0))
+            out[f"{metric}_p25"] = float(np.percentile(values, 25))
+            out[f"{metric}_p75"] = float(np.percentile(values, 75))
+        summary_rows.append(out)
+    return summary_rows
+
+
+def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str] | None = None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if fieldnames is None:
+        fieldnames = sorted({key for row in rows for key in row.keys()})
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def run_csv_stats(args, model: ViTWithHook, image_paths: list[Path], output_dir: Path) -> None:
+    block_indices = args.block_indices if args.block_indices is not None else (args.block_index,)
+    stats_csv = Path(args.stats_csv) if args.stats_csv else output_dir / "attention_patchscores_stats.csv"
+    summary_csv = Path(args.summary_csv) if args.summary_csv else output_dir / "attention_patchscores_summary.csv"
+    rows: list[dict[str, Any]] = []
+
+    with GenericAttentionCapture(model) as capture:
+        if not capture.records:
+            raise RuntimeError(f"No attention qkv modules found for model {args.model_name}.")
+        resolved_indices = [resolve_block_index(idx, len(capture.records)) for idx in block_indices]
+
+        for path in image_paths:
+            print(f"Processing {path}")
+            original = load_rgb_image(path, args.img_size)
+            tensor = preprocess_rgb(original).unsqueeze(0).to(DEVICE)
+            capture.reset()
+            with torch.no_grad():
+                logits = model.model(tensor)
+                pred = logits.argmax(dim=1).item()
+
+            for requested_idx, resolved_idx in zip(block_indices, resolved_indices):
+                record = capture.records[resolved_idx]
+                row = {
+                    "model_name": args.model_name,
+                    "image_name": path.name,
+                    "block_index": requested_idx,
+                    "resolved_block_index": resolved_idx,
+                    "block_name": record["block_name"],
+                    "metric_mode": "",
+                    "pred_class": pred,
+                    "error": "",
+                }
+                try:
+                    tokens = flatten_tokens(record["tokens"])
+                    if tokens.size(1) > 1 and is_square_token_count(tokens.size(1) - 1):
+                        row.update(compute_cls_stats(record, args.img_size, args.fft_topk, args.overlap_top_ratio))
+                    else:
+                        row.update(compute_no_cls_stats(record, args.img_size, args.fft_topk, args.overlap_top_ratio))
+                except Exception as exc:  # keep long runs alive and record unsupported layers.
+                    row["error"] = f"{type(exc).__name__}: {exc}"
+                rows.append(row)
+
+    write_csv(stats_csv, rows, STATS_FIELDS)
+    summary_rows = summarize_rows(rows)
+    write_csv(summary_csv, summary_rows)
+    print(f"Saved per-image stats to {stats_csv}")
+    print(f"Saved summary stats to {summary_csv}")
 
 
 def tokens_to_heatmap(token_scores: torch.Tensor, img_size: int) -> np.ndarray:
@@ -404,6 +799,10 @@ def main():
 
     model = build_model(num_classes=num_classes, model_name=args.model_name)
     image_paths = list_image_paths(image_dir, args.pattern, args.max_images)
+
+    if args.no_save_images or args.stats_csv or args.summary_csv or args.block_indices is not None:
+        run_csv_stats(args, model, image_paths, output_dir)
+        return
 
     for path in image_paths:
         print(f"Processing {path}")
