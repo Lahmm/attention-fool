@@ -852,6 +852,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         anchor_end_weight: float | None = None,
         lazy_spectral_delta: bool = False,
         lazy_spectral_cutoff: float = 0.25,
+        anchor_mod_alpha: float = 1.0,
+        fg_mod_alpha: float = 0.5,
+        anchor_mod_power: float = 1.0,
         ensemble_models: tuple[torch.nn.Module, ...] | None = None,
         device: torch.device | None = None,
     ) -> None:
@@ -906,6 +909,11 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.anchor_end_weight = self.lambda_anchor if anchor_end_weight is None else float(anchor_end_weight)
         self.lazy_spectral_delta = bool(lazy_spectral_delta)
         self.lazy_spectral_cutoff = float(lazy_spectral_cutoff)
+        self.anchor_mod_alpha = float(anchor_mod_alpha)
+        self.fg_mod_alpha = float(fg_mod_alpha)
+        self.anchor_mod_power = float(anchor_mod_power)
+        if self.anchor_mod_power <= 0:
+            raise ValueError(f"anchor_mod_power must be positive, got {anchor_mod_power}.")
         self.ensemble_models = tuple(ensemble_models or ())
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
         self._perturb_kernel = (
@@ -1168,7 +1176,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
     ) -> torch.Tensor:
         anchor = torch.stack([anchor_masks[layer_idx].float() for layer_idx in layer_indices]).mean(dim=0)
         foreground = torch.stack([fg_masks[layer_idx].float() for layer_idx in layer_indices]).mean(dim=0)
-        token_map = anchor + 0.5 * foreground
+        token_map = self.anchor_mod_alpha * anchor + self.fg_mod_alpha * foreground
+        if self.anchor_mod_power != 1.0:
+            token_map = token_map ** self.anchor_mod_power
         token_map = self._normalize_weights(token_map)
         batch_size, num_patches = token_map.shape
         grid_size = int(num_patches ** 0.5)

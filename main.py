@@ -64,6 +64,9 @@ def create_attacker(
     anchor_end_weight: float | None = None,
     lazy_spectral_delta: bool = False,
     lazy_spectral_cutoff: float = 0.25,
+    anchor_mod_alpha: float = 1.0,
+    fg_mod_alpha: float = 0.5,
+    anchor_mod_power: float = 1.0,
     ensemble_models: tuple[ViTWithHook, ...] = (),
 ) -> MIFGSMAttacker:
     if attack_type == "lazy-agg":
@@ -94,6 +97,9 @@ def create_attacker(
             anchor_end_weight=anchor_end_weight,
             lazy_spectral_delta=lazy_spectral_delta,
             lazy_spectral_cutoff=lazy_spectral_cutoff,
+            anchor_mod_alpha=anchor_mod_alpha,
+            fg_mod_alpha=fg_mod_alpha,
+            anchor_mod_power=anchor_mod_power,
             ensemble_models=ensemble_models,
             device=DEVICE,
         )
@@ -371,6 +377,9 @@ def parse_args():
     parser.add_argument("--anchor-end-weight", type=float, default=None, help="Final lazy-agg anchor modulation weight for linear/cosine schedules. Defaults to lambda-anchor.")
     parser.add_argument("--lazy-spectral-delta", action="store_true", help="Enable lazy-agg spectral perturbation filtering in the second half of the attack.")
     parser.add_argument("--lazy-spectral-cutoff", type=float, default=0.25, help="Low-pass cutoff ratio for lazy-agg spectral perturbation filtering.")
+    parser.add_argument("--anchor-mod-alpha", type=float, default=1.0, help="Anchor multiplier in anchor_modulation map.")
+    parser.add_argument("--fg-mod-alpha", type=float, default=0.5, help="Foreground multiplier in anchor_modulation map.")
+    parser.add_argument("--anchor-mod-power", type=float, default=1.0, help="Power exponent applied to token_map before normalization.")
     parser.add_argument("--ensemble-source-models", type=parse_model_names, default=(), help="Comma-separated extra lazy-agg source models whose CE gradients are averaged with the primary ViT.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode this is required and must match outputs/attack/<attack-name>.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
@@ -426,6 +435,9 @@ def main(
     anchor_end_weight: float | None = None,
     lazy_spectral_delta: bool = False,
     lazy_spectral_cutoff: float = 0.25,
+    anchor_mod_alpha: float = 1.0,
+    fg_mod_alpha: float = 0.5,
+    anchor_mod_power: float = 1.0,
     ensemble_source_models: tuple[str, ...] = (),
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
@@ -490,6 +502,9 @@ def main(
         anchor_end_weight=anchor_end_weight,
         lazy_spectral_delta=lazy_spectral_delta,
         lazy_spectral_cutoff=lazy_spectral_cutoff,
+        anchor_mod_alpha=anchor_mod_alpha,
+        fg_mod_alpha=fg_mod_alpha,
+        anchor_mod_power=anchor_mod_power,
         ensemble_models=ensemble_models,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
@@ -555,6 +570,9 @@ if __name__ == "__main__":
         anchor_end_weight=args.anchor_end_weight,
         lazy_spectral_delta=args.lazy_spectral_delta,
         lazy_spectral_cutoff=args.lazy_spectral_cutoff,
+        anchor_mod_alpha=args.anchor_mod_alpha,
+        fg_mod_alpha=args.fg_mod_alpha,
+        anchor_mod_power=args.anchor_mod_power,
         ensemble_source_models=args.ensemble_source_models,
         output_dir=args.output_dir,
         mode=args.mode,
