@@ -59,6 +59,11 @@ def create_attacker(
     eot_iter: int = 1,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
     perturb_smooth_sigma: float = 0.0,
+    anchor_schedule: str = "constant",
+    anchor_start_step: int | None = None,
+    anchor_end_weight: float | None = None,
+    lazy_spectral_delta: bool = False,
+    lazy_spectral_cutoff: float = 0.25,
     ensemble_models: tuple[ViTWithHook, ...] = (),
 ) -> MIFGSMAttacker:
     if attack_type == "lazy-agg":
@@ -84,6 +89,11 @@ def create_attacker(
             nesterov=nesterov,
             eot_iter=eot_iter,
             perturb_smooth_sigma=perturb_smooth_sigma,
+            anchor_schedule=anchor_schedule,
+            anchor_start_step=anchor_start_step,
+            anchor_end_weight=anchor_end_weight,
+            lazy_spectral_delta=lazy_spectral_delta,
+            lazy_spectral_cutoff=lazy_spectral_cutoff,
             ensemble_models=ensemble_models,
             device=DEVICE,
         )
@@ -356,6 +366,11 @@ def parse_args():
     parser.add_argument("--eot-iter", type=int, default=1, help="Number of DIM samples averaged per SI scale by lazy-agg anchor_modulate.")
     parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0), help='DIM resize scale range for lazy-agg, e.g. "0.85,1.0".')
     parser.add_argument("--perturb-smooth-sigma", type=float, default=0.0, help="Gaussian sigma for optional lazy-agg perturbation smoothing after each step. 0=disabled.")
+    parser.add_argument("--anchor-schedule", type=str, default="constant", choices=["constant", "linear", "cosine"], help="Lazy-agg anchor modulation schedule.")
+    parser.add_argument("--anchor-start-step", type=int, default=None, help="First zero-based step where lazy-agg anchor modulation can apply. Defaults to warmup steps.")
+    parser.add_argument("--anchor-end-weight", type=float, default=None, help="Final lazy-agg anchor modulation weight for linear/cosine schedules. Defaults to lambda-anchor.")
+    parser.add_argument("--lazy-spectral-delta", action="store_true", help="Enable lazy-agg spectral perturbation filtering in the second half of the attack.")
+    parser.add_argument("--lazy-spectral-cutoff", type=float, default=0.25, help="Low-pass cutoff ratio for lazy-agg spectral perturbation filtering.")
     parser.add_argument("--ensemble-source-models", type=parse_model_names, default=(), help="Comma-separated extra lazy-agg source models whose CE gradients are averaged with the primary ViT.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode this is required and must match outputs/attack/<attack-name>.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
@@ -406,6 +421,11 @@ def main(
     eot_iter: int = 1,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
     perturb_smooth_sigma: float = 0.0,
+    anchor_schedule: str = "constant",
+    anchor_start_step: int | None = None,
+    anchor_end_weight: float | None = None,
+    lazy_spectral_delta: bool = False,
+    lazy_spectral_cutoff: float = 0.25,
     ensemble_source_models: tuple[str, ...] = (),
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
@@ -465,6 +485,11 @@ def main(
         eot_iter=eot_iter,
         dim_resize_range=dim_resize_range,
         perturb_smooth_sigma=perturb_smooth_sigma,
+        anchor_schedule=anchor_schedule,
+        anchor_start_step=anchor_start_step,
+        anchor_end_weight=anchor_end_weight,
+        lazy_spectral_delta=lazy_spectral_delta,
+        lazy_spectral_cutoff=lazy_spectral_cutoff,
         ensemble_models=ensemble_models,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
@@ -525,6 +550,11 @@ if __name__ == "__main__":
         eot_iter=args.eot_iter,
         dim_resize_range=args.dim_resize_range,
         perturb_smooth_sigma=args.perturb_smooth_sigma,
+        anchor_schedule=args.anchor_schedule,
+        anchor_start_step=args.anchor_start_step,
+        anchor_end_weight=args.anchor_end_weight,
+        lazy_spectral_delta=args.lazy_spectral_delta,
+        lazy_spectral_cutoff=args.lazy_spectral_cutoff,
         ensemble_source_models=args.ensemble_source_models,
         output_dir=args.output_dir,
         mode=args.mode,

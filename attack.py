@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn.functional as F
 
@@ -845,6 +847,11 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         nesterov: bool = True,
         eot_iter: int = 1,
         perturb_smooth_sigma: float = 0.0,
+        anchor_schedule: str = "constant",
+        anchor_start_step: int | None = None,
+        anchor_end_weight: float | None = None,
+        lazy_spectral_delta: bool = False,
+        lazy_spectral_cutoff: float = 0.25,
         ensemble_models: tuple[torch.nn.Module, ...] | None = None,
         device: torch.device | None = None,
     ) -> None:
@@ -867,6 +874,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         valid_combine = ("pcgrad_asymmetric", "sum", "ce", "anchor_modulate")
         if grad_combine not in valid_combine:
             raise ValueError(f"grad_combine must be one of {valid_combine}, got {grad_combine!r}.")
+        valid_anchor_schedules = ("constant", "linear", "cosine")
+        if anchor_schedule not in valid_anchor_schedules:
+            raise ValueError(f"anchor_schedule must be one of {valid_anchor_schedules}, got {anchor_schedule!r}.")
 
         self.layers = tuple(int(layer) for layer in layers)
         self.anchor_top_ratio = float(anchor_top_ratio)
@@ -889,6 +899,13 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if self.eot_iter <= 0:
             raise ValueError(f"eot_iter must be positive, got {eot_iter}.")
         self.perturb_smooth_sigma = float(perturb_smooth_sigma)
+        self.anchor_schedule = anchor_schedule
+        self.anchor_start_step = self.warmup_steps if anchor_start_step is None else int(anchor_start_step)
+        if self.anchor_start_step < 0:
+            raise ValueError(f"anchor_start_step must be non-negative, got {self.anchor_start_step}.")
+        self.anchor_end_weight = self.lambda_anchor if anchor_end_weight is None else float(anchor_end_weight)
+        self.lazy_spectral_delta = bool(lazy_spectral_delta)
+        self.lazy_spectral_cutoff = float(lazy_spectral_cutoff)
         self.ensemble_models = tuple(ensemble_models or ())
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
         self._perturb_kernel = (
@@ -896,6 +913,22 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             if self.perturb_smooth_sigma > 0
             else None
         )
+
+    def _anchor_weight_for_step(self, step_idx: int) -> float:
+        if step_idx < self.anchor_start_step:
+            return 0.0
+        if self.anchor_schedule == "constant":
+            return self.lambda_anchor
+
+        ramp_end_step = max(self.anchor_start_step + 1, self.steps // 2)
+        if step_idx >= ramp_end_step:
+            return self.anchor_end_weight
+
+        progress = (step_idx - self.anchor_start_step + 1) / (ramp_end_step - self.anchor_start_step + 1)
+        progress = max(0.0, min(1.0, progress))
+        if self.anchor_schedule == "cosine":
+            progress = 0.5 - 0.5 * math.cos(math.pi * progress)
+        return self.anchor_end_weight * progress
 
     @staticmethod
     def _build_ti_kernel(sigma: float) -> torch.Tensor:
@@ -919,6 +952,20 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         kernel = self._perturb_kernel.to(delta.device, delta.dtype).repeat(delta.size(1), 1, 1, 1)
         pad = kernel.size(2) // 2
         return F.conv2d(F.pad(delta, (pad, pad, pad, pad), mode="reflect"), kernel, groups=delta.size(1))
+
+    def _spectral_filter_delta(self, delta: torch.Tensor) -> torch.Tensor:
+        from utils import image_2d_fft_low_high_maps
+
+        maps = image_2d_fft_low_high_maps(
+            delta,
+            cutoff_ratio=self.lazy_spectral_cutoff,
+            transition_ratio=self.spectral_transition,
+        )
+        filter_weights = maps["low_ratio"].to(delta.dtype)
+        if filter_weights.ndim == 2:
+            filter_weights = filter_weights.unsqueeze(0)
+        filter_weights = filter_weights.unsqueeze(1)
+        return delta * (0.5 + 0.5 * filter_weights)
 
     def _input_diversity(self, images: torch.Tensor) -> torch.Tensor:
         if not self.input_diversity:
@@ -1078,9 +1125,16 @@ class LazyAggregationAttacker(MIFGSMAttacker):
 
         return torch.stack(layer_terms).mean()
 
-    def _combine_grads(self, g_ce: torch.Tensor, g_anchor: torch.Tensor) -> tuple[torch.Tensor, float]:
+    def _combine_grads(
+        self,
+        g_ce: torch.Tensor,
+        g_anchor: torch.Tensor,
+        anchor_weight: float | None = None,
+    ) -> tuple[torch.Tensor, float]:
         if self.grad_combine == "ce":
             return g_ce, 1.0
+        if anchor_weight is None:
+            anchor_weight = self.lambda_anchor
 
         g_ce = self._l2_normalize_grad(g_ce, self.grad_l2_norm)
         g_anchor = self._l2_normalize_grad(g_anchor, self.grad_l2_norm)
@@ -1090,7 +1144,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             cos = (flat_ce * flat_anchor).sum(dim=1) / (
                 flat_ce.norm(dim=1).clamp_min(1e-12) * flat_anchor.norm(dim=1).clamp_min(1e-12)
             )
-            return g_ce + self.lambda_anchor * g_anchor, cos.mean().item()
+            return g_ce + anchor_weight * g_anchor, cos.mean().item()
 
         batch_size = g_ce.size(0)
         flat_ce = g_ce.reshape(batch_size, -1)
@@ -1103,7 +1157,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         conflict = cos < 0
         projection = (dot / ce_norm_sq).unsqueeze(1) * flat_ce
         flat_anchor = torch.where(conflict[:, None], flat_anchor - projection, flat_anchor)
-        return (flat_ce + self.lambda_anchor * flat_anchor).reshape_as(g_ce), cos.mean().item()
+        return (flat_ce + anchor_weight * flat_anchor).reshape_as(g_ce), cos.mean().item()
 
     def _build_anchor_modulation_map(
         self,
@@ -1178,10 +1232,11 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 ce_loss = F.cross_entropy(logits_adv, labels)
             g_ce = torch.autograd.grad(ce_loss, grad_pixels, retain_graph=True)[0]
 
-            if step_idx < self.warmup_steps:
+            anchor_weight = self._anchor_weight_for_step(step_idx)
+            if anchor_weight <= 0.0:
                 grad, avg_cos = g_ce, 1.0
             elif self.grad_combine == "anchor_modulate":
-                grad = g_ce * (1.0 + self.lambda_anchor * anchor_modulation.to(g_ce.device, g_ce.dtype))
+                grad = g_ce * (1.0 + anchor_weight * anchor_modulation.to(g_ce.device, g_ce.dtype))
                 avg_cos = 1.0
             else:
                 anchor_loss = self._anchor_loss(
@@ -1192,7 +1247,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     anchor_masks=anchor_masks,
                 )
                 g_anchor = torch.autograd.grad(anchor_loss, grad_pixels, retain_graph=False)[0]
-                grad, avg_cos = self._combine_grads(g_ce, g_anchor)
+                grad, avg_cos = self._combine_grads(g_ce, g_anchor, anchor_weight=anchor_weight)
 
             self._last_cosine_log.append((step_idx, avg_cos))
             grad = self._smooth_grad(self._normalize_grad(grad))
@@ -1202,6 +1257,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 adv_pixels = adv_pixels + self.step_size * momentum.sign()
                 delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
                 delta = torch.clamp(self._smooth_perturbation(delta), -self.epsilon, self.epsilon)
+                if self.lazy_spectral_delta and step_idx + 1 >= max(self.steps // 2, self.anchor_start_step):
+                    delta = torch.clamp(self._spectral_filter_delta(delta), -self.epsilon, self.epsilon)
                 adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
 
         cos_vals = [c for _, c in self._last_cosine_log]
