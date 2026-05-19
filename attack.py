@@ -857,6 +857,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         anchor_mod_power: float = 1.0,
         ensemble_models: tuple[torch.nn.Module, ...] | None = None,
         attention_guide_models: tuple[torch.nn.Module, ...] | None = None,
+        guide_dilate_kernel: int = 1,
+        guide_smooth_sigma: float = 0.0,
         device: torch.device | None = None,
     ) -> None:
         super().__init__(
@@ -875,7 +877,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             raise ValueError(f"fg_top_ratio must be in (0, 1), got {fg_top_ratio}.")
         if fft_topk <= 0:
             raise ValueError(f"fft_topk must be positive, got {fft_topk}.")
-        valid_combine = ("pcgrad_asymmetric", "sum", "ce", "anchor_modulate", "stable_attention")
+        valid_combine = ("pcgrad_asymmetric", "sum", "ce", "anchor_modulate", "stable_attention", "expanded_stable_attention")
         if grad_combine not in valid_combine:
             raise ValueError(f"grad_combine must be one of {valid_combine}, got {grad_combine!r}.")
         valid_anchor_schedules = ("constant", "linear", "cosine")
@@ -917,6 +919,12 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             raise ValueError(f"anchor_mod_power must be positive, got {anchor_mod_power}.")
         self.ensemble_models = tuple(ensemble_models or ())
         self.attention_guide_models = tuple(attention_guide_models or ())
+        self.guide_dilate_kernel = int(guide_dilate_kernel)
+        if self.guide_dilate_kernel <= 0 or self.guide_dilate_kernel % 2 == 0:
+            raise ValueError(f"guide_dilate_kernel must be a positive odd integer, got {guide_dilate_kernel}.")
+        self.guide_smooth_sigma = float(guide_smooth_sigma)
+        if self.guide_smooth_sigma < 0:
+            raise ValueError(f"guide_smooth_sigma must be non-negative, got {guide_smooth_sigma}.")
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
         self._perturb_kernel = (
             self._build_ti_kernel(self.perturb_smooth_sigma)
@@ -1272,7 +1280,19 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             for handle in handles:
                 handle.remove()
 
-    def _build_stable_attention_modulation_map(self, images: torch.Tensor, img_size: int) -> torch.Tensor:
+    def _smooth_guide_grid(self, grid: torch.Tensor) -> torch.Tensor:
+        if self.guide_smooth_sigma <= 0:
+            return grid
+        kernel = self._build_ti_kernel(self.guide_smooth_sigma).to(grid.device, grid.dtype)
+        pad = kernel.size(2) // 2
+        return F.conv2d(F.pad(grid, (pad, pad, pad, pad), mode="reflect"), kernel)
+
+    def _build_stable_attention_modulation_map(
+        self,
+        images: torch.Tensor,
+        img_size: int,
+        expand_shared: bool = False,
+    ) -> torch.Tensor:
         primary_score = self._collect_cls_attention_scores(self.model, images)
         if primary_score is None:
             raise ValueError("The white-box model did not produce compatible CLS attention scores.")
@@ -1288,11 +1308,21 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 scores.append(score)
         stable_score = self._normalize_weights(torch.stack(scores).mean(dim=0))
         stable_mask = self._select_top_mask(stable_score, self.fg_top_ratio).to(stable_score.dtype)
-        token_map = self._normalize_weights(stable_score * stable_mask)
+        token_map = stable_score * stable_mask
         grid_size = int(num_patches ** 0.5)
         if grid_size * grid_size != num_patches:
             raise ValueError(f"Patch count {num_patches} is not a square.")
         grid = token_map.view(token_map.size(0), 1, grid_size, grid_size)
+        if expand_shared:
+            if self.guide_dilate_kernel > 1:
+                pad = self.guide_dilate_kernel // 2
+                grid = F.max_pool2d(grid, kernel_size=self.guide_dilate_kernel, stride=1, padding=pad)
+            grid = self._smooth_guide_grid(grid)
+            token_map = self._normalize_weights(grid.flatten(1))
+            grid = token_map.view(token_map.size(0), 1, grid_size, grid_size)
+        else:
+            token_map = self._normalize_weights(token_map)
+            grid = token_map.view(token_map.size(0), 1, grid_size, grid_size)
         return F.interpolate(grid, size=(img_size, img_size), mode="bilinear", align_corners=False).detach()
 
     def _build_anchor_modulation_map(
@@ -1337,8 +1367,12 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 layer_indices=layer_indices,
                 img_size=clean_pixels.size(-1),
             )
-        elif self.grad_combine == "stable_attention":
-            anchor_modulation = self._build_stable_attention_modulation_map(images, clean_pixels.size(-1))
+        elif self.grad_combine in ("stable_attention", "expanded_stable_attention"):
+            anchor_modulation = self._build_stable_attention_modulation_map(
+                images,
+                clean_pixels.size(-1),
+                expand_shared=self.grad_combine == "expanded_stable_attention",
+            )
         adv_pixels = clean_pixels.clone().detach()
         momentum = torch.zeros_like(adv_pixels)
         self._last_cosine_log = []
@@ -1351,7 +1385,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     delta = torch.clamp(grad_pixels - clean_pixels, -self.epsilon, self.epsilon)
                     grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
             grad_pixels = grad_pixels.detach().requires_grad_(True)
-            if self.grad_combine in ("anchor_modulate", "stable_attention"):
+            if self.grad_combine in ("anchor_modulate", "stable_attention", "expanded_stable_attention"):
                 ce_terms = []
                 norm_adv = self._normalize(grad_pixels)
                 source_models = (self.model, *self.ensemble_models) if self.grad_combine == "anchor_modulate" else (self.model,)
@@ -1379,7 +1413,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             anchor_weight = self._anchor_weight_for_step(step_idx)
             if anchor_weight <= 0.0:
                 grad, avg_cos = g_ce, 1.0
-            elif self.grad_combine in ("anchor_modulate", "stable_attention"):
+            elif self.grad_combine in ("anchor_modulate", "stable_attention", "expanded_stable_attention"):
                 grad = g_ce * (1.0 + anchor_weight * anchor_modulation.to(g_ce.device, g_ce.dtype))
                 avg_cos = 1.0
             else:
