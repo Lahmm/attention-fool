@@ -44,6 +44,7 @@ def parse_args():
     parser.add_argument("--block-indices", type=parse_block_indices, default=None, help='Comma-separated block indices for CSV stats, e.g. "-6,-5,-4,-3,-2,-1".')
     parser.add_argument("--img-size", type=int, default=224)
     parser.add_argument("--model-name", type=str, default=DEFAULT_MODEL_NAME, help="timm model name used for visualization.")
+    parser.add_argument("--model-names", type=parse_model_names, default=(), help="Comma-separated model names for cross-model overlap.")
     parser.add_argument("--fft-topk", type=int, default=1, help="Per-channel Top-K stable patch count used by FFT selection.")
     parser.add_argument("--fft-alpha", type=float, default=0.6, help="FFT stability heatmap overlay opacity.")
     parser.add_argument("--image-fft-alpha", type=float, default=0.70, help="Image-space 2D FFT low/high overlay opacity.")
@@ -54,6 +55,10 @@ def parse_args():
     parser.add_argument("--no-save-images", action="store_true", help="Only compute CSV statistics; do not save visualization images.")
     parser.add_argument("--stats-csv", type=str, default=None, help="Path for per-image/per-layer CSV statistics.")
     parser.add_argument("--summary-csv", type=str, default=None, help="Path for per-model/per-layer summary CSV statistics.")
+    parser.add_argument("--cross-model-overlap", action="store_true", help="Compute cross-model top-mask overlap statistics.")
+    parser.add_argument("--cross-stats-csv", type=str, default=None, help="Path for per-image/per-layer/model-pair overlap CSV.")
+    parser.add_argument("--cross-summary-csv", type=str, default=None, help="Path for cross-model overlap summary CSV.")
+    parser.add_argument("--cross-conclusion-csv", type=str, default=None, help="Path for cross-model overlap conclusion CSV.")
     parser.add_argument("--num-classes", type=int, default=None)
     parser.add_argument("--dataset-dir", type=str, default="data/clean_resized_images")
     parser.add_argument("--annotations-path",type=str,default="data/image_name_to_class_id_and_name.json")
@@ -65,6 +70,10 @@ def parse_block_indices(value: str) -> tuple[int, ...]:
     if not indices:
         raise argparse.ArgumentTypeError("block indices must contain at least one integer.")
     return indices
+
+
+def parse_model_names(value: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
 def build_model(num_classes: int, model_name: str) -> ViTWithHook:
@@ -505,6 +514,319 @@ def run_csv_stats(args, model: ViTWithHook, image_paths: list[Path], output_dir:
     print(f"Saved summary stats to {summary_csv}")
 
 
+
+DEFAULT_CROSS_MODEL_NAMES = (
+    "vit_base_patch16_224",
+    "deit_base_patch16_224",
+    "beit_base_patch16_224",
+    "cait_s24_224",
+    "pit_s_224",
+    "crossvit_15_240",
+)
+
+CROSS_METRIC_TYPES = (
+    "attention",
+    "patchscore",
+    "stability",
+    "joint_attn_patch",
+    "triple",
+)
+
+CROSS_STATS_FIELDS = [
+    "image_name",
+    "block_index",
+    "model_a",
+    "model_b",
+    "resolved_block_a",
+    "resolved_block_b",
+    "block_name_a",
+    "block_name_b",
+    "metric_type",
+    "jaccard",
+    "overlap_a_in_b",
+    "overlap_b_in_a",
+    "cosine_similarity",
+    "random_jaccard_baseline",
+    "above_random",
+    "density_a",
+    "density_b",
+    "error",
+]
+
+
+def binary_cosine(mask_a: np.ndarray, mask_b: np.ndarray) -> float:
+    a = mask_a.reshape(-1).astype(np.float64)
+    b = mask_b.reshape(-1).astype(np.float64)
+    denom = np.linalg.norm(a) * np.linalg.norm(b)
+    if denom <= 1e-12:
+        return 0.0
+    return float((a @ b) / denom)
+
+
+def expected_random_jaccard(mask_a: np.ndarray, mask_b: np.ndarray) -> float:
+    density_a = float(mask_a.mean())
+    density_b = float(mask_b.mean())
+    denom = density_a + density_b - density_a * density_b
+    if denom <= 1e-12:
+        return 0.0
+    return float((density_a * density_b) / denom)
+
+
+def overlap_fraction(source: np.ndarray, target: np.ndarray) -> float:
+    source_count = int(source.sum())
+    if source_count == 0:
+        return 0.0
+    return float((source & target).sum() / source_count)
+
+
+def compute_cls_maps_for_cross(
+    record: dict[str, Any],
+    img_size: int,
+    fft_topk: int,
+) -> dict[str, np.ndarray]:
+    tokens = flatten_tokens(record["tokens"])
+    qkv = record["qkv"]
+    num_patches = tokens.size(1) - 1
+    if qkv is None:
+        raise ValueError("Missing qkv output.")
+    if num_patches <= 0 or not is_square_token_count(num_patches):
+        raise ValueError(f"Cross-model CLS overlap requires square patch tokens, got token count {tokens.size(1)}.")
+
+    attn_logits = qkv_to_attn_logits(qkv, record["num_heads"])
+    attn_weights = torch.softmax(attn_logits, dim=-1)
+    attn_scores = attn_weights[:, :, 0, 1:].mean(dim=1)
+    attn_map = normalized_patch_scores(attn_scores, img_size)
+
+    cls_token = tokens[:, 0, :]
+    patch_tokens = tokens[:, 1:, :]
+    cls_token_expanded = cls_token.unsqueeze(1).expand_as(patch_tokens)
+    patch_scores = F.cosine_similarity(patch_tokens, cls_token_expanded, dim=-1)
+    patch_map = normalized_patch_scores(patch_scores, img_size)
+
+    fft_scores = last_vit_stable_patch_frequency(tokens=tokens, topk=fft_topk, has_cls_token=True)
+    stability_map = normalized_patch_scores(fft_scores, img_size)
+    return {
+        "attention": attn_map,
+        "patchscore": patch_map,
+        "stability": stability_map,
+    }
+
+
+def maps_to_cross_masks(maps: dict[str, np.ndarray], top_ratio: float) -> dict[str, np.ndarray]:
+    attention = top_ratio_mask(normalize_map(maps["attention"]), top_ratio)
+    patchscore = top_ratio_mask(normalize_map(maps["patchscore"]), top_ratio)
+    stability = top_ratio_mask(normalize_map(maps["stability"]), top_ratio)
+    joint = attention & patchscore
+    triple = joint & stability
+    return {
+        "attention": attention,
+        "patchscore": patchscore,
+        "stability": stability,
+        "joint_attn_patch": joint,
+        "triple": triple,
+    }
+
+
+def summarize_cross_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str, int, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        key = (
+            str(row["model_a"]),
+            str(row["model_b"]),
+            int(row["block_index"]),
+            str(row["metric_type"]),
+        )
+        grouped.setdefault(key, []).append(row)
+
+    summary_rows = []
+    metrics = [
+        "jaccard",
+        "overlap_a_in_b",
+        "overlap_b_in_a",
+        "cosine_similarity",
+        "random_jaccard_baseline",
+        "above_random",
+        "density_a",
+        "density_b",
+    ]
+    for (model_a, model_b, block_index, metric_type), group in sorted(grouped.items()):
+        out: dict[str, Any] = {
+            "model_a": model_a,
+            "model_b": model_b,
+            "block_index": block_index,
+            "metric_type": metric_type,
+            "records": len(group),
+            "errors": sum(1 for row in group if row.get("error")),
+        }
+        for metric in metrics:
+            values = np.array([safe_float(row.get(metric)) for row in group], dtype=np.float64)
+            values = values[np.isfinite(values)]
+            if values.size == 0:
+                out[f"{metric}_mean"] = float("nan")
+                out[f"{metric}_median"] = float("nan")
+                out[f"{metric}_p25"] = float("nan")
+                out[f"{metric}_p75"] = float("nan")
+                continue
+            out[f"{metric}_mean"] = float(values.mean())
+            out[f"{metric}_median"] = float(np.median(values))
+            out[f"{metric}_p25"] = float(np.percentile(values, 25))
+            out[f"{metric}_p75"] = float(np.percentile(values, 75))
+        summary_rows.append(out)
+    return summary_rows
+
+
+def cross_pair_group(model_a: str, model_b: str) -> str:
+    pair = {model_a, model_b}
+    if pair == {"vit_base_patch16_224", "deit_base_patch16_224"}:
+        return "vit_deit"
+    if "pit_s_224" in pair:
+        return "includes_pit"
+    if "crossvit_15_240" in pair:
+        return "includes_crossvit"
+    return "other_cls"
+
+
+def summarize_cross_conclusion(summary_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in summary_rows:
+        group = cross_pair_group(str(row["model_a"]), str(row["model_b"]))
+        key = (str(row["metric_type"]), group)
+        grouped.setdefault(key, []).append(row)
+
+    conclusion_rows = []
+    for (metric_type, group), rows in sorted(grouped.items()):
+        jaccard_vals = np.array([safe_float(row.get("jaccard_mean")) for row in rows], dtype=np.float64)
+        above_vals = np.array([safe_float(row.get("above_random_mean")) for row in rows], dtype=np.float64)
+        valid_j = jaccard_vals[np.isfinite(jaccard_vals)]
+        valid_a = above_vals[np.isfinite(above_vals)]
+        strong_layers = sum(1 for row in rows if safe_float(row.get("above_random_mean")) > 0.02)
+        weak_layers = sum(1 for row in rows if safe_float(row.get("above_random_mean")) <= 0.0)
+        conclusion_rows.append({
+            "metric_type": metric_type,
+            "model_pair_group": group,
+            "rows": len(rows),
+            "jaccard_mean": float(valid_j.mean()) if valid_j.size else float("nan"),
+            "above_random_mean": float(valid_a.mean()) if valid_a.size else float("nan"),
+            "strong_layers": strong_layers,
+            "weak_layers": weak_layers,
+        })
+    return conclusion_rows
+
+
+def run_cross_model_overlap(args, image_paths: list[Path], num_classes: int) -> None:
+    model_names = args.model_names or DEFAULT_CROSS_MODEL_NAMES
+    block_indices = args.block_indices if args.block_indices is not None else (-6, -5, -4, -3, -2, -1)
+    stats_csv = Path(args.cross_stats_csv or "outputs/csv/cross_cls_overlap_stats.csv")
+    summary_csv = Path(args.cross_summary_csv or "outputs/csv/cross_cls_overlap_summary.csv")
+    conclusion_csv = Path(args.cross_conclusion_csv or "outputs/csv/cross_cls_overlap_conclusion.csv")
+
+    model_entries = []
+    try:
+        for model_name in model_names:
+            print(f"Loading {model_name}")
+            model = build_model(num_classes=num_classes, model_name=model_name)
+            capture = GenericAttentionCapture(model)
+            capture.__enter__()
+            resolved = [resolve_block_index(idx, len(capture.records)) for idx in block_indices]
+            model_entries.append({
+                "name": model_name,
+                "model": model,
+                "capture": capture,
+                "resolved": resolved,
+            })
+
+        rows: list[dict[str, Any]] = []
+        for path in image_paths:
+            print(f"Processing {path}")
+            original = load_rgb_image(path, args.img_size)
+            tensor = preprocess_rgb(original).unsqueeze(0).to(DEVICE)
+            per_model_masks: dict[str, dict[int, dict[str, Any]]] = {}
+
+            for entry in model_entries:
+                capture = entry["capture"]
+                capture.reset()
+                with torch.no_grad():
+                    _logits = entry["model"].model(tensor)
+                layer_masks: dict[int, dict[str, Any]] = {}
+                for requested_idx, resolved_idx in zip(block_indices, entry["resolved"]):
+                    record = capture.records[resolved_idx]
+                    try:
+                        maps = compute_cls_maps_for_cross(record, args.img_size, args.fft_topk)
+                        masks = maps_to_cross_masks(maps, args.overlap_top_ratio)
+                        layer_masks[requested_idx] = {
+                            "error": "",
+                            "resolved": resolved_idx,
+                            "block_name": record["block_name"],
+                            "masks": masks,
+                        }
+                    except Exception as exc:
+                        layer_masks[requested_idx] = {
+                            "error": f"{type(exc).__name__}: {exc}",
+                            "resolved": resolved_idx,
+                            "block_name": record["block_name"],
+                            "masks": {},
+                        }
+                per_model_masks[entry["name"]] = layer_masks
+
+            for model_a_idx in range(len(model_entries)):
+                for model_b_idx in range(model_a_idx + 1, len(model_entries)):
+                    model_a = model_entries[model_a_idx]["name"]
+                    model_b = model_entries[model_b_idx]["name"]
+                    for block_index in block_indices:
+                        data_a = per_model_masks[model_a][block_index]
+                        data_b = per_model_masks[model_b][block_index]
+                        base = {
+                            "image_name": path.name,
+                            "block_index": block_index,
+                            "model_a": model_a,
+                            "model_b": model_b,
+                            "resolved_block_a": data_a["resolved"],
+                            "resolved_block_b": data_b["resolved"],
+                            "block_name_a": data_a["block_name"],
+                            "block_name_b": data_b["block_name"],
+                        }
+                        if data_a["error"] or data_b["error"]:
+                            for metric_type in CROSS_METRIC_TYPES:
+                                row = dict(base)
+                                row.update({
+                                    "metric_type": metric_type,
+                                    "error": data_a["error"] or data_b["error"],
+                                })
+                                rows.append(row)
+                            continue
+
+                        for metric_type in CROSS_METRIC_TYPES:
+                            mask_a = data_a["masks"][metric_type]
+                            mask_b = data_b["masks"][metric_type]
+                            baseline = expected_random_jaccard(mask_a, mask_b)
+                            jac = jaccard(mask_a, mask_b)
+                            row = dict(base)
+                            row.update({
+                                "metric_type": metric_type,
+                                "jaccard": jac,
+                                "overlap_a_in_b": overlap_fraction(mask_a, mask_b),
+                                "overlap_b_in_a": overlap_fraction(mask_b, mask_a),
+                                "cosine_similarity": binary_cosine(mask_a, mask_b),
+                                "random_jaccard_baseline": baseline,
+                                "above_random": jac - baseline,
+                                "density_a": float(mask_a.mean()),
+                                "density_b": float(mask_b.mean()),
+                                "error": "",
+                            })
+                            rows.append(row)
+
+        write_csv(stats_csv, rows, CROSS_STATS_FIELDS)
+        summary_rows = summarize_cross_rows(rows)
+        write_csv(summary_csv, summary_rows)
+        conclusion_rows = summarize_cross_conclusion(summary_rows)
+        write_csv(conclusion_csv, conclusion_rows)
+        print(f"Saved cross-model stats to {stats_csv}")
+        print(f"Saved cross-model summary to {summary_csv}")
+        print(f"Saved cross-model conclusion to {conclusion_csv}")
+    finally:
+        for entry in model_entries:
+            entry["capture"].__exit__(None, None, None)
+
 def tokens_to_heatmap(token_scores: torch.Tensor, img_size: int) -> np.ndarray:
     num_tokens = token_scores.numel()
     grid_size = int(math.sqrt(num_tokens))
@@ -796,9 +1118,13 @@ def main():
     dataset_dir = Path(args.dataset_dir)
     annotations_path = Path(args.annotations_path)
     num_classes = resolve_num_classes(args.num_classes, dataset_dir, annotations_path, args.img_size)
+    image_paths = list_image_paths(image_dir, args.pattern, args.max_images)
+
+    if args.cross_model_overlap:
+        run_cross_model_overlap(args, image_paths, num_classes)
+        return
 
     model = build_model(num_classes=num_classes, model_name=args.model_name)
-    image_paths = list_image_paths(image_dir, args.pattern, args.max_images)
 
     if args.no_save_images or args.stats_csv or args.summary_csv or args.block_indices is not None:
         run_csv_stats(args, model, image_paths, output_dir)
