@@ -214,19 +214,48 @@ class GenericAttentionCapture:
                 continue
             record = {
                 "index": len(self.records),
+                "mode": "qkv",
                 "qkv_name": qkv_name,
                 "block_name": block_name,
                 "attn_module": attn_module,
                 "block_module": block_module,
                 "num_heads": getattr(attn_module, "num_heads", None),
                 "qkv": None,
+                "attn_input": None,
+                "tokens": None,
+            }
+            self.records.append(record)
+
+        for q_name, q_module in self.module_dict.items():
+            if not q_name.endswith("attn.q"):
+                continue
+            attn_name = q_name.rsplit(".q", 1)[0]
+            k_module = self.module_dict.get(f"{attn_name}.k")
+            v_module = self.module_dict.get(f"{attn_name}.v")
+            attn_module = self.module_dict.get(attn_name)
+            block_name = q_name.rsplit(".attn.q", 1)[0]
+            block_module = self.module_dict.get(block_name)
+            if k_module is None or v_module is None or attn_module is None or block_module is None:
+                continue
+            record = {
+                "index": len(self.records),
+                "mode": "class_attn",
+                "qkv_name": q_name,
+                "block_name": block_name,
+                "attn_module": attn_module,
+                "block_module": block_module,
+                "num_heads": getattr(attn_module, "num_heads", None),
+                "qkv": None,
+                "attn_input": None,
                 "tokens": None,
             }
             self.records.append(record)
 
     def __enter__(self):
         for record in self.records:
-            self.handles.append(record["attn_module"].qkv.register_forward_hook(self._qkv_hook(record)))
+            if hasattr(record["attn_module"], "qkv"):
+                self.handles.append(record["attn_module"].qkv.register_forward_hook(self._qkv_hook(record)))
+            self.handles.append(record["attn_module"].register_forward_pre_hook(self._attn_pre_hook(record)))
             self.handles.append(record["block_module"].register_forward_hook(self._block_hook(record)))
         return self
 
@@ -238,12 +267,21 @@ class GenericAttentionCapture:
     def reset(self) -> None:
         for record in self.records:
             record["qkv"] = None
+            record["attn_input"] = None
             record["tokens"] = None
 
     @staticmethod
     def _qkv_hook(record: dict[str, Any]):
         def hook(_module, _inputs, output):
             record["qkv"] = output.detach() if isinstance(output, torch.Tensor) else None
+
+        return hook
+
+    @staticmethod
+    def _attn_pre_hook(record: dict[str, Any]):
+        def hook(_module, inputs):
+            if inputs and isinstance(inputs[0], torch.Tensor):
+                record["attn_input"] = inputs[0].detach()
 
         return hook
 
@@ -271,6 +309,51 @@ def qkv_to_attn_logits(qkv: torch.Tensor, num_heads: int | None) -> torch.Tensor
     q, k = qkv_view[0], qkv_view[1]
     return (q @ k.transpose(-2, -1)) * (head_dim ** -0.5)
 
+
+
+def build_qkv_from_attn_input(record: dict[str, Any]) -> torch.Tensor:
+    x = record.get("attn_input")
+    if x is None:
+        raise ValueError("Missing attention input for qkv reconstruction.")
+    attn_module = record["attn_module"]
+    qkv_layer = getattr(attn_module, "qkv", None)
+    if qkv_layer is None:
+        raise ValueError("Attention module does not expose qkv.")
+
+    q_bias = getattr(attn_module, "q_bias", None)
+    if q_bias is None:
+        return qkv_layer(x)
+
+    qkv_bias = torch.cat((attn_module.q_bias, attn_module.k_bias, attn_module.v_bias))
+    if getattr(attn_module, "qkv_bias_separate", False):
+        qkv = qkv_layer(x)
+        return qkv + qkv_bias
+    return F.linear(x, weight=qkv_layer.weight, bias=qkv_bias)
+
+
+def qkv_record_to_attn_logits(record: dict[str, Any]) -> torch.Tensor:
+    qkv = record.get("qkv")
+    if qkv is None:
+        qkv = build_qkv_from_attn_input(record)
+    return qkv_to_attn_logits(qkv, record["num_heads"])
+
+
+def class_attn_record_to_attn_logits(record: dict[str, Any]) -> torch.Tensor:
+    x = record.get("attn_input")
+    if x is None:
+        raise ValueError("Missing class attention input.")
+    attn_module = record["attn_module"]
+    num_heads = int(record["num_heads"])
+    if num_heads <= 0:
+        raise ValueError(f"Invalid class attention heads: {record['num_heads']}.")
+    bsz, num_tokens, channels = x.shape
+    head_dim = channels // num_heads
+    if channels % num_heads != 0:
+        raise ValueError(f"Class attention channels {channels} not divisible by heads {num_heads}.")
+    q = attn_module.q(x[:, 0]).unsqueeze(1).reshape(bsz, 1, num_heads, head_dim).permute(0, 2, 1, 3)
+    k = attn_module.k(x).reshape(bsz, num_tokens, num_heads, head_dim).permute(0, 2, 1, 3)
+    scale = getattr(attn_module, "scale", head_dim ** -0.5)
+    return (q * scale) @ k.transpose(-2, -1)
 
 def flatten_tokens(tokens: torch.Tensor) -> torch.Tensor:
     if tokens.ndim == 3:
@@ -584,15 +667,16 @@ def compute_cls_maps_for_cross(
     img_size: int,
     fft_topk: int,
 ) -> dict[str, np.ndarray]:
-    tokens = flatten_tokens(record["tokens"])
-    qkv = record["qkv"]
+    if record.get("mode") == "class_attn":
+        tokens = flatten_tokens(record["attn_input"])
+        attn_logits = class_attn_record_to_attn_logits(record)
+    else:
+        tokens = flatten_tokens(record["tokens"])
+        attn_logits = qkv_record_to_attn_logits(record)
     num_patches = tokens.size(1) - 1
-    if qkv is None:
-        raise ValueError("Missing qkv output.")
     if num_patches <= 0 or not is_square_token_count(num_patches):
         raise ValueError(f"Cross-model CLS overlap requires square patch tokens, got token count {tokens.size(1)}.")
 
-    attn_logits = qkv_to_attn_logits(qkv, record["num_heads"])
     attn_weights = torch.softmax(attn_logits, dim=-1)
     attn_scores = attn_weights[:, :, 0, 1:].mean(dim=1)
     attn_map = normalized_patch_scores(attn_scores, img_size)
