@@ -372,7 +372,7 @@ def parse_args():
     parser.add_argument("--anchor-top-ratio", type=float, default=0.25, help="Top patch ratio used for lazy-agg background anchors.")
     parser.add_argument("--fg-top-ratio", type=float, default=0.25, help="Top patch ratio used for lazy-agg foreground patches.")
     parser.add_argument("--lambda-anchor", type=float, default=1.0, help="Weight for lazy-agg aggregation hijack loss.")
-    parser.add_argument("--grad-combine", type=str, default="anchor_modulate", choices=["pcgrad_asymmetric", "sum", "ce", "anchor_modulate", "stable_attention", "expanded_stable_attention"], help="Gradient combination strategy for lazy-agg.")
+    parser.add_argument("--grad-combine", type=str, default="anchor_modulate", choices=["pcgrad_asymmetric", "sum", "ce", "anchor_modulate", "stable_attention", "expanded_stable_attention", "guide_response"], help="Gradient combination strategy for lazy-agg.")
     parser.add_argument("--si-scales", type=int, default=1, help="Number of scale-invariant CE gradients averaged by lazy-agg anchor_modulate.")
     parser.add_argument("--no-nesterov", action="store_true", help="Disable lazy-agg NI-FGSM style lookahead gradients.")
     parser.add_argument("--eot-iter", type=int, default=1, help="Number of DIM samples averaged per SI scale by lazy-agg anchor_modulate.")
