@@ -856,6 +856,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         fg_mod_alpha: float = 0.5,
         anchor_mod_power: float = 1.0,
         ensemble_models: tuple[torch.nn.Module, ...] | None = None,
+        attention_guide_models: tuple[torch.nn.Module, ...] | None = None,
         device: torch.device | None = None,
     ) -> None:
         super().__init__(
@@ -874,7 +875,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             raise ValueError(f"fg_top_ratio must be in (0, 1), got {fg_top_ratio}.")
         if fft_topk <= 0:
             raise ValueError(f"fft_topk must be positive, got {fft_topk}.")
-        valid_combine = ("pcgrad_asymmetric", "sum", "ce", "anchor_modulate")
+        valid_combine = ("pcgrad_asymmetric", "sum", "ce", "anchor_modulate", "stable_attention")
         if grad_combine not in valid_combine:
             raise ValueError(f"grad_combine must be one of {valid_combine}, got {grad_combine!r}.")
         valid_anchor_schedules = ("constant", "linear", "cosine")
@@ -915,6 +916,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if self.anchor_mod_power <= 0:
             raise ValueError(f"anchor_mod_power must be positive, got {anchor_mod_power}.")
         self.ensemble_models = tuple(ensemble_models or ())
+        self.attention_guide_models = tuple(attention_guide_models or ())
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
         self._perturb_kernel = (
             self._build_ti_kernel(self.perturb_smooth_sigma)
@@ -1167,6 +1169,132 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         flat_anchor = torch.where(conflict[:, None], flat_anchor - projection, flat_anchor)
         return (flat_ce + anchor_weight * flat_anchor).reshape_as(g_ce), cos.mean().item()
 
+    @staticmethod
+    def _infer_num_heads_from_attn(attn_module) -> int | None:
+        heads = getattr(attn_module, "num_heads", None)
+        return int(heads) if heads is not None else None
+
+    @staticmethod
+    def _qkv_to_cls_attention_scores(qkv: torch.Tensor, num_heads: int | None) -> torch.Tensor:
+        if qkv.ndim != 3 or num_heads is None or num_heads <= 0:
+            raise ValueError(f"Unsupported qkv shape/heads: {tuple(qkv.shape)}, {num_heads}.")
+        bsz, num_tokens, hidden = qkv.shape
+        if num_tokens < 2 or hidden % (3 * num_heads) != 0:
+            raise ValueError(f"Unsupported qkv dimensions: {tuple(qkv.shape)} heads={num_heads}.")
+        num_patches = num_tokens - 1
+        grid_size = int(num_patches ** 0.5)
+        if grid_size * grid_size != num_patches:
+            raise ValueError(f"Patch token count {num_patches} is not square.")
+        head_dim = hidden // (3 * num_heads)
+        qkv = qkv.reshape(bsz, num_tokens, 3, num_heads, head_dim).permute(2, 0, 3, 1, 4)
+        q, k = qkv[0], qkv[1]
+        attn = torch.softmax((q @ k.transpose(-2, -1)) * (head_dim ** -0.5), dim=-1)
+        return attn[:, :, 0, 1:].mean(dim=1)
+
+    @staticmethod
+    def _build_qkv_from_attn_input(attn_module, attn_input: torch.Tensor) -> torch.Tensor:
+        qkv_layer = getattr(attn_module, "qkv", None)
+        if qkv_layer is None:
+            raise ValueError("Attention module does not expose qkv.")
+        q_bias = getattr(attn_module, "q_bias", None)
+        if q_bias is None:
+            return qkv_layer(attn_input)
+        qkv_bias = torch.cat((attn_module.q_bias, attn_module.k_bias, attn_module.v_bias))
+        if getattr(attn_module, "qkv_bias_separate", False):
+            return qkv_layer(attn_input) + qkv_bias
+        return F.linear(attn_input, weight=qkv_layer.weight, bias=qkv_bias)
+
+    def _collect_cls_attention_scores(
+        self,
+        source_model,
+        images: torch.Tensor,
+        target_num_patches: int | None = None,
+    ) -> torch.Tensor | None:
+        module_dict = dict(source_model.model.named_modules())
+        records = []
+        handles = []
+        try:
+            for qkv_name, qkv_module in module_dict.items():
+                if not qkv_name.endswith("attn.qkv"):
+                    continue
+                attn_name = qkv_name.rsplit(".qkv", 1)[0]
+                attn_module = module_dict.get(attn_name)
+                if attn_module is None:
+                    continue
+                record = {"attn": attn_module, "qkv": None, "input": None, "heads": self._infer_num_heads_from_attn(attn_module)}
+                records.append(record)
+
+                def qkv_hook(_module, _inputs, output, rec=record):
+                    rec["qkv"] = output.detach() if isinstance(output, torch.Tensor) else None
+
+                def pre_hook(_module, inputs, rec=record):
+                    if inputs and isinstance(inputs[0], torch.Tensor):
+                        rec["input"] = inputs[0].detach()
+
+                handles.append(qkv_module.register_forward_hook(qkv_hook))
+                handles.append(attn_module.register_forward_pre_hook(pre_hook))
+
+            if not records:
+                return None
+            with torch.no_grad():
+                _ = source_model.model(images)
+
+            scores = []
+            for record in records:
+                try:
+                    qkv = record["qkv"]
+                    if qkv is None and record["input"] is not None:
+                        qkv = self._build_qkv_from_attn_input(record["attn"], record["input"])
+                    if qkv is None:
+                        continue
+                    score = self._qkv_to_cls_attention_scores(qkv, record["heads"])
+                    scores.append(self._normalize_weights(score.detach()))
+                except (RuntimeError, ValueError):
+                    continue
+            if not scores:
+                return None
+            scores_by_size: dict[int, list[torch.Tensor]] = {}
+            for score in scores:
+                scores_by_size.setdefault(score.size(1), []).append(score)
+            if target_num_patches is not None:
+                selected = scores_by_size.get(target_num_patches)
+                if not selected:
+                    return None
+            else:
+                target_num_patches = max(
+                    scores_by_size,
+                    key=lambda num_patches: (len(scores_by_size[num_patches]), num_patches),
+                )
+                selected = scores_by_size[target_num_patches]
+            max_layers = min(len(selected), len(self.layers))
+            return torch.stack(selected[-max_layers:]).mean(dim=0)
+        finally:
+            for handle in handles:
+                handle.remove()
+
+    def _build_stable_attention_modulation_map(self, images: torch.Tensor, img_size: int) -> torch.Tensor:
+        primary_score = self._collect_cls_attention_scores(self.model, images)
+        if primary_score is None:
+            raise ValueError("The white-box model did not produce compatible CLS attention scores.")
+        num_patches = primary_score.size(1)
+        scores = [primary_score]
+        for source_model in self.attention_guide_models:
+            score = self._collect_cls_attention_scores(
+                source_model,
+                images,
+                target_num_patches=num_patches,
+            )
+            if score is not None:
+                scores.append(score)
+        stable_score = self._normalize_weights(torch.stack(scores).mean(dim=0))
+        stable_mask = self._select_top_mask(stable_score, self.fg_top_ratio).to(stable_score.dtype)
+        token_map = self._normalize_weights(stable_score * stable_mask)
+        grid_size = int(num_patches ** 0.5)
+        if grid_size * grid_size != num_patches:
+            raise ValueError(f"Patch count {num_patches} is not a square.")
+        grid = token_map.view(token_map.size(0), 1, grid_size, grid_size)
+        return F.interpolate(grid, size=(img_size, img_size), mode="bilinear", align_corners=False).detach()
+
     def _build_anchor_modulation_map(
         self,
         fg_masks: dict[int, torch.Tensor],
@@ -1196,11 +1324,12 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         labels = labels.to(self.device)
 
         clean_pixels = self._denormalize(images).detach()
-        layer_indices, fg_masks, anchor_masks = self._build_clean_guides(images, clean_pixels)
-        adv_pixels = clean_pixels.clone().detach()
-        momentum = torch.zeros_like(adv_pixels)
-        self._last_cosine_log = []
+        layer_indices = []
+        fg_masks = {}
+        anchor_masks = {}
         anchor_modulation = None
+        if self.grad_combine in ("anchor_modulate", "pcgrad_asymmetric", "sum"):
+            layer_indices, fg_masks, anchor_masks = self._build_clean_guides(images, clean_pixels)
         if self.grad_combine == "anchor_modulate":
             anchor_modulation = self._build_anchor_modulation_map(
                 fg_masks=fg_masks,
@@ -1208,6 +1337,11 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 layer_indices=layer_indices,
                 img_size=clean_pixels.size(-1),
             )
+        elif self.grad_combine == "stable_attention":
+            anchor_modulation = self._build_stable_attention_modulation_map(images, clean_pixels.size(-1))
+        adv_pixels = clean_pixels.clone().detach()
+        momentum = torch.zeros_like(adv_pixels)
+        self._last_cosine_log = []
 
         for step_idx in range(self.steps):
             grad_pixels = adv_pixels.detach()
@@ -1217,10 +1351,10 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     delta = torch.clamp(grad_pixels - clean_pixels, -self.epsilon, self.epsilon)
                     grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
             grad_pixels = grad_pixels.detach().requires_grad_(True)
-            if self.grad_combine == "anchor_modulate":
+            if self.grad_combine in ("anchor_modulate", "stable_attention"):
                 ce_terms = []
                 norm_adv = self._normalize(grad_pixels)
-                source_models = (self.model, *self.ensemble_models)
+                source_models = (self.model, *self.ensemble_models) if self.grad_combine == "anchor_modulate" else (self.model,)
                 for scale_idx in range(self.si_scales):
                     scale = float(2 ** scale_idx)
                     for _eot_idx in range(self.eot_iter):
@@ -1245,7 +1379,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             anchor_weight = self._anchor_weight_for_step(step_idx)
             if anchor_weight <= 0.0:
                 grad, avg_cos = g_ce, 1.0
-            elif self.grad_combine == "anchor_modulate":
+            elif self.grad_combine in ("anchor_modulate", "stable_attention"):
                 grad = g_ce * (1.0 + anchor_weight * anchor_modulation.to(g_ce.device, g_ce.dtype))
                 avg_cos = 1.0
             else:

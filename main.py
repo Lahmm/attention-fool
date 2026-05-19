@@ -68,6 +68,7 @@ def create_attacker(
     fg_mod_alpha: float = 0.5,
     anchor_mod_power: float = 1.0,
     ensemble_models: tuple[ViTWithHook, ...] = (),
+    attention_guide_models: tuple[ViTWithHook, ...] = (),
 ) -> MIFGSMAttacker:
     if attack_type == "lazy-agg":
         return LazyAggregationAttacker(
@@ -101,6 +102,7 @@ def create_attacker(
             fg_mod_alpha=fg_mod_alpha,
             anchor_mod_power=anchor_mod_power,
             ensemble_models=ensemble_models,
+            attention_guide_models=attention_guide_models,
             device=DEVICE,
         )
     if attack_type == "fft-cc-pcgrad":
@@ -366,7 +368,7 @@ def parse_args():
     parser.add_argument("--anchor-top-ratio", type=float, default=0.25, help="Top patch ratio used for lazy-agg background anchors.")
     parser.add_argument("--fg-top-ratio", type=float, default=0.25, help="Top patch ratio used for lazy-agg foreground patches.")
     parser.add_argument("--lambda-anchor", type=float, default=1.0, help="Weight for lazy-agg aggregation hijack loss.")
-    parser.add_argument("--grad-combine", type=str, default="anchor_modulate", choices=["pcgrad_asymmetric", "sum", "ce", "anchor_modulate"], help="Gradient combination strategy for lazy-agg.")
+    parser.add_argument("--grad-combine", type=str, default="anchor_modulate", choices=["pcgrad_asymmetric", "sum", "ce", "anchor_modulate", "stable_attention"], help="Gradient combination strategy for lazy-agg.")
     parser.add_argument("--si-scales", type=int, default=1, help="Number of scale-invariant CE gradients averaged by lazy-agg anchor_modulate.")
     parser.add_argument("--no-nesterov", action="store_true", help="Disable lazy-agg NI-FGSM style lookahead gradients.")
     parser.add_argument("--eot-iter", type=int, default=1, help="Number of DIM samples averaged per SI scale by lazy-agg anchor_modulate.")
@@ -381,6 +383,7 @@ def parse_args():
     parser.add_argument("--fg-mod-alpha", type=float, default=0.5, help="Foreground multiplier in anchor_modulation map.")
     parser.add_argument("--anchor-mod-power", type=float, default=1.0, help="Power exponent applied to token_map before normalization.")
     parser.add_argument("--ensemble-source-models", type=parse_model_names, default=(), help="Comma-separated extra lazy-agg source models whose CE gradients are averaged with the primary ViT.")
+    parser.add_argument("--attention-guide-models", type=parse_model_names, default=(), help="Comma-separated extra lazy-agg models used only for clean stable-attention guide maps.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode this is required and must match outputs/attack/<attack-name>.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
@@ -439,6 +442,7 @@ def main(
     fg_mod_alpha: float = 0.5,
     anchor_mod_power: float = 1.0,
     ensemble_source_models: tuple[str, ...] = (),
+    attention_guide_models_arg: tuple[str, ...] = (),
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -468,6 +472,12 @@ def main(
         ensemble_models = tuple(
             build_vit_model(num_classes=num_classes, model_name=model_name)
             for model_name in ensemble_source_models
+        )
+    attention_guide_models: tuple[ViTWithHook, ...] = ()
+    if attack_type == "lazy-agg" and attention_guide_models_arg:
+        attention_guide_models = tuple(
+            build_vit_model(num_classes=num_classes, model_name=model_name)
+            for model_name in attention_guide_models_arg
         )
     attacker = create_attacker(
         model=model,
@@ -506,6 +516,7 @@ def main(
         fg_mod_alpha=fg_mod_alpha,
         anchor_mod_power=anchor_mod_power,
         ensemble_models=ensemble_models,
+        attention_guide_models=attention_guide_models,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
         dataloader=dataloader,
@@ -574,6 +585,7 @@ if __name__ == "__main__":
         fg_mod_alpha=args.fg_mod_alpha,
         anchor_mod_power=args.anchor_mod_power,
         ensemble_source_models=args.ensemble_source_models,
+        attention_guide_models_arg=args.attention_guide_models,
         output_dir=args.output_dir,
         mode=args.mode,
         image_dir=args.image_dir,
