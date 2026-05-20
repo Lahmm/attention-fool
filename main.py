@@ -448,7 +448,7 @@ def parse_args():
     parser.add_argument("--guide-ema", type=float, default=0.7, help="EMA weight for the previous dynamic guide.")
     parser.add_argument("--guide-aug", action="store_true", help="Enable guide-based input augmentation for lazy-agg guide_aug_ce.")
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Number of guide-augmented CE copies per SI/EOT sample.")
-    parser.add_argument("--guide-aug-mode", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation modes: dropout,mix,jitter,freq.")
+    parser.add_argument("--guide-aug-mode", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation modes: dropout,mix,jitter,freq,dropout_inner,jitter_outer,freq_inner,dropout_all,jitter_all,freq_all.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode this is required and must match outputs/attack/<attack-name>.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")

@@ -986,7 +986,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if self.guide_aug_copies <= 0:
             raise ValueError(f"guide_aug_copies must be positive, got {guide_aug_copies}.")
         self.guide_aug_mode = tuple(str(mode).strip() for mode in guide_aug_mode if str(mode).strip())
-        valid_guide_aug_modes = ("dropout", "mix", "jitter", "freq")
+        valid_guide_aug_modes = ("dropout", "mix", "jitter", "freq", "dropout_inner", "jitter_outer", "freq_inner", "dropout_all", "jitter_all", "freq_all")
         if not self.guide_aug_mode:
             raise ValueError("guide_aug_mode must contain at least one mode.")
         invalid_guide_aug_modes = [mode for mode in self.guide_aug_mode if mode not in valid_guide_aug_modes]
@@ -1498,6 +1498,17 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             corrupt = 0.5 * noise + 0.5 * blurred
             background = pixels * (1.0 - strength) + corrupt * strength
             return torch.clamp(pixels * guide + background * (1.0 - guide), 0.0, 1.0)
+        if mode == "dropout_all":
+            noise = torch.rand_like(pixels)
+            blurred = F.avg_pool2d(pixels, kernel_size=5, stride=1, padding=2)
+            corrupt = 0.5 * noise + 0.5 * blurred
+            return torch.clamp(pixels * (1.0 - strength) + corrupt * strength, 0.0, 1.0)
+        if mode == "dropout_inner":
+            noise = torch.rand_like(pixels)
+            blurred = F.avg_pool2d(pixels, kernel_size=5, stride=1, padding=2)
+            corrupt = 0.5 * noise + 0.5 * blurred
+            foreground = pixels * (1.0 - strength) + corrupt * strength
+            return torch.clamp(foreground * guide + pixels * (1.0 - guide), 0.0, 1.0)
         if mode == "mix":
             if pixels.size(0) > 1:
                 mixed = pixels.roll(shifts=copy_idx + 1, dims=0)
@@ -1511,12 +1522,32 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             noise = torch.randn_like(pixels) * (strength / 2.0)
             jittered = torch.clamp(pixels * (1.0 + brightness) + noise, 0.0, 1.0)
             return torch.clamp(jittered * guide + pixels * (1.0 - guide), 0.0, 1.0)
+        if mode == "jitter_all":
+            brightness = (torch.rand(pixels.size(0), 1, 1, 1, device=pixels.device, dtype=pixels.dtype) * 2.0 - 1.0) * strength
+            noise = torch.randn_like(pixels) * (strength / 2.0)
+            return torch.clamp(pixels * (1.0 + brightness) + noise, 0.0, 1.0)
+        if mode == "jitter_outer":
+            brightness = (torch.rand(pixels.size(0), 1, 1, 1, device=pixels.device, dtype=pixels.dtype) * 2.0 - 1.0) * strength
+            noise = torch.randn_like(pixels) * (strength / 2.0)
+            jittered = torch.clamp(pixels * (1.0 + brightness) + noise, 0.0, 1.0)
+            return torch.clamp(pixels * guide + jittered * (1.0 - guide), 0.0, 1.0)
         if mode == "freq":
             pooled = F.avg_pool2d(pixels, kernel_size=9, stride=1, padding=4)
             noise = F.avg_pool2d(torch.rand_like(pixels), kernel_size=9, stride=1, padding=4)
             corrupt = 0.7 * pooled + 0.3 * noise
             background = pixels * (1.0 - strength) + corrupt * strength
             return torch.clamp(pixels * guide + background * (1.0 - guide), 0.0, 1.0)
+        if mode == "freq_all":
+            pooled = F.avg_pool2d(pixels, kernel_size=9, stride=1, padding=4)
+            noise = F.avg_pool2d(torch.rand_like(pixels), kernel_size=9, stride=1, padding=4)
+            corrupt = 0.7 * pooled + 0.3 * noise
+            return torch.clamp(pixels * (1.0 - strength) + corrupt * strength, 0.0, 1.0)
+        if mode == "freq_inner":
+            pooled = F.avg_pool2d(pixels, kernel_size=9, stride=1, padding=4)
+            noise = F.avg_pool2d(torch.rand_like(pixels), kernel_size=9, stride=1, padding=4)
+            corrupt = 0.7 * pooled + 0.3 * noise
+            foreground = pixels * (1.0 - strength) + corrupt * strength
+            return torch.clamp(foreground * guide + pixels * (1.0 - guide), 0.0, 1.0)
         raise ValueError(f"Unsupported guide augmentation mode: {mode}")
 
     def _guide_aug_ce_loss(
