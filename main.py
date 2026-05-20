@@ -70,6 +70,12 @@ def create_attacker(
     anchor_mod_power: float = 1.0,
     ensemble_models: tuple[ViTWithHook, ...] = (),
     attention_guide_models: tuple[ViTWithHook, ...] = (),
+    guide_type: str = "postsoftmax_cls",
+    guide_sample_mode: str = "fixed",
+    attention_grad_smooth_sigma: float = 0.0,
+    patch_grad_smooth_sigma: float = 0.0,
+    guide_entropy_temp: float = 1.0,
+    feature_loss_weight: float = 0.1,
     guide_dilate_kernel: int = 1,
     guide_smooth_sigma: float = 0.0,
     guide_dynamic: bool = False,
@@ -113,6 +119,12 @@ def create_attacker(
             anchor_mod_power=anchor_mod_power,
             ensemble_models=ensemble_models,
             attention_guide_models=attention_guide_models,
+            guide_type=guide_type,
+            guide_sample_mode=guide_sample_mode,
+            attention_grad_smooth_sigma=attention_grad_smooth_sigma,
+            patch_grad_smooth_sigma=patch_grad_smooth_sigma,
+            guide_entropy_temp=guide_entropy_temp,
+            feature_loss_weight=feature_loss_weight,
             guide_dilate_kernel=guide_dilate_kernel,
             guide_smooth_sigma=guide_smooth_sigma,
             guide_dynamic=guide_dynamic,
@@ -407,7 +419,7 @@ def parse_args():
     parser.add_argument("--anchor-top-ratio", type=float, default=0.25, help="Top patch ratio used for lazy-agg background anchors.")
     parser.add_argument("--fg-top-ratio", type=float, default=0.25, help="Top patch ratio used for lazy-agg foreground patches.")
     parser.add_argument("--lambda-anchor", type=float, default=1.0, help="Weight for lazy-agg aggregation hijack loss.")
-    parser.add_argument("--grad-combine", type=str, default="anchor_modulate", choices=["pcgrad_asymmetric", "sum", "ce", "anchor_modulate", "stable_attention", "expanded_stable_attention", "guide_response", "dynamic_guide_response", "guide_aug_ce"], help="Gradient combination strategy for lazy-agg.")
+    parser.add_argument("--grad-combine", type=str, default="anchor_modulate", choices=["pcgrad_asymmetric", "sum", "ce", "anchor_modulate", "stable_attention", "expanded_stable_attention", "guide_response", "dynamic_guide_response", "guide_aug_ce", "guide_aug_feature", "guide_qk_response"], help="Gradient combination strategy for lazy-agg.")
     parser.add_argument("--si-scales", type=int, default=1, help="Number of scale-invariant CE gradients averaged by lazy-agg anchor_modulate.")
     parser.add_argument("--no-nesterov", action="store_true", help="Disable lazy-agg NI-FGSM style lookahead gradients.")
     parser.add_argument("--eot-iter", type=int, default=1, help="Number of DIM samples averaged per SI scale by lazy-agg anchor_modulate.")
@@ -423,6 +435,12 @@ def parse_args():
     parser.add_argument("--anchor-mod-power", type=float, default=1.0, help="Power exponent applied to token_map before normalization.")
     parser.add_argument("--ensemble-source-models", type=parse_model_names, default=(), help="Comma-separated extra lazy-agg source models whose CE gradients are averaged with the primary ViT.")
     parser.add_argument("--attention-guide-models", type=parse_model_names, default=(), help="Comma-separated extra lazy-agg models used only for clean stable-attention guide maps.")
+    parser.add_argument("--guide-type", type=str, default="postsoftmax_cls", help="Comma-separated guide types: postsoftmax_cls,qk_cls,qk_all_queries.")
+    parser.add_argument("--guide-sample-mode", type=str, default="fixed", choices=["fixed", "random"], help="How to choose a guide type when --guide-type lists multiple entries.")
+    parser.add_argument("--attention-grad-smooth-sigma", type=float, default=0.0, help="Extra Gaussian smoothing for attention/QK-response gradients. 0=disabled.")
+    parser.add_argument("--patch-grad-smooth-sigma", type=float, default=0.0, help="Extra Gaussian smoothing for guide feature gradients. 0=disabled.")
+    parser.add_argument("--guide-entropy-temp", type=float, default=1.0, help="Temperature exponent for guide normalization. >1 softens, <1 sharpens.")
+    parser.add_argument("--feature-loss-weight", type=float, default=0.1, help="Weight for guide_aug_feature patch feature disruption loss.")
     parser.add_argument("--guide-dilate-kernel", type=int, default=1, help="Odd patch-grid max-pool kernel for expanded stable-attention guides. 1=disabled.")
     parser.add_argument("--guide-smooth-sigma", type=float, default=0.0, help="Gaussian sigma for smoothing expanded stable-attention guides. 0=disabled.")
     parser.add_argument("--guide-dynamic", action="store_true", help="Update the stable-attention guide from the current adversarial image during lazy-agg.")
@@ -430,7 +448,7 @@ def parse_args():
     parser.add_argument("--guide-ema", type=float, default=0.7, help="EMA weight for the previous dynamic guide.")
     parser.add_argument("--guide-aug", action="store_true", help="Enable guide-based input augmentation for lazy-agg guide_aug_ce.")
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Number of guide-augmented CE copies per SI/EOT sample.")
-    parser.add_argument("--guide-aug-mode", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation modes: dropout,mix,jitter.")
+    parser.add_argument("--guide-aug-mode", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation modes: dropout,mix,jitter,freq.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode this is required and must match outputs/attack/<attack-name>.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
@@ -491,6 +509,12 @@ def main(
     anchor_mod_power: float = 1.0,
     ensemble_source_models: tuple[str, ...] = (),
     attention_guide_models_arg: tuple[str, ...] = (),
+    guide_type: str = "postsoftmax_cls",
+    guide_sample_mode: str = "fixed",
+    attention_grad_smooth_sigma: float = 0.0,
+    patch_grad_smooth_sigma: float = 0.0,
+    guide_entropy_temp: float = 1.0,
+    feature_loss_weight: float = 0.1,
     guide_dilate_kernel: int = 1,
     guide_smooth_sigma: float = 0.0,
     guide_dynamic: bool = False,
@@ -574,6 +598,12 @@ def main(
         anchor_mod_power=anchor_mod_power,
         ensemble_models=ensemble_models,
         attention_guide_models=attention_guide_models,
+        guide_type=guide_type,
+        guide_sample_mode=guide_sample_mode,
+        attention_grad_smooth_sigma=attention_grad_smooth_sigma,
+        patch_grad_smooth_sigma=patch_grad_smooth_sigma,
+        guide_entropy_temp=guide_entropy_temp,
+        feature_loss_weight=feature_loss_weight,
         guide_dilate_kernel=guide_dilate_kernel,
         guide_smooth_sigma=guide_smooth_sigma,
         guide_dynamic=guide_dynamic,
@@ -652,6 +682,12 @@ if __name__ == "__main__":
         anchor_mod_power=args.anchor_mod_power,
         ensemble_source_models=args.ensemble_source_models,
         attention_guide_models_arg=args.attention_guide_models,
+        guide_type=args.guide_type,
+        guide_sample_mode=args.guide_sample_mode,
+        attention_grad_smooth_sigma=args.attention_grad_smooth_sigma,
+        patch_grad_smooth_sigma=args.patch_grad_smooth_sigma,
+        guide_entropy_temp=args.guide_entropy_temp,
+        feature_loss_weight=args.feature_loss_weight,
         guide_dilate_kernel=args.guide_dilate_kernel,
         guide_smooth_sigma=args.guide_smooth_sigma,
         guide_dynamic=args.guide_dynamic,
