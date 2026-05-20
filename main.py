@@ -1,4 +1,5 @@
 import argparse
+import csv
 import shutil
 from pathlib import Path
 from typing import List
@@ -71,6 +72,13 @@ def create_attacker(
     attention_guide_models: tuple[ViTWithHook, ...] = (),
     guide_dilate_kernel: int = 1,
     guide_smooth_sigma: float = 0.0,
+    guide_dynamic: bool = False,
+    guide_update_interval: int = 5,
+    guide_ema: float = 0.7,
+    guide_aug: bool = False,
+    guide_aug_copies: int = 3,
+    guide_aug_mode: tuple[str, ...] = ("dropout",),
+    guide_aug_strength: float = 0.2,
 ) -> MIFGSMAttacker:
     if attack_type == "lazy-agg":
         return LazyAggregationAttacker(
@@ -107,6 +115,13 @@ def create_attacker(
             attention_guide_models=attention_guide_models,
             guide_dilate_kernel=guide_dilate_kernel,
             guide_smooth_sigma=guide_smooth_sigma,
+            guide_dynamic=guide_dynamic,
+            guide_update_interval=guide_update_interval,
+            guide_ema=guide_ema,
+            guide_aug=guide_aug,
+            guide_aug_copies=guide_aug_copies,
+            guide_aug_mode=guide_aug_mode,
+            guide_aug_strength=guide_aug_strength,
             device=DEVICE,
         )
     if attack_type == "fft-cc-pcgrad":
@@ -314,6 +329,26 @@ def attack_correctly_classified_samples(
 
         x_adv = attacker.attack_batch(images_to_attack, labels_to_attack)
 
+        dynamic_guide_log = getattr(attacker, "_last_dynamic_guide_log", None)
+        if dynamic_guide_log and output_dir is not None:
+            stats_path = Path(output_dir) / "dynamic_guide_stats.csv"
+            write_header = not stats_path.exists()
+            with stats_path.open("a", newline="") as f:
+                fieldnames = [
+                    "attacked_start",
+                    "batch_size",
+                    "step",
+                    "clean_cosine",
+                    "adv_cls_cosine",
+                    "entropy",
+                    "topk_change_rate",
+                ]
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                if write_header:
+                    writer.writeheader()
+                for row in dynamic_guide_log:
+                    writer.writerow({"attacked_start": attacked, "batch_size": labels_to_attack.size(0), **row})
+
         with torch.inference_mode():
             logits_adv = model(x_adv, return_attn=False)
             preds_adv = logits_adv.argmax(dim=1)
@@ -372,7 +407,7 @@ def parse_args():
     parser.add_argument("--anchor-top-ratio", type=float, default=0.25, help="Top patch ratio used for lazy-agg background anchors.")
     parser.add_argument("--fg-top-ratio", type=float, default=0.25, help="Top patch ratio used for lazy-agg foreground patches.")
     parser.add_argument("--lambda-anchor", type=float, default=1.0, help="Weight for lazy-agg aggregation hijack loss.")
-    parser.add_argument("--grad-combine", type=str, default="anchor_modulate", choices=["pcgrad_asymmetric", "sum", "ce", "anchor_modulate", "stable_attention", "expanded_stable_attention", "guide_response"], help="Gradient combination strategy for lazy-agg.")
+    parser.add_argument("--grad-combine", type=str, default="anchor_modulate", choices=["pcgrad_asymmetric", "sum", "ce", "anchor_modulate", "stable_attention", "expanded_stable_attention", "guide_response", "dynamic_guide_response", "guide_aug_ce"], help="Gradient combination strategy for lazy-agg.")
     parser.add_argument("--si-scales", type=int, default=1, help="Number of scale-invariant CE gradients averaged by lazy-agg anchor_modulate.")
     parser.add_argument("--no-nesterov", action="store_true", help="Disable lazy-agg NI-FGSM style lookahead gradients.")
     parser.add_argument("--eot-iter", type=int, default=1, help="Number of DIM samples averaged per SI scale by lazy-agg anchor_modulate.")
@@ -390,6 +425,13 @@ def parse_args():
     parser.add_argument("--attention-guide-models", type=parse_model_names, default=(), help="Comma-separated extra lazy-agg models used only for clean stable-attention guide maps.")
     parser.add_argument("--guide-dilate-kernel", type=int, default=1, help="Odd patch-grid max-pool kernel for expanded stable-attention guides. 1=disabled.")
     parser.add_argument("--guide-smooth-sigma", type=float, default=0.0, help="Gaussian sigma for smoothing expanded stable-attention guides. 0=disabled.")
+    parser.add_argument("--guide-dynamic", action="store_true", help="Update the stable-attention guide from the current adversarial image during lazy-agg.")
+    parser.add_argument("--guide-update-interval", type=int, default=5, help="Lazy-agg dynamic guide update interval in attack steps.")
+    parser.add_argument("--guide-ema", type=float, default=0.7, help="EMA weight for the previous dynamic guide.")
+    parser.add_argument("--guide-aug", action="store_true", help="Enable guide-based input augmentation for lazy-agg guide_aug_ce.")
+    parser.add_argument("--guide-aug-copies", type=int, default=3, help="Number of guide-augmented CE copies per SI/EOT sample.")
+    parser.add_argument("--guide-aug-mode", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation modes: dropout,mix,jitter.")
+    parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode this is required and must match outputs/attack/<attack-name>.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
@@ -451,6 +493,13 @@ def main(
     attention_guide_models_arg: tuple[str, ...] = (),
     guide_dilate_kernel: int = 1,
     guide_smooth_sigma: float = 0.0,
+    guide_dynamic: bool = False,
+    guide_update_interval: int = 5,
+    guide_ema: float = 0.7,
+    guide_aug: bool = False,
+    guide_aug_copies: int = 3,
+    guide_aug_mode: tuple[str, ...] = ("dropout",),
+    guide_aug_strength: float = 0.2,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -527,6 +576,13 @@ def main(
         attention_guide_models=attention_guide_models,
         guide_dilate_kernel=guide_dilate_kernel,
         guide_smooth_sigma=guide_smooth_sigma,
+        guide_dynamic=guide_dynamic,
+        guide_update_interval=guide_update_interval,
+        guide_ema=guide_ema,
+        guide_aug=guide_aug,
+        guide_aug_copies=guide_aug_copies,
+        guide_aug_mode=guide_aug_mode,
+        guide_aug_strength=guide_aug_strength,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
         dataloader=dataloader,
@@ -598,6 +654,13 @@ if __name__ == "__main__":
         attention_guide_models_arg=args.attention_guide_models,
         guide_dilate_kernel=args.guide_dilate_kernel,
         guide_smooth_sigma=args.guide_smooth_sigma,
+        guide_dynamic=args.guide_dynamic,
+        guide_update_interval=args.guide_update_interval,
+        guide_ema=args.guide_ema,
+        guide_aug=args.guide_aug,
+        guide_aug_copies=args.guide_aug_copies,
+        guide_aug_mode=args.guide_aug_mode,
+        guide_aug_strength=args.guide_aug_strength,
         output_dir=args.output_dir,
         mode=args.mode,
         image_dir=args.image_dir,

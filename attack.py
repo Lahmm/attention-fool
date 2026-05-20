@@ -859,6 +859,13 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         attention_guide_models: tuple[torch.nn.Module, ...] | None = None,
         guide_dilate_kernel: int = 1,
         guide_smooth_sigma: float = 0.0,
+        guide_dynamic: bool = False,
+        guide_update_interval: int = 5,
+        guide_ema: float = 0.7,
+        guide_aug: bool = False,
+        guide_aug_copies: int = 3,
+        guide_aug_mode: tuple[str, ...] = ("dropout",),
+        guide_aug_strength: float = 0.2,
         device: torch.device | None = None,
     ) -> None:
         super().__init__(
@@ -885,6 +892,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             "stable_attention",
             "expanded_stable_attention",
             "guide_response",
+            "dynamic_guide_response",
+            "guide_aug_ce",
         )
         if grad_combine not in valid_combine:
             raise ValueError(f"grad_combine must be one of {valid_combine}, got {grad_combine!r}.")
@@ -933,6 +942,27 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.guide_smooth_sigma = float(guide_smooth_sigma)
         if self.guide_smooth_sigma < 0:
             raise ValueError(f"guide_smooth_sigma must be non-negative, got {guide_smooth_sigma}.")
+        self.guide_dynamic = bool(guide_dynamic)
+        self.guide_update_interval = int(guide_update_interval)
+        if self.guide_update_interval <= 0:
+            raise ValueError(f"guide_update_interval must be positive, got {guide_update_interval}.")
+        self.guide_ema = float(guide_ema)
+        if not (0.0 <= self.guide_ema <= 1.0):
+            raise ValueError(f"guide_ema must be in [0, 1], got {guide_ema}.")
+        self.guide_aug = bool(guide_aug)
+        self.guide_aug_copies = int(guide_aug_copies)
+        if self.guide_aug_copies <= 0:
+            raise ValueError(f"guide_aug_copies must be positive, got {guide_aug_copies}.")
+        self.guide_aug_mode = tuple(str(mode).strip() for mode in guide_aug_mode if str(mode).strip())
+        valid_guide_aug_modes = ("dropout", "mix", "jitter")
+        if not self.guide_aug_mode:
+            raise ValueError("guide_aug_mode must contain at least one mode.")
+        invalid_guide_aug_modes = [mode for mode in self.guide_aug_mode if mode not in valid_guide_aug_modes]
+        if invalid_guide_aug_modes:
+            raise ValueError(f"guide_aug_mode entries must be in {valid_guide_aug_modes}, got {invalid_guide_aug_modes}.")
+        self.guide_aug_strength = float(guide_aug_strength)
+        if self.guide_aug_strength < 0:
+            raise ValueError(f"guide_aug_strength must be non-negative, got {guide_aug_strength}.")
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
         self._perturb_kernel = (
             self._build_ti_kernel(self.perturb_smooth_sigma)
@@ -1364,6 +1394,96 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         guide = guide / guide.sum(dim=1, keepdim=True).clamp_min(1e-12)
         return (response * guide).sum(dim=1).mean()
 
+    def _token_map_to_pixel_map(self, token_map: torch.Tensor, img_size: int) -> torch.Tensor:
+        num_patches = token_map.size(1)
+        grid_size = int(num_patches ** 0.5)
+        if grid_size * grid_size != num_patches:
+            raise ValueError(f"Patch count {num_patches} is not a square.")
+        grid = token_map.view(token_map.size(0), 1, grid_size, grid_size)
+        pixel_map = F.interpolate(grid, size=(img_size, img_size), mode="bilinear", align_corners=False)
+        flat = pixel_map.flatten(1)
+        min_vals = flat.min(dim=1, keepdim=True).values.view(-1, 1, 1, 1)
+        max_vals = flat.max(dim=1, keepdim=True).values.view(-1, 1, 1, 1)
+        return ((pixel_map - min_vals) / (max_vals - min_vals).clamp_min(1e-12)).detach()
+
+    def _guide_augmented_pixels(self, pixels: torch.Tensor, guide_pixel_map: torch.Tensor, copy_idx: int) -> torch.Tensor:
+        strength = self.guide_aug_strength
+        if strength <= 0:
+            return pixels
+        mode = self.guide_aug_mode[copy_idx % len(self.guide_aug_mode)]
+        guide = guide_pixel_map.to(pixels.device, pixels.dtype).clamp(0.0, 1.0)
+        if mode == "dropout":
+            noise = torch.rand_like(pixels)
+            blurred = F.avg_pool2d(pixels, kernel_size=5, stride=1, padding=2)
+            corrupt = 0.5 * noise + 0.5 * blurred
+            background = pixels * (1.0 - strength) + corrupt * strength
+            return torch.clamp(pixels * guide + background * (1.0 - guide), 0.0, 1.0)
+        if mode == "mix":
+            if pixels.size(0) > 1:
+                mixed = pixels.roll(shifts=copy_idx + 1, dims=0)
+            else:
+                low_noise = torch.rand_like(pixels)
+                mixed = F.avg_pool2d(low_noise, kernel_size=7, stride=1, padding=3)
+            background = pixels * (1.0 - strength) + mixed * strength
+            return torch.clamp(pixels * guide + background * (1.0 - guide), 0.0, 1.0)
+        if mode == "jitter":
+            brightness = (torch.rand(pixels.size(0), 1, 1, 1, device=pixels.device, dtype=pixels.dtype) * 2.0 - 1.0) * strength
+            noise = torch.randn_like(pixels) * (strength / 2.0)
+            jittered = torch.clamp(pixels * (1.0 + brightness) + noise, 0.0, 1.0)
+            return torch.clamp(jittered * guide + pixels * (1.0 - guide), 0.0, 1.0)
+        raise ValueError(f"Unsupported guide augmentation mode: {mode}")
+
+    def _guide_aug_ce_loss(
+        self,
+        pixels: torch.Tensor,
+        labels: torch.Tensor,
+        guide_pixel_map: torch.Tensor,
+    ) -> torch.Tensor:
+        ce_terms = []
+        for scale_idx in range(self.si_scales):
+            scale = float(2 ** scale_idx)
+            for _eot_idx in range(self.eot_iter):
+                for copy_idx in range(self.guide_aug_copies):
+                    aug_pixels = self._guide_augmented_pixels(pixels, guide_pixel_map, copy_idx)
+                    logits_adv = self.model(
+                        self._input_diversity(self._normalize(aug_pixels) / scale),
+                        return_attn=False,
+                    )
+                    ce_terms.append(F.cross_entropy(logits_adv, labels))
+        return torch.stack(ce_terms).mean()
+
+    @staticmethod
+    def _batch_cosine(a: torch.Tensor, b: torch.Tensor) -> float:
+        a_flat = a.flatten(1)
+        b_flat = b.flatten(1)
+        return F.cosine_similarity(a_flat, b_flat, dim=1).mean().item()
+
+    def _guide_entropy(self, guide: torch.Tensor) -> float:
+        prob = guide / guide.sum(dim=1, keepdim=True).clamp_min(1e-12)
+        entropy = -(prob * prob.clamp_min(1e-12).log()).sum(dim=1)
+        return (entropy / math.log(prob.size(1))).mean().item()
+
+    def _guide_topk_change_rate(self, guide_a: torch.Tensor, guide_b: torch.Tensor) -> float:
+        mask_a = self._select_top_mask(guide_a, self.fg_top_ratio)
+        mask_b = self._select_top_mask(guide_b, self.fg_top_ratio)
+        return (mask_a != mask_b).to(torch.float32).mean(dim=1).mean().item()
+
+    def _dynamic_guide_stats(
+        self,
+        step_idx: int,
+        clean_guide: torch.Tensor,
+        guide: torch.Tensor,
+        adv_primary_score: torch.Tensor,
+    ) -> dict[str, float | int]:
+        adv_primary_score = self._normalize_weights(adv_primary_score.detach())
+        return {
+            "step": int(step_idx),
+            "clean_cosine": self._batch_cosine(guide, clean_guide),
+            "adv_cls_cosine": self._batch_cosine(guide, adv_primary_score),
+            "entropy": self._guide_entropy(guide),
+            "topk_change_rate": self._guide_topk_change_rate(clean_guide, guide),
+        }
+
     def _build_anchor_modulation_map(
         self,
         fg_masks: dict[int, torch.Tensor],
@@ -1398,6 +1518,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         anchor_masks = {}
         anchor_modulation = None
         guide_token_map = None
+        clean_guide_token_map = None
+        guide_pixel_map = None
         if self.grad_combine in ("anchor_modulate", "pcgrad_asymmetric", "sum"):
             layer_indices, fg_masks, anchor_masks = self._build_clean_guides(images, clean_pixels)
         if self.grad_combine == "anchor_modulate":
@@ -1413,11 +1535,14 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 clean_pixels.size(-1),
                 expand_shared=self.grad_combine == "expanded_stable_attention",
             )
-        elif self.grad_combine == "guide_response":
+        elif self.grad_combine in ("guide_response", "dynamic_guide_response", "guide_aug_ce") or self.guide_aug:
             guide_token_map = self._build_stable_attention_token_map(images, expand_shared=True)
+            clean_guide_token_map = guide_token_map.clone().detach()
+            guide_pixel_map = self._token_map_to_pixel_map(guide_token_map, clean_pixels.size(-1))
         adv_pixels = clean_pixels.clone().detach()
         momentum = torch.zeros_like(adv_pixels)
         self._last_cosine_log = []
+        self._last_dynamic_guide_log = []
 
         for step_idx in range(self.steps):
             grad_pixels = adv_pixels.detach()
@@ -1427,20 +1552,45 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     delta = torch.clamp(grad_pixels - clean_pixels, -self.epsilon, self.epsilon)
                     grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
             grad_pixels = grad_pixels.detach().requires_grad_(True)
-            if self.grad_combine in ("anchor_modulate", "stable_attention", "expanded_stable_attention", "guide_response"):
-                ce_terms = []
-                norm_adv = self._normalize(grad_pixels)
-                source_models = (self.model, *self.ensemble_models) if self.grad_combine == "anchor_modulate" else (self.model,)
-                for scale_idx in range(self.si_scales):
-                    scale = float(2 ** scale_idx)
-                    for _eot_idx in range(self.eot_iter):
-                        for source_model in source_models:
-                            logits_adv = source_model(
-                                self._input_diversity(norm_adv / scale),
-                                return_attn=False,
+            norm_adv = self._normalize(grad_pixels)
+            if (self.guide_dynamic or self.grad_combine == "dynamic_guide_response") and guide_token_map is not None:
+                if step_idx % self.guide_update_interval == 0:
+                    with torch.no_grad():
+                        guide_adv = self._build_stable_attention_token_map(norm_adv.detach(), expand_shared=True)
+                        guide_token_map = self._normalize_weights(
+                            self.guide_ema * guide_token_map.to(guide_adv.device) + (1.0 - self.guide_ema) * guide_adv
+                        ).detach()
+                        guide_pixel_map = self._token_map_to_pixel_map(guide_token_map, clean_pixels.size(-1))
+                        adv_primary_score = self._collect_cls_attention_scores(
+                            self.model,
+                            norm_adv.detach(),
+                            target_num_patches=guide_token_map.size(1),
+                        )
+                        if adv_primary_score is not None and clean_guide_token_map is not None:
+                            self._last_dynamic_guide_log.append(
+                                self._dynamic_guide_stats(
+                                    step_idx=step_idx,
+                                    clean_guide=clean_guide_token_map,
+                                    guide=guide_token_map,
+                                    adv_primary_score=adv_primary_score,
+                                )
                             )
-                            ce_terms.append(F.cross_entropy(logits_adv, labels))
-                ce_loss = torch.stack(ce_terms).mean()
+            if self.grad_combine in ("anchor_modulate", "stable_attention", "expanded_stable_attention", "guide_response", "dynamic_guide_response", "guide_aug_ce"):
+                if self.grad_combine == "guide_aug_ce":
+                    ce_loss = self._guide_aug_ce_loss(grad_pixels, labels, guide_pixel_map)
+                else:
+                    ce_terms = []
+                    source_models = (self.model, *self.ensemble_models) if self.grad_combine == "anchor_modulate" else (self.model,)
+                    for scale_idx in range(self.si_scales):
+                        scale = float(2 ** scale_idx)
+                        for _eot_idx in range(self.eot_iter):
+                            for source_model in source_models:
+                                logits_adv = source_model(
+                                    self._input_diversity(norm_adv / scale),
+                                    return_attn=False,
+                                )
+                                ce_terms.append(F.cross_entropy(logits_adv, labels))
+                    ce_loss = torch.stack(ce_terms).mean()
                 attn_logits_adv = None
                 token_list_adv = None
             else:
@@ -1464,7 +1614,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             elif self.grad_combine in ("anchor_modulate", "stable_attention", "expanded_stable_attention"):
                 grad = g_ce * (1.0 + anchor_weight * anchor_modulation.to(g_ce.device, g_ce.dtype))
                 avg_cos = 1.0
-            elif self.grad_combine == "guide_response":
+            elif self.grad_combine in ("guide_response", "dynamic_guide_response", "guide_aug_ce"):
                 grad, avg_cos = g_ce, 1.0
             else:
                 anchor_loss = self._anchor_loss(
