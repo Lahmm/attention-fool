@@ -56,9 +56,10 @@ def create_attacker(
     guide_dynamic: bool = False,
     guide_update_interval: int = 5,
     guide_ema: float = 0.7,
+    guide_aug: bool = False,
     guide_aug_copies: int = 3,
-    guide_aug_mode: tuple[str, ...] = ("bg_blur",),
-    guide_aug_strength: float = 0.3,
+    guide_aug_mode: tuple[str, ...] = ("dropout",),
+    guide_aug_strength: float = 0.2,
     bg_foreground_ratio: float = 0.25,
     bg_background_ratio: float = 0.50,
     bg_fg_dilate_kernel: int = 3,
@@ -97,6 +98,7 @@ def create_attacker(
         guide_dynamic=guide_dynamic,
         guide_update_interval=guide_update_interval,
         guide_ema=guide_ema,
+        guide_aug=guide_aug,
         guide_aug_copies=guide_aug_copies,
         guide_aug_mode=guide_aug_mode,
         guide_aug_strength=guide_aug_strength,
@@ -283,7 +285,7 @@ def parse_args():
     parser.add_argument("--spectral-transition", type=float, default=0.04, help="Transition width for spectral filter.")
     parser.add_argument("--fg-top-ratio", type=float, default=0.25, help="Top patch ratio for foreground patches.")
     parser.add_argument("--lambda-anchor", type=float, default=1.0, help="Weight for aggregation hijack loss.")
-    parser.add_argument("--grad-combine", type=str, default="guide_qk_response", choices=["guide_response", "dynamic_guide_response", "guide_qk_response", "background_aug_ce"], help="Gradient combination strategy.")
+    parser.add_argument("--grad-combine", type=str, default="guide_qk_response", choices=["guide_response", "dynamic_guide_response", "guide_qk_response", "background_aug_ce", "guide_aug_ce"], help="Gradient combination strategy.")
     parser.add_argument("--si-scales", type=int, default=1, help="Number of scale-invariant CE gradient copies.")
     parser.add_argument("--no-nesterov", action="store_true", help="Disable NI-FGSM style lookahead gradients.")
     parser.add_argument("--eot-iter", type=int, default=1, help="Number of DIM samples per SI scale.")
@@ -305,9 +307,10 @@ def parse_args():
     parser.add_argument("--guide-dynamic", action="store_true", help="Update stable-attention guide from adversarial image during attack.")
     parser.add_argument("--guide-update-interval", type=int, default=5, help="Dynamic guide update interval in attack steps.")
     parser.add_argument("--guide-ema", type=float, default=0.7, help="EMA weight for previous dynamic guide.")
-    parser.add_argument("--guide-aug-copies", type=int, default=3, help="Number of augmented CE copies per SI/EOT sample.")
-    parser.add_argument("--guide-aug-mode", type=parse_model_names, default=("bg_blur",), help="Comma-separated background augmentation modes: bg_blur,bg_jitter,bg_freq.")
-    parser.add_argument("--guide-aug-strength", type=float, default=0.3, help="Background augmentation strength.")
+    parser.add_argument("--guide-aug", action="store_true", help="Enable guide-based input augmentation for guide_aug_ce.")
+    parser.add_argument("--guide-aug-copies", type=int, default=3, help="Number of guide-augmented CE copies per SI/EOT sample.")
+    parser.add_argument("--guide-aug-mode", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation modes: dropout,mix,jitter,freq,dropout_inner,jitter_outer,freq_inner,dropout_all,jitter_all,freq_all,bg_blur,bg_jitter,bg_freq.")
+    parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
     parser.add_argument("--bg-foreground-ratio", type=float, default=0.25, help="Top QK patch ratio protected as foreground by background_aug_ce.")
     parser.add_argument("--bg-background-ratio", type=float, default=0.50, help="Bottom QK patch ratio eligible for background augmentation by background_aug_ce.")
     parser.add_argument("--bg-fg-dilate-kernel", type=int, default=3, help="Odd patch-grid max-pool kernel to dilate protected foreground for background_aug_ce.")
@@ -319,8 +322,14 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=16, help="DataLoader batch size for clean eval and attack batches.")
     parser.add_argument("--num-workers", type=int, default=4, help="DataLoader worker processes for image decode/transform.")
     parser.add_argument("--prefetch-factor", type=int, default=4, help="Batches prefetched per DataLoader worker.")
-    args = parser.parse_args()
 
+    # background_aug_ce defaults override
+    args = parser.parse_args()
+    if args.grad_combine == "background_aug_ce":
+        if args.guide_aug_mode == ("dropout",):
+            args.guide_aug_mode = ("bg_blur", "bg_jitter", "bg_freq")
+        if args.guide_aug_strength == 0.2:
+            args.guide_aug_strength = 0.3
     return args
 
 
@@ -360,9 +369,10 @@ def main(
     guide_dynamic: bool = False,
     guide_update_interval: int = 5,
     guide_ema: float = 0.7,
+    guide_aug: bool = False,
     guide_aug_copies: int = 3,
-    guide_aug_mode: tuple[str, ...] = ("bg_blur",),
-    guide_aug_strength: float = 0.3,
+    guide_aug_mode: tuple[str, ...] = ("dropout",),
+    guide_aug_strength: float = 0.2,
     bg_foreground_ratio: float = 0.25,
     bg_background_ratio: float = 0.50,
     bg_fg_dilate_kernel: int = 3,
@@ -429,6 +439,7 @@ def main(
         guide_dynamic=guide_dynamic,
         guide_update_interval=guide_update_interval,
         guide_ema=guide_ema,
+        guide_aug=guide_aug,
         guide_aug_copies=guide_aug_copies,
         guide_aug_mode=guide_aug_mode,
         guide_aug_strength=guide_aug_strength,
@@ -500,6 +511,7 @@ if __name__ == "__main__":
         guide_dynamic=args.guide_dynamic,
         guide_update_interval=args.guide_update_interval,
         guide_ema=args.guide_ema,
+        guide_aug=args.guide_aug,
         guide_aug_copies=args.guide_aug_copies,
         guide_aug_mode=args.guide_aug_mode,
         guide_aug_strength=args.guide_aug_strength,

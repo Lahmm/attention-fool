@@ -128,9 +128,10 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         guide_dynamic: bool = False,
         guide_update_interval: int = 5,
         guide_ema: float = 0.7,
+        guide_aug: bool = False,
         guide_aug_copies: int = 3,
-        guide_aug_mode: tuple[str, ...] = ("bg_blur",),
-        guide_aug_strength: float = 0.3,
+        guide_aug_mode: tuple[str, ...] = ("dropout",),
+        guide_aug_strength: float = 0.2,
         bg_foreground_ratio: float = 0.25,
         bg_background_ratio: float = 0.50,
         bg_fg_dilate_kernel: int = 3,
@@ -153,6 +154,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             "dynamic_guide_response",
             "guide_qk_response",
             "background_aug_ce",
+            "guide_aug_ce",
         )
         if grad_combine not in valid_combine:
             raise ValueError(f"grad_combine must be one of {valid_combine}, got {grad_combine!r}.")
@@ -219,11 +221,22 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.guide_ema = float(guide_ema)
         if not (0.0 <= self.guide_ema <= 1.0):
             raise ValueError(f"guide_ema must be in [0, 1], got {guide_ema}.")
+        self.guide_aug = bool(guide_aug)
         self.guide_aug_copies = int(guide_aug_copies)
         if self.guide_aug_copies <= 0:
             raise ValueError(f"guide_aug_copies must be positive, got {guide_aug_copies}.")
         self.guide_aug_mode = tuple(str(mode).strip() for mode in guide_aug_mode if str(mode).strip())
         valid_guide_aug_modes = (
+            "dropout",
+            "mix",
+            "jitter",
+            "freq",
+            "dropout_inner",
+            "jitter_outer",
+            "freq_inner",
+            "dropout_all",
+            "jitter_all",
+            "freq_all",
             "bg_blur",
             "bg_jitter",
             "bg_freq",
@@ -659,6 +672,89 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     ce_terms.append(F.cross_entropy(logits_adv, labels))
         return torch.stack(ce_terms).mean()
 
+    def _guide_augmented_pixels(self, pixels: torch.Tensor, guide_pixel_map: torch.Tensor, copy_idx: int) -> torch.Tensor:
+        strength = self.guide_aug_strength
+        if strength <= 0:
+            return pixels
+        mode = self.guide_aug_mode[copy_idx % len(self.guide_aug_mode)]
+        guide = guide_pixel_map.to(pixels.device, pixels.dtype).clamp(0.0, 1.0)
+        if mode == "dropout":
+            noise = torch.rand_like(pixels)
+            blurred = F.avg_pool2d(pixels, kernel_size=5, stride=1, padding=2)
+            corrupt = 0.5 * noise + 0.5 * blurred
+            background = pixels * (1.0 - strength) + corrupt * strength
+            return torch.clamp(pixels * guide + background * (1.0 - guide), 0.0, 1.0)
+        if mode == "dropout_all":
+            noise = torch.rand_like(pixels)
+            blurred = F.avg_pool2d(pixels, kernel_size=5, stride=1, padding=2)
+            corrupt = 0.5 * noise + 0.5 * blurred
+            return torch.clamp(pixels * (1.0 - strength) + corrupt * strength, 0.0, 1.0)
+        if mode == "dropout_inner":
+            noise = torch.rand_like(pixels)
+            blurred = F.avg_pool2d(pixels, kernel_size=5, stride=1, padding=2)
+            corrupt = 0.5 * noise + 0.5 * blurred
+            foreground = pixels * (1.0 - strength) + corrupt * strength
+            return torch.clamp(foreground * guide + pixels * (1.0 - guide), 0.0, 1.0)
+        if mode == "mix":
+            if pixels.size(0) > 1:
+                mixed = pixels.roll(shifts=copy_idx + 1, dims=0)
+            else:
+                low_noise = torch.rand_like(pixels)
+                mixed = F.avg_pool2d(low_noise, kernel_size=7, stride=1, padding=3)
+            background = pixels * (1.0 - strength) + mixed * strength
+            return torch.clamp(pixels * guide + background * (1.0 - guide), 0.0, 1.0)
+        if mode == "jitter":
+            brightness = (torch.rand(pixels.size(0), 1, 1, 1, device=pixels.device, dtype=pixels.dtype) * 2.0 - 1.0) * strength
+            noise = torch.randn_like(pixels) * (strength / 2.0)
+            jittered = torch.clamp(pixels * (1.0 + brightness) + noise, 0.0, 1.0)
+            return torch.clamp(jittered * guide + pixels * (1.0 - guide), 0.0, 1.0)
+        if mode == "jitter_all":
+            brightness = (torch.rand(pixels.size(0), 1, 1, 1, device=pixels.device, dtype=pixels.dtype) * 2.0 - 1.0) * strength
+            noise = torch.randn_like(pixels) * (strength / 2.0)
+            return torch.clamp(pixels * (1.0 + brightness) + noise, 0.0, 1.0)
+        if mode == "jitter_outer":
+            brightness = (torch.rand(pixels.size(0), 1, 1, 1, device=pixels.device, dtype=pixels.dtype) * 2.0 - 1.0) * strength
+            noise = torch.randn_like(pixels) * (strength / 2.0)
+            jittered = torch.clamp(pixels * (1.0 + brightness) + noise, 0.0, 1.0)
+            return torch.clamp(pixels * guide + jittered * (1.0 - guide), 0.0, 1.0)
+        if mode == "freq":
+            pooled = F.avg_pool2d(pixels, kernel_size=9, stride=1, padding=4)
+            noise = F.avg_pool2d(torch.rand_like(pixels), kernel_size=9, stride=1, padding=4)
+            corrupt = 0.7 * pooled + 0.3 * noise
+            background = pixels * (1.0 - strength) + corrupt * strength
+            return torch.clamp(pixels * guide + background * (1.0 - guide), 0.0, 1.0)
+        if mode == "freq_all":
+            pooled = F.avg_pool2d(pixels, kernel_size=9, stride=1, padding=4)
+            noise = F.avg_pool2d(torch.rand_like(pixels), kernel_size=9, stride=1, padding=4)
+            corrupt = 0.7 * pooled + 0.3 * noise
+            return torch.clamp(pixels * (1.0 - strength) + corrupt * strength, 0.0, 1.0)
+        if mode == "freq_inner":
+            pooled = F.avg_pool2d(pixels, kernel_size=9, stride=1, padding=4)
+            noise = F.avg_pool2d(torch.rand_like(pixels), kernel_size=9, stride=1, padding=4)
+            corrupt = 0.7 * pooled + 0.3 * noise
+            foreground = pixels * (1.0 - strength) + corrupt * strength
+            return torch.clamp(foreground * guide + pixels * (1.0 - guide), 0.0, 1.0)
+        raise ValueError(f"Unsupported guide augmentation mode: {mode}")
+
+    def _guide_aug_ce_loss(
+        self,
+        pixels: torch.Tensor,
+        labels: torch.Tensor,
+        guide_pixel_map: torch.Tensor,
+    ) -> torch.Tensor:
+        ce_terms = []
+        for scale_idx in range(self.si_scales):
+            scale = float(2 ** scale_idx)
+            for _eot_idx in range(self.eot_iter):
+                for copy_idx in range(self.guide_aug_copies):
+                    aug_pixels = self._guide_augmented_pixels(pixels, guide_pixel_map, copy_idx)
+                    logits_adv = self.model(
+                        self._input_diversity(self._normalize(aug_pixels) / scale),
+                        return_attn=False,
+                    )
+                    ce_terms.append(F.cross_entropy(logits_adv, labels))
+        return torch.stack(ce_terms).mean()
+
     @staticmethod
     def _batch_cosine(a: torch.Tensor, b: torch.Tensor) -> float:
         a_flat = a.flatten(1)
@@ -709,7 +805,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 images,
                 clean_pixels.size(-1),
             )
-        elif self.grad_combine in ("guide_response", "dynamic_guide_response", "guide_qk_response"):
+        elif self.grad_combine in ("guide_response", "dynamic_guide_response", "guide_qk_response", "guide_aug_ce") or self.guide_aug:
             guide_token_map = self._build_stable_attention_token_map(images, expand_shared=True)
             clean_guide_token_map = guide_token_map.clone().detach()
             guide_pixel_map = self._token_map_to_pixel_map(guide_token_map, clean_pixels.size(-1))
@@ -751,6 +847,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                             )
             if self.grad_combine == "background_aug_ce":
                 ce_loss = self._background_aug_ce_loss(grad_pixels, labels, bg_pixel_mask)
+            elif self.grad_combine == "guide_aug_ce":
+                ce_loss = self._guide_aug_ce_loss(grad_pixels, labels, guide_pixel_map)
             else:
                 ce_terms = []
                 for scale_idx in range(self.si_scales):
