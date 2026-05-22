@@ -29,20 +29,15 @@ def create_attacker(
     steps: int,
     decay: float,
     layers: tuple[int, ...],
-    warmup_steps: int = 3,
     ti_sigma: float = 0.0,
     spectral_transition: float = 0.04,
     fg_top_ratio: float = 0.25,
-    lambda_anchor: float = 1.0,
-    grad_combine: str = "guide_qk_response",
+    grad_combine: str = "guide_aug_ce",
     si_scales: int = 1,
     nesterov: bool = True,
     eot_iter: int = 1,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
     perturb_smooth_sigma: float = 0.0,
-    anchor_schedule: str = "constant",
-    anchor_start_step: int | None = None,
-    anchor_end_weight: float | None = None,
     lazy_spectral_delta: bool = False,
     lazy_spectral_cutoff: float = 0.25,
     attention_guide_models: tuple[ViTWithHook, ...] = (),
@@ -72,8 +67,6 @@ def create_attacker(
         decay=decay,
         layers=layers,
         fg_top_ratio=fg_top_ratio,
-        lambda_anchor=lambda_anchor,
-        warmup_steps=warmup_steps,
         grad_combine=grad_combine,
         spectral_transition=spectral_transition,
         ti_sigma=ti_sigma if ti_sigma > 0 else 3.0,
@@ -82,9 +75,6 @@ def create_attacker(
         nesterov=nesterov,
         eot_iter=eot_iter,
         perturb_smooth_sigma=perturb_smooth_sigma,
-        anchor_schedule=anchor_schedule,
-        anchor_start_step=anchor_start_step,
-        anchor_end_weight=anchor_end_weight,
         lazy_spectral_delta=lazy_spectral_delta,
         lazy_spectral_cutoff=lazy_spectral_cutoff,
         attention_guide_models=attention_guide_models,
@@ -280,20 +270,15 @@ def parse_args():
     parser.add_argument("--steps", type=int, default=20, help="Number of attack iterations.")
     parser.add_argument("--decay", type=float, default=1.0, help="Momentum decay factor.")
     parser.add_argument("--layers", type=parse_layers, default=(-6, -5, -4, -3, -2, -1), help='Comma-separated token layers, e.g. "-6,-5,-4,-3,-2,-1".')
-    parser.add_argument("--warmup-steps", type=int, default=3, help="Pure-CE steps before adding feature losses.")
     parser.add_argument("--ti-sigma", type=float, default=0.0, help="TI-FGSM Gaussian kernel sigma for gradient smoothing. 0=disabled.")
     parser.add_argument("--spectral-transition", type=float, default=0.04, help="Transition width for spectral filter.")
     parser.add_argument("--fg-top-ratio", type=float, default=0.25, help="Top patch ratio for foreground patches.")
-    parser.add_argument("--lambda-anchor", type=float, default=1.0, help="Weight for aggregation hijack loss.")
-    parser.add_argument("--grad-combine", type=str, default="guide_qk_response", choices=["guide_response", "dynamic_guide_response", "guide_qk_response", "background_aug_ce", "guide_aug_ce"], help="Gradient combination strategy.")
+    parser.add_argument("--grad-combine", type=str, default="guide_aug_ce", choices=["background_aug_ce", "guide_aug_ce"], help="Gradient combination strategy.")
     parser.add_argument("--si-scales", type=int, default=1, help="Number of scale-invariant CE gradient copies.")
     parser.add_argument("--no-nesterov", action="store_true", help="Disable NI-FGSM style lookahead gradients.")
     parser.add_argument("--eot-iter", type=int, default=1, help="Number of DIM samples per SI scale.")
     parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0), help='DIM resize scale range, e.g. "0.85,1.0".')
     parser.add_argument("--perturb-smooth-sigma", type=float, default=0.0, help="Gaussian sigma for perturbation smoothing. 0=disabled.")
-    parser.add_argument("--anchor-schedule", type=str, default="constant", choices=["constant", "linear", "cosine"], help="Anchor modulation schedule.")
-    parser.add_argument("--anchor-start-step", type=int, default=None, help="First step where anchor modulation applies. Defaults to warmup steps.")
-    parser.add_argument("--anchor-end-weight", type=float, default=None, help="Final anchor modulation weight for linear/cosine schedules.")
     parser.add_argument("--lazy-spectral-delta", action="store_true", help="Enable spectral perturbation filtering in the second half of attack.")
     parser.add_argument("--lazy-spectral-cutoff", type=float, default=0.25, help="Low-pass cutoff ratio for spectral perturbation filtering.")
     parser.add_argument("--attention-guide-models", type=parse_model_names, default=(), help="Comma-separated extra models for clean stable-attention guide maps.")
@@ -342,20 +327,15 @@ def main(
     layers: tuple[int, ...],
     output_dir: str | None,
     mode: str,
-    warmup_steps: int = 3,
     ti_sigma: float = 0.0,
     spectral_transition: float = 0.04,
     fg_top_ratio: float = 0.25,
-    lambda_anchor: float = 1.0,
-    grad_combine: str = "guide_qk_response",
+    grad_combine: str = "guide_aug_ce",
     si_scales: int = 1,
     nesterov: bool = True,
     eot_iter: int = 1,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
     perturb_smooth_sigma: float = 0.0,
-    anchor_schedule: str = "constant",
-    anchor_start_step: int | None = None,
-    anchor_end_weight: float | None = None,
     lazy_spectral_delta: bool = False,
     lazy_spectral_cutoff: float = 0.25,
     attention_guide_models_arg: tuple[str, ...] = (),
@@ -412,20 +392,15 @@ def main(
         steps=steps,
         decay=decay,
         layers=layers,
-        warmup_steps=warmup_steps,
         ti_sigma=ti_sigma,
         spectral_transition=spectral_transition,
         fg_top_ratio=fg_top_ratio,
-        lambda_anchor=lambda_anchor,
         grad_combine=grad_combine,
         si_scales=si_scales,
         nesterov=nesterov,
         eot_iter=eot_iter,
         dim_resize_range=dim_resize_range,
         perturb_smooth_sigma=perturb_smooth_sigma,
-        anchor_schedule=anchor_schedule,
-        anchor_start_step=anchor_start_step,
-        anchor_end_weight=anchor_end_weight,
         lazy_spectral_delta=lazy_spectral_delta,
         lazy_spectral_cutoff=lazy_spectral_cutoff,
         attention_guide_models=attention_guide_models,
@@ -484,20 +459,15 @@ if __name__ == "__main__":
         steps=args.steps,
         decay=args.decay,
         layers=args.layers,
-        warmup_steps=args.warmup_steps,
         ti_sigma=args.ti_sigma,
         spectral_transition=args.spectral_transition,
         fg_top_ratio=args.fg_top_ratio,
-        lambda_anchor=args.lambda_anchor,
         grad_combine=args.grad_combine,
         si_scales=args.si_scales,
         nesterov=not args.no_nesterov,
         eot_iter=args.eot_iter,
         dim_resize_range=args.dim_resize_range,
         perturb_smooth_sigma=args.perturb_smooth_sigma,
-        anchor_schedule=args.anchor_schedule,
-        anchor_start_step=args.anchor_start_step,
-        anchor_end_weight=args.anchor_end_weight,
         lazy_spectral_delta=args.lazy_spectral_delta,
         lazy_spectral_cutoff=args.lazy_spectral_cutoff,
         attention_guide_models_arg=args.attention_guide_models,

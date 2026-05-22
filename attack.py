@@ -88,8 +88,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
     """
     Lazy aggregation hijack attack for ViTs.
 
-    Uses stable attention token maps as guides, with guide response losses
-    and background augmentation strategies to disrupt ViT attention.
+    Uses stable attention token maps as guides for background augmentation
+    and guide-based augmentation strategies to disrupt ViT attention.
     """
 
     def __init__(
@@ -101,9 +101,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         decay: float = 1.0,
         layers: tuple[int, ...] = (-6, -5, -4, -3, -2, -1),
         fg_top_ratio: float = 0.25,
-        lambda_anchor: float = 1.0,
-        warmup_steps: int = 3,
-        grad_combine: str = "guide_qk_response",
+        grad_combine: str = "guide_aug_ce",
         spectral_transition: float = 0.04,
         ti_sigma: float = 3.0,
         input_diversity: bool = True,
@@ -112,9 +110,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         nesterov: bool = True,
         eot_iter: int = 1,
         perturb_smooth_sigma: float = 0.0,
-        anchor_schedule: str = "constant",
-        anchor_start_step: int | None = None,
-        anchor_end_weight: float | None = None,
         lazy_spectral_delta: bool = False,
         lazy_spectral_cutoff: float = 0.25,
         attention_guide_models: tuple[torch.nn.Module, ...] | None = None,
@@ -150,22 +145,14 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if not (0.0 < fg_top_ratio < 1.0):
             raise ValueError(f"fg_top_ratio must be in (0, 1), got {fg_top_ratio}.")
         valid_combine = (
-            "guide_response",
-            "dynamic_guide_response",
-            "guide_qk_response",
             "background_aug_ce",
             "guide_aug_ce",
         )
         if grad_combine not in valid_combine:
             raise ValueError(f"grad_combine must be one of {valid_combine}, got {grad_combine!r}.")
-        valid_anchor_schedules = ("constant", "linear", "cosine")
-        if anchor_schedule not in valid_anchor_schedules:
-            raise ValueError(f"anchor_schedule must be one of {valid_anchor_schedules}, got {anchor_schedule!r}.")
 
         self.layers = tuple(int(layer) for layer in layers)
         self.fg_top_ratio = float(fg_top_ratio)
-        self.lambda_anchor = float(lambda_anchor)
-        self.warmup_steps = int(warmup_steps)
         self.grad_combine = grad_combine
         self.spectral_transition = float(spectral_transition)
         self.ti_sigma = float(ti_sigma)
@@ -179,11 +166,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if self.eot_iter <= 0:
             raise ValueError(f"eot_iter must be positive, got {eot_iter}.")
         self.perturb_smooth_sigma = float(perturb_smooth_sigma)
-        self.anchor_schedule = anchor_schedule
-        self.anchor_start_step = self.warmup_steps if anchor_start_step is None else int(anchor_start_step)
-        if self.anchor_start_step < 0:
-            raise ValueError(f"anchor_start_step must be non-negative, got {self.anchor_start_step}.")
-        self.anchor_end_weight = self.lambda_anchor if anchor_end_weight is None else float(anchor_end_weight)
         self.lazy_spectral_delta = bool(lazy_spectral_delta)
         self.lazy_spectral_cutoff = float(lazy_spectral_cutoff)
         self.attention_guide_models = tuple(attention_guide_models or ())
@@ -275,22 +257,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             else None
         )
 
-    def _anchor_weight_for_step(self, step_idx: int) -> float:
-        if step_idx < self.anchor_start_step:
-            return 0.0
-        if self.anchor_schedule == "constant":
-            return self.lambda_anchor
-
-        ramp_end_step = max(self.anchor_start_step + 1, self.steps // 2)
-        if step_idx >= ramp_end_step:
-            return self.anchor_end_weight
-
-        progress = (step_idx - self.anchor_start_step + 1) / (ramp_end_step - self.anchor_start_step + 1)
-        progress = max(0.0, min(1.0, progress))
-        if self.anchor_schedule == "cosine":
-            progress = 0.5 - 0.5 * math.cos(math.pi * progress)
-        return self.anchor_end_weight * progress
-
     @staticmethod
     def _build_ti_kernel(sigma: float) -> torch.Tensor:
         radius = int(3 * sigma)
@@ -358,17 +324,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         bottom = pad_h - top
         right = pad_w - left
         return F.pad(resized, (left, right, top, bottom), value=0.0)
-
-    @staticmethod
-    def _resolve_layers(layers: tuple[int, ...], num_layers: int) -> list[int]:
-        resolved: list[int] = []
-        for layer in layers:
-            idx = layer if layer >= 0 else num_layers + layer
-            if idx < 0 or idx >= num_layers:
-                raise ValueError(f"Invalid layer index {layer}; model returned {num_layers} token layers.")
-            if idx not in resolved:
-                resolved.append(idx)
-        return resolved
 
     @staticmethod
     def _normalize_weights(weights: torch.Tensor) -> torch.Tensor:
@@ -554,32 +509,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         else:
             token_map = self._normalize_weights(token_map)
         return token_map.detach()
-
-    def _guide_response_loss(
-        self,
-        attn_logits_list: list[torch.Tensor],
-        guide_token_map: torch.Tensor,
-        pre_softmax: bool = False,
-    ) -> torch.Tensor:
-        layer_indices = self._resolve_layers(self.layers, len(attn_logits_list))
-        layer_responses = []
-        for layer_idx in layer_indices:
-            if pre_softmax:
-                cls_attn = attn_logits_list[layer_idx][:, :, 0, 1:].mean(dim=1)
-                cls_attn = self._normalize_weights(cls_attn)
-            else:
-                attn = F.softmax(attn_logits_list[layer_idx], dim=-1)
-                cls_attn = attn[:, :, 0, 1:].mean(dim=1)
-                cls_attn = cls_attn / cls_attn.sum(dim=1, keepdim=True).clamp_min(1e-12)
-            if cls_attn.size(1) == guide_token_map.size(1):
-                layer_responses.append(cls_attn)
-        if not layer_responses:
-            raise ValueError("No compatible adversarial CLS attention maps for guide response loss.")
-        response = torch.stack(layer_responses).mean(dim=0)
-        guide = guide_token_map.to(response.device, response.dtype)
-        guide = guide / guide.sum(dim=1, keepdim=True).clamp_min(1e-12)
-        response_loss = (response * guide).sum(dim=1).mean()
-        return -response_loss if pre_softmax else response_loss
 
     def _token_map_to_pixel_map(self, token_map: torch.Tensor, img_size: int) -> torch.Tensor:
         num_patches = token_map.size(1)
@@ -805,13 +734,12 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 images,
                 clean_pixels.size(-1),
             )
-        elif self.grad_combine in ("guide_response", "dynamic_guide_response", "guide_qk_response", "guide_aug_ce") or self.guide_aug:
+        elif self.grad_combine == "guide_aug_ce" or self.guide_aug:
             guide_token_map = self._build_stable_attention_token_map(images, expand_shared=True)
             clean_guide_token_map = guide_token_map.clone().detach()
             guide_pixel_map = self._token_map_to_pixel_map(guide_token_map, clean_pixels.size(-1))
         adv_pixels = clean_pixels.clone().detach()
         momentum = torch.zeros_like(adv_pixels)
-        self._last_cosine_log = []
         self._last_dynamic_guide_log = []
 
         for step_idx in range(self.steps):
@@ -823,7 +751,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
             grad_pixels = grad_pixels.detach().requires_grad_(True)
             norm_adv = self._normalize(grad_pixels)
-            if (self.guide_dynamic or self.grad_combine == "dynamic_guide_response") and guide_token_map is not None:
+            if self.guide_dynamic and guide_token_map is not None:
                 if step_idx % self.guide_update_interval == 0:
                     with torch.no_grad():
                         guide_adv = self._build_stable_attention_token_map(norm_adv.detach(), expand_shared=True)
@@ -850,32 +778,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             elif self.grad_combine == "guide_aug_ce":
                 ce_loss = self._guide_aug_ce_loss(grad_pixels, labels, guide_pixel_map)
             else:
-                ce_terms = []
-                for scale_idx in range(self.si_scales):
-                    scale = float(2 ** scale_idx)
-                    for _eot_idx in range(self.eot_iter):
-                        logits_adv = self.model(
-                            self._input_diversity(norm_adv / scale),
-                            return_attn=False,
-                        )
-                        ce_terms.append(F.cross_entropy(logits_adv, labels))
-                ce_loss = torch.stack(ce_terms).mean()
+                raise ValueError(f"Unknown grad_combine: {self.grad_combine!r}")
 
-            anchor_weight = self._anchor_weight_for_step(step_idx)
-            if self.grad_combine in ("guide_response", "guide_qk_response") and anchor_weight > 0.0:
-                _logits_resp, attn_logits_resp = self.model(norm_adv, return_attn=True)
-                response_score = self._guide_response_loss(
-                    attn_logits_resp,
-                    guide_token_map,
-                    pre_softmax=self.grad_combine == "guide_qk_response",
-                )
-                ce_loss = ce_loss + anchor_weight * response_score
-            g_ce = torch.autograd.grad(ce_loss, grad_pixels, retain_graph=True)[0]
-
-            grad = g_ce
-            avg_cos = 1.0
-
-            self._last_cosine_log.append((step_idx, avg_cos))
+            grad = torch.autograd.grad(ce_loss, grad_pixels)[0]
             grad = self._smooth_grad(self._normalize_grad(grad))
             momentum = self.decay * momentum + grad
 
@@ -883,10 +788,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 adv_pixels = adv_pixels + self.step_size * momentum.sign()
                 delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
                 delta = torch.clamp(self._smooth_perturbation(delta), -self.epsilon, self.epsilon)
-                if self.lazy_spectral_delta and step_idx + 1 >= max(self.steps // 2, self.anchor_start_step):
+                if self.lazy_spectral_delta and step_idx + 1 >= self.steps // 2:
                     delta = torch.clamp(self._spectral_filter_delta(delta), -self.epsilon, self.epsilon)
                 adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
 
-        cos_vals = [c for _, c in self._last_cosine_log]
-        print(f"  [LazyAgg] conflicts={sum(1 for c in cos_vals if c < 0)}/{len(cos_vals)} mean_cos={sum(cos_vals)/len(cos_vals):.4f}")
         return self._normalize(adv_pixels)
