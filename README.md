@@ -87,7 +87,7 @@ PowerShell 中带负数的 `--layers` 建议写成等号形式：
 
 ## Lazy Aggregation 攻击
 
-`lazy-agg` 是单白盒 ViT 非定向迁移攻击。它用 stable attention token map 作为 guide，通过 guide response loss（post-softmax 或 QK pre-softmax）或 background augmentation 策略来破坏 ViT 的 attention 聚合。
+`lazy-agg` 是单白盒 ViT 非定向迁移攻击。它用 stable attention token map 作为 guide，通过 guide-based input augmentation CE 策略来破坏 ViT 的 attention 聚合。
 
 默认配置：
 

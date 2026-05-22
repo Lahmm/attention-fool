@@ -55,9 +55,6 @@ def create_attacker(
     guide_aug_copies: int = 3,
     guide_aug_mode: tuple[str, ...] = ("dropout",),
     guide_aug_strength: float = 0.2,
-    bg_foreground_ratio: float = 0.25,
-    bg_background_ratio: float = 0.50,
-    bg_fg_dilate_kernel: int = 3,
 ) -> LazyAggregationAttacker:
     return LazyAggregationAttacker(
         model=model,
@@ -92,9 +89,6 @@ def create_attacker(
         guide_aug_copies=guide_aug_copies,
         guide_aug_mode=guide_aug_mode,
         guide_aug_strength=guide_aug_strength,
-        bg_foreground_ratio=bg_foreground_ratio,
-        bg_background_ratio=bg_background_ratio,
-        bg_fg_dilate_kernel=bg_fg_dilate_kernel,
         device=DEVICE,
     )
 
@@ -273,7 +267,7 @@ def parse_args():
     parser.add_argument("--ti-sigma", type=float, default=0.0, help="TI-FGSM Gaussian kernel sigma for gradient smoothing. 0=disabled.")
     parser.add_argument("--spectral-transition", type=float, default=0.04, help="Transition width for spectral filter.")
     parser.add_argument("--fg-top-ratio", type=float, default=0.25, help="Top patch ratio for foreground patches.")
-    parser.add_argument("--grad-combine", type=str, default="guide_aug_ce", choices=["background_aug_ce", "guide_aug_ce"], help="Gradient combination strategy.")
+    parser.add_argument("--grad-combine", type=str, default="guide_aug_ce", choices=["guide_aug_ce"], help="Gradient combination strategy.")
     parser.add_argument("--si-scales", type=int, default=1, help="Number of scale-invariant CE gradient copies.")
     parser.add_argument("--no-nesterov", action="store_true", help="Disable NI-FGSM style lookahead gradients.")
     parser.add_argument("--eot-iter", type=int, default=1, help="Number of DIM samples per SI scale.")
@@ -294,11 +288,8 @@ def parse_args():
     parser.add_argument("--guide-ema", type=float, default=0.7, help="EMA weight for previous dynamic guide.")
     parser.add_argument("--guide-aug", action="store_true", help="Enable guide-based input augmentation for guide_aug_ce.")
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Number of guide-augmented CE copies per SI/EOT sample.")
-    parser.add_argument("--guide-aug-mode", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation modes: dropout,mix,jitter,freq,dropout_inner,jitter_outer,freq_inner,dropout_all,jitter_all,freq_all,bg_blur,bg_jitter,bg_freq.")
+    parser.add_argument("--guide-aug-mode", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation modes: dropout,mix,jitter,freq,dropout_inner,jitter_outer,freq_inner,dropout_all,jitter_all,freq_all.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
-    parser.add_argument("--bg-foreground-ratio", type=float, default=0.25, help="Top QK patch ratio protected as foreground by background_aug_ce.")
-    parser.add_argument("--bg-background-ratio", type=float, default=0.50, help="Bottom QK patch ratio eligible for background augmentation by background_aug_ce.")
-    parser.add_argument("--bg-fg-dilate-kernel", type=int, default=3, help="Odd patch-grid max-pool kernel to dilate protected foreground for background_aug_ce.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode, use --output-dir outputs/attack/lazyagg.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
@@ -308,14 +299,7 @@ def parse_args():
     parser.add_argument("--num-workers", type=int, default=4, help="DataLoader worker processes for image decode/transform.")
     parser.add_argument("--prefetch-factor", type=int, default=4, help="Batches prefetched per DataLoader worker.")
 
-    # background_aug_ce defaults override
-    args = parser.parse_args()
-    if args.grad_combine == "background_aug_ce":
-        if args.guide_aug_mode == ("dropout",):
-            args.guide_aug_mode = ("bg_blur", "bg_jitter", "bg_freq")
-        if args.guide_aug_strength == 0.2:
-            args.guide_aug_strength = 0.3
-    return args
+    return parser.parse_args()
 
 
 def main(
@@ -353,9 +337,6 @@ def main(
     guide_aug_copies: int = 3,
     guide_aug_mode: tuple[str, ...] = ("dropout",),
     guide_aug_strength: float = 0.2,
-    bg_foreground_ratio: float = 0.25,
-    bg_background_ratio: float = 0.50,
-    bg_fg_dilate_kernel: int = 3,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -418,9 +399,6 @@ def main(
         guide_aug_copies=guide_aug_copies,
         guide_aug_mode=guide_aug_mode,
         guide_aug_strength=guide_aug_strength,
-        bg_foreground_ratio=bg_foreground_ratio,
-        bg_background_ratio=bg_background_ratio,
-        bg_fg_dilate_kernel=bg_fg_dilate_kernel,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
         dataloader=dataloader,
@@ -485,9 +463,6 @@ if __name__ == "__main__":
         guide_aug_copies=args.guide_aug_copies,
         guide_aug_mode=args.guide_aug_mode,
         guide_aug_strength=args.guide_aug_strength,
-        bg_foreground_ratio=args.bg_foreground_ratio,
-        bg_background_ratio=args.bg_background_ratio,
-        bg_fg_dilate_kernel=args.bg_fg_dilate_kernel,
         output_dir=args.output_dir,
         mode=args.mode,
         image_dir=args.image_dir,

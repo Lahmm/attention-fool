@@ -88,8 +88,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
     """
     Lazy aggregation hijack attack for ViTs.
 
-    Uses stable attention token maps as guides for background augmentation
-    and guide-based augmentation strategies to disrupt ViT attention.
+    Uses stable attention token maps as guides for guide-based
+    augmentation strategies to disrupt ViT attention.
     """
 
     def __init__(
@@ -127,9 +127,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         guide_aug_copies: int = 3,
         guide_aug_mode: tuple[str, ...] = ("dropout",),
         guide_aug_strength: float = 0.2,
-        bg_foreground_ratio: float = 0.25,
-        bg_background_ratio: float = 0.50,
-        bg_fg_dilate_kernel: int = 3,
         device: torch.device | None = None,
     ) -> None:
         super().__init__(
@@ -144,10 +141,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             raise ValueError("layers must contain at least one layer index.")
         if not (0.0 < fg_top_ratio < 1.0):
             raise ValueError(f"fg_top_ratio must be in (0, 1), got {fg_top_ratio}.")
-        valid_combine = (
-            "background_aug_ce",
-            "guide_aug_ce",
-        )
+        valid_combine = ("guide_aug_ce",)
         if grad_combine not in valid_combine:
             raise ValueError(f"grad_combine must be one of {valid_combine}, got {grad_combine!r}.")
 
@@ -219,9 +213,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             "dropout_all",
             "jitter_all",
             "freq_all",
-            "bg_blur",
-            "bg_jitter",
-            "bg_freq",
         )
         if not self.guide_aug_mode:
             raise ValueError("guide_aug_mode must contain at least one mode.")
@@ -231,15 +222,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.guide_aug_strength = float(guide_aug_strength)
         if self.guide_aug_strength < 0:
             raise ValueError(f"guide_aug_strength must be non-negative, got {guide_aug_strength}.")
-        self.bg_foreground_ratio = float(bg_foreground_ratio)
-        if not (0.0 < self.bg_foreground_ratio < 1.0):
-            raise ValueError(f"bg_foreground_ratio must be in (0, 1), got {bg_foreground_ratio}.")
-        self.bg_background_ratio = float(bg_background_ratio)
-        if not (0.0 < self.bg_background_ratio < 1.0):
-            raise ValueError(f"bg_background_ratio must be in (0, 1), got {bg_background_ratio}.")
-        self.bg_fg_dilate_kernel = int(bg_fg_dilate_kernel)
-        if self.bg_fg_dilate_kernel <= 0 or self.bg_fg_dilate_kernel % 2 == 0:
-            raise ValueError(f"bg_fg_dilate_kernel must be a positive odd integer, got {bg_fg_dilate_kernel}.")
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
         self._attention_grad_kernel = (
             self._build_ti_kernel(self.attention_grad_smooth_sigma)
@@ -522,85 +504,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         max_vals = flat.max(dim=1, keepdim=True).values.view(-1, 1, 1, 1)
         return ((pixel_map - min_vals) / (max_vals - min_vals).clamp_min(1e-12)).detach()
 
-    def _build_background_context_masks(
-        self,
-        images: torch.Tensor,
-        img_size: int,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        score = self._collect_cls_attention_scores(self.model, images, guide_type="qk_cls")
-        if score is None:
-            raise ValueError("The white-box model did not produce compatible QK CLS attention scores.")
-        num_patches = score.size(1)
-        grid_size = int(num_patches ** 0.5)
-        if grid_size * grid_size != num_patches:
-            raise ValueError(f"Patch count {num_patches} is not a square.")
-
-        fg_mask = self._select_top_mask(score, self.bg_foreground_ratio).to(score.dtype)
-        bg_mask = self._select_bottom_mask(score, self.bg_background_ratio).to(score.dtype)
-        fg_grid = fg_mask.view(score.size(0), 1, grid_size, grid_size)
-        bg_grid = bg_mask.view(score.size(0), 1, grid_size, grid_size)
-
-        if self.bg_fg_dilate_kernel > 1:
-            pad = self.bg_fg_dilate_kernel // 2
-            fg_grid = F.max_pool2d(fg_grid, kernel_size=self.bg_fg_dilate_kernel, stride=1, padding=pad)
-
-        bg_grid = bg_grid * (1.0 - fg_grid).clamp(0.0, 1.0)
-        fg_pixel_mask = F.interpolate(fg_grid, size=(img_size, img_size), mode="bilinear", align_corners=False)
-        bg_pixel_mask = F.interpolate(bg_grid, size=(img_size, img_size), mode="bilinear", align_corners=False)
-        bg_pixel_mask = bg_pixel_mask * (1.0 - fg_pixel_mask).clamp(0.0, 1.0)
-        return fg_pixel_mask.clamp(0.0, 1.0).detach(), bg_pixel_mask.clamp(0.0, 1.0).detach()
-
-    def _background_augmented_pixels(
-        self,
-        pixels: torch.Tensor,
-        bg_pixel_mask: torch.Tensor,
-        copy_idx: int,
-    ) -> torch.Tensor:
-        strength = self.guide_aug_strength
-        if strength <= 0:
-            return pixels
-        mode = self.guide_aug_mode[copy_idx % len(self.guide_aug_mode)]
-        bg = bg_pixel_mask.to(pixels.device, pixels.dtype).clamp(0.0, 1.0)
-        blend = (bg * strength).clamp(0.0, 1.0)
-
-        if mode == "bg_blur":
-            transformed = F.avg_pool2d(pixels, kernel_size=7, stride=1, padding=3)
-        elif mode == "bg_jitter":
-            brightness = (
-                torch.rand(pixels.size(0), 1, 1, 1, device=pixels.device, dtype=pixels.dtype) * 2.0 - 1.0
-            ) * strength
-            noise = torch.randn_like(pixels) * (strength / 2.0)
-            transformed = torch.clamp(pixels * (1.0 + brightness) + noise, 0.0, 1.0)
-        elif mode == "bg_freq":
-            pooled = F.avg_pool2d(pixels, kernel_size=9, stride=1, padding=4)
-            low_noise = F.avg_pool2d(torch.rand_like(pixels), kernel_size=9, stride=1, padding=4)
-            transformed = torch.clamp(0.7 * pooled + 0.3 * low_noise, 0.0, 1.0)
-        else:
-            raise ValueError(
-                f"background_aug_ce only supports bg_blur, bg_jitter, bg_freq; got {mode!r}."
-            )
-
-        return torch.clamp(pixels * (1.0 - blend) + transformed * blend, 0.0, 1.0)
-
-    def _background_aug_ce_loss(
-        self,
-        pixels: torch.Tensor,
-        labels: torch.Tensor,
-        bg_pixel_mask: torch.Tensor,
-    ) -> torch.Tensor:
-        ce_terms = []
-        for scale_idx in range(self.si_scales):
-            scale = float(2 ** scale_idx)
-            for _eot_idx in range(self.eot_iter):
-                for copy_idx in range(self.guide_aug_copies):
-                    aug_pixels = self._background_augmented_pixels(pixels, bg_pixel_mask, copy_idx)
-                    logits_adv = self.model(
-                        self._input_diversity(self._normalize(aug_pixels) / scale),
-                        return_attn=False,
-                    )
-                    ce_terms.append(F.cross_entropy(logits_adv, labels))
-        return torch.stack(ce_terms).mean()
-
     def _guide_augmented_pixels(self, pixels: torch.Tensor, guide_pixel_map: torch.Tensor, copy_idx: int) -> torch.Tensor:
         strength = self.guide_aug_strength
         if strength <= 0:
@@ -728,13 +631,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         guide_token_map = None
         clean_guide_token_map = None
         guide_pixel_map = None
-        bg_pixel_mask = None
-        if self.grad_combine == "background_aug_ce":
-            _fg_pixel_mask, bg_pixel_mask = self._build_background_context_masks(
-                images,
-                clean_pixels.size(-1),
-            )
-        elif self.grad_combine == "guide_aug_ce" or self.guide_aug:
+        if self.grad_combine == "guide_aug_ce" or self.guide_aug:
             guide_token_map = self._build_stable_attention_token_map(images, expand_shared=True)
             clean_guide_token_map = guide_token_map.clone().detach()
             guide_pixel_map = self._token_map_to_pixel_map(guide_token_map, clean_pixels.size(-1))
@@ -773,9 +670,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                                     adv_primary_score=adv_primary_score,
                                 )
                             )
-            if self.grad_combine == "background_aug_ce":
-                ce_loss = self._background_aug_ce_loss(grad_pixels, labels, bg_pixel_mask)
-            elif self.grad_combine == "guide_aug_ce":
+            if self.grad_combine == "guide_aug_ce":
                 ce_loss = self._guide_aug_ce_loss(grad_pixels, labels, guide_pixel_map)
             else:
                 raise ValueError(f"Unknown grad_combine: {self.grad_combine!r}")
