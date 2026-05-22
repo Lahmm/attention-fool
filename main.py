@@ -29,16 +29,12 @@ def create_attacker(
     steps: int,
     decay: float,
     layers: tuple[int, ...],
-    fft_topk: int,
     warmup_steps: int = 3,
-    grad_l2_norm: float = 1.0,
     ti_sigma: float = 0.0,
-    spectral_cutoff: float = 0.15,
     spectral_transition: float = 0.04,
-    anchor_top_ratio: float = 0.25,
     fg_top_ratio: float = 0.25,
     lambda_anchor: float = 1.0,
-    grad_combine: str = "anchor_modulate",
+    grad_combine: str = "guide_qk_response",
     si_scales: int = 1,
     nesterov: bool = True,
     eot_iter: int = 1,
@@ -49,26 +45,20 @@ def create_attacker(
     anchor_end_weight: float | None = None,
     lazy_spectral_delta: bool = False,
     lazy_spectral_cutoff: float = 0.25,
-    anchor_mod_alpha: float = 1.0,
-    fg_mod_alpha: float = 0.5,
-    anchor_mod_power: float = 1.0,
-    ensemble_models: tuple[ViTWithHook, ...] = (),
     attention_guide_models: tuple[ViTWithHook, ...] = (),
     guide_type: str = "postsoftmax_cls",
     guide_sample_mode: str = "fixed",
     attention_grad_smooth_sigma: float = 0.0,
     patch_grad_smooth_sigma: float = 0.0,
     guide_entropy_temp: float = 1.0,
-    feature_loss_weight: float = 0.1,
     guide_dilate_kernel: int = 1,
     guide_smooth_sigma: float = 0.0,
     guide_dynamic: bool = False,
     guide_update_interval: int = 5,
     guide_ema: float = 0.7,
-    guide_aug: bool = False,
     guide_aug_copies: int = 3,
-    guide_aug_mode: tuple[str, ...] = ("dropout",),
-    guide_aug_strength: float = 0.2,
+    guide_aug_mode: tuple[str, ...] = ("bg_blur",),
+    guide_aug_strength: float = 0.3,
     bg_foreground_ratio: float = 0.25,
     bg_background_ratio: float = 0.50,
     bg_fg_dilate_kernel: int = 3,
@@ -80,15 +70,11 @@ def create_attacker(
         steps=steps,
         decay=decay,
         layers=layers,
-        anchor_top_ratio=anchor_top_ratio,
         fg_top_ratio=fg_top_ratio,
         lambda_anchor=lambda_anchor,
         warmup_steps=warmup_steps,
         grad_combine=grad_combine,
-        fft_topk=fft_topk,
-        spectral_cutoff=spectral_cutoff,
         spectral_transition=spectral_transition,
-        grad_l2_norm=grad_l2_norm,
         ti_sigma=ti_sigma if ti_sigma > 0 else 3.0,
         dim_resize_range=dim_resize_range,
         si_scales=si_scales,
@@ -100,23 +86,17 @@ def create_attacker(
         anchor_end_weight=anchor_end_weight,
         lazy_spectral_delta=lazy_spectral_delta,
         lazy_spectral_cutoff=lazy_spectral_cutoff,
-        anchor_mod_alpha=anchor_mod_alpha,
-        fg_mod_alpha=fg_mod_alpha,
-        anchor_mod_power=anchor_mod_power,
-        ensemble_models=ensemble_models,
         attention_guide_models=attention_guide_models,
         guide_type=guide_type,
         guide_sample_mode=guide_sample_mode,
         attention_grad_smooth_sigma=attention_grad_smooth_sigma,
         patch_grad_smooth_sigma=patch_grad_smooth_sigma,
         guide_entropy_temp=guide_entropy_temp,
-        feature_loss_weight=feature_loss_weight,
         guide_dilate_kernel=guide_dilate_kernel,
         guide_smooth_sigma=guide_smooth_sigma,
         guide_dynamic=guide_dynamic,
         guide_update_interval=guide_update_interval,
         guide_ema=guide_ema,
-        guide_aug=guide_aug,
         guide_aug_copies=guide_aug_copies,
         guide_aug_mode=guide_aug_mode,
         guide_aug_strength=guide_aug_strength,
@@ -161,7 +141,6 @@ def validate_attack_output_dir(output_dir: str | None) -> Path:
         )
     provided = Path(output_dir).expanduser()
     if provided.resolve() != expected.resolve():
-        # Allow subdirectories under the lazyagg output directory
         if str(provided.resolve()).startswith(str(expected.resolve())):
             return provided
         raise ValueError(
@@ -299,16 +278,12 @@ def parse_args():
     parser.add_argument("--steps", type=int, default=20, help="Number of attack iterations.")
     parser.add_argument("--decay", type=float, default=1.0, help="Momentum decay factor.")
     parser.add_argument("--layers", type=parse_layers, default=(-6, -5, -4, -3, -2, -1), help='Comma-separated token layers, e.g. "-6,-5,-4,-3,-2,-1".')
-    parser.add_argument("--fft-topk", type=int, default=1, help="Per-channel Top-K stable patch count for FFT stability weights.")
     parser.add_argument("--warmup-steps", type=int, default=3, help="Pure-CE steps before adding feature losses.")
-    parser.add_argument("--grad-l2-norm", type=float, default=1.0, help="L2 target norm for gradient surgery.")
     parser.add_argument("--ti-sigma", type=float, default=0.0, help="TI-FGSM Gaussian kernel sigma for gradient smoothing. 0=disabled.")
-    parser.add_argument("--spectral-cutoff", type=float, default=0.15, help="Low-pass cutoff ratio for spectral perturbation filtering.")
     parser.add_argument("--spectral-transition", type=float, default=0.04, help="Transition width for spectral filter.")
-    parser.add_argument("--anchor-top-ratio", type=float, default=0.25, help="Top patch ratio for background anchors.")
     parser.add_argument("--fg-top-ratio", type=float, default=0.25, help="Top patch ratio for foreground patches.")
     parser.add_argument("--lambda-anchor", type=float, default=1.0, help="Weight for aggregation hijack loss.")
-    parser.add_argument("--grad-combine", type=str, default="anchor_modulate", choices=["pcgrad_asymmetric", "sum", "ce", "anchor_modulate", "stable_attention", "expanded_stable_attention", "guide_response", "dynamic_guide_response", "guide_aug_ce", "guide_aug_feature", "guide_qk_response", "background_aug_ce"], help="Gradient combination strategy.")
+    parser.add_argument("--grad-combine", type=str, default="guide_qk_response", choices=["guide_response", "dynamic_guide_response", "guide_qk_response", "background_aug_ce"], help="Gradient combination strategy.")
     parser.add_argument("--si-scales", type=int, default=1, help="Number of scale-invariant CE gradient copies.")
     parser.add_argument("--no-nesterov", action="store_true", help="Disable NI-FGSM style lookahead gradients.")
     parser.add_argument("--eot-iter", type=int, default=1, help="Number of DIM samples per SI scale.")
@@ -319,26 +294,20 @@ def parse_args():
     parser.add_argument("--anchor-end-weight", type=float, default=None, help="Final anchor modulation weight for linear/cosine schedules.")
     parser.add_argument("--lazy-spectral-delta", action="store_true", help="Enable spectral perturbation filtering in the second half of attack.")
     parser.add_argument("--lazy-spectral-cutoff", type=float, default=0.25, help="Low-pass cutoff ratio for spectral perturbation filtering.")
-    parser.add_argument("--anchor-mod-alpha", type=float, default=1.0, help="Anchor multiplier in modulation map.")
-    parser.add_argument("--fg-mod-alpha", type=float, default=0.5, help="Foreground multiplier in modulation map.")
-    parser.add_argument("--anchor-mod-power", type=float, default=1.0, help="Power exponent for token_map before normalization.")
-    parser.add_argument("--ensemble-source-models", type=parse_model_names, default=(), help="Comma-separated extra source models for CE gradient ensemble.")
     parser.add_argument("--attention-guide-models", type=parse_model_names, default=(), help="Comma-separated extra models for clean stable-attention guide maps.")
     parser.add_argument("--guide-type", type=str, default="postsoftmax_cls", help="Comma-separated guide types: postsoftmax_cls,qk_cls,qk_all_queries.")
     parser.add_argument("--guide-sample-mode", type=str, default="fixed", choices=["fixed", "random"], help="How to choose a guide type when listing multiple.")
     parser.add_argument("--attention-grad-smooth-sigma", type=float, default=0.0, help="Gaussian smoothing for attention/QK-response gradients. 0=disabled.")
     parser.add_argument("--patch-grad-smooth-sigma", type=float, default=0.0, help="Gaussian smoothing for guide feature gradients. 0=disabled.")
     parser.add_argument("--guide-entropy-temp", type=float, default=1.0, help="Temperature exponent for guide normalization.")
-    parser.add_argument("--feature-loss-weight", type=float, default=0.1, help="Weight for guide_aug_feature patch feature disruption loss.")
     parser.add_argument("--guide-dilate-kernel", type=int, default=1, help="Odd patch-grid max-pool kernel for expanded stable-attention guides. 1=disabled.")
     parser.add_argument("--guide-smooth-sigma", type=float, default=0.0, help="Gaussian sigma for smoothing expanded stable-attention guides. 0=disabled.")
     parser.add_argument("--guide-dynamic", action="store_true", help="Update stable-attention guide from adversarial image during attack.")
     parser.add_argument("--guide-update-interval", type=int, default=5, help="Dynamic guide update interval in attack steps.")
     parser.add_argument("--guide-ema", type=float, default=0.7, help="EMA weight for previous dynamic guide.")
-    parser.add_argument("--guide-aug", action="store_true", help="Enable guide-based input augmentation for guide_aug_ce.")
-    parser.add_argument("--guide-aug-copies", type=int, default=3, help="Number of guide-augmented CE copies per SI/EOT sample.")
-    parser.add_argument("--guide-aug-mode", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation modes: dropout,mix,jitter,freq,dropout_inner,jitter_outer,freq_inner,dropout_all,jitter_all,freq_all,bg_blur,bg_jitter,bg_freq.")
-    parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
+    parser.add_argument("--guide-aug-copies", type=int, default=3, help="Number of augmented CE copies per SI/EOT sample.")
+    parser.add_argument("--guide-aug-mode", type=parse_model_names, default=("bg_blur",), help="Comma-separated background augmentation modes: bg_blur,bg_jitter,bg_freq.")
+    parser.add_argument("--guide-aug-strength", type=float, default=0.3, help="Background augmentation strength.")
     parser.add_argument("--bg-foreground-ratio", type=float, default=0.25, help="Top QK patch ratio protected as foreground by background_aug_ce.")
     parser.add_argument("--bg-background-ratio", type=float, default=0.50, help="Bottom QK patch ratio eligible for background augmentation by background_aug_ce.")
     parser.add_argument("--bg-fg-dilate-kernel", type=int, default=3, help="Odd patch-grid max-pool kernel to dilate protected foreground for background_aug_ce.")
@@ -352,12 +321,6 @@ def parse_args():
     parser.add_argument("--prefetch-factor", type=int, default=4, help="Batches prefetched per DataLoader worker.")
     args = parser.parse_args()
 
-    # background_aug_ce defaults override
-    if args.grad_combine == "background_aug_ce":
-        if args.guide_aug_mode == ("dropout",):
-            args.guide_aug_mode = ("bg_blur", "bg_jitter", "bg_freq")
-        if args.guide_aug_strength == 0.2:
-            args.guide_aug_strength = 0.3
     return args
 
 
@@ -368,18 +331,14 @@ def main(
     steps: int,
     decay: float,
     layers: tuple[int, ...],
-    fft_topk: int,
     output_dir: str | None,
     mode: str,
     warmup_steps: int = 3,
-    grad_l2_norm: float = 1.0,
     ti_sigma: float = 0.0,
-    spectral_cutoff: float = 0.15,
     spectral_transition: float = 0.04,
-    anchor_top_ratio: float = 0.25,
     fg_top_ratio: float = 0.25,
     lambda_anchor: float = 1.0,
-    grad_combine: str = "anchor_modulate",
+    grad_combine: str = "guide_qk_response",
     si_scales: int = 1,
     nesterov: bool = True,
     eot_iter: int = 1,
@@ -390,26 +349,20 @@ def main(
     anchor_end_weight: float | None = None,
     lazy_spectral_delta: bool = False,
     lazy_spectral_cutoff: float = 0.25,
-    anchor_mod_alpha: float = 1.0,
-    fg_mod_alpha: float = 0.5,
-    anchor_mod_power: float = 1.0,
-    ensemble_source_models: tuple[str, ...] = (),
     attention_guide_models_arg: tuple[str, ...] = (),
     guide_type: str = "postsoftmax_cls",
     guide_sample_mode: str = "fixed",
     attention_grad_smooth_sigma: float = 0.0,
     patch_grad_smooth_sigma: float = 0.0,
     guide_entropy_temp: float = 1.0,
-    feature_loss_weight: float = 0.1,
     guide_dilate_kernel: int = 1,
     guide_smooth_sigma: float = 0.0,
     guide_dynamic: bool = False,
     guide_update_interval: int = 5,
     guide_ema: float = 0.7,
-    guide_aug: bool = False,
     guide_aug_copies: int = 3,
-    guide_aug_mode: tuple[str, ...] = ("dropout",),
-    guide_aug_strength: float = 0.2,
+    guide_aug_mode: tuple[str, ...] = ("bg_blur",),
+    guide_aug_strength: float = 0.3,
     bg_foreground_ratio: float = 0.25,
     bg_background_ratio: float = 0.50,
     bg_fg_dilate_kernel: int = 3,
@@ -435,12 +388,6 @@ def main(
     )
     model = build_vit_model(num_classes=num_classes)
 
-    ensemble_models: tuple[ViTWithHook, ...] = ()
-    if ensemble_source_models:
-        ensemble_models = tuple(
-            build_vit_model(num_classes=num_classes, model_name=model_name)
-            for model_name in ensemble_source_models
-        )
     attention_guide_models: tuple[ViTWithHook, ...] = ()
     if attention_guide_models_arg:
         attention_guide_models = tuple(
@@ -455,13 +402,9 @@ def main(
         steps=steps,
         decay=decay,
         layers=layers,
-        fft_topk=fft_topk,
         warmup_steps=warmup_steps,
-        grad_l2_norm=grad_l2_norm,
         ti_sigma=ti_sigma,
-        spectral_cutoff=spectral_cutoff,
         spectral_transition=spectral_transition,
-        anchor_top_ratio=anchor_top_ratio,
         fg_top_ratio=fg_top_ratio,
         lambda_anchor=lambda_anchor,
         grad_combine=grad_combine,
@@ -475,23 +418,17 @@ def main(
         anchor_end_weight=anchor_end_weight,
         lazy_spectral_delta=lazy_spectral_delta,
         lazy_spectral_cutoff=lazy_spectral_cutoff,
-        anchor_mod_alpha=anchor_mod_alpha,
-        fg_mod_alpha=fg_mod_alpha,
-        anchor_mod_power=anchor_mod_power,
-        ensemble_models=ensemble_models,
         attention_guide_models=attention_guide_models,
         guide_type=guide_type,
         guide_sample_mode=guide_sample_mode,
         attention_grad_smooth_sigma=attention_grad_smooth_sigma,
         patch_grad_smooth_sigma=patch_grad_smooth_sigma,
         guide_entropy_temp=guide_entropy_temp,
-        feature_loss_weight=feature_loss_weight,
         guide_dilate_kernel=guide_dilate_kernel,
         guide_smooth_sigma=guide_smooth_sigma,
         guide_dynamic=guide_dynamic,
         guide_update_interval=guide_update_interval,
         guide_ema=guide_ema,
-        guide_aug=guide_aug,
         guide_aug_copies=guide_aug_copies,
         guide_aug_mode=guide_aug_mode,
         guide_aug_strength=guide_aug_strength,
@@ -536,13 +473,9 @@ if __name__ == "__main__":
         steps=args.steps,
         decay=args.decay,
         layers=args.layers,
-        fft_topk=args.fft_topk,
         warmup_steps=args.warmup_steps,
-        grad_l2_norm=args.grad_l2_norm,
         ti_sigma=args.ti_sigma,
-        spectral_cutoff=args.spectral_cutoff,
         spectral_transition=args.spectral_transition,
-        anchor_top_ratio=args.anchor_top_ratio,
         fg_top_ratio=args.fg_top_ratio,
         lambda_anchor=args.lambda_anchor,
         grad_combine=args.grad_combine,
@@ -556,23 +489,17 @@ if __name__ == "__main__":
         anchor_end_weight=args.anchor_end_weight,
         lazy_spectral_delta=args.lazy_spectral_delta,
         lazy_spectral_cutoff=args.lazy_spectral_cutoff,
-        anchor_mod_alpha=args.anchor_mod_alpha,
-        fg_mod_alpha=args.fg_mod_alpha,
-        anchor_mod_power=args.anchor_mod_power,
-        ensemble_source_models=args.ensemble_source_models,
         attention_guide_models_arg=args.attention_guide_models,
         guide_type=args.guide_type,
         guide_sample_mode=args.guide_sample_mode,
         attention_grad_smooth_sigma=args.attention_grad_smooth_sigma,
         patch_grad_smooth_sigma=args.patch_grad_smooth_sigma,
         guide_entropy_temp=args.guide_entropy_temp,
-        feature_loss_weight=args.feature_loss_weight,
         guide_dilate_kernel=args.guide_dilate_kernel,
         guide_smooth_sigma=args.guide_smooth_sigma,
         guide_dynamic=args.guide_dynamic,
         guide_update_interval=args.guide_update_interval,
         guide_ema=args.guide_ema,
-        guide_aug=args.guide_aug,
         guide_aug_copies=args.guide_aug_copies,
         guide_aug_mode=args.guide_aug_mode,
         guide_aug_strength=args.guide_aug_strength,
