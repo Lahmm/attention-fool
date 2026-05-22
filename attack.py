@@ -84,735 +84,6 @@ class MIFGSMAttacker:
         return self._normalize(adv_pixels)
 
 
-class FFTCCAttacker(MIFGSMAttacker):
-    """
-    MI-FGSM with FFT-guided foreground/background contrast collapse.
-
-    Clean-token FFT stability defines foreground-like/background-like soft
-    patch groups. The attack minimizes their patch-CLS alignment gap across
-    selected residual-stream layers.
-    """
-
-    def __init__(
-        self,
-        model,
-        epsilon: float = 8.0 / 255.0,
-        step_size: float | None = None,
-        steps: int = 10,
-        decay: float = 1.0,
-        layers: tuple[int, ...] = (-4, -2, -1),
-        lambda_contrast: float = 1.0,
-        fft_topk: int = 1,
-        device: torch.device | None = None,
-    ) -> None:
-        super().__init__(
-            model=model,
-            epsilon=epsilon,
-            step_size=step_size,
-            steps=steps,
-            decay=decay,
-            device=device,
-        )
-        if not layers:
-            raise ValueError("layers must contain at least one layer index.")
-        if fft_topk <= 0:
-            raise ValueError(f"fft_topk must be positive, got {fft_topk}.")
-
-        self.layers = tuple(int(layer) for layer in layers)
-        self.lambda_contrast = float(lambda_contrast)
-        self.fft_topk = int(fft_topk)
-
-    @staticmethod
-    def _resolve_layers(layers: tuple[int, ...], num_layers: int) -> list[int]:
-        resolved: list[int] = []
-        for layer in layers:
-            idx = layer if layer >= 0 else num_layers + layer
-            if idx < 0 or idx >= num_layers:
-                raise ValueError(f"Invalid layer index {layer}; model returned {num_layers} token layers.")
-            if idx not in resolved:
-                resolved.append(idx)
-        return resolved
-
-    def _build_clean_guides(
-        self,
-        images: torch.Tensor,
-    ) -> tuple[list[int], dict[int, torch.Tensor]]:
-        with torch.no_grad():
-            _logits_clean, token_list_clean = self.model(images, return_tokens=True)
-
-        layer_indices = self._resolve_layers(self.layers, len(token_list_clean))
-        fft_weights: dict[int, torch.Tensor] = {}
-
-        for layer_idx in layer_indices:
-            tokens = token_list_clean[layer_idx].detach()
-            weights = last_vit_stable_patch_frequency(
-                tokens=tokens,
-                topk=self.fft_topk,
-                has_cls_token=True,
-            ).detach()
-            fft_weights[layer_idx] = self._normalize_weights(weights)
-
-        return layer_indices, fft_weights
-
-    @staticmethod
-    def _normalize_weights(weights: torch.Tensor) -> torch.Tensor:
-        min_vals = weights.min(dim=1, keepdim=True).values
-        max_vals = weights.max(dim=1, keepdim=True).values
-        return (weights - min_vals) / (max_vals - min_vals).clamp_min(1e-12)
-
-    @staticmethod
-    def _weighted_mean(values: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
-        weighted_sum = (values * weights).sum(dim=1)
-        normalizer = weights.sum(dim=1).clamp_min(1e-12)
-        return weighted_sum / normalizer
-
-    def _feature_losses(
-        self,
-        token_list_adv: list[torch.Tensor],
-        layer_indices: list[int],
-        fft_weights: dict[int, torch.Tensor],
-    ) -> torch.Tensor:
-        contrast_terms = []
-
-        for layer_idx in layer_indices:
-            tokens_adv = token_list_adv[layer_idx]
-            cls_adv = tokens_adv[:, 0, :]
-            patch_adv = tokens_adv[:, 1:, :]
-
-            cls_for_patch = cls_adv.unsqueeze(1).expand_as(patch_adv)
-            patch_cls_cos = F.cosine_similarity(patch_adv, cls_for_patch, dim=-1)
-            fg_weights = fft_weights[layer_idx].to(
-                device=patch_cls_cos.device,
-                dtype=patch_cls_cos.dtype,
-            )
-            bg_weights = 1.0 - fg_weights
-
-            fg_align = self._weighted_mean(patch_cls_cos, fg_weights)
-            bg_align = self._weighted_mean(patch_cls_cos, bg_weights)
-            contrast_terms.append(-torch.abs(fg_align - bg_align).mean())
-
-        contrast_loss = torch.stack(contrast_terms).mean()
-        return contrast_loss
-
-    def attack_batch(
-        self,
-        images: torch.Tensor,
-        labels: torch.Tensor,
-    ) -> torch.Tensor:
-        images = images.to(self.device)
-        labels = labels.to(self.device)
-
-        layer_indices, fft_weights = self._build_clean_guides(images)
-        clean_pixels = self._denormalize(images).detach()
-        adv_pixels = clean_pixels.clone().detach()
-        momentum = torch.zeros_like(adv_pixels)
-
-        for _step in range(self.steps):
-            adv_pixels.requires_grad_(True)
-            logits_adv, token_list_adv = self.model(
-                self._normalize(adv_pixels),
-                return_tokens=True,
-            )
-            ce_loss = F.cross_entropy(logits_adv, labels)
-            contrast_loss = self._feature_losses(
-                token_list_adv=token_list_adv,
-                layer_indices=layer_indices,
-                fft_weights=fft_weights,
-            )
-            loss = (
-                ce_loss
-                + self.lambda_contrast * contrast_loss
-            )
-
-            grad = torch.autograd.grad(loss, adv_pixels)[0]
-            grad = self._normalize_grad(grad)
-            momentum = self.decay * momentum + grad
-
-            with torch.no_grad():
-                adv_pixels = adv_pixels + self.step_size * momentum.sign()
-                delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
-                adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0).detach()
-
-        return self._normalize(adv_pixels)
-
-
-class FFTCCAttackerV2(FFTCCAttacker):
-    """
-    Enhanced FFT-CC attacker with:
-    - Attention-aware loss (target attention-FFT alignment)
-    - Directional contrast loss (invert fg/bg instead of collapse)
-    - Patch score inversion (invert high-FFT → low-patch-score pattern)
-    - Input diversity (DIM-style random resize for transferability)
-    - Dynamic FFT weight update during attack
-    - Extended layer coverage with depth-aware weighting
-    """
-
-    def __init__(
-        self,
-        model,
-        epsilon: float = 16.0 / 255.0,
-        step_size: float | None = None,
-        steps: int = 10,
-        decay: float = 1.0,
-        layers: tuple[int, ...] = (-8, -7, -6, -5, -4, -3, -2, -1),
-        lambda_contrast: float = 0.5,
-        lambda_attn: float = 0.3,
-        lambda_patch_score: float = 0.2,
-        fft_topk: int = 2,
-        fft_update_interval: int = 3,
-        input_diversity: bool = True,
-        dim_resize_range: tuple[float, float] = (0.9, 1.0),
-        device: torch.device | None = None,
-    ) -> None:
-        super().__init__(
-            model=model,
-            epsilon=epsilon,
-            step_size=step_size,
-            steps=steps,
-            decay=decay,
-            layers=layers,
-            lambda_contrast=lambda_contrast,
-            fft_topk=fft_topk,
-            device=device,
-        )
-        self.lambda_attn = float(lambda_attn)
-        self.lambda_patch_score = float(lambda_patch_score)
-        self.fft_update_interval = int(fft_update_interval)
-        self.input_diversity = bool(input_diversity)
-        self.dim_resize_range = tuple(float(r) for r in dim_resize_range)
-
-    def _input_diversity(self, images: torch.Tensor) -> torch.Tensor:
-        """Apply random resizing for input diversity (DIM)."""
-        if not self.input_diversity:
-            return images
-        b, c, h, w = images.shape
-        lo, hi = self.dim_resize_range
-        scale = lo + (hi - lo) * torch.rand(1, device=images.device)
-        new_h = max(int(h * scale.item()), h - 2)
-        new_w = max(int(w * scale.item()), w - 2)
-        resized = F.interpolate(images, size=(new_h, new_w), mode='bilinear', align_corners=False)
-        pad_h = (h - new_h) // 2
-        pad_w = (w - new_w) // 2
-        pad_h2 = h - new_h - pad_h
-        pad_w2 = w - new_w - pad_w
-        if pad_h >= 0 and pad_w >= 0:
-            return F.pad(resized, (pad_w, pad_w2, pad_h, pad_h2), value=0.0)
-        return resized[:, :, -pad_h:new_h + pad_h, -pad_w:new_w + pad_w]
-
-    def _attention_loss(
-        self,
-        attn_logits_list: list[torch.Tensor],
-        layer_indices: list[int],
-        fft_weights: dict[int, torch.Tensor],
-    ) -> torch.Tensor:
-        """Attack attention distribution: flatten attention peaks, shift away from high-FFT regions."""
-        terms = []
-        for i, layer_idx in enumerate(layer_indices):
-            attn_logits = attn_logits_list[layer_idx]  # [B, H, N, N]
-            attn_weights = F.softmax(attn_logits, dim=-1)
-            cls_attn = attn_weights[:, :, 0, 1:]  # [B, H, N_p]
-            mean_attn = cls_attn.mean(dim=1)  # [B, N_p]
-
-            fg_w = fft_weights[layer_idx].to(device=mean_attn.device, dtype=mean_attn.dtype)
-            bg_w = 1.0 - fg_w
-
-            log_attn = (mean_attn + 1e-12).log()
-            entropy = -(mean_attn * log_attn).sum(dim=1).mean()
-
-            attn_to_fg = (mean_attn * fg_w).sum(dim=1) / fg_w.sum(dim=1).clamp_min(1e-12)
-            attn_to_bg = (mean_attn * bg_w).sum(dim=1) / bg_w.sum(dim=1).clamp_min(1e-12)
-            attn_shift = attn_to_fg.mean() - attn_to_bg.mean()
-
-            depth_weight = 0.5 + 0.5 * (i / max(len(layer_indices) - 1, 1))
-            terms.append(depth_weight * (entropy + attn_shift))
-
-        return torch.stack(terms).mean()
-
-    def _directional_contrast_loss(
-        self,
-        token_list_adv: list[torch.Tensor],
-        layer_indices: list[int],
-        fft_weights: dict[int, torch.Tensor],
-    ) -> torch.Tensor:
-        """Directional contrast: push foreground alignment below background alignment."""
-        terms = []
-        for i, layer_idx in enumerate(layer_indices):
-            tokens_adv = token_list_adv[layer_idx]
-            cls_adv = tokens_adv[:, 0, :]
-            patch_adv = tokens_adv[:, 1:, :]
-
-            cls_for_patch = cls_adv.unsqueeze(1).expand_as(patch_adv)
-            patch_cls_cos = F.cosine_similarity(patch_adv, cls_for_patch, dim=-1)
-
-            fg_w = fft_weights[layer_idx].to(device=patch_cls_cos.device, dtype=patch_cls_cos.dtype)
-            bg_w = 1.0 - fg_w
-
-            fg_align = self._weighted_mean(patch_cls_cos, fg_w)
-            bg_align = self._weighted_mean(patch_cls_cos, bg_w)
-
-            # fg_align - bg_align: minimize to push fg below bg
-            depth_weight = 0.5 + 0.5 * (i / max(len(layer_indices) - 1, 1))
-            terms.append(depth_weight * (fg_align - bg_align).mean())
-
-        return torch.stack(terms).mean()
-
-    def _patch_score_inversion_loss(
-        self,
-        token_list_adv: list[torch.Tensor],
-        layer_indices: list[int],
-        fft_weights: dict[int, torch.Tensor],
-    ) -> torch.Tensor:
-        """Invert patch score pattern: make high-FFT regions have high patch scores."""
-        terms = []
-        for i, layer_idx in enumerate(layer_indices):
-            tokens = token_list_adv[layer_idx]
-            patches = tokens[:, 1:, :]
-            patch_norm = patches.norm(dim=-1)
-
-            fg_w = fft_weights[layer_idx].to(device=patch_norm.device, dtype=patch_norm.dtype)
-            bg_w = 1.0 - fg_w
-
-            fg_score = self._weighted_mean(patch_norm, fg_w)
-            bg_score = self._weighted_mean(patch_norm, bg_w)
-
-            depth_weight = 0.5 + 0.5 * (i / max(len(layer_indices) - 1, 1))
-            terms.append(depth_weight * (bg_score - fg_score).mean())
-
-        return torch.stack(terms).mean()
-
-    def _update_fft_weights(
-        self,
-        token_list_adv: list[torch.Tensor],
-        layer_indices: list[int],
-        old_fft_weights: dict[int, torch.Tensor],
-        ema: float = 0.3,
-    ) -> dict[int, torch.Tensor]:
-        """Update FFT weights from current adversarial tokens with EMA."""
-        new_fft: dict[int, torch.Tensor] = {}
-        for layer_idx in layer_indices:
-            tokens = token_list_adv[layer_idx].detach()
-            weights = last_vit_stable_patch_frequency(
-                tokens=tokens,
-                topk=self.fft_topk,
-                has_cls_token=True,
-            ).detach()
-            weights = self._normalize_weights(weights)
-            old_w = old_fft_weights[layer_idx]
-            new_fft[layer_idx] = (1 - ema) * old_w + ema * weights
-        return new_fft
-
-    def attack_batch(
-        self,
-        images: torch.Tensor,
-        labels: torch.Tensor,
-    ) -> torch.Tensor:
-        images = images.to(self.device)
-        labels = labels.to(self.device)
-
-        layer_indices, fft_weights = self._build_clean_guides(images)
-        clean_pixels = self._denormalize(images).detach()
-        adv_pixels = clean_pixels.clone().detach()
-        momentum = torch.zeros_like(adv_pixels)
-
-        for step_idx in range(self.steps):
-            norm_input = self._normalize(adv_pixels)
-            if self.input_diversity:
-                norm_input = self._input_diversity(norm_input)
-
-            norm_input_for_grad = norm_input.detach().clone()
-            norm_input_for_grad.requires_grad_(True)
-
-            logits_adv, attn_logits_list, token_list_adv = self.model(
-                norm_input_for_grad,
-                return_tokens=True,
-                return_attn=True,
-            )
-            ce_loss = F.cross_entropy(logits_adv, labels)
-
-            contrast_loss = self._directional_contrast_loss(
-                token_list_adv=token_list_adv,
-                layer_indices=layer_indices,
-                fft_weights=fft_weights,
-            )
-
-            attn_loss = self._attention_loss(
-                attn_logits_list=attn_logits_list,
-                layer_indices=layer_indices,
-                fft_weights=fft_weights,
-            )
-
-            ps_loss = self._patch_score_inversion_loss(
-                token_list_adv=token_list_adv,
-                layer_indices=layer_indices,
-                fft_weights=fft_weights,
-            )
-
-            loss = (
-                ce_loss
-                + self.lambda_contrast * contrast_loss
-                + self.lambda_attn * attn_loss
-                + self.lambda_patch_score * ps_loss
-            )
-
-            grad = torch.autograd.grad(loss, norm_input_for_grad)[0]
-            grad = self._normalize_grad(grad)
-            momentum = self.decay * momentum + grad
-
-            with torch.no_grad():
-                adv_pixels = adv_pixels + self.step_size * momentum.sign()
-                delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
-                adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0).detach()
-
-            # Dynamic FFT weight update
-            if self.fft_update_interval > 0 and (step_idx + 1) % self.fft_update_interval == 0:
-                with torch.no_grad():
-                    _logits, token_list_update = self.model(
-                        self._normalize(adv_pixels), return_tokens=True, return_attn=False,
-                    )
-                fft_weights = self._update_fft_weights(
-                    token_list_adv=token_list_update,
-                    layer_indices=layer_indices,
-                    old_fft_weights=fft_weights,
-                )
-
-        return self._normalize(adv_pixels)
-
-
-class FFTCCAttackerV3(FFTCCAttacker):
-    """
-    Conservative FFT-CC enhancement:
-    - More steps (20) for stronger attack
-    - All 12 layers for full depth coverage
-    - fft_topk=3 for broader FFT stability selection
-    - TI-FGSM style gradient smoothing (Gaussian kernel on gradients)
-    - Original collapse loss (fg/bg alignment gap minimization)
-    - Dynamic FFT update
-    """
-
-    def __init__(
-        self,
-        model,
-        epsilon: float = 16.0 / 255.0,
-        step_size: float | None = None,
-        steps: int = 20,
-        decay: float = 0.9,
-        layers: tuple[int, ...] = tuple(range(12)),
-        lambda_contrast: float = 1.0,
-        fft_topk: int = 3,
-        fft_update_interval: int = 5,
-        ti_sigma: float = 5.0,
-        device: torch.device | None = None,
-    ) -> None:
-        super().__init__(
-            model=model,
-            epsilon=epsilon,
-            step_size=step_size,
-            steps=steps,
-            decay=decay,
-            layers=layers,
-            lambda_contrast=lambda_contrast,
-            fft_topk=fft_topk,
-            device=device,
-        )
-        self.fft_update_interval = int(fft_update_interval)
-        self.ti_sigma = float(ti_sigma)
-
-        # Build TI-FGSM Gaussian kernel
-        self._ti_kernel = self._build_ti_kernel(self.ti_sigma)
-
-    def _build_ti_kernel(self, sigma: float) -> torch.Tensor:
-        """Build a 2D Gaussian kernel for gradient smoothing."""
-        if sigma <= 0:
-            return None
-        radius = int(3 * sigma)
-        x = torch.arange(-radius, radius + 1, dtype=torch.float32)
-        g1d = torch.exp(-0.5 * (x / sigma) ** 2)
-        g1d = g1d / g1d.sum()
-        g2d = g1d[:, None] @ g1d[None, :]  # [K, K]
-        return g2d.view(1, 1, g2d.size(0), g2d.size(1))
-
-    def _smooth_grad(self, grad: torch.Tensor) -> torch.Tensor:
-        """Apply TI-FGSM Gaussian smoothing to gradients."""
-        if self._ti_kernel is None or self.ti_sigma <= 0:
-            return grad
-        kernel = self._ti_kernel.to(grad.device, grad.dtype)  # [1, 1, K, K]
-        # Repeat kernel for each channel for grouped conv
-        kernel = kernel.repeat(grad.size(1), 1, 1, 1)  # [C, 1, K, K]
-        pad = kernel.size(2) // 2
-        padded = F.pad(grad, (pad, pad, pad, pad), mode='reflect')
-        smoothed = F.conv2d(padded, kernel, groups=grad.size(1))
-        return smoothed
-
-    def _update_fft_weights(
-        self,
-        token_list_adv: list[torch.Tensor],
-        layer_indices: list[int],
-        old_fft_weights: dict[int, torch.Tensor],
-        ema: float = 0.3,
-    ) -> dict[int, torch.Tensor]:
-        """Update FFT weights from current adversarial tokens with EMA."""
-        new_fft: dict[int, torch.Tensor] = {}
-        for layer_idx in layer_indices:
-            tokens = token_list_adv[layer_idx].detach()
-            weights = last_vit_stable_patch_frequency(
-                tokens=tokens,
-                topk=self.fft_topk,
-                has_cls_token=True,
-            ).detach()
-            weights = self._normalize_weights(weights)
-            old_w = old_fft_weights[layer_idx]
-            new_fft[layer_idx] = (1 - ema) * old_w + ema * weights
-        return new_fft
-
-    def attack_batch(
-        self,
-        images: torch.Tensor,
-        labels: torch.Tensor,
-    ) -> torch.Tensor:
-        images = images.to(self.device)
-        labels = labels.to(self.device)
-
-        layer_indices, fft_weights = self._build_clean_guides(images)
-        clean_pixels = self._denormalize(images).detach()
-        adv_pixels = clean_pixels.clone().detach()
-        momentum = torch.zeros_like(adv_pixels)
-
-        for step_idx in range(self.steps):
-            adv_pixels.requires_grad_(True)
-            logits_adv, token_list_adv = self.model(
-                self._normalize(adv_pixels),
-                return_tokens=True,
-            )
-            ce_loss = F.cross_entropy(logits_adv, labels)
-            contrast_loss = self._feature_losses(
-                token_list_adv=token_list_adv,
-                layer_indices=layer_indices,
-                fft_weights=fft_weights,
-            )
-            loss = ce_loss + self.lambda_contrast * contrast_loss
-
-            grad = torch.autograd.grad(loss, adv_pixels)[0]
-            grad = self._smooth_grad(grad)  # TI-FGSM gradient smoothing
-            grad = self._normalize_grad(grad)
-            momentum = self.decay * momentum + grad
-
-            with torch.no_grad():
-                adv_pixels = adv_pixels + self.step_size * momentum.sign()
-                delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
-                adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0).detach()
-
-            # Dynamic FFT weight update
-            if self.fft_update_interval > 0 and (step_idx + 1) % self.fft_update_interval == 0:
-                with torch.no_grad():
-                    _logits, token_list_update = self.model(
-                        self._normalize(adv_pixels), return_tokens=True, return_attn=False,
-                    )
-                fft_weights = self._update_fft_weights(
-                    token_list_adv=token_list_update,
-                    layer_indices=layer_indices,
-                    old_fft_weights=fft_weights,
-                )
-
-        return self._normalize(adv_pixels)
-
-class FFTCCAttackerImgFFT(FFTCCAttacker):
-    def __init__(self, model, epsilon=16.0/255.0, step_size=None, steps=10, decay=1.0,
-                 layers=(-4,-2,-1), lambda_contrast=1.0, fft_cutoff=0.15,
-                 fft_transition=0.04, device=None):
-        super().__init__(model=model, epsilon=epsilon, step_size=step_size, steps=steps,
-                         decay=decay, layers=layers, lambda_contrast=lambda_contrast,
-                         fft_topk=1, device=device)
-        self.fft_cutoff = float(fft_cutoff)
-        self.fft_transition = float(fft_transition)
-
-    def _image_fft_patch_weights(self, clean_pixels):
-        from utils import image_2d_fft_low_high_maps
-        fft_maps = image_2d_fft_low_high_maps(clean_pixels, cutoff_ratio=self.fft_cutoff,
-                                               transition_ratio=self.fft_transition)
-        low_ratio = fft_maps["low_ratio"]
-        b, h, w = low_ratio.shape
-        patch_h, patch_w = h // 14, w // 14
-        low_reshaped = low_ratio.view(b, 14, patch_h, 14, patch_w)
-        patch_low = low_reshaped.mean(dim=(2, 4))
-        patch_weights = patch_low.reshape(b, -1)
-        patch_weights = self._normalize_weights(patch_weights)
-        weights_dict = {}
-        for layer_idx in range(12):
-            weights_dict[layer_idx] = patch_weights
-        return weights_dict
-
-    def attack_batch(self, images, labels):
-        import torch.nn.functional as F
-        images = images.to(self.device)
-        labels = labels.to(self.device)
-        clean_pixels = self._denormalize(images).detach()
-        fft_weights = self._image_fft_patch_weights(clean_pixels)
-        layer_indices = self._resolve_layers(self.layers, self.model.num_blocks)
-        adv_pixels = clean_pixels.clone().detach()
-        momentum = torch.zeros_like(adv_pixels)
-        for _step in range(self.steps):
-            adv_pixels.requires_grad_(True)
-            logits_adv, token_list_adv = self.model(self._normalize(adv_pixels), return_tokens=True)
-            ce_loss = F.cross_entropy(logits_adv, labels)
-            contrast_loss = self._feature_losses(token_list_adv=token_list_adv,
-                                                  layer_indices=layer_indices,
-                                                  fft_weights=fft_weights)
-            loss = ce_loss + self.lambda_contrast * contrast_loss
-            grad = torch.autograd.grad(loss, adv_pixels)[0]
-            grad = self._normalize_grad(grad)
-            momentum = self.decay * momentum + grad
-            with torch.no_grad():
-                adv_pixels = adv_pixels + self.step_size * momentum.sign()
-                delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
-                adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0).detach()
-        return self._normalize(adv_pixels)
-
-
-class FFTCCAttackerPCGrad(FFTCCAttackerV2):
-    """
-    FFT-CC with PCGrad gradient surgery to resolve CE / feature loss conflicts.
-
-    Core improvements over V2:
-    - Asymmetric PCGrad: contrast gradient is projected away from conflicting CE directions
-    - Warmup phase: pure CE iterations before adding feature losses
-    - Per-task L2 gradient normalization before PCGrad
-    - TI-FGSM gradient smoothing
-    """
-
-    def __init__(
-        self,
-        model,
-        epsilon: float = 16.0 / 255.0,
-        step_size: float | None = None,
-        steps: int = 10,
-        decay: float = 1.0,
-        layers: tuple[int, ...] = (-6, -5, -4, -3, -2, -1),
-        lambda_contrast: float = 1.0,
-        fft_topk: int = 3,
-        fft_update_interval: int = 3,
-        pcgrad_mode: str = "asymmetric",
-        warmup_steps: int = 3,
-        grad_l2_norm: float = 1.0,
-        ti_sigma: float = 0.0,
-        device=None,
-    ):
-        super().__init__(
-            model=model, epsilon=epsilon, step_size=step_size, steps=steps,
-            decay=decay, layers=layers, lambda_contrast=lambda_contrast,
-            lambda_attn=0.0, lambda_patch_score=0.0, fft_topk=fft_topk,
-            fft_update_interval=fft_update_interval, input_diversity=False,
-            device=device,
-        )
-        valid_modes = ("asymmetric", "symmetric", "none", "orthogonalize", "adaptive", "modulate")
-        if pcgrad_mode not in valid_modes:
-            raise ValueError(f"pcgrad_mode must be one of {valid_modes}, got {pcgrad_mode!r}.")
-        self.pcgrad_mode = pcgrad_mode
-        self.warmup_steps = int(warmup_steps)
-        self.grad_l2_norm = float(grad_l2_norm)
-        self.ti_sigma = float(ti_sigma)
-        self._ti_kernel = None
-        if self.ti_sigma > 0:
-            self._ti_kernel = self._build_ti_kernel(self.ti_sigma)
-
-    @staticmethod
-    def _build_ti_kernel(sigma):
-        radius = int(3 * sigma)
-        x = torch.arange(-radius, radius + 1, dtype=torch.float32)
-        g1d = torch.exp(-0.5 * (x / sigma) ** 2)
-        g1d = g1d / g1d.sum()
-        g2d = g1d[:, None] @ g1d[None, :]
-        return g2d.view(1, 1, g2d.size(0), g2d.size(1))
-
-    def _smooth_grad(self, grad):
-        if self._ti_kernel is None or self.ti_sigma <= 0:
-            return grad
-        kernel = self._ti_kernel.to(grad.device, grad.dtype)
-        kernel = kernel.repeat(grad.size(1), 1, 1, 1)
-        pad = kernel.size(2) // 2
-        return F.conv2d(F.pad(grad, (pad, pad, pad, pad), mode="reflect"), kernel, groups=grad.size(1))
-
-    @staticmethod
-    def _l2_normalize_grad(grad, target_norm=1.0):
-        flat = grad.reshape(grad.size(0), -1)
-        return (flat / flat.norm(dim=1, keepdim=True).clamp_min(1e-12) * target_norm).reshape_as(grad)
-
-    def _pcgrad_combine(self, g_ce, g_contrast):
-        B = g_ce.size(0)
-        flat_ce = g_ce.reshape(B, -1)
-        flat_ct = g_contrast.reshape(B, -1)
-        dot = (flat_ce * flat_ct).sum(dim=1)
-        n_ce = flat_ce.norm(dim=1).clamp_min(1e-12)
-        n_ct = flat_ct.norm(dim=1).clamp_min(1e-12)
-        cos_sim = dot / (n_ce * n_ct)
-        avg_cos = cos_sim.mean().item()
-        conflict = cos_sim < 0
-
-        if self.pcgrad_mode in ("none",) or not conflict.any():
-            return g_ce + self.lambda_contrast * g_contrast, avg_cos
-        if self.pcgrad_mode == "orthogonalize":
-            g_ct_res = flat_ct - (dot / (n_ce ** 2)).unsqueeze(1) * flat_ce
-            return (flat_ce + self.lambda_contrast * g_ct_res).reshape_as(g_ce), avg_cos
-        if self.pcgrad_mode == "adaptive":
-            return (flat_ce + self.lambda_contrast * torch.clamp(cos_sim, min=0.0)[:, None] * flat_ct).reshape_as(g_ce), avg_cos
-        if self.pcgrad_mode == "symmetric":
-            proj_c2t = (dot / (n_ct ** 2)).unsqueeze(1) * flat_ct
-            proj_t2c = (dot / (n_ce ** 2)).unsqueeze(1) * flat_ce
-            return (torch.where(conflict[:, None], flat_ce - proj_c2t, flat_ce)
-                    + self.lambda_contrast * torch.where(conflict[:, None], flat_ct - proj_t2c, flat_ct)).reshape_as(g_ce), avg_cos
-        proj = (dot / (n_ce ** 2)).unsqueeze(1) * flat_ce
-        return (flat_ce + self.lambda_contrast * torch.where(conflict[:, None], flat_ct - proj, flat_ct)).reshape_as(g_ce), avg_cos
-
-    def _build_modulation_map(self, token_list_adv, layer_indices, fft_weights, img_size):
-        avg_fg = torch.stack([fft_weights[li] for li in layer_indices]).mean(dim=0)
-        B, N = avg_fg.shape
-        gs = int(N ** 0.5)
-        grid = avg_fg.reshape(B, 1, gs, gs)
-        grid = (grid - grid.amin(dim=(1, 2, 3), keepdim=True)) / (grid.amax(dim=(1, 2, 3), keepdim=True) - grid.amin(dim=(1, 2, 3), keepdim=True) + 1e-8)
-        return F.interpolate(grid, size=(img_size, img_size), mode="bilinear", align_corners=False).detach()
-
-    def attack_batch(self, images, labels):
-        images = images.to(self.device)
-        labels = labels.to(self.device)
-        layer_indices, fft_weights = self._build_clean_guides(images)
-        clean_pixels = self._denormalize(images).detach()
-        adv_pixels = clean_pixels.clone().detach()
-        momentum = torch.zeros_like(adv_pixels)
-        self._last_cosine_log = []
-
-        for step_idx in range(self.steps):
-            adv_pixels = adv_pixels.detach().requires_grad_(True)
-            logits_adv, token_list_adv = self.model(self._normalize(adv_pixels), return_tokens=True)
-            ce_loss = F.cross_entropy(logits_adv, labels)
-            g_ce = torch.autograd.grad(ce_loss, adv_pixels, retain_graph=True)[0]
-
-            if step_idx < self.warmup_steps:
-                grad, avg_cos = g_ce, 1.0
-            elif self.pcgrad_mode == "modulate":
-                mod = self._build_modulation_map(token_list_adv, layer_indices, fft_weights, clean_pixels.size(-1))
-                grad = (g_ce * (1.0 + self.lambda_contrast * mod)).detach()
-                avg_cos = 0.0
-            else:
-                ct_loss = self._directional_contrast_loss(token_list_adv, layer_indices, fft_weights)
-                g_ct = torch.autograd.grad(ct_loss, adv_pixels, retain_graph=False)[0]
-                grad, avg_cos = self._pcgrad_combine(self._l2_normalize_grad(g_ce, self.grad_l2_norm), self._l2_normalize_grad(g_ct, self.grad_l2_norm))
-
-            self._last_cosine_log.append((step_idx, avg_cos))
-            grad = self._smooth_grad(self._normalize_grad(grad))
-            momentum = self.decay * momentum + grad
-            with torch.no_grad():
-                adv_pixels = adv_pixels + self.step_size * momentum.sign()
-                delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
-                adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
-            if self.fft_update_interval > 0 and (step_idx + 1) % self.fft_update_interval == 0:
-                with torch.no_grad():
-                    _, tu = self.model(self._normalize(adv_pixels), return_tokens=True)
-                fft_weights = self._update_fft_weights(tu, layer_indices, fft_weights)
-
-        cos_vals = [c for _, c in self._last_cosine_log]
-        print(f"  [PCGrad] conflicts={sum(1 for c in cos_vals if c < 0)}/{len(cos_vals)} mean_cos={sum(cos_vals)/len(cos_vals):.4f}")
-        return self._normalize(adv_pixels)
-
-
 class LazyAggregationAttacker(MIFGSMAttacker):
     """
     Lazy aggregation hijack attack for ViTs.
@@ -872,6 +143,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         guide_aug_copies: int = 3,
         guide_aug_mode: tuple[str, ...] = ("dropout",),
         guide_aug_strength: float = 0.2,
+        bg_foreground_ratio: float = 0.25,
+        bg_background_ratio: float = 0.50,
+        bg_fg_dilate_kernel: int = 3,
         device: torch.device | None = None,
     ) -> None:
         super().__init__(
@@ -902,6 +176,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             "guide_aug_ce",
             "guide_aug_feature",
             "guide_qk_response",
+            "background_aug_ce",
         )
         if grad_combine not in valid_combine:
             raise ValueError(f"grad_combine must be one of {valid_combine}, got {grad_combine!r}.")
@@ -986,7 +261,21 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if self.guide_aug_copies <= 0:
             raise ValueError(f"guide_aug_copies must be positive, got {guide_aug_copies}.")
         self.guide_aug_mode = tuple(str(mode).strip() for mode in guide_aug_mode if str(mode).strip())
-        valid_guide_aug_modes = ("dropout", "mix", "jitter", "freq", "dropout_inner", "jitter_outer", "freq_inner", "dropout_all", "jitter_all", "freq_all")
+        valid_guide_aug_modes = (
+            "dropout",
+            "mix",
+            "jitter",
+            "freq",
+            "dropout_inner",
+            "jitter_outer",
+            "freq_inner",
+            "dropout_all",
+            "jitter_all",
+            "freq_all",
+            "bg_blur",
+            "bg_jitter",
+            "bg_freq",
+        )
         if not self.guide_aug_mode:
             raise ValueError("guide_aug_mode must contain at least one mode.")
         invalid_guide_aug_modes = [mode for mode in self.guide_aug_mode if mode not in valid_guide_aug_modes]
@@ -995,6 +284,15 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.guide_aug_strength = float(guide_aug_strength)
         if self.guide_aug_strength < 0:
             raise ValueError(f"guide_aug_strength must be non-negative, got {guide_aug_strength}.")
+        self.bg_foreground_ratio = float(bg_foreground_ratio)
+        if not (0.0 < self.bg_foreground_ratio < 1.0):
+            raise ValueError(f"bg_foreground_ratio must be in (0, 1), got {bg_foreground_ratio}.")
+        self.bg_background_ratio = float(bg_background_ratio)
+        if not (0.0 < self.bg_background_ratio < 1.0):
+            raise ValueError(f"bg_background_ratio must be in (0, 1), got {bg_background_ratio}.")
+        self.bg_fg_dilate_kernel = int(bg_fg_dilate_kernel)
+        if self.bg_fg_dilate_kernel <= 0 or self.bg_fg_dilate_kernel % 2 == 0:
+            raise ValueError(f"bg_fg_dilate_kernel must be a positive odd integer, got {bg_fg_dilate_kernel}.")
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
         self._attention_grad_kernel = (
             self._build_ti_kernel(self.attention_grad_smooth_sigma)
@@ -1098,11 +396,20 @@ class LazyAggregationAttacker(MIFGSMAttacker):
 
     @staticmethod
     def _resolve_layers(layers: tuple[int, ...], num_layers: int) -> list[int]:
-        return FFTCCAttacker._resolve_layers(layers, num_layers)
+        resolved: list[int] = []
+        for layer in layers:
+            idx = layer if layer >= 0 else num_layers + layer
+            if idx < 0 or idx >= num_layers:
+                raise ValueError(f"Invalid layer index {layer}; model returned {num_layers} token layers.")
+            if idx not in resolved:
+                resolved.append(idx)
+        return resolved
 
     @staticmethod
     def _normalize_weights(weights: torch.Tensor) -> torch.Tensor:
-        return FFTCCAttacker._normalize_weights(weights)
+        min_vals = weights.min(dim=1, keepdim=True).values
+        max_vals = weights.max(dim=1, keepdim=True).values
+        return (weights - min_vals) / (max_vals - min_vals).clamp_min(1e-12)
 
     @staticmethod
     def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -1118,6 +425,14 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         top_idx = torch.topk(scores, k=k, dim=1, largest=True).indices
         mask = torch.zeros_like(scores, dtype=torch.bool)
         return mask.scatter(1, top_idx, True)
+
+    @staticmethod
+    def _select_bottom_mask(scores: torch.Tensor, ratio: float) -> torch.Tensor:
+        num_patches = scores.size(1)
+        k = max(1, min(num_patches, int(round(num_patches * ratio))))
+        bottom_idx = torch.topk(scores, k=k, dim=1, largest=False).indices
+        mask = torch.zeros_like(scores, dtype=torch.bool)
+        return mask.scatter(1, bottom_idx, True)
 
     @staticmethod
     def _scale_term(term: torch.Tensor) -> torch.Tensor:
@@ -1486,6 +801,85 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         max_vals = flat.max(dim=1, keepdim=True).values.view(-1, 1, 1, 1)
         return ((pixel_map - min_vals) / (max_vals - min_vals).clamp_min(1e-12)).detach()
 
+    def _build_background_context_masks(
+        self,
+        images: torch.Tensor,
+        img_size: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        score = self._collect_cls_attention_scores(self.model, images, guide_type="qk_cls")
+        if score is None:
+            raise ValueError("The white-box model did not produce compatible QK CLS attention scores.")
+        num_patches = score.size(1)
+        grid_size = int(num_patches ** 0.5)
+        if grid_size * grid_size != num_patches:
+            raise ValueError(f"Patch count {num_patches} is not a square.")
+
+        fg_mask = self._select_top_mask(score, self.bg_foreground_ratio).to(score.dtype)
+        bg_mask = self._select_bottom_mask(score, self.bg_background_ratio).to(score.dtype)
+        fg_grid = fg_mask.view(score.size(0), 1, grid_size, grid_size)
+        bg_grid = bg_mask.view(score.size(0), 1, grid_size, grid_size)
+
+        if self.bg_fg_dilate_kernel > 1:
+            pad = self.bg_fg_dilate_kernel // 2
+            fg_grid = F.max_pool2d(fg_grid, kernel_size=self.bg_fg_dilate_kernel, stride=1, padding=pad)
+
+        bg_grid = bg_grid * (1.0 - fg_grid).clamp(0.0, 1.0)
+        fg_pixel_mask = F.interpolate(fg_grid, size=(img_size, img_size), mode="bilinear", align_corners=False)
+        bg_pixel_mask = F.interpolate(bg_grid, size=(img_size, img_size), mode="bilinear", align_corners=False)
+        bg_pixel_mask = bg_pixel_mask * (1.0 - fg_pixel_mask).clamp(0.0, 1.0)
+        return fg_pixel_mask.clamp(0.0, 1.0).detach(), bg_pixel_mask.clamp(0.0, 1.0).detach()
+
+    def _background_augmented_pixels(
+        self,
+        pixels: torch.Tensor,
+        bg_pixel_mask: torch.Tensor,
+        copy_idx: int,
+    ) -> torch.Tensor:
+        strength = self.guide_aug_strength
+        if strength <= 0:
+            return pixels
+        mode = self.guide_aug_mode[copy_idx % len(self.guide_aug_mode)]
+        bg = bg_pixel_mask.to(pixels.device, pixels.dtype).clamp(0.0, 1.0)
+        blend = (bg * strength).clamp(0.0, 1.0)
+
+        if mode == "bg_blur":
+            transformed = F.avg_pool2d(pixels, kernel_size=7, stride=1, padding=3)
+        elif mode == "bg_jitter":
+            brightness = (
+                torch.rand(pixels.size(0), 1, 1, 1, device=pixels.device, dtype=pixels.dtype) * 2.0 - 1.0
+            ) * strength
+            noise = torch.randn_like(pixels) * (strength / 2.0)
+            transformed = torch.clamp(pixels * (1.0 + brightness) + noise, 0.0, 1.0)
+        elif mode == "bg_freq":
+            pooled = F.avg_pool2d(pixels, kernel_size=9, stride=1, padding=4)
+            low_noise = F.avg_pool2d(torch.rand_like(pixels), kernel_size=9, stride=1, padding=4)
+            transformed = torch.clamp(0.7 * pooled + 0.3 * low_noise, 0.0, 1.0)
+        else:
+            raise ValueError(
+                f"background_aug_ce only supports bg_blur, bg_jitter, bg_freq; got {mode!r}."
+            )
+
+        return torch.clamp(pixels * (1.0 - blend) + transformed * blend, 0.0, 1.0)
+
+    def _background_aug_ce_loss(
+        self,
+        pixels: torch.Tensor,
+        labels: torch.Tensor,
+        bg_pixel_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        ce_terms = []
+        for scale_idx in range(self.si_scales):
+            scale = float(2 ** scale_idx)
+            for _eot_idx in range(self.eot_iter):
+                for copy_idx in range(self.guide_aug_copies):
+                    aug_pixels = self._background_augmented_pixels(pixels, bg_pixel_mask, copy_idx)
+                    logits_adv = self.model(
+                        self._input_diversity(self._normalize(aug_pixels) / scale),
+                        return_attn=False,
+                    )
+                    ce_terms.append(F.cross_entropy(logits_adv, labels))
+        return torch.stack(ce_terms).mean()
+
     def _guide_augmented_pixels(self, pixels: torch.Tensor, guide_pixel_map: torch.Tensor, copy_idx: int) -> torch.Tensor:
         strength = self.guide_aug_strength
         if strength <= 0:
@@ -1702,6 +1096,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         clean_guide_token_map = None
         guide_pixel_map = None
         clean_shared_features = None
+        bg_pixel_mask = None
         if self.grad_combine in ("anchor_modulate", "pcgrad_asymmetric", "sum"):
             layer_indices, fg_masks, anchor_masks = self._build_clean_guides(images, clean_pixels)
         if self.grad_combine == "anchor_modulate":
@@ -1716,6 +1111,11 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 images,
                 clean_pixels.size(-1),
                 expand_shared=self.grad_combine == "expanded_stable_attention",
+            )
+        elif self.grad_combine == "background_aug_ce":
+            _fg_pixel_mask, bg_pixel_mask = self._build_background_context_masks(
+                images,
+                clean_pixels.size(-1),
             )
         elif self.grad_combine in ("guide_response", "dynamic_guide_response", "guide_aug_ce", "guide_aug_feature", "guide_qk_response") or self.guide_aug:
             guide_token_map = self._build_stable_attention_token_map(images, expand_shared=True)
@@ -1759,8 +1159,10 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                                     adv_primary_score=adv_primary_score,
                                 )
                             )
-            if self.grad_combine in ("anchor_modulate", "stable_attention", "expanded_stable_attention", "guide_response", "dynamic_guide_response", "guide_aug_ce", "guide_aug_feature", "guide_qk_response"):
-                if self.grad_combine == "guide_aug_ce":
+            if self.grad_combine in ("anchor_modulate", "stable_attention", "expanded_stable_attention", "guide_response", "dynamic_guide_response", "guide_aug_ce", "guide_aug_feature", "guide_qk_response", "background_aug_ce"):
+                if self.grad_combine == "background_aug_ce":
+                    ce_loss = self._background_aug_ce_loss(grad_pixels, labels, bg_pixel_mask)
+                elif self.grad_combine == "guide_aug_ce":
                     ce_loss = self._guide_aug_ce_loss(grad_pixels, labels, guide_pixel_map)
                 elif self.grad_combine == "guide_aug_feature":
                     ce_loss = self._guide_aug_feature_loss(
@@ -1810,7 +1212,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             elif self.grad_combine in ("anchor_modulate", "stable_attention", "expanded_stable_attention"):
                 grad = g_ce * (1.0 + anchor_weight * anchor_modulation.to(g_ce.device, g_ce.dtype))
                 avg_cos = 1.0
-            elif self.grad_combine in ("guide_response", "dynamic_guide_response", "guide_aug_ce", "guide_aug_feature", "guide_qk_response"):
+            elif self.grad_combine in ("guide_response", "dynamic_guide_response", "guide_aug_ce", "guide_aug_feature", "guide_qk_response", "background_aug_ce"):
                 grad, avg_cos = g_ce, 1.0
             else:
                 anchor_loss = self._anchor_loss(
@@ -1837,249 +1239,4 @@ class LazyAggregationAttacker(MIFGSMAttacker):
 
         cos_vals = [c for _, c in self._last_cosine_log]
         print(f"  [LazyAgg] conflicts={sum(1 for c in cos_vals if c < 0)}/{len(cos_vals)} mean_cos={sum(cos_vals)/len(cos_vals):.4f}")
-        return self._normalize(adv_pixels)
-
-
-class FFTForwardPassAttacker(MIFGSMAttacker):
-    """
-    FFT-guided forward-pass-aware attack with single CE gradient.
-
-    Modes (mutually exclusive, set via *mode*):
-      - "hardmask":  zero-out CE gradient on background (low-FFT) pixels
-      - "softmask":  continuous FFT weighting of CE gradient
-      - "spectral":  low-pass filter the *perturbation* each step
-      - "combined":  softmask + spectral
-
-    Core improvement over FFT-CC: no extra feature losses → no gradient interference.
-    """
-
-    def __init__(
-        self,
-        model,
-        epsilon: float = 16.0 / 255.0,
-        step_size: float | None = None,
-        steps: int = 10,
-        decay: float = 1.0,
-        layers: tuple[int, ...] = (-6, -5, -4, -3, -2, -1),
-        fft_topk: int = 1,
-        lambda_mask: float = 1.0,
-        mode: str = "combined",
-        spectral_cutoff: float = 0.15,
-        spectral_transition: float = 0.04,
-        ti_sigma: float = 0.0,
-        device: torch.device | None = None,
-    ) -> None:
-        super().__init__(
-            model=model,
-            epsilon=epsilon,
-            step_size=step_size,
-            steps=steps,
-            decay=decay,
-            device=device,
-        )
-        if not layers:
-            raise ValueError("layers must contain at least one layer index.")
-        valid_modes = ("hardmask", "softmask", "spectral", "combined")
-        if mode not in valid_modes:
-            raise ValueError(f"mode must be one of {valid_modes}, got {mode!r}.")
-
-        self.layers = tuple(int(l) for l in layers)
-        self.fft_topk = int(fft_topk)
-        self.lambda_mask = float(lambda_mask)
-        self.mode = mode
-        self.spectral_cutoff = float(spectral_cutoff)
-        self.spectral_transition = float(spectral_transition)
-        self.ti_sigma = float(ti_sigma)
-
-        self._ti_kernel: torch.Tensor | None = None
-        if self.ti_sigma > 0:
-            self._ti_kernel = self._build_ti_kernel(self.ti_sigma)
-
-    # ------------------------------------------------------------------
-    # TI-FGSM helpers
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _build_ti_kernel(sigma: float) -> torch.Tensor:
-        radius = int(3 * sigma)
-        x = torch.arange(-radius, radius + 1, dtype=torch.float32)
-        g1d = torch.exp(-0.5 * (x / sigma) ** 2)
-        g1d = g1d / g1d.sum()
-        g2d = g1d[:, None] @ g1d[None, :]
-        return g2d.view(1, 1, g2d.size(0), g2d.size(1))
-
-    def _smooth_grad(self, grad: torch.Tensor) -> torch.Tensor:
-        if self._ti_kernel is None or self.ti_sigma <= 0:
-            return grad
-        kernel = self._ti_kernel.to(grad.device, grad.dtype)
-        kernel = kernel.repeat(grad.size(1), 1, 1, 1)
-        pad = kernel.size(2) // 2
-        padded = F.pad(grad, (pad, pad, pad, pad), mode="reflect")
-        return F.conv2d(padded, kernel, groups=grad.size(1))
-
-    # ------------------------------------------------------------------
-    # Layer resolution  (shared logic from FFTCCAttacker)
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _resolve_layers(layers: tuple[int, ...], num_layers: int) -> list[int]:
-        resolved: list[int] = []
-        for layer in layers:
-            idx = layer if layer >= 0 else num_layers + layer
-            if idx < 0 or idx >= num_layers:
-                raise ValueError(
-                    f"Invalid layer index {layer}; model has {num_layers} layers."
-                )
-            if idx not in resolved:
-                resolved.append(idx)
-        return resolved
-
-    @staticmethod
-    def _normalize_weights(weights: torch.Tensor) -> torch.Tensor:
-        min_vals = weights.min(dim=1, keepdim=True).values
-        max_vals = weights.max(dim=1, keepdim=True).values
-        return (weights - min_vals) / (max_vals - min_vals).clamp_min(1e-12)
-
-    # ------------------------------------------------------------------
-    # FFT mask builder
-    # ------------------------------------------------------------------
-    def _build_fft_mask(
-        self,
-        images: torch.Tensor,
-        mode: str,
-    ) -> tuple[list[int], torch.Tensor | None]:
-        """Compute per-pixel mask from FFT foreground scores.
-
-        Returns:
-            layer_indices: list of resolved layer indices
-            mask: [B, 1, H, W] in [0,1] or None for spectral-only mode
-        """
-        if mode == "spectral":
-            # No spatial mask needed
-            with torch.no_grad():
-                _logits, token_list = self.model(images, return_tokens=True)
-            layer_indices = self._resolve_layers(self.layers, len(token_list))
-            return layer_indices, None
-
-        with torch.no_grad():
-            _logits, token_list = self.model(images, return_tokens=True)
-
-        layer_indices = self._resolve_layers(self.layers, len(token_list))
-
-        from utils import last_vit_stable_patch_frequency
-
-        # Average FFT foreground scores across selected layers
-        all_scores: list[torch.Tensor] = []
-        for layer_idx in layer_indices:
-            tokens = token_list[layer_idx].detach()
-            scores = last_vit_stable_patch_frequency(
-                tokens=tokens, topk=self.fft_topk, has_cls_token=True,
-            ).detach()  # [B, N_patches]
-            all_scores.append(scores)
-        avg = torch.stack(all_scores).mean(dim=0)  # [B, N_patches]
-        avg = self._normalize_weights(avg)
-
-        B, N = avg.shape
-        grid_size = int(N ** 0.5)
-        if grid_size * grid_size != N:
-            raise ValueError(f"Patch count {N} not a square.")
-
-        grid = avg.reshape(B, 1, grid_size, grid_size)  # [B, 1, 14, 14]
-
-        if mode == "hardmask":
-            # Top-K binary mask: keep top fraction of patches as foreground
-            k = max(1, int(grid_size * grid_size * 0.3))
-            flat = grid.reshape(B, -1)
-            threshold = flat.kthvalue(grid_size * grid_size - k + 1, dim=1).values
-            mask = (flat >= threshold.unsqueeze(1)).float()
-            mask = mask.reshape(B, 1, grid_size, grid_size)
-        else:
-            # softmask / combined: use continuous scores
-            mask = grid
-
-        # Upsample to image space
-        img_size = max(images.shape[2], images.shape[3])
-        mask = F.interpolate(
-            mask, size=(img_size, img_size),
-            mode="bilinear", align_corners=False,
-        )  # [B, 1, H, W]
-        return layer_indices, mask
-
-    # ------------------------------------------------------------------
-    # Spectral perturbation filtering
-    # ------------------------------------------------------------------
-    def _spectral_filter_delta(
-        self, delta: torch.Tensor,
-    ) -> torch.Tensor:
-        """Low-pass filter the perturbation delta to remove high-freq overfitting."""
-        from utils import image_2d_fft_low_high_maps
-
-        # image_2d_fft expects [C,H,W] or [B,C,H,W]
-        maps = image_2d_fft_low_high_maps(
-            delta,
-            cutoff_ratio=self.spectral_cutoff,
-            transition_ratio=self.spectral_transition,
-        )
-        # low_ratio is per-pixel from grayscale conversion
-        # We use it as a per-pixel filter weight
-        low_ratio = maps["low_ratio"]  # [B, H, W] or [H, W]
-        img_ref = delta if delta.ndim == 4 else delta.unsqueeze(0)
-        filter_weights = low_ratio.to(delta.dtype)
-        if filter_weights.ndim == 2:
-            filter_weights = filter_weights.unsqueeze(0)
-        filter_weights = filter_weights.unsqueeze(1)  # [B, 1, H, W]
-
-        # Blend original + low-passed
-        # delta_low = delta * filter_weights  (approximate low-pass)
-        return delta * (0.5 + 0.5 * filter_weights)
-
-    # ------------------------------------------------------------------
-    # Attack loop
-    # ------------------------------------------------------------------
-    def attack_batch(
-        self,
-        images: torch.Tensor,
-        labels: torch.Tensor,
-    ) -> torch.Tensor:
-        images = images.to(self.device)
-        labels = labels.to(self.device)
-
-        # Build FFT mask from clean forward pass
-        layer_indices, fft_mask = self._build_fft_mask(images, self.mode)
-
-        clean_pixels = self._denormalize(images).detach()
-        adv_pixels = clean_pixels.clone().detach()
-        momentum = torch.zeros_like(adv_pixels)
-
-        for _step in range(self.steps):
-            adv_pixels = adv_pixels.detach().requires_grad_(True)
-
-            logits = self.model(
-                self._normalize(adv_pixels), return_attn=False,
-            )
-            loss = F.cross_entropy(logits, labels)
-
-            grad = torch.autograd.grad(loss, adv_pixels)[0]
-
-            # Apply spatial mask if applicable
-            if fft_mask is not None:
-                mask = fft_mask.to(grad.device, grad.dtype)
-                if self.mode == "hardmask":
-                    grad = grad * mask
-                else:  # softmask / combined
-                    grad = grad * (1.0 + self.lambda_mask * mask)
-
-            # Normalize and momentum
-            grad = self._normalize_grad(grad)
-            grad = self._smooth_grad(grad)
-            momentum = self.decay * momentum + grad
-
-            with torch.no_grad():
-                adv_pixels = adv_pixels + self.step_size * momentum.sign()
-                delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
-
-                # Spectral filtering of perturbation
-                if self.mode in ("spectral", "combined"):
-                    delta = self._spectral_filter_delta(delta)
-
-                adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
-
         return self._normalize(adv_pixels)
