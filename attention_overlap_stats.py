@@ -86,7 +86,7 @@ def pair_metrics(a, b, ratio):
 
 def collect_guides(models, images, guide_type, ratio):
     guides = {}
-    helper = LazyAggregationAttacker(next(iter(models.values())), fg_top_ratio=ratio, guide_type=guide_type, device=DEVICE)
+    helper = LazyAggregationAttacker(next(iter(models.values())), guide_type=guide_type, device=DEVICE)
     for name, model in models.items():
         score = helper._collect_cls_attention_scores(model, images, guide_type=guide_type)
         if score is not None:

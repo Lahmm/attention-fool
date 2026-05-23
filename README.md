@@ -93,7 +93,6 @@ PowerShell 中带负数的 `--layers` 建议写成等号形式：
 
 ```text
 epsilon=16/255, steps=20, decay=1.0, layers=-6,-5,-4,-3,-2,-1
-fg_top_ratio=0.25, lambda_anchor=1.0
 warmup_steps=3, grad_combine=guide_qk_response
 input_diversity=True, ti_sigma=3.0, si_scales=1, nesterov=True, eot_iter=1
 perturb_smooth_sigma=0.0

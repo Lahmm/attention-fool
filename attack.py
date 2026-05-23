@@ -1,5 +1,3 @@
-import math
-
 import torch
 import torch.nn.functional as F
 
@@ -100,7 +98,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         steps: int = 20,
         decay: float = 1.0,
         layers: tuple[int, ...] = (-6, -5, -4, -3, -2, -1),
-        fg_top_ratio: float = 0.25,
         grad_combine: str = "guide_aug_ce",
         spectral_transition: float = 0.04,
         ti_sigma: float = 3.0,
@@ -114,15 +111,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         lazy_spectral_cutoff: float = 0.25,
         attention_guide_models: tuple[torch.nn.Module, ...] | None = None,
         guide_type: str = "postsoftmax_cls",
-        guide_sample_mode: str = "fixed",
-        guide_entropy_temp: float = 1.0,
         attention_grad_smooth_sigma: float = 0.0,
         patch_grad_smooth_sigma: float = 0.0,
-        guide_dilate_kernel: int = 1,
-        guide_smooth_sigma: float = 0.0,
-        guide_dynamic: bool = False,
-        guide_update_interval: int = 5,
-        guide_ema: float = 0.7,
         guide_aug: bool = False,
         guide_aug_copies: int = 3,
         guide_aug_mode: tuple[str, ...] = ("dropout",),
@@ -139,14 +129,11 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         )
         if not layers:
             raise ValueError("layers must contain at least one layer index.")
-        if not (0.0 < fg_top_ratio < 1.0):
-            raise ValueError(f"fg_top_ratio must be in (0, 1), got {fg_top_ratio}.")
         valid_combine = ("guide_aug_ce",)
         if grad_combine not in valid_combine:
             raise ValueError(f"grad_combine must be one of {valid_combine}, got {grad_combine!r}.")
 
         self.layers = tuple(int(layer) for layer in layers)
-        self.fg_top_ratio = float(fg_top_ratio)
         self.grad_combine = grad_combine
         self.spectral_transition = float(spectral_transition)
         self.ti_sigma = float(ti_sigma)
@@ -171,32 +158,12 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if invalid_guide_types:
             raise ValueError(f"guide_type entries must be in {valid_guide_types}, got {invalid_guide_types}.")
         self.guide_types = guide_types
-        valid_guide_sample_modes = ("fixed", "random")
-        if guide_sample_mode not in valid_guide_sample_modes:
-            raise ValueError(f"guide_sample_mode must be one of {valid_guide_sample_modes}, got {guide_sample_mode!r}.")
-        self.guide_sample_mode = guide_sample_mode
-        self.guide_entropy_temp = float(guide_entropy_temp)
-        if self.guide_entropy_temp <= 0:
-            raise ValueError(f"guide_entropy_temp must be positive, got {guide_entropy_temp}.")
         self.attention_grad_smooth_sigma = float(attention_grad_smooth_sigma)
         if self.attention_grad_smooth_sigma < 0:
             raise ValueError(f"attention_grad_smooth_sigma must be non-negative, got {attention_grad_smooth_sigma}.")
         self.patch_grad_smooth_sigma = float(patch_grad_smooth_sigma)
         if self.patch_grad_smooth_sigma < 0:
             raise ValueError(f"patch_grad_smooth_sigma must be non-negative, got {patch_grad_smooth_sigma}.")
-        self.guide_dilate_kernel = int(guide_dilate_kernel)
-        if self.guide_dilate_kernel <= 0 or self.guide_dilate_kernel % 2 == 0:
-            raise ValueError(f"guide_dilate_kernel must be a positive odd integer, got {guide_dilate_kernel}.")
-        self.guide_smooth_sigma = float(guide_smooth_sigma)
-        if self.guide_smooth_sigma < 0:
-            raise ValueError(f"guide_smooth_sigma must be non-negative, got {guide_smooth_sigma}.")
-        self.guide_dynamic = bool(guide_dynamic)
-        self.guide_update_interval = int(guide_update_interval)
-        if self.guide_update_interval <= 0:
-            raise ValueError(f"guide_update_interval must be positive, got {guide_update_interval}.")
-        self.guide_ema = float(guide_ema)
-        if not (0.0 <= self.guide_ema <= 1.0):
-            raise ValueError(f"guide_ema must be in [0, 1], got {guide_ema}.")
         self.guide_aug = bool(guide_aug)
         self.guide_aug_copies = int(guide_aug_copies)
         if self.guide_aug_copies <= 0:
@@ -314,22 +281,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         return (weights - min_vals) / (max_vals - min_vals).clamp_min(1e-12)
 
     @staticmethod
-    def _select_top_mask(scores: torch.Tensor, ratio: float) -> torch.Tensor:
-        num_patches = scores.size(1)
-        k = max(1, min(num_patches, int(round(num_patches * ratio))))
-        top_idx = torch.topk(scores, k=k, dim=1, largest=True).indices
-        mask = torch.zeros_like(scores, dtype=torch.bool)
-        return mask.scatter(1, top_idx, True)
-
-    @staticmethod
-    def _select_bottom_mask(scores: torch.Tensor, ratio: float) -> torch.Tensor:
-        num_patches = scores.size(1)
-        k = max(1, min(num_patches, int(round(num_patches * ratio))))
-        bottom_idx = torch.topk(scores, k=k, dim=1, largest=False).indices
-        mask = torch.zeros_like(scores, dtype=torch.bool)
-        return mask.scatter(1, bottom_idx, True)
-
-    @staticmethod
     def _infer_num_heads_from_attn(attn_module) -> int | None:
         heads = getattr(attn_module, "num_heads", None)
         return int(heads) if heads is not None else None
@@ -377,7 +328,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         target_num_patches: int | None = None,
         guide_type: str | None = None,
     ) -> torch.Tensor | None:
-        guide_type = self._sample_guide_type() if guide_type is None else guide_type
+        guide_type = self.guide_types[0] if guide_type is None else guide_type
         module_dict = dict(source_model.model.named_modules())
         records = []
         handles = []
@@ -440,25 +391,11 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             for handle in handles:
                 handle.remove()
 
-    def _sample_guide_type(self) -> str:
-        if self.guide_sample_mode == "random" and len(self.guide_types) > 1:
-            idx = torch.randint(0, len(self.guide_types), (1,), device=self.pixel_mean.device).item()
-            return self.guide_types[int(idx)]
-        return self.guide_types[0]
-
-    def _smooth_guide_grid(self, grid: torch.Tensor) -> torch.Tensor:
-        if self.guide_smooth_sigma <= 0:
-            return grid
-        kernel = self._build_ti_kernel(self.guide_smooth_sigma).to(grid.device, grid.dtype)
-        pad = kernel.size(2) // 2
-        return F.conv2d(F.pad(grid, (pad, pad, pad, pad), mode="reflect"), kernel)
-
     def _build_stable_attention_token_map(
         self,
         images: torch.Tensor,
-        expand_shared: bool = False,
     ) -> torch.Tensor:
-        guide_type = self._sample_guide_type()
+        guide_type = self.guide_types[0]
         primary_score = self._collect_cls_attention_scores(self.model, images, guide_type=guide_type)
         if primary_score is None:
             raise ValueError("The white-box model did not produce compatible CLS attention scores.")
@@ -473,23 +410,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             )
             if score is not None:
                 scores.append(score)
-        stable_score = self._normalize_weights(torch.stack(scores).mean(dim=0))
-        if self.guide_entropy_temp != 1.0:
-            stable_score = self._normalize_weights(stable_score.clamp_min(1e-12) ** (1.0 / self.guide_entropy_temp))
-        stable_mask = self._select_top_mask(stable_score, self.fg_top_ratio).to(stable_score.dtype)
-        token_map = stable_score * stable_mask
-        grid_size = int(num_patches ** 0.5)
-        if grid_size * grid_size != num_patches:
-            raise ValueError(f"Patch count {num_patches} is not a square.")
-        grid = token_map.view(token_map.size(0), 1, grid_size, grid_size)
-        if expand_shared:
-            if self.guide_dilate_kernel > 1:
-                pad = self.guide_dilate_kernel // 2
-                grid = F.max_pool2d(grid, kernel_size=self.guide_dilate_kernel, stride=1, padding=pad)
-            grid = self._smooth_guide_grid(grid)
-            token_map = self._normalize_weights(grid.flatten(1))
-        else:
-            token_map = self._normalize_weights(token_map)
+        token_map = self._normalize_weights(torch.stack(scores).mean(dim=0))
         return token_map.detach()
 
     def _token_map_to_pixel_map(self, token_map: torch.Tensor, img_size: int) -> torch.Tensor:
@@ -587,38 +508,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     ce_terms.append(F.cross_entropy(logits_adv, labels))
         return torch.stack(ce_terms).mean()
 
-    @staticmethod
-    def _batch_cosine(a: torch.Tensor, b: torch.Tensor) -> float:
-        a_flat = a.flatten(1)
-        b_flat = b.flatten(1)
-        return F.cosine_similarity(a_flat, b_flat, dim=1).mean().item()
-
-    def _guide_entropy(self, guide: torch.Tensor) -> float:
-        prob = guide / guide.sum(dim=1, keepdim=True).clamp_min(1e-12)
-        entropy = -(prob * prob.clamp_min(1e-12).log()).sum(dim=1)
-        return (entropy / math.log(prob.size(1))).mean().item()
-
-    def _guide_topk_change_rate(self, guide_a: torch.Tensor, guide_b: torch.Tensor) -> float:
-        mask_a = self._select_top_mask(guide_a, self.fg_top_ratio)
-        mask_b = self._select_top_mask(guide_b, self.fg_top_ratio)
-        return (mask_a != mask_b).to(torch.float32).mean(dim=1).mean().item()
-
-    def _dynamic_guide_stats(
-        self,
-        step_idx: int,
-        clean_guide: torch.Tensor,
-        guide: torch.Tensor,
-        adv_primary_score: torch.Tensor,
-    ) -> dict[str, float | int]:
-        adv_primary_score = self._normalize_weights(adv_primary_score.detach())
-        return {
-            "step": int(step_idx),
-            "clean_cosine": self._batch_cosine(guide, clean_guide),
-            "adv_cls_cosine": self._batch_cosine(guide, adv_primary_score),
-            "entropy": self._guide_entropy(guide),
-            "topk_change_rate": self._guide_topk_change_rate(clean_guide, guide),
-        }
-
     def attack_batch(
         self,
         images: torch.Tensor,
@@ -629,15 +518,12 @@ class LazyAggregationAttacker(MIFGSMAttacker):
 
         clean_pixels = self._denormalize(images).detach()
         guide_token_map = None
-        clean_guide_token_map = None
         guide_pixel_map = None
         if self.grad_combine == "guide_aug_ce" or self.guide_aug:
-            guide_token_map = self._build_stable_attention_token_map(images, expand_shared=True)
-            clean_guide_token_map = guide_token_map.clone().detach()
+            guide_token_map = self._build_stable_attention_token_map(images)
             guide_pixel_map = self._token_map_to_pixel_map(guide_token_map, clean_pixels.size(-1))
         adv_pixels = clean_pixels.clone().detach()
         momentum = torch.zeros_like(adv_pixels)
-        self._last_dynamic_guide_log = []
 
         for step_idx in range(self.steps):
             grad_pixels = adv_pixels.detach()
@@ -647,29 +533,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     delta = torch.clamp(grad_pixels - clean_pixels, -self.epsilon, self.epsilon)
                     grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
             grad_pixels = grad_pixels.detach().requires_grad_(True)
-            norm_adv = self._normalize(grad_pixels)
-            if self.guide_dynamic and guide_token_map is not None:
-                if step_idx % self.guide_update_interval == 0:
-                    with torch.no_grad():
-                        guide_adv = self._build_stable_attention_token_map(norm_adv.detach(), expand_shared=True)
-                        guide_token_map = self._normalize_weights(
-                            self.guide_ema * guide_token_map.to(guide_adv.device) + (1.0 - self.guide_ema) * guide_adv
-                        ).detach()
-                        guide_pixel_map = self._token_map_to_pixel_map(guide_token_map, clean_pixels.size(-1))
-                        adv_primary_score = self._collect_cls_attention_scores(
-                            self.model,
-                            norm_adv.detach(),
-                            target_num_patches=guide_token_map.size(1),
-                        )
-                        if adv_primary_score is not None and clean_guide_token_map is not None:
-                            self._last_dynamic_guide_log.append(
-                                self._dynamic_guide_stats(
-                                    step_idx=step_idx,
-                                    clean_guide=clean_guide_token_map,
-                                    guide=guide_token_map,
-                                    adv_primary_score=adv_primary_score,
-                                )
-                            )
             if self.grad_combine == "guide_aug_ce":
                 ce_loss = self._guide_aug_ce_loss(grad_pixels, labels, guide_pixel_map)
             else:
