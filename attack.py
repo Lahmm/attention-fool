@@ -108,8 +108,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         perturb_smooth_sigma: float = 0.0,
         attention_guide_models: tuple[torch.nn.Module, ...] | None = None,
         guide_type: str = "postsoftmax_cls",
-        attention_grad_smooth_sigma: float = 0.0,
-        patch_grad_smooth_sigma: float = 0.0,
         guide_aug: bool = False,
         guide_aug_copies: int = 3,
         guide_aug_mode: tuple[str, ...] = ("dropout",),
@@ -152,12 +150,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if invalid_guide_types:
             raise ValueError(f"guide_type entries must be in {valid_guide_types}, got {invalid_guide_types}.")
         self.guide_types = guide_types
-        self.attention_grad_smooth_sigma = float(attention_grad_smooth_sigma)
-        if self.attention_grad_smooth_sigma < 0:
-            raise ValueError(f"attention_grad_smooth_sigma must be non-negative, got {attention_grad_smooth_sigma}.")
-        self.patch_grad_smooth_sigma = float(patch_grad_smooth_sigma)
-        if self.patch_grad_smooth_sigma < 0:
-            raise ValueError(f"patch_grad_smooth_sigma must be non-negative, got {patch_grad_smooth_sigma}.")
         self.guide_aug = bool(guide_aug)
         self.guide_aug_copies = int(guide_aug_copies)
         if self.guide_aug_copies <= 0:
@@ -184,16 +176,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if self.guide_aug_strength < 0:
             raise ValueError(f"guide_aug_strength must be non-negative, got {guide_aug_strength}.")
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
-        self._attention_grad_kernel = (
-            self._build_ti_kernel(self.attention_grad_smooth_sigma)
-            if self.attention_grad_smooth_sigma > 0
-            else None
-        )
-        self._patch_grad_kernel = (
-            self._build_ti_kernel(self.patch_grad_smooth_sigma)
-            if self.patch_grad_smooth_sigma > 0
-            else None
-        )
         self._perturb_kernel = (
             self._build_ti_kernel(self.perturb_smooth_sigma)
             if self.perturb_smooth_sigma > 0
@@ -213,20 +195,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if self._ti_kernel is None or self.ti_sigma <= 0:
             return grad
         kernel = self._ti_kernel.to(grad.device, grad.dtype).repeat(grad.size(1), 1, 1, 1)
-        pad = kernel.size(2) // 2
-        return F.conv2d(F.pad(grad, (pad, pad, pad, pad), mode="reflect"), kernel, groups=grad.size(1))
-
-    def _smooth_attention_grad(self, grad: torch.Tensor) -> torch.Tensor:
-        if self._attention_grad_kernel is None or self.attention_grad_smooth_sigma <= 0:
-            return grad
-        kernel = self._attention_grad_kernel.to(grad.device, grad.dtype).repeat(grad.size(1), 1, 1, 1)
-        pad = kernel.size(2) // 2
-        return F.conv2d(F.pad(grad, (pad, pad, pad, pad), mode="reflect"), kernel, groups=grad.size(1))
-
-    def _smooth_patch_grad(self, grad: torch.Tensor) -> torch.Tensor:
-        if self._patch_grad_kernel is None or self.patch_grad_smooth_sigma <= 0:
-            return grad
-        kernel = self._patch_grad_kernel.to(grad.device, grad.dtype).repeat(grad.size(1), 1, 1, 1)
         pad = kernel.size(2) // 2
         return F.conv2d(F.pad(grad, (pad, pad, pad, pad), mode="reflect"), kernel, groups=grad.size(1))
 

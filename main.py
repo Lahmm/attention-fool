@@ -37,8 +37,6 @@ def create_attacker(
     perturb_smooth_sigma: float = 0.0,
     attention_guide_models: tuple[ViTWithHook, ...] = (),
     guide_type: str = "postsoftmax_cls",
-    attention_grad_smooth_sigma: float = 0.0,
-    patch_grad_smooth_sigma: float = 0.0,
     guide_aug: bool = False,
     guide_aug_copies: int = 3,
     guide_aug_mode: tuple[str, ...] = ("dropout",),
@@ -60,8 +58,6 @@ def create_attacker(
         perturb_smooth_sigma=perturb_smooth_sigma,
         attention_guide_models=attention_guide_models,
         guide_type=guide_type,
-        attention_grad_smooth_sigma=attention_grad_smooth_sigma,
-        patch_grad_smooth_sigma=patch_grad_smooth_sigma,
         guide_aug=guide_aug,
         guide_aug_copies=guide_aug_copies,
         guide_aug_mode=guide_aug_mode,
@@ -230,8 +226,6 @@ def parse_args():
     parser.add_argument("--perturb-smooth-sigma", type=float, default=0.0, help="Gaussian sigma for perturbation smoothing. 0=disabled.")
     parser.add_argument("--attention-guide-models", type=parse_model_names, default=(), help="Comma-separated extra models for clean stable-attention guide maps.")
     parser.add_argument("--guide-type", type=str, default="postsoftmax_cls", help="Comma-separated guide types: postsoftmax_cls,qk_cls,qk_all_queries. The first entry is used.")
-    parser.add_argument("--attention-grad-smooth-sigma", type=float, default=0.0, help="Gaussian smoothing for attention/QK-response gradients. 0=disabled.")
-    parser.add_argument("--patch-grad-smooth-sigma", type=float, default=0.0, help="Gaussian smoothing for guide feature gradients. 0=disabled.")
     parser.add_argument("--guide-aug", action="store_true", help="Enable guide-based input augmentation for guide_aug_ce.")
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Number of guide-augmented CE copies per SI/EOT sample.")
     parser.add_argument("--guide-aug-mode", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation modes: dropout,mix,jitter,freq,dropout_inner,jitter_outer,freq_inner,dropout_all,jitter_all,freq_all.")
@@ -266,8 +260,6 @@ def main(
     perturb_smooth_sigma: float = 0.0,
     attention_guide_models_arg: tuple[str, ...] = (),
     guide_type: str = "postsoftmax_cls",
-    attention_grad_smooth_sigma: float = 0.0,
-    patch_grad_smooth_sigma: float = 0.0,
     guide_aug: bool = False,
     guide_aug_copies: int = 3,
     guide_aug_mode: tuple[str, ...] = ("dropout",),
@@ -317,8 +309,6 @@ def main(
         perturb_smooth_sigma=perturb_smooth_sigma,
         attention_guide_models=attention_guide_models,
         guide_type=guide_type,
-        attention_grad_smooth_sigma=attention_grad_smooth_sigma,
-        patch_grad_smooth_sigma=patch_grad_smooth_sigma,
         guide_aug=guide_aug,
         guide_aug_copies=guide_aug_copies,
         guide_aug_mode=guide_aug_mode,
@@ -370,8 +360,6 @@ if __name__ == "__main__":
         perturb_smooth_sigma=args.perturb_smooth_sigma,
         attention_guide_models_arg=args.attention_guide_models,
         guide_type=args.guide_type,
-        attention_grad_smooth_sigma=args.attention_grad_smooth_sigma,
-        patch_grad_smooth_sigma=args.patch_grad_smooth_sigma,
         guide_aug=args.guide_aug,
         guide_aug_copies=args.guide_aug_copies,
         guide_aug_mode=args.guide_aug_mode,
