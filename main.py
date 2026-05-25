@@ -36,8 +36,6 @@ def create_attacker(
     eot_iter: int = 1,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
     perturb_smooth_sigma: float = 0.0,
-    lazy_spectral_delta: bool = False,
-    lazy_spectral_cutoff: float = 0.25,
     attention_guide_models: tuple[ViTWithHook, ...] = (),
     guide_type: str = "postsoftmax_cls",
     attention_grad_smooth_sigma: float = 0.0,
@@ -62,8 +60,6 @@ def create_attacker(
         nesterov=nesterov,
         eot_iter=eot_iter,
         perturb_smooth_sigma=perturb_smooth_sigma,
-        lazy_spectral_delta=lazy_spectral_delta,
-        lazy_spectral_cutoff=lazy_spectral_cutoff,
         attention_guide_models=attention_guide_models,
         guide_type=guide_type,
         attention_grad_smooth_sigma=attention_grad_smooth_sigma,
@@ -235,8 +231,6 @@ def parse_args():
     parser.add_argument("--eot-iter", type=int, default=1, help="Number of DIM samples per SI scale.")
     parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0), help='DIM resize scale range, e.g. "0.85,1.0".')
     parser.add_argument("--perturb-smooth-sigma", type=float, default=0.0, help="Gaussian sigma for perturbation smoothing. 0=disabled.")
-    parser.add_argument("--lazy-spectral-delta", action="store_true", help="Enable spectral perturbation filtering in the second half of attack.")
-    parser.add_argument("--lazy-spectral-cutoff", type=float, default=0.25, help="Low-pass cutoff ratio for spectral perturbation filtering.")
     parser.add_argument("--attention-guide-models", type=parse_model_names, default=(), help="Comma-separated extra models for clean stable-attention guide maps.")
     parser.add_argument("--guide-type", type=str, default="postsoftmax_cls", help="Comma-separated guide types: postsoftmax_cls,qk_cls,qk_all_queries. The first entry is used.")
     parser.add_argument("--attention-grad-smooth-sigma", type=float, default=0.0, help="Gaussian smoothing for attention/QK-response gradients. 0=disabled.")
@@ -274,8 +268,6 @@ def main(
     eot_iter: int = 1,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
     perturb_smooth_sigma: float = 0.0,
-    lazy_spectral_delta: bool = False,
-    lazy_spectral_cutoff: float = 0.25,
     attention_guide_models_arg: tuple[str, ...] = (),
     guide_type: str = "postsoftmax_cls",
     attention_grad_smooth_sigma: float = 0.0,
@@ -328,8 +320,6 @@ def main(
         eot_iter=eot_iter,
         dim_resize_range=dim_resize_range,
         perturb_smooth_sigma=perturb_smooth_sigma,
-        lazy_spectral_delta=lazy_spectral_delta,
-        lazy_spectral_cutoff=lazy_spectral_cutoff,
         attention_guide_models=attention_guide_models,
         guide_type=guide_type,
         attention_grad_smooth_sigma=attention_grad_smooth_sigma,
@@ -384,8 +374,6 @@ if __name__ == "__main__":
         eot_iter=args.eot_iter,
         dim_resize_range=args.dim_resize_range,
         perturb_smooth_sigma=args.perturb_smooth_sigma,
-        lazy_spectral_delta=args.lazy_spectral_delta,
-        lazy_spectral_cutoff=args.lazy_spectral_cutoff,
         attention_guide_models_arg=args.attention_guide_models,
         guide_type=args.guide_type,
         attention_grad_smooth_sigma=args.attention_grad_smooth_sigma,

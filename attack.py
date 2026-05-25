@@ -107,8 +107,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         nesterov: bool = True,
         eot_iter: int = 1,
         perturb_smooth_sigma: float = 0.0,
-        lazy_spectral_delta: bool = False,
-        lazy_spectral_cutoff: float = 0.25,
         attention_guide_models: tuple[torch.nn.Module, ...] | None = None,
         guide_type: str = "postsoftmax_cls",
         attention_grad_smooth_sigma: float = 0.0,
@@ -147,8 +145,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if self.eot_iter <= 0:
             raise ValueError(f"eot_iter must be positive, got {eot_iter}.")
         self.perturb_smooth_sigma = float(perturb_smooth_sigma)
-        self.lazy_spectral_delta = bool(lazy_spectral_delta)
-        self.lazy_spectral_cutoff = float(lazy_spectral_cutoff)
         self.attention_guide_models = tuple(attention_guide_models or ())
         guide_types = tuple(item.strip() for item in guide_type.split(",") if item.strip())
         valid_guide_types = ("postsoftmax_cls", "qk_cls", "qk_all_queries")
@@ -242,20 +238,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         kernel = self._perturb_kernel.to(delta.device, delta.dtype).repeat(delta.size(1), 1, 1, 1)
         pad = kernel.size(2) // 2
         return F.conv2d(F.pad(delta, (pad, pad, pad, pad), mode="reflect"), kernel, groups=delta.size(1))
-
-    def _spectral_filter_delta(self, delta: torch.Tensor) -> torch.Tensor:
-        from utils import image_2d_fft_low_high_maps
-
-        maps = image_2d_fft_low_high_maps(
-            delta,
-            cutoff_ratio=self.lazy_spectral_cutoff,
-            transition_ratio=self.spectral_transition,
-        )
-        filter_weights = maps["low_ratio"].to(delta.dtype)
-        if filter_weights.ndim == 2:
-            filter_weights = filter_weights.unsqueeze(0)
-        filter_weights = filter_weights.unsqueeze(1)
-        return delta * (0.5 + 0.5 * filter_weights)
 
     def _input_diversity(self, images: torch.Tensor) -> torch.Tensor:
         if not self.input_diversity:
@@ -546,8 +528,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 adv_pixels = adv_pixels + self.step_size * momentum.sign()
                 delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
                 delta = torch.clamp(self._smooth_perturbation(delta), -self.epsilon, self.epsilon)
-                if self.lazy_spectral_delta and step_idx + 1 >= self.steps // 2:
-                    delta = torch.clamp(self._spectral_filter_delta(delta), -self.epsilon, self.epsilon)
                 adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
 
         return self._normalize(adv_pixels)
