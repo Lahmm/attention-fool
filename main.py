@@ -29,7 +29,6 @@ def create_attacker(
     decay: float,
     layers: tuple[int, ...],
     ti_sigma: float = 0.0,
-    spectral_transition: float = 0.04,
     grad_combine: str = "guide_aug_ce",
     si_scales: int = 1,
     nesterov: bool = True,
@@ -53,7 +52,6 @@ def create_attacker(
         decay=decay,
         layers=layers,
         grad_combine=grad_combine,
-        spectral_transition=spectral_transition,
         ti_sigma=ti_sigma if ti_sigma > 0 else 3.0,
         dim_resize_range=dim_resize_range,
         si_scales=si_scales,
@@ -224,7 +222,6 @@ def parse_args():
     parser.add_argument("--decay", type=float, default=1.0, help="Momentum decay factor.")
     parser.add_argument("--layers", type=parse_layers, default=(-6, -5, -4, -3, -2, -1), help='Comma-separated token layers, e.g. "-6,-5,-4,-3,-2,-1".')
     parser.add_argument("--ti-sigma", type=float, default=0.0, help="TI-FGSM Gaussian kernel sigma for gradient smoothing. 0=disabled.")
-    parser.add_argument("--spectral-transition", type=float, default=0.04, help="Transition width for spectral filter.")
     parser.add_argument("--grad-combine", type=str, default="guide_aug_ce", choices=["guide_aug_ce"], help="Gradient combination strategy.")
     parser.add_argument("--si-scales", type=int, default=1, help="Number of scale-invariant CE gradient copies.")
     parser.add_argument("--no-nesterov", action="store_true", help="Disable NI-FGSM style lookahead gradients.")
@@ -261,7 +258,6 @@ def main(
     output_dir: str | None,
     mode: str,
     ti_sigma: float = 0.0,
-    spectral_transition: float = 0.04,
     grad_combine: str = "guide_aug_ce",
     si_scales: int = 1,
     nesterov: bool = True,
@@ -313,7 +309,6 @@ def main(
         decay=decay,
         layers=layers,
         ti_sigma=ti_sigma,
-        spectral_transition=spectral_transition,
         grad_combine=grad_combine,
         si_scales=si_scales,
         nesterov=nesterov,
@@ -367,7 +362,6 @@ if __name__ == "__main__":
         decay=args.decay,
         layers=args.layers,
         ti_sigma=args.ti_sigma,
-        spectral_transition=args.spectral_transition,
         grad_combine=args.grad_combine,
         si_scales=args.si_scales,
         nesterov=not args.no_nesterov,

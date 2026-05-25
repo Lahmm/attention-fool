@@ -99,7 +99,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         decay: float = 1.0,
         layers: tuple[int, ...] = (-6, -5, -4, -3, -2, -1),
         grad_combine: str = "guide_aug_ce",
-        spectral_transition: float = 0.04,
         ti_sigma: float = 3.0,
         input_diversity: bool = True,
         dim_resize_range: tuple[float, float] = (0.85, 1.0),
@@ -133,7 +132,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
 
         self.layers = tuple(int(layer) for layer in layers)
         self.grad_combine = grad_combine
-        self.spectral_transition = float(spectral_transition)
         self.ti_sigma = float(ti_sigma)
         self.input_diversity = bool(input_diversity)
         self.dim_resize_range = tuple(float(r) for r in dim_resize_range)
