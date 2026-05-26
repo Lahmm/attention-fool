@@ -40,6 +40,7 @@ def create_attacker(
     guide_aug_copies: int = 3,
     guide_aug_mode: tuple[str, ...] = ("dropout",),
     guide_aug_strength: float = 0.2,
+    input_diversity: bool = True,
 ) -> LazyAggregationAttacker:
     return LazyAggregationAttacker(
         model=model,
@@ -60,9 +61,9 @@ def create_attacker(
         guide_aug_copies=guide_aug_copies,
         guide_aug_mode=guide_aug_mode,
         guide_aug_strength=guide_aug_strength,
+        input_diversity=input_diversity,
         device=DEVICE,
     )
-
 
 def parse_layers(value: str) -> tuple[int, ...]:
     layers = tuple(int(item.strip()) for item in value.split(",") if item.strip())
@@ -220,6 +221,7 @@ def parse_args():
     parser.add_argument("--si-scales", type=int, default=1, help="Number of scale-invariant CE gradient copies.")
     parser.add_argument("--no-nesterov", action="store_true", help="Disable NI-FGSM style lookahead gradients.")
     parser.add_argument("--eot-iter", type=int, default=1, help="Number of DIM samples per SI scale.")
+    parser.add_argument("--no-dim", action="store_true", help="Disable input diversity (DIM).")
     parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0), help='DIM resize scale range, e.g. "0.85,1.0".')
     parser.add_argument("--attention-guide-models", type=parse_model_names, default=(), help="Comma-separated extra models for clean stable-attention guide maps.")
     parser.add_argument("--guide-type", type=str, default="postsoftmax_cls", help="Comma-separated guide types: postsoftmax_cls,qk_cls,qk_all_queries. The first entry is used.")
@@ -254,6 +256,7 @@ def main(
     nesterov: bool = True,
     eot_iter: int = 1,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
+    input_diversity: bool = True,
     attention_guide_models_arg: tuple[str, ...] = (),
     guide_type: str = "postsoftmax_cls",
     guide_aug: bool = False,
@@ -302,6 +305,7 @@ def main(
         nesterov=nesterov,
         eot_iter=eot_iter,
         dim_resize_range=dim_resize_range,
+        input_diversity=input_diversity,
         attention_guide_models=attention_guide_models,
         guide_type=guide_type,
         guide_aug=guide_aug,
@@ -352,6 +356,7 @@ if __name__ == "__main__":
         nesterov=not args.no_nesterov,
         eot_iter=args.eot_iter,
         dim_resize_range=args.dim_resize_range,
+        input_diversity=not args.no_dim,
         attention_guide_models_arg=args.attention_guide_models,
         guide_type=args.guide_type,
         guide_aug=args.guide_aug,
