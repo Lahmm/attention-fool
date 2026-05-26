@@ -267,8 +267,12 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         for layer in self.layers:
             idx = layer if layer >= 0 else num_layers + layer
             if idx < 0 or idx >= num_layers:
-                raise ValueError(f"Layer index {layer} is out of range for {num_layers} compatible attention layers.")
+                continue
             indices.append(idx)
+        if not indices:
+            raise ValueError(
+                f"Layer indices {self.layers} are out of range for {num_layers} compatible attention layers."
+            )
         return indices
 
     def _collect_cls_attention_scores(
