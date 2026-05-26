@@ -34,7 +34,6 @@ def create_attacker(
     nesterov: bool = True,
     eot_iter: int = 1,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
-    perturb_smooth_sigma: float = 0.0,
     attention_guide_models: tuple[ViTWithHook, ...] = (),
     guide_type: str = "postsoftmax_cls",
     guide_aug: bool = False,
@@ -55,7 +54,6 @@ def create_attacker(
         si_scales=si_scales,
         nesterov=nesterov,
         eot_iter=eot_iter,
-        perturb_smooth_sigma=perturb_smooth_sigma,
         attention_guide_models=attention_guide_models,
         guide_type=guide_type,
         guide_aug=guide_aug,
@@ -223,7 +221,6 @@ def parse_args():
     parser.add_argument("--no-nesterov", action="store_true", help="Disable NI-FGSM style lookahead gradients.")
     parser.add_argument("--eot-iter", type=int, default=1, help="Number of DIM samples per SI scale.")
     parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0), help='DIM resize scale range, e.g. "0.85,1.0".')
-    parser.add_argument("--perturb-smooth-sigma", type=float, default=0.0, help="Gaussian sigma for perturbation smoothing. 0=disabled.")
     parser.add_argument("--attention-guide-models", type=parse_model_names, default=(), help="Comma-separated extra models for clean stable-attention guide maps.")
     parser.add_argument("--guide-type", type=str, default="postsoftmax_cls", help="Comma-separated guide types: postsoftmax_cls,qk_cls,qk_all_queries. The first entry is used.")
     parser.add_argument("--guide-aug", action="store_true", help="Enable guide-based input augmentation for guide_aug_ce.")
@@ -257,7 +254,6 @@ def main(
     nesterov: bool = True,
     eot_iter: int = 1,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
-    perturb_smooth_sigma: float = 0.0,
     attention_guide_models_arg: tuple[str, ...] = (),
     guide_type: str = "postsoftmax_cls",
     guide_aug: bool = False,
@@ -306,7 +302,6 @@ def main(
         nesterov=nesterov,
         eot_iter=eot_iter,
         dim_resize_range=dim_resize_range,
-        perturb_smooth_sigma=perturb_smooth_sigma,
         attention_guide_models=attention_guide_models,
         guide_type=guide_type,
         guide_aug=guide_aug,
@@ -357,7 +352,6 @@ if __name__ == "__main__":
         nesterov=not args.no_nesterov,
         eot_iter=args.eot_iter,
         dim_resize_range=args.dim_resize_range,
-        perturb_smooth_sigma=args.perturb_smooth_sigma,
         attention_guide_models_arg=args.attention_guide_models,
         guide_type=args.guide_type,
         guide_aug=args.guide_aug,

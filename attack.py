@@ -105,7 +105,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         si_scales: int = 1,
         nesterov: bool = True,
         eot_iter: int = 1,
-        perturb_smooth_sigma: float = 0.0,
         attention_guide_models: tuple[torch.nn.Module, ...] | None = None,
         guide_type: str = "postsoftmax_cls",
         guide_aug: bool = False,
@@ -140,7 +139,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.eot_iter = int(eot_iter)
         if self.eot_iter <= 0:
             raise ValueError(f"eot_iter must be positive, got {eot_iter}.")
-        self.perturb_smooth_sigma = float(perturb_smooth_sigma)
         self.attention_guide_models = tuple(attention_guide_models or ())
         guide_types = tuple(item.strip() for item in guide_type.split(",") if item.strip())
         valid_guide_types = ("postsoftmax_cls", "qk_cls", "qk_all_queries")
@@ -176,11 +174,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if self.guide_aug_strength < 0:
             raise ValueError(f"guide_aug_strength must be non-negative, got {guide_aug_strength}.")
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
-        self._perturb_kernel = (
-            self._build_ti_kernel(self.perturb_smooth_sigma)
-            if self.perturb_smooth_sigma > 0
-            else None
-        )
 
     @staticmethod
     def _build_ti_kernel(sigma: float) -> torch.Tensor:
@@ -197,13 +190,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         kernel = self._ti_kernel.to(grad.device, grad.dtype).repeat(grad.size(1), 1, 1, 1)
         pad = kernel.size(2) // 2
         return F.conv2d(F.pad(grad, (pad, pad, pad, pad), mode="reflect"), kernel, groups=grad.size(1))
-
-    def _smooth_perturbation(self, delta: torch.Tensor) -> torch.Tensor:
-        if self._perturb_kernel is None or self.perturb_smooth_sigma <= 0:
-            return delta
-        kernel = self._perturb_kernel.to(delta.device, delta.dtype).repeat(delta.size(1), 1, 1, 1)
-        pad = kernel.size(2) // 2
-        return F.conv2d(F.pad(delta, (pad, pad, pad, pad), mode="reflect"), kernel, groups=delta.size(1))
 
     def _input_diversity(self, images: torch.Tensor) -> torch.Tensor:
         if not self.input_diversity:
@@ -493,7 +479,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             with torch.no_grad():
                 adv_pixels = adv_pixels + self.step_size * momentum.sign()
                 delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
-                delta = torch.clamp(self._smooth_perturbation(delta), -self.epsilon, self.epsilon)
                 adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
 
         return self._normalize(adv_pixels)
