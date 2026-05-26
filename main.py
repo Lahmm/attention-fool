@@ -26,44 +26,55 @@ def create_attacker(
     epsilon: float,
     step_size: float | None,
     steps: int,
-    decay: float,
     layers: tuple[int, ...],
-    ti_sigma: float = 0.0,
-    grad_combine: str = "guide_aug_ce",
+    ti_sigma: float = 3.0,
+    dim: bool = False,
+    si: bool = False,
     si_scales: int = 1,
-    nesterov: bool = True,
+    eot: bool = False,
     eot_iter: int = 1,
+    mi: bool = False,
+    mi_decay: float = 1.0,
+    ni: bool = False,
+    normalize_grad: bool = False,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
     attention_guide_models: tuple[ViTWithHook, ...] = (),
-    guide_type: str = "postsoftmax_cls",
+    attention_guide_type: str = "postsoftmax_cls",
+    attention_guide_build_method: str = "pixel",
     guide_aug: bool = False,
+    guide_aug_area: str = "background",
+    guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
-    guide_aug_mode: tuple[str, ...] = ("dropout",),
     guide_aug_strength: float = 0.2,
-    input_diversity: bool = True,
 ) -> LazyAggregationAttacker:
     return LazyAggregationAttacker(
         model=model,
         epsilon=epsilon,
         step_size=step_size,
         steps=steps,
-        decay=decay,
         layers=layers,
-        grad_combine=grad_combine,
-        ti_sigma=ti_sigma if ti_sigma > 0 else 3.0,
+        ti_sigma=ti_sigma,
+        input_diversity=dim,
         dim_resize_range=dim_resize_range,
+        use_si=si,
         si_scales=si_scales,
-        nesterov=nesterov,
+        use_eot=eot,
         eot_iter=eot_iter,
+        use_momentum=mi,
+        momentum_decay=mi_decay,
+        nesterov=ni,
+        normalize_grad=normalize_grad,
         attention_guide_models=attention_guide_models,
-        guide_type=guide_type,
+        attention_guide_type=attention_guide_type,
+        attention_guide_build_method=attention_guide_build_method,
         guide_aug=guide_aug,
+        guide_aug_area=guide_aug_area,
+        guide_aug_methods=guide_aug_methods,
         guide_aug_copies=guide_aug_copies,
-        guide_aug_mode=guide_aug_mode,
         guide_aug_strength=guide_aug_strength,
-        input_diversity=input_diversity,
         device=DEVICE,
     )
+
 
 def parse_layers(value: str) -> tuple[int, ...]:
     layers = tuple(int(item.strip()) for item in value.split(",") if item.strip())
@@ -209,25 +220,30 @@ def attack_correctly_classified_samples(
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Generate adversarial samples with lazy aggregation attack.")
+    parser = argparse.ArgumentParser(description="Generate adversarial samples with configurable lazy aggregation attack.")
     parser.add_argument("--max-attacked-samples", type=int, default=5, help="Maximum number of correctly classified samples to attack.")
     parser.add_argument("--epsilon", type=float, default=16.0 / 255.0, help="L_inf perturbation budget in pixel range [0, 1].")
     parser.add_argument("--step-size", type=float, default=None, help="Step size. Defaults to epsilon / steps.")
     parser.add_argument("--steps", type=int, default=20, help="Number of attack iterations.")
-    parser.add_argument("--decay", type=float, default=1.0, help="Momentum decay factor.")
     parser.add_argument("--layers", type=parse_layers, default=(-6, -5, -4, -3, -2, -1), help='Comma-separated token layers, e.g. "-6,-5,-4,-3,-2,-1".')
-    parser.add_argument("--ti-sigma", type=float, default=0.0, help="TI-FGSM Gaussian kernel sigma for gradient smoothing. 0=disabled.")
-    parser.add_argument("--grad-combine", type=str, default="guide_aug_ce", choices=["guide_aug_ce"], help="Gradient combination strategy.")
-    parser.add_argument("--si-scales", type=int, default=1, help="Number of scale-invariant CE gradient copies.")
-    parser.add_argument("--no-nesterov", action="store_true", help="Disable NI-FGSM style lookahead gradients.")
-    parser.add_argument("--eot-iter", type=int, default=1, help="Number of DIM samples per SI scale.")
-    parser.add_argument("--no-dim", action="store_true", help="Disable input diversity (DIM).")
+    parser.add_argument("--ti-sigma", type=float, default=3.0, help="TI-FGSM Gaussian kernel sigma for gradient smoothing. 0=disabled.")
+    parser.add_argument("--mi", action="store_true", help="Enable momentum iterative gradients.")
+    parser.add_argument("--mi-decay", type=float, default=1.0, help="Momentum decay factor used when --mi is enabled.")
+    parser.add_argument("--ni", action="store_true", help="Enable Nesterov lookahead. Requires --mi.")
+    parser.add_argument("--normalize-grad", action="store_true", help="Normalize input gradients before TI/momentum updates.")
+    parser.add_argument("--dim", action="store_true", help="Enable input diversity (DIM).")
     parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0), help='DIM resize scale range, e.g. "0.85,1.0".')
+    parser.add_argument("--si", action="store_true", help="Enable scale-invariant forward copies.")
+    parser.add_argument("--si-scales", type=int, default=1, help="Number of scale-invariant CE gradient copies when --si is enabled.")
+    parser.add_argument("--eot", action="store_true", help="Enable EOT repeated stochastic forward samples.")
+    parser.add_argument("--eot-iter", type=int, default=1, help="Number of EOT samples when --eot is enabled.")
     parser.add_argument("--attention-guide-models", type=parse_model_names, default=(), help="Comma-separated extra models for clean stable-attention guide maps.")
-    parser.add_argument("--guide-type", type=str, default="postsoftmax_cls", help="Comma-separated guide types: postsoftmax_cls,qk_cls,qk_all_queries. The first entry is used.")
-    parser.add_argument("--guide-aug", action="store_true", help="Enable guide-based input augmentation for guide_aug_ce.")
-    parser.add_argument("--guide-aug-copies", type=int, default=3, help="Number of guide-augmented CE copies per SI/EOT sample.")
-    parser.add_argument("--guide-aug-mode", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation modes: dropout,mix,jitter,freq,dropout_inner,jitter_outer,freq_inner,dropout_all,jitter_all,freq_all.")
+    parser.add_argument("--attention-guide-type", type=str, default="postsoftmax_cls", help="Comma-separated guide types: postsoftmax_cls,qk_cls,qk_all_queries. The first entry is used.")
+    parser.add_argument("--attention-guide-build-method", choices=["pixel", "patch"], default="pixel", help="Build guide masks as pixel-level bilinear maps or patch-wise nearest maps.")
+    parser.add_argument("--guide-aug", action="store_true", help="Enable attention-guided forward augmentation.")
+    parser.add_argument("--guide-aug-area", choices=["foreground", "background", "all"], default="background", help="Region affected by guide augmentation. all ignores attention guide maps.")
+    parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq.")
+    parser.add_argument("--guide-aug-copies", type=int, default=3, help="Random copies per guide augmentation method.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode, use --output-dir outputs/attack/lazyagg.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
@@ -246,22 +262,27 @@ def main(
     epsilon: float,
     step_size: float | None,
     steps: int,
-    decay: float,
     layers: tuple[int, ...],
     output_dir: str | None,
     mode: str,
-    ti_sigma: float = 0.0,
-    grad_combine: str = "guide_aug_ce",
-    si_scales: int = 1,
-    nesterov: bool = True,
-    eot_iter: int = 1,
+    ti_sigma: float = 3.0,
+    mi: bool = False,
+    mi_decay: float = 1.0,
+    ni: bool = False,
+    normalize_grad: bool = False,
+    dim: bool = False,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
-    input_diversity: bool = True,
+    si: bool = False,
+    si_scales: int = 1,
+    eot: bool = False,
+    eot_iter: int = 1,
     attention_guide_models_arg: tuple[str, ...] = (),
-    guide_type: str = "postsoftmax_cls",
+    attention_guide_type: str = "postsoftmax_cls",
+    attention_guide_build_method: str = "pixel",
     guide_aug: bool = False,
+    guide_aug_area: str = "background",
+    guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
-    guide_aug_mode: tuple[str, ...] = ("dropout",),
     guide_aug_strength: float = 0.2,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
@@ -286,7 +307,8 @@ def main(
     model = build_vit_model(num_classes=num_classes)
 
     attention_guide_models: tuple[ViTWithHook, ...] = ()
-    if attention_guide_models_arg:
+    needs_attention_guide = guide_aug and guide_aug_area != "all"
+    if needs_attention_guide and attention_guide_models_arg:
         attention_guide_models = tuple(
             build_vit_model(num_classes=num_classes, model_name=model_name)
             for model_name in attention_guide_models_arg
@@ -297,20 +319,25 @@ def main(
         epsilon=epsilon,
         step_size=step_size,
         steps=steps,
-        decay=decay,
         layers=layers,
         ti_sigma=ti_sigma,
-        grad_combine=grad_combine,
+        dim=dim,
+        si=si,
         si_scales=si_scales,
-        nesterov=nesterov,
+        eot=eot,
         eot_iter=eot_iter,
+        mi=mi,
+        mi_decay=mi_decay,
+        ni=ni,
+        normalize_grad=normalize_grad,
         dim_resize_range=dim_resize_range,
-        input_diversity=input_diversity,
         attention_guide_models=attention_guide_models,
-        guide_type=guide_type,
+        attention_guide_type=attention_guide_type,
+        attention_guide_build_method=attention_guide_build_method,
         guide_aug=guide_aug,
+        guide_aug_area=guide_aug_area,
+        guide_aug_methods=guide_aug_methods,
         guide_aug_copies=guide_aug_copies,
-        guide_aug_mode=guide_aug_mode,
         guide_aug_strength=guide_aug_strength,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
@@ -348,20 +375,25 @@ if __name__ == "__main__":
         epsilon=args.epsilon,
         step_size=args.step_size,
         steps=args.steps,
-        decay=args.decay,
         layers=args.layers,
         ti_sigma=args.ti_sigma,
-        grad_combine=args.grad_combine,
-        si_scales=args.si_scales,
-        nesterov=not args.no_nesterov,
-        eot_iter=args.eot_iter,
+        mi=args.mi,
+        mi_decay=args.mi_decay,
+        ni=args.ni,
+        normalize_grad=args.normalize_grad,
+        dim=args.dim,
         dim_resize_range=args.dim_resize_range,
-        input_diversity=not args.no_dim,
+        si=args.si,
+        si_scales=args.si_scales,
+        eot=args.eot,
+        eot_iter=args.eot_iter,
         attention_guide_models_arg=args.attention_guide_models,
-        guide_type=args.guide_type,
+        attention_guide_type=args.attention_guide_type,
+        attention_guide_build_method=args.attention_guide_build_method,
         guide_aug=args.guide_aug,
+        guide_aug_area=args.guide_aug_area,
+        guide_aug_methods=args.guide_aug_method,
         guide_aug_copies=args.guide_aug_copies,
-        guide_aug_mode=args.guide_aug_mode,
         guide_aug_strength=args.guide_aug_strength,
         output_dir=args.output_dir,
         mode=args.mode,

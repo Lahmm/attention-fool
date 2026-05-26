@@ -87,48 +87,42 @@ PowerShell 中带负数的 `--layers` 建议写成等号形式：
 
 ## Lazy Aggregation 攻击
 
-`lazy-agg` 是单白盒 ViT 非定向迁移攻击。它用 stable attention token map 作为 guide，通过 guide-based input augmentation CE 策略来破坏 ViT 的 attention 聚合。
+`lazy-agg` 是单白盒 ViT 非定向迁移攻击。当前实现将攻击拆成前向增强、CE loss 和反向梯度处理三个可组合模块。
 
 默认配置：
 
 ```text
-epsilon=16/255, steps=20, decay=1.0, layers=-6,-5,-4,-3,-2,-1
-warmup_steps=3, grad_combine=guide_qk_response
-input_diversity=True, ti_sigma=3.0, si_scales=1, nesterov=True, eot_iter=1
+epsilon=16/255, steps=20, layers=-6,-5,-4,-3,-2,-1
+guide_aug=False, dim=False, si=False, eot=False
+mi=False, ni=False, normalize_grad=False, ti_sigma=3.0
 ```
 
-运行示例：
+最简单的无增强 FGSM 示例：
 
 ```powershell
-python main.py --mode attack --attack-type lazy-agg --max-attacked-samples 50 --decay 1.0 --output-dir outputs/attack/lazyagg
+python main.py --mode attack --max-attacked-samples 50 --steps 1 --ti-sigma 0 --output-dir outputs/attack/lazyagg/fgsm_plain
 ```
 
-当前推荐先复现实验配置：
+注意力引导增强示例：
 
 ```powershell
-python main.py --mode attack --attack-type lazy-agg --max-attacked-samples 500 --steps 80 --decay 1.0 --si-scales 2 --output-dir outputs/attack/lazyagg/si2_s80_500
-python transfer_eval.py --image-dir outputs/attack/lazyagg/si2_s80_500 --prefix adv_ --batch-size 128 --num-workers 8 --prefetch-factor 4 --exp-name lazyagg_si2_s80_500
+python main.py --mode attack --max-attacked-samples 500 --layers=-6,-5,-4,-3,-2,-1 --guide-aug --guide-aug-area background --guide-aug-method dropout,jitter,freq --guide-aug-copies 3 --attention-guide-type postsoftmax_cls --attention-guide-build-method pixel --output-dir outputs/attack/lazyagg/bgaug_s02_lastsix_500
 ```
 
-若要评估 EOT 收益，使用：
+前向增强与反向梯度模块均由独立参数控制：
 
 ```powershell
-python main.py --mode attack --attack-type lazy-agg --max-attacked-samples 500 --steps 80 --decay 1.0 --si-scales 2 --eot-iter 2 --output-dir outputs/attack/lazyagg/eot2_si2_s80_500
-python transfer_eval.py --image-dir outputs/attack/lazyagg/eot2_si2_s80_500 --prefix adv_ --batch-size 128 --num-workers 8 --prefetch-factor 4 --exp-name lazyagg_eot2_si2_s80_500
+--dim
+--si --si-scales 2
+--eot --eot-iter 2
+--mi --mi-decay 1.0
+--ni
+--normalize-grad
+--ti-sigma 0
+--ti-sigma 3
 ```
 
-EOT2 的 500 样本 Avg ASR 若接近或超过 0.62，可继续围绕下面参数搜索：
-
-```powershell
---steps 100
---steps 120
---eot-iter 3
---ti-sigma 2
---ti-sigma 5
---dim-resize-range 0.75,1.0
---dim-resize-range 0.9,1.0
---ensemble-source-models deit_base_patch16_224
-```
+`--guide-aug-area` 可选 `foreground`、`background`、`all`；`all` 不使用 attention guide map。`--guide-aug-method` 可传 `dropout,jitter,freq` 中的一个或多个，实际前向分支数为 `len(methods) * guide_aug_copies`。
 
 ## 迁移攻击评估
 

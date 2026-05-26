@@ -16,7 +16,7 @@ from utils import DEVICE, load_data
 def parse_args():
     parser = argparse.ArgumentParser(description="Compute cross-model CLS attention/QK guide overlap statistics.")
     parser.add_argument("--models", type=parse_model_names, default=("vit_base_patch16_224", "deit_base_patch16_224", "pit_s_224", "crossvit_15_240"), help="Comma-separated timm model names.")
-    parser.add_argument("--guide-types", type=parse_model_names, default=("postsoftmax_cls", "qk_cls"), help="Comma-separated guide types: postsoftmax_cls,qk_cls,qk_all_queries.")
+    parser.add_argument("--attention-guide-types", type=parse_model_names, default=("postsoftmax_cls", "qk_cls"), help="Comma-separated guide types: postsoftmax_cls,qk_cls,qk_all_queries.")
     parser.add_argument("--topk-ratio", type=float, default=0.25, help="Top patch ratio for IoU/Dice/change metrics.")
     parser.add_argument("--max-samples", type=int, default=50, help="Maximum samples to process.")
     parser.add_argument("--batch-size", type=int, default=8)
@@ -86,9 +86,9 @@ def pair_metrics(a, b, ratio):
 
 def collect_guides(models, images, guide_type, ratio):
     guides = {}
-    helper = LazyAggregationAttacker(next(iter(models.values())), guide_type=guide_type, device=DEVICE)
+    helper = LazyAggregationAttacker(next(iter(models.values())), attention_guide_type=guide_type, device=DEVICE)
     for name, model in models.items():
-        score = helper._collect_cls_attention_scores(model, images, guide_type=guide_type)
+        score = helper._collect_cls_attention_scores(model, images, attention_guide_type=guide_type)
         if score is not None:
             guides[name] = normalize_weights(score.detach())
     return guides
@@ -124,7 +124,7 @@ def main():
             images = images[:remaining].to(DEVICE)
             indices = indices[:remaining]
             batch_n = images.size(0)
-            for guide_type in args.guide_types:
+            for guide_type in args.attention_guide_types:
                 guides = collect_guides(models, images, guide_type, args.topk_ratio)
                 for name_a, name_b in combinations(guides.keys(), 2):
                     a = guides[name_a]

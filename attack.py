@@ -84,10 +84,8 @@ class MIFGSMAttacker:
 
 class LazyAggregationAttacker(MIFGSMAttacker):
     """
-    Lazy aggregation hijack attack for ViTs.
-
-    Uses stable attention token maps as guides for guide-based
-    augmentation strategies to disrupt ViT attention.
+    Configurable iterative FGSM attack with optional forward augmentations,
+    attention-guided augmentation, and gradient refinement modules.
     """
 
     def __init__(
@@ -96,20 +94,25 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         epsilon: float = 16.0 / 255.0,
         step_size: float | None = None,
         steps: int = 20,
-        decay: float = 1.0,
         layers: tuple[int, ...] = (-6, -5, -4, -3, -2, -1),
-        grad_combine: str = "guide_aug_ce",
         ti_sigma: float = 3.0,
-        input_diversity: bool = True,
+        input_diversity: bool = False,
         dim_resize_range: tuple[float, float] = (0.85, 1.0),
+        use_si: bool = False,
         si_scales: int = 1,
-        nesterov: bool = True,
+        use_eot: bool = False,
         eot_iter: int = 1,
+        use_momentum: bool = False,
+        momentum_decay: float = 1.0,
+        nesterov: bool = False,
+        normalize_grad: bool = False,
         attention_guide_models: tuple[torch.nn.Module, ...] | None = None,
-        guide_type: str = "postsoftmax_cls",
+        attention_guide_type: str = "postsoftmax_cls",
+        attention_guide_build_method: str = "pixel",
         guide_aug: bool = False,
+        guide_aug_area: str = "background",
+        guide_aug_methods: tuple[str, ...] = ("dropout",),
         guide_aug_copies: int = 3,
-        guide_aug_mode: tuple[str, ...] = ("dropout",),
         guide_aug_strength: float = 0.2,
         device: torch.device | None = None,
     ) -> None:
@@ -118,58 +121,62 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             epsilon=epsilon,
             step_size=step_size,
             steps=steps,
-            decay=decay,
+            decay=momentum_decay,
             device=device,
         )
         if not layers:
             raise ValueError("layers must contain at least one layer index.")
-        valid_combine = ("guide_aug_ce",)
-        if grad_combine not in valid_combine:
-            raise ValueError(f"grad_combine must be one of {valid_combine}, got {grad_combine!r}.")
+        if ti_sigma < 0:
+            raise ValueError(f"ti_sigma must be non-negative, got {ti_sigma}.")
+        if si_scales <= 0:
+            raise ValueError(f"si_scales must be positive, got {si_scales}.")
+        if eot_iter <= 0:
+            raise ValueError(f"eot_iter must be positive, got {eot_iter}.")
+        if nesterov and not use_momentum:
+            raise ValueError("--ni requires --mi because Nesterov lookahead depends on momentum.")
 
         self.layers = tuple(int(layer) for layer in layers)
-        self.grad_combine = grad_combine
         self.ti_sigma = float(ti_sigma)
         self.input_diversity = bool(input_diversity)
         self.dim_resize_range = tuple(float(r) for r in dim_resize_range)
+        self.use_si = bool(use_si)
         self.si_scales = int(si_scales)
-        if self.si_scales <= 0:
-            raise ValueError(f"si_scales must be positive, got {si_scales}.")
-        self.nesterov = bool(nesterov)
+        self.use_eot = bool(use_eot)
         self.eot_iter = int(eot_iter)
-        if self.eot_iter <= 0:
-            raise ValueError(f"eot_iter must be positive, got {eot_iter}.")
+        self.use_momentum = bool(use_momentum)
+        self.nesterov = bool(nesterov)
+        self.normalize_grad = bool(normalize_grad)
         self.attention_guide_models = tuple(attention_guide_models or ())
-        guide_types = tuple(item.strip() for item in guide_type.split(",") if item.strip())
+
+        guide_types = tuple(item.strip() for item in attention_guide_type.split(",") if item.strip())
         valid_guide_types = ("postsoftmax_cls", "qk_cls", "qk_all_queries")
         if not guide_types:
-            raise ValueError("guide_type must contain at least one guide type.")
+            raise ValueError("attention_guide_type must contain at least one guide type.")
         invalid_guide_types = [item for item in guide_types if item not in valid_guide_types]
         if invalid_guide_types:
-            raise ValueError(f"guide_type entries must be in {valid_guide_types}, got {invalid_guide_types}.")
-        self.guide_types = guide_types
+            raise ValueError(f"attention_guide_type entries must be in {valid_guide_types}, got {invalid_guide_types}.")
+        self.attention_guide_types = guide_types
+
+        valid_build_methods = ("pixel", "patch")
+        if attention_guide_build_method not in valid_build_methods:
+            raise ValueError(f"attention_guide_build_method must be one of {valid_build_methods}, got {attention_guide_build_method!r}.")
+        self.attention_guide_build_method = attention_guide_build_method
+
         self.guide_aug = bool(guide_aug)
+        valid_guide_aug_areas = ("foreground", "background", "all")
+        if guide_aug_area not in valid_guide_aug_areas:
+            raise ValueError(f"guide_aug_area must be one of {valid_guide_aug_areas}, got {guide_aug_area!r}.")
+        self.guide_aug_area = guide_aug_area
+        self.guide_aug_methods = tuple(str(method).strip() for method in guide_aug_methods if str(method).strip())
+        valid_guide_aug_methods = ("dropout", "jitter", "freq")
+        if not self.guide_aug_methods:
+            raise ValueError("guide_aug_methods must contain at least one method.")
+        invalid_methods = [method for method in self.guide_aug_methods if method not in valid_guide_aug_methods]
+        if invalid_methods:
+            raise ValueError(f"guide_aug_methods entries must be in {valid_guide_aug_methods}, got {invalid_methods}.")
         self.guide_aug_copies = int(guide_aug_copies)
         if self.guide_aug_copies <= 0:
             raise ValueError(f"guide_aug_copies must be positive, got {guide_aug_copies}.")
-        self.guide_aug_mode = tuple(str(mode).strip() for mode in guide_aug_mode if str(mode).strip())
-        valid_guide_aug_modes = (
-            "dropout",
-            "mix",
-            "jitter",
-            "freq",
-            "dropout_inner",
-            "jitter_outer",
-            "freq_inner",
-            "dropout_all",
-            "jitter_all",
-            "freq_all",
-        )
-        if not self.guide_aug_mode:
-            raise ValueError("guide_aug_mode must contain at least one mode.")
-        invalid_guide_aug_modes = [mode for mode in self.guide_aug_mode if mode not in valid_guide_aug_modes]
-        if invalid_guide_aug_modes:
-            raise ValueError(f"guide_aug_mode entries must be in {valid_guide_aug_modes}, got {invalid_guide_aug_modes}.")
         self.guide_aug_strength = float(guide_aug_strength)
         if self.guide_aug_strength < 0:
             raise ValueError(f"guide_aug_strength must be non-negative, got {guide_aug_strength}.")
@@ -194,7 +201,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
     def _input_diversity(self, images: torch.Tensor) -> torch.Tensor:
         if not self.input_diversity:
             return images
-        batch_size, channels, height, width = images.shape
+        _batch_size, _channels, height, width = images.shape
         lo, hi = self.dim_resize_range
         scale = lo + (hi - lo) * torch.rand(1, device=images.device)
         new_h = max(1, min(height, int(round(height * scale.item()))))
@@ -220,7 +227,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         return int(heads) if heads is not None else None
 
     @staticmethod
-    def _qkv_to_cls_attention_scores(qkv: torch.Tensor, num_heads: int | None, guide_type: str) -> torch.Tensor:
+    def _qkv_to_cls_attention_scores(qkv: torch.Tensor, num_heads: int | None, attention_guide_type: str) -> torch.Tensor:
         if qkv.ndim != 3 or num_heads is None or num_heads <= 0:
             raise ValueError(f"Unsupported qkv shape/heads: {tuple(qkv.shape)}, {num_heads}.")
         bsz, num_tokens, hidden = qkv.shape
@@ -234,13 +241,13 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         qkv = qkv.reshape(bsz, num_tokens, 3, num_heads, head_dim).permute(2, 0, 3, 1, 4)
         q, k = qkv[0], qkv[1]
         qk = (q @ k.transpose(-2, -1)) * (head_dim ** -0.5)
-        if guide_type == "postsoftmax_cls":
+        if attention_guide_type == "postsoftmax_cls":
             return torch.softmax(qk, dim=-1)[:, :, 0, 1:].mean(dim=1)
-        if guide_type == "qk_cls":
+        if attention_guide_type == "qk_cls":
             return qk[:, :, 0, 1:].mean(dim=1)
-        if guide_type == "qk_all_queries":
+        if attention_guide_type == "qk_all_queries":
             return qk[:, :, :, 1:].mean(dim=(1, 2))
-        raise ValueError(f"Unsupported guide_type: {guide_type}")
+        raise ValueError(f"Unsupported attention_guide_type: {attention_guide_type}")
 
     @staticmethod
     def _build_qkv_from_attn_input(attn_module, attn_input: torch.Tensor) -> torch.Tensor:
@@ -255,14 +262,23 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             return qkv_layer(attn_input) + qkv_bias
         return F.linear(attn_input, weight=qkv_layer.weight, bias=qkv_bias)
 
+    def _resolve_layer_indices(self, num_layers: int) -> list[int]:
+        indices = []
+        for layer in self.layers:
+            idx = layer if layer >= 0 else num_layers + layer
+            if idx < 0 or idx >= num_layers:
+                raise ValueError(f"Layer index {layer} is out of range for {num_layers} compatible attention layers.")
+            indices.append(idx)
+        return indices
+
     def _collect_cls_attention_scores(
         self,
         source_model,
         images: torch.Tensor,
         target_num_patches: int | None = None,
-        guide_type: str | None = None,
+        attention_guide_type: str | None = None,
     ) -> torch.Tensor | None:
-        guide_type = self.guide_types[0] if guide_type is None else guide_type
+        attention_guide_type = self.attention_guide_types[0] if attention_guide_type is None else attention_guide_type
         module_dict = dict(source_model.model.named_modules())
         records = []
         handles = []
@@ -300,7 +316,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                         qkv = self._build_qkv_from_attn_input(record["attn"], record["input"])
                     if qkv is None:
                         continue
-                    score = self._qkv_to_cls_attention_scores(qkv, record["heads"], guide_type)
+                    score = self._qkv_to_cls_attention_scores(qkv, record["heads"], attention_guide_type)
                     scores.append(self._normalize_weights(score.detach()))
                 except (RuntimeError, ValueError):
                     continue
@@ -319,8 +335,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     key=lambda num_patches: (len(scores_by_size[num_patches]), num_patches),
                 )
                 selected = scores_by_size[target_num_patches]
-            max_layers = min(len(selected), len(self.layers))
-            return torch.stack(selected[-max_layers:]).mean(dim=0)
+            layer_indices = self._resolve_layer_indices(len(selected))
+            return torch.stack([selected[idx] for idx in layer_indices]).mean(dim=0)
         finally:
             for handle in handles:
                 handle.remove()
@@ -329,8 +345,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self,
         images: torch.Tensor,
     ) -> torch.Tensor:
-        guide_type = self.guide_types[0]
-        primary_score = self._collect_cls_attention_scores(self.model, images, guide_type=guide_type)
+        attention_guide_type = self.attention_guide_types[0]
+        primary_score = self._collect_cls_attention_scores(self.model, images, attention_guide_type=attention_guide_type)
         if primary_score is None:
             raise ValueError("The white-box model did not produce compatible CLS attention scores.")
         num_patches = primary_score.size(1)
@@ -340,7 +356,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 source_model,
                 images,
                 target_num_patches=num_patches,
-                guide_type=guide_type,
+                attention_guide_type=attention_guide_type,
             )
             if score is not None:
                 scores.append(score)
@@ -354,89 +370,97 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             raise ValueError(f"Patch count {num_patches} is not a square.")
         grid = token_map.view(token_map.size(0), 1, grid_size, grid_size)
         pixel_map = F.interpolate(grid, size=(img_size, img_size), mode="bilinear", align_corners=False)
+        return self._normalize_pixel_map(pixel_map)
+
+    def _token_map_to_patch_pixel_map(self, token_map: torch.Tensor, img_size: int) -> torch.Tensor:
+        num_patches = token_map.size(1)
+        grid_size = int(num_patches ** 0.5)
+        if grid_size * grid_size != num_patches:
+            raise ValueError(f"Patch count {num_patches} is not a square.")
+        grid = token_map.view(token_map.size(0), 1, grid_size, grid_size)
+        pixel_map = F.interpolate(grid, size=(img_size, img_size), mode="nearest")
+        return self._normalize_pixel_map(pixel_map)
+
+    @staticmethod
+    def _normalize_pixel_map(pixel_map: torch.Tensor) -> torch.Tensor:
         flat = pixel_map.flatten(1)
         min_vals = flat.min(dim=1, keepdim=True).values.view(-1, 1, 1, 1)
         max_vals = flat.max(dim=1, keepdim=True).values.view(-1, 1, 1, 1)
         return ((pixel_map - min_vals) / (max_vals - min_vals).clamp_min(1e-12)).detach()
 
-    def _guide_augmented_pixels(self, pixels: torch.Tensor, guide_pixel_map: torch.Tensor, copy_idx: int) -> torch.Tensor:
+    def _build_guide_pixel_map(self, images: torch.Tensor, img_size: int) -> torch.Tensor:
+        guide_token_map = self._build_stable_attention_token_map(images)
+        if self.attention_guide_build_method == "pixel":
+            return self._token_map_to_pixel_map(guide_token_map, img_size)
+        if self.attention_guide_build_method == "patch":
+            return self._token_map_to_patch_pixel_map(guide_token_map, img_size)
+        raise ValueError(f"Unsupported attention_guide_build_method: {self.attention_guide_build_method}")
+
+    def _augment_full_image(self, pixels: torch.Tensor, method: str) -> torch.Tensor:
         strength = self.guide_aug_strength
         if strength <= 0:
             return pixels
-        mode = self.guide_aug_mode[copy_idx % len(self.guide_aug_mode)]
-        guide = guide_pixel_map.to(pixels.device, pixels.dtype).clamp(0.0, 1.0)
-        if mode == "dropout":
-            noise = torch.rand_like(pixels)
-            blurred = F.avg_pool2d(pixels, kernel_size=5, stride=1, padding=2)
-            corrupt = 0.5 * noise + 0.5 * blurred
-            background = pixels * (1.0 - strength) + corrupt * strength
-            return torch.clamp(pixels * guide + background * (1.0 - guide), 0.0, 1.0)
-        if mode == "dropout_all":
+        if method == "dropout":
             noise = torch.rand_like(pixels)
             blurred = F.avg_pool2d(pixels, kernel_size=5, stride=1, padding=2)
             corrupt = 0.5 * noise + 0.5 * blurred
             return torch.clamp(pixels * (1.0 - strength) + corrupt * strength, 0.0, 1.0)
-        if mode == "dropout_inner":
-            noise = torch.rand_like(pixels)
-            blurred = F.avg_pool2d(pixels, kernel_size=5, stride=1, padding=2)
-            corrupt = 0.5 * noise + 0.5 * blurred
-            foreground = pixels * (1.0 - strength) + corrupt * strength
-            return torch.clamp(foreground * guide + pixels * (1.0 - guide), 0.0, 1.0)
-        if mode == "mix":
-            if pixels.size(0) > 1:
-                mixed = pixels.roll(shifts=copy_idx + 1, dims=0)
-            else:
-                low_noise = torch.rand_like(pixels)
-                mixed = F.avg_pool2d(low_noise, kernel_size=7, stride=1, padding=3)
-            background = pixels * (1.0 - strength) + mixed * strength
-            return torch.clamp(pixels * guide + background * (1.0 - guide), 0.0, 1.0)
-        if mode == "jitter":
-            brightness = (torch.rand(pixels.size(0), 1, 1, 1, device=pixels.device, dtype=pixels.dtype) * 2.0 - 1.0) * strength
-            noise = torch.randn_like(pixels) * (strength / 2.0)
-            jittered = torch.clamp(pixels * (1.0 + brightness) + noise, 0.0, 1.0)
-            return torch.clamp(jittered * guide + pixels * (1.0 - guide), 0.0, 1.0)
-        if mode == "jitter_all":
+        if method == "jitter":
             brightness = (torch.rand(pixels.size(0), 1, 1, 1, device=pixels.device, dtype=pixels.dtype) * 2.0 - 1.0) * strength
             noise = torch.randn_like(pixels) * (strength / 2.0)
             return torch.clamp(pixels * (1.0 + brightness) + noise, 0.0, 1.0)
-        if mode == "jitter_outer":
-            brightness = (torch.rand(pixels.size(0), 1, 1, 1, device=pixels.device, dtype=pixels.dtype) * 2.0 - 1.0) * strength
-            noise = torch.randn_like(pixels) * (strength / 2.0)
-            jittered = torch.clamp(pixels * (1.0 + brightness) + noise, 0.0, 1.0)
-            return torch.clamp(pixels * guide + jittered * (1.0 - guide), 0.0, 1.0)
-        if mode == "freq":
-            pooled = F.avg_pool2d(pixels, kernel_size=9, stride=1, padding=4)
-            noise = F.avg_pool2d(torch.rand_like(pixels), kernel_size=9, stride=1, padding=4)
-            corrupt = 0.7 * pooled + 0.3 * noise
-            background = pixels * (1.0 - strength) + corrupt * strength
-            return torch.clamp(pixels * guide + background * (1.0 - guide), 0.0, 1.0)
-        if mode == "freq_all":
+        if method == "freq":
             pooled = F.avg_pool2d(pixels, kernel_size=9, stride=1, padding=4)
             noise = F.avg_pool2d(torch.rand_like(pixels), kernel_size=9, stride=1, padding=4)
             corrupt = 0.7 * pooled + 0.3 * noise
             return torch.clamp(pixels * (1.0 - strength) + corrupt * strength, 0.0, 1.0)
-        if mode == "freq_inner":
-            pooled = F.avg_pool2d(pixels, kernel_size=9, stride=1, padding=4)
-            noise = F.avg_pool2d(torch.rand_like(pixels), kernel_size=9, stride=1, padding=4)
-            corrupt = 0.7 * pooled + 0.3 * noise
-            foreground = pixels * (1.0 - strength) + corrupt * strength
-            return torch.clamp(foreground * guide + pixels * (1.0 - guide), 0.0, 1.0)
-        raise ValueError(f"Unsupported guide augmentation mode: {mode}")
+        raise ValueError(f"Unsupported guide augmentation method: {method}")
 
-    def _guide_aug_ce_loss(
+    def _guide_augmented_pixels(
+        self,
+        pixels: torch.Tensor,
+        guide_pixel_map: torch.Tensor | None,
+        method: str,
+    ) -> torch.Tensor:
+        augmented = self._augment_full_image(pixels, method)
+        if self.guide_aug_area == "all":
+            return augmented
+        if guide_pixel_map is None:
+            raise ValueError("guide_pixel_map is required unless guide_aug_area='all'.")
+        guide = guide_pixel_map.to(pixels.device, pixels.dtype).clamp(0.0, 1.0)
+        if self.guide_aug_area == "foreground":
+            return torch.clamp(augmented * guide + pixels * (1.0 - guide), 0.0, 1.0)
+        if self.guide_aug_area == "background":
+            return torch.clamp(pixels * guide + augmented * (1.0 - guide), 0.0, 1.0)
+        raise ValueError(f"Unsupported guide augmentation area: {self.guide_aug_area}")
+
+    def _iter_forward_pixels(
+        self,
+        pixels: torch.Tensor,
+        guide_pixel_map: torch.Tensor | None,
+    ):
+        if not self.guide_aug:
+            yield pixels
+            return
+        for method in self.guide_aug_methods:
+            for _copy_idx in range(self.guide_aug_copies):
+                yield self._guide_augmented_pixels(pixels, guide_pixel_map, method)
+
+    def _attack_loss(
         self,
         pixels: torch.Tensor,
         labels: torch.Tensor,
-        guide_pixel_map: torch.Tensor,
+        guide_pixel_map: torch.Tensor | None,
     ) -> torch.Tensor:
         ce_terms = []
-        for scale_idx in range(self.si_scales):
+        si_count = self.si_scales if self.use_si else 1
+        eot_count = self.eot_iter if self.use_eot else 1
+        for scale_idx in range(si_count):
             scale = float(2 ** scale_idx)
-            for _eot_idx in range(self.eot_iter):
-                for copy_idx in range(self.guide_aug_copies):
-                    aug_pixels = self._guide_augmented_pixels(pixels, guide_pixel_map, copy_idx)
+            for _eot_idx in range(eot_count):
+                for forward_pixels in self._iter_forward_pixels(pixels, guide_pixel_map):
                     logits_adv = self.model(
-                        self._input_diversity(self._normalize(aug_pixels) / scale),
+                        self._input_diversity(self._normalize(forward_pixels) / scale),
                         return_attn=False,
                     )
                     ce_terms.append(F.cross_entropy(logits_adv, labels))
@@ -451,11 +475,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         labels = labels.to(self.device)
 
         clean_pixels = self._denormalize(images).detach()
-        guide_token_map = None
         guide_pixel_map = None
-        if self.grad_combine == "guide_aug_ce" or self.guide_aug:
-            guide_token_map = self._build_stable_attention_token_map(images)
-            guide_pixel_map = self._token_map_to_pixel_map(guide_token_map, clean_pixels.size(-1))
+        if self.guide_aug and self.guide_aug_area != "all":
+            guide_pixel_map = self._build_guide_pixel_map(images, clean_pixels.size(-1))
         adv_pixels = clean_pixels.clone().detach()
         momentum = torch.zeros_like(adv_pixels)
 
@@ -467,17 +489,20 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     delta = torch.clamp(grad_pixels - clean_pixels, -self.epsilon, self.epsilon)
                     grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
             grad_pixels = grad_pixels.detach().requires_grad_(True)
-            if self.grad_combine == "guide_aug_ce":
-                ce_loss = self._guide_aug_ce_loss(grad_pixels, labels, guide_pixel_map)
-            else:
-                raise ValueError(f"Unknown grad_combine: {self.grad_combine!r}")
+            ce_loss = self._attack_loss(grad_pixels, labels, guide_pixel_map)
 
             grad = torch.autograd.grad(ce_loss, grad_pixels)[0]
-            grad = self._smooth_grad(self._normalize_grad(grad))
-            momentum = self.decay * momentum + grad
+            if self.normalize_grad:
+                grad = self._normalize_grad(grad)
+            grad = self._smooth_grad(grad)
+            if self.use_momentum:
+                momentum = self.decay * momentum + grad
+                update = momentum
+            else:
+                update = grad
 
             with torch.no_grad():
-                adv_pixels = adv_pixels + self.step_size * momentum.sign()
+                adv_pixels = adv_pixels + self.step_size * update.sign()
                 delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
                 adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
 
