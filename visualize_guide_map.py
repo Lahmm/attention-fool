@@ -27,6 +27,7 @@ CONFIG = dict(
     guide_models=("deit_base_patch16_224", "pit_s_224", "cait_s24_224"),
     attention_guide_type="qk_cls",
     attention_guide_build_method="patch",
+    attention_guide_patch_size=16,
     guide_aug_area="background",
     layers=(0, 1, 4, 9, 11),
     guide_aug_methods=("dropout", "jitter", "freq"),
@@ -113,6 +114,7 @@ def build_attacker(num_classes: int) -> LazyAggregationAttacker:
         attention_guide_models=guide_models,
         attention_guide_type=c["attention_guide_type"],
         attention_guide_build_method=c["attention_guide_build_method"],
+        attention_guide_patch_size=c["attention_guide_patch_size"],
         guide_aug=True,
         guide_aug_area=c["guide_aug_area"],
         guide_aug_methods=c["guide_aug_methods"],
@@ -204,6 +206,7 @@ def save_figure(
     )
     fig.suptitle(
         f"{image_name} | build={CONFIG['attention_guide_build_method']} | "
+        f"patch={CONFIG['attention_guide_patch_size']} | "
         f"area={CONFIG['guide_aug_area']} | type={CONFIG['attention_guide_type']} | "
         f"layers={CONFIG['layers']} | {stats}",
         fontsize=10,

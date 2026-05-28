@@ -41,6 +41,7 @@ def create_attacker(
     attention_guide_models: tuple[ViTWithHook, ...] = (),
     attention_guide_type: str = "postsoftmax_cls",
     attention_guide_build_method: str = "pixel",
+    attention_guide_patch_size: int = 16,
     guide_aug: bool = False,
     guide_aug_area: str = "background",
     guide_aug_methods: tuple[str, ...] = ("dropout",),
@@ -67,6 +68,7 @@ def create_attacker(
         attention_guide_models=attention_guide_models,
         attention_guide_type=attention_guide_type,
         attention_guide_build_method=attention_guide_build_method,
+        attention_guide_patch_size=attention_guide_patch_size,
         guide_aug=guide_aug,
         guide_aug_area=guide_aug_area,
         guide_aug_methods=guide_aug_methods,
@@ -240,6 +242,7 @@ def parse_args():
     parser.add_argument("--attention-guide-models", type=parse_model_names, default=(), help="Comma-separated extra models for clean stable-attention guide maps.")
     parser.add_argument("--attention-guide-type", type=str, default="postsoftmax_cls", help="Comma-separated guide types: postsoftmax_cls,qk_cls,qk_all_queries. The first entry is used.")
     parser.add_argument("--attention-guide-build-method", choices=["pixel", "patch"], default="pixel", help="Build guide masks as pixel-level bilinear maps or patch-wise nearest maps.")
+    parser.add_argument("--attention-guide-patch-size", type=int, default=16, help="Rendered guide patch size for --attention-guide-build-method patch. Must divide --img-size.")
     parser.add_argument("--guide-aug", action="store_true", help="Enable attention-guided forward augmentation.")
     parser.add_argument("--guide-aug-area", choices=["foreground", "background", "all"], default="background", help="Region affected by guide augmentation. all ignores attention guide maps.")
     parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq.")
@@ -279,6 +282,7 @@ def main(
     attention_guide_models_arg: tuple[str, ...] = (),
     attention_guide_type: str = "postsoftmax_cls",
     attention_guide_build_method: str = "pixel",
+    attention_guide_patch_size: int = 16,
     guide_aug: bool = False,
     guide_aug_area: str = "background",
     guide_aug_methods: tuple[str, ...] = ("dropout",),
@@ -291,6 +295,14 @@ def main(
     num_workers: int = 4,
     prefetch_factor: int = 4,
 ) -> None:
+    if attention_guide_patch_size <= 0:
+        raise ValueError(f"attention_guide_patch_size must be positive, got {attention_guide_patch_size}.")
+    if img_size % attention_guide_patch_size != 0:
+        raise ValueError(
+            f"attention_guide_patch_size must divide img_size, got "
+            f"patch_size={attention_guide_patch_size}, img_size={img_size}."
+        )
+
     if mode == "attack":
         resolved_output_dir = validate_attack_output_dir(output_dir=output_dir)
     else:
@@ -334,6 +346,7 @@ def main(
         attention_guide_models=attention_guide_models,
         attention_guide_type=attention_guide_type,
         attention_guide_build_method=attention_guide_build_method,
+        attention_guide_patch_size=attention_guide_patch_size,
         guide_aug=guide_aug,
         guide_aug_area=guide_aug_area,
         guide_aug_methods=guide_aug_methods,
@@ -390,6 +403,7 @@ if __name__ == "__main__":
         attention_guide_models_arg=args.attention_guide_models,
         attention_guide_type=args.attention_guide_type,
         attention_guide_build_method=args.attention_guide_build_method,
+        attention_guide_patch_size=args.attention_guide_patch_size,
         guide_aug=args.guide_aug,
         guide_aug_area=args.guide_aug_area,
         guide_aug_methods=args.guide_aug_method,

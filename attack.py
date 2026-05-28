@@ -109,6 +109,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         attention_guide_models: tuple[torch.nn.Module, ...] | None = None,
         attention_guide_type: str = "postsoftmax_cls",
         attention_guide_build_method: str = "pixel",
+        attention_guide_patch_size: int = 16,
         guide_aug: bool = False,
         guide_aug_area: str = "background",
         guide_aug_methods: tuple[str, ...] = ("dropout",),
@@ -161,6 +162,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if attention_guide_build_method not in valid_build_methods:
             raise ValueError(f"attention_guide_build_method must be one of {valid_build_methods}, got {attention_guide_build_method!r}.")
         self.attention_guide_build_method = attention_guide_build_method
+        if attention_guide_patch_size <= 0:
+            raise ValueError(f"attention_guide_patch_size must be positive, got {attention_guide_patch_size}.")
+        self.attention_guide_patch_size = int(attention_guide_patch_size)
 
         self.guide_aug = bool(guide_aug)
         valid_guide_aug_areas = ("foreground", "background", "all")
@@ -377,11 +381,24 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         return self._normalize_pixel_map(pixel_map)
 
     def _token_map_to_patch_pixel_map(self, token_map: torch.Tensor, img_size: int) -> torch.Tensor:
+        if img_size % self.attention_guide_patch_size != 0:
+            raise ValueError(
+                f"attention_guide_patch_size must divide img_size, got "
+                f"patch_size={self.attention_guide_patch_size}, img_size={img_size}."
+            )
         num_patches = token_map.size(1)
         grid_size = int(num_patches ** 0.5)
         if grid_size * grid_size != num_patches:
             raise ValueError(f"Patch count {num_patches} is not a square.")
         grid = token_map.view(token_map.size(0), 1, grid_size, grid_size)
+        target_grid_size = img_size // self.attention_guide_patch_size
+        if target_grid_size != grid_size:
+            grid = F.interpolate(
+                grid,
+                size=(target_grid_size, target_grid_size),
+                mode="bilinear",
+                align_corners=False,
+            )
         pixel_map = F.interpolate(grid, size=(img_size, img_size), mode="nearest")
         return self._normalize_pixel_map(pixel_map)
 
