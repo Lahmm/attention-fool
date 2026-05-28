@@ -12,7 +12,7 @@ from PIL import Image
 
 from attack import LazyAggregationAttacker
 from nets import build_vit_model
-from utils import DEVICE
+from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
 
 HEATMAP_CMAP = "turbo"
 HEATMAP_ALPHA = 0.6
@@ -93,8 +93,8 @@ def load_rgb_image(path: Path, img_size: int) -> np.ndarray:
 
 def preprocess_rgb(rgb: np.ndarray) -> torch.Tensor:
     tensor = torch.from_numpy(rgb).permute(2, 0, 1)
-    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+    mean = torch.tensor(IMAGENET_MEAN).view(3, 1, 1)
+    std = torch.tensor(IMAGENET_STD).view(3, 1, 1)
     return (tensor - mean) / std
 
 
