@@ -115,6 +115,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         guide_aug_methods: tuple[str, ...] = ("dropout",),
         guide_aug_copies: int = 3,
         guide_aug_strength: float = 0.2,
+        guide_grad_norm_area: str = "none",
         device: torch.device | None = None,
     ) -> None:
         super().__init__(
@@ -184,6 +185,13 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.guide_aug_strength = float(guide_aug_strength)
         if self.guide_aug_strength < 0:
             raise ValueError(f"guide_aug_strength must be non-negative, got {guide_aug_strength}.")
+        valid_guide_grad_norm_areas = ("none", "foreground", "background")
+        if guide_grad_norm_area not in valid_guide_grad_norm_areas:
+            raise ValueError(
+                f"guide_grad_norm_area must be one of {valid_guide_grad_norm_areas}, "
+                f"got {guide_grad_norm_area!r}."
+            )
+        self.guide_grad_norm_area = guide_grad_norm_area
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
 
     @staticmethod
@@ -409,6 +417,32 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         max_vals = flat.max(dim=1, keepdim=True).values.view(-1, 1, 1, 1)
         return ((pixel_map - min_vals) / (max_vals - min_vals).clamp_min(1e-12)).detach()
 
+    def _normalize_guided_grad(
+        self,
+        grad: torch.Tensor,
+        guide_pixel_map: torch.Tensor | None,
+    ) -> torch.Tensor:
+        if self.guide_grad_norm_area == "none":
+            return grad
+        if guide_pixel_map is None:
+            raise ValueError("guide_pixel_map is required when guide_grad_norm_area is enabled.")
+
+        guide = guide_pixel_map.to(grad.device, grad.dtype).clamp(0.0, 1.0)
+        if self.guide_grad_norm_area == "foreground":
+            region = guide
+        elif self.guide_grad_norm_area == "background":
+            region = 1.0 - guide
+        else:
+            raise ValueError(f"Unsupported guide_grad_norm_area: {self.guide_grad_norm_area}")
+
+        region = region.expand_as(grad)
+        denom = (
+            (grad.abs() * region).sum(dim=(1, 2, 3), keepdim=True)
+            / region.sum(dim=(1, 2, 3), keepdim=True).clamp_min(1e-12)
+        ).clamp_min(1e-12)
+        normalized_region_grad = grad / denom
+        return normalized_region_grad * region + grad * (1.0 - region)
+
     def _build_guide_pixel_map(self, images: torch.Tensor, img_size: int) -> torch.Tensor:
         guide_token_map = self._build_stable_attention_token_map(images)
         if self.attention_guide_build_method == "pixel":
@@ -497,7 +531,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
 
         clean_pixels = self._denormalize(images).detach()
         guide_pixel_map = None
-        if self.guide_aug and self.guide_aug_area != "all":
+        needs_guide_map = (self.guide_aug and self.guide_aug_area != "all") or self.guide_grad_norm_area != "none"
+        if needs_guide_map:
             guide_pixel_map = self._build_guide_pixel_map(images, clean_pixels.size(-1))
         adv_pixels = clean_pixels.clone().detach()
         momentum = torch.zeros_like(adv_pixels)
@@ -515,6 +550,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             grad = torch.autograd.grad(ce_loss, grad_pixels)[0]
             if self.normalize_grad:
                 grad = self._normalize_grad(grad)
+            grad = self._normalize_guided_grad(grad, guide_pixel_map)
             grad = self._smooth_grad(grad)
             if self.use_momentum:
                 momentum = self.decay * momentum + grad

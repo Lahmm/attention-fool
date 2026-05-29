@@ -47,6 +47,7 @@ def create_attacker(
     guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
     guide_aug_strength: float = 0.2,
+    guide_grad_norm_area: str = "none",
 ) -> LazyAggregationAttacker:
     return LazyAggregationAttacker(
         model=model,
@@ -74,6 +75,7 @@ def create_attacker(
         guide_aug_methods=guide_aug_methods,
         guide_aug_copies=guide_aug_copies,
         guide_aug_strength=guide_aug_strength,
+        guide_grad_norm_area=guide_grad_norm_area,
         device=DEVICE,
     )
 
@@ -248,6 +250,7 @@ def parse_args():
     parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq.")
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Random copies per guide augmentation method.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
+    parser.add_argument("--guide-grad-norm-area", choices=["none", "foreground", "background"], default="none", help="Attention-guide region whose input gradients are normalized after backprop. none disables guided gradient normalization.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode, use --output-dir outputs/attack/lazyagg.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
@@ -288,6 +291,7 @@ def main(
     guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
     guide_aug_strength: float = 0.2,
+    guide_grad_norm_area: str = "none",
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -319,7 +323,7 @@ def main(
     model = build_vit_model(num_classes=num_classes)
 
     attention_guide_models: tuple[ViTWithHook, ...] = ()
-    needs_attention_guide = guide_aug and guide_aug_area != "all"
+    needs_attention_guide = (guide_aug and guide_aug_area != "all") or guide_grad_norm_area != "none"
     if needs_attention_guide and attention_guide_models_arg:
         attention_guide_models = tuple(
             build_vit_model(num_classes=num_classes, model_name=model_name)
@@ -352,6 +356,7 @@ def main(
         guide_aug_methods=guide_aug_methods,
         guide_aug_copies=guide_aug_copies,
         guide_aug_strength=guide_aug_strength,
+        guide_grad_norm_area=guide_grad_norm_area,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
         dataloader=dataloader,
@@ -409,6 +414,7 @@ if __name__ == "__main__":
         guide_aug_methods=args.guide_aug_method,
         guide_aug_copies=args.guide_aug_copies,
         guide_aug_strength=args.guide_aug_strength,
+        guide_grad_norm_area=args.guide_grad_norm_area,
         output_dir=args.output_dir,
         mode=args.mode,
         image_dir=args.image_dir,
