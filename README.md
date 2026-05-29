@@ -122,7 +122,7 @@ python main.py --mode attack --max-attacked-samples 500 --layers=-6,-5,-4,-3,-2,
 --ti-sigma 3
 ```
 
-`--guide-aug-area` 可选 `foreground`、`background`、`all`；`all` 不使用 attention guide map。`--guide-aug-method` 可传 `dropout,jitter,freq` 中的一个或多个，实际前向分支数为 `len(methods) * guide_aug_copies`。
+`--guide-aug-area` 可选 `foreground`、`background`、`all`；`all` 不使用 attention guide map。`--guide-aug-method` 可传 `dropout,jitter,freq,lowpass_gauss,laplacian_low,fft_lowboost,illumination_low` 中的一个或多个，实际前向分支数为 `len(methods) * guide_aug_copies`。其中新增低频方法分别对应 Gaussian scale-space 低通、Laplacian pyramid 高频残差抑制、FFT2D 径向低频增益、低频 illumination field 调制；它们先生成整图低频增强版本，再由 pixel/patch attention guide map 选择前景或背景区域混合。
 
 ## 迁移攻击评估
 

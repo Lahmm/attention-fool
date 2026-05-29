@@ -247,7 +247,7 @@ def parse_args():
     parser.add_argument("--attention-guide-patch-size", type=int, default=16, help="Rendered guide patch size for --attention-guide-build-method patch. Must divide --img-size.")
     parser.add_argument("--guide-aug", action="store_true", help="Enable attention-guided forward augmentation.")
     parser.add_argument("--guide-aug-area", choices=["foreground", "background", "all"], default="background", help="Region affected by guide augmentation. all ignores attention guide maps.")
-    parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq.")
+    parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,lowpass_gauss,laplacian_low,fft_lowboost,illumination_low.")
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Random copies per guide augmentation method.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
     parser.add_argument("--guide-grad-norm-area", choices=["none", "foreground", "background"], default="none", help="Attention-guide region whose input gradients are normalized after backprop. none disables guided gradient normalization.")

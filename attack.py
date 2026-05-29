@@ -173,7 +173,15 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             raise ValueError(f"guide_aug_area must be one of {valid_guide_aug_areas}, got {guide_aug_area!r}.")
         self.guide_aug_area = guide_aug_area
         self.guide_aug_methods = tuple(str(method).strip() for method in guide_aug_methods if str(method).strip())
-        valid_guide_aug_methods = ("dropout", "jitter", "freq")
+        valid_guide_aug_methods = (
+            "dropout",
+            "jitter",
+            "freq",
+            "lowpass_gauss",
+            "laplacian_low",
+            "fft_lowboost",
+            "illumination_low",
+        )
         if not self.guide_aug_methods:
             raise ValueError("guide_aug_methods must contain at least one method.")
         invalid_methods = [method for method in self.guide_aug_methods if method not in valid_guide_aug_methods]
@@ -193,22 +201,37 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             )
         self.guide_grad_norm_area = guide_grad_norm_area
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
+        self._guide_lowpass_kernel = self._build_gaussian_kernel(kernel_size=15, sigma=3.0)
+        self._guide_illumination_kernel = self._build_gaussian_kernel(kernel_size=31, sigma=8.0)
 
     @staticmethod
-    def _build_ti_kernel(sigma: float) -> torch.Tensor:
-        radius = int(3 * sigma)
+    def _build_gaussian_kernel(kernel_size: int, sigma: float) -> torch.Tensor:
+        if kernel_size <= 0 or kernel_size % 2 == 0:
+            raise ValueError(f"kernel_size must be a positive odd integer, got {kernel_size}.")
+        if sigma <= 0:
+            raise ValueError(f"sigma must be positive, got {sigma}.")
+        radius = kernel_size // 2
         x = torch.arange(-radius, radius + 1, dtype=torch.float32)
         g1d = torch.exp(-0.5 * (x / sigma) ** 2)
         g1d = g1d / g1d.sum()
         g2d = g1d[:, None] @ g1d[None, :]
-        return g2d.view(1, 1, g2d.size(0), g2d.size(1))
+        return g2d.view(1, 1, kernel_size, kernel_size)
+
+    @staticmethod
+    def _build_ti_kernel(sigma: float) -> torch.Tensor:
+        radius = int(3 * sigma)
+        kernel_size = 2 * radius + 1
+        return LazyAggregationAttacker._build_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
+
+    def _apply_depthwise_kernel(self, pixels: torch.Tensor, kernel: torch.Tensor) -> torch.Tensor:
+        kernel = kernel.to(pixels.device, pixels.dtype).repeat(pixels.size(1), 1, 1, 1)
+        pad = kernel.size(2) // 2
+        return F.conv2d(F.pad(pixels, (pad, pad, pad, pad), mode="reflect"), kernel, groups=pixels.size(1))
 
     def _smooth_grad(self, grad: torch.Tensor) -> torch.Tensor:
         if self._ti_kernel is None or self.ti_sigma <= 0:
             return grad
-        kernel = self._ti_kernel.to(grad.device, grad.dtype).repeat(grad.size(1), 1, 1, 1)
-        pad = kernel.size(2) // 2
-        return F.conv2d(F.pad(grad, (pad, pad, pad, pad), mode="reflect"), kernel, groups=grad.size(1))
+        return self._apply_depthwise_kernel(grad, self._ti_kernel)
 
     def _input_diversity(self, images: torch.Tensor) -> torch.Tensor:
         if not self.input_diversity:
@@ -451,6 +474,32 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             return self._token_map_to_patch_pixel_map(guide_token_map, img_size)
         raise ValueError(f"Unsupported attention_guide_build_method: {self.attention_guide_build_method}")
 
+    def _lowpass_gauss_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        return self._apply_depthwise_kernel(pixels, self._guide_lowpass_kernel)
+
+    def _laplacian_low_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        low = self._lowpass_gauss_pixels(pixels)
+        high = pixels - low
+        high_scale = max(0.0, 1.0 - 2.5 * self.guide_aug_strength)
+        return torch.clamp(low + high * high_scale, 0.0, 1.0)
+
+    def _fft_lowboost_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        height, width = pixels.shape[-2:]
+        work = pixels.float()
+        freq = torch.fft.rfft2(work, dim=(-2, -1), norm="ortho")
+        fy = torch.fft.fftfreq(height, device=pixels.device, dtype=work.dtype).view(1, 1, height, 1)
+        fx = torch.fft.rfftfreq(width, device=pixels.device, dtype=work.dtype).view(1, 1, 1, width // 2 + 1)
+        radius = torch.sqrt(fx.square() + fy.square())
+        low_weight = torch.exp(-0.5 * (radius / 0.12).square())
+        boosted = freq * (1.0 + self.guide_aug_strength * low_weight)
+        augmented = torch.fft.irfft2(boosted, s=(height, width), dim=(-2, -1), norm="ortho")
+        return torch.clamp(augmented.to(pixels.dtype), 0.0, 1.0)
+
+    def _illumination_low_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        illumination = self._apply_depthwise_kernel(pixels, self._guide_illumination_kernel)
+        centered = illumination - illumination.mean(dim=(2, 3), keepdim=True)
+        return torch.clamp(pixels + self.guide_aug_strength * centered, 0.0, 1.0)
+
     def _augment_full_image(self, pixels: torch.Tensor, method: str) -> torch.Tensor:
         strength = self.guide_aug_strength
         if strength <= 0:
@@ -469,6 +518,15 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             noise = F.avg_pool2d(torch.rand_like(pixels), kernel_size=9, stride=1, padding=4)
             corrupt = 0.7 * pooled + 0.3 * noise
             return torch.clamp(pixels * (1.0 - strength) + corrupt * strength, 0.0, 1.0)
+        if method == "lowpass_gauss":
+            low = self._lowpass_gauss_pixels(pixels)
+            return torch.clamp(pixels * (1.0 - strength) + low * strength, 0.0, 1.0)
+        if method == "laplacian_low":
+            return self._laplacian_low_pixels(pixels)
+        if method == "fft_lowboost":
+            return self._fft_lowboost_pixels(pixels)
+        if method == "illumination_low":
+            return self._illumination_low_pixels(pixels)
         raise ValueError(f"Unsupported guide augmentation method: {method}")
 
     def _guide_augmented_pixels(
@@ -501,13 +559,12 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             for _copy_idx in range(self.guide_aug_copies):
                 yield self._guide_augmented_pixels(pixels, guide_pixel_map, method)
 
-    def _attack_loss(
+    def _iter_attack_losses(
         self,
         pixels: torch.Tensor,
         labels: torch.Tensor,
         guide_pixel_map: torch.Tensor | None,
-    ) -> torch.Tensor:
-        ce_terms = []
+    ):
         si_count = self.si_scales if self.use_si else 1
         eot_count = self.eot_iter if self.use_eot else 1
         for scale_idx in range(si_count):
@@ -518,8 +575,23 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                         self._input_diversity(self._normalize(forward_pixels) / scale),
                         return_attn=False,
                     )
-                    ce_terms.append(F.cross_entropy(logits_adv, labels))
-        return torch.stack(ce_terms).mean()
+                    yield F.cross_entropy(logits_adv, labels)
+
+    def _attack_grad(
+        self,
+        pixels: torch.Tensor,
+        labels: torch.Tensor,
+        guide_pixel_map: torch.Tensor | None,
+    ) -> torch.Tensor:
+        grad_sum = None
+        term_count = 0
+        for ce_loss in self._iter_attack_losses(pixels, labels, guide_pixel_map):
+            grad_term = torch.autograd.grad(ce_loss, pixels)[0]
+            grad_sum = grad_term if grad_sum is None else grad_sum + grad_term
+            term_count += 1
+        if grad_sum is None:
+            raise RuntimeError("No attack loss terms were generated.")
+        return grad_sum / float(term_count)
 
     def attack_batch(
         self,
@@ -545,9 +617,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     delta = torch.clamp(grad_pixels - clean_pixels, -self.epsilon, self.epsilon)
                     grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
             grad_pixels = grad_pixels.detach().requires_grad_(True)
-            ce_loss = self._attack_loss(grad_pixels, labels, guide_pixel_map)
-
-            grad = torch.autograd.grad(ce_loss, grad_pixels)[0]
+            grad = self._attack_grad(grad_pixels, labels, guide_pixel_map)
             if self.normalize_grad:
                 grad = self._normalize_grad(grad)
             grad = self._normalize_guided_grad(grad, guide_pixel_map)
