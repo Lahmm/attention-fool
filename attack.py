@@ -181,6 +181,10 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             "laplacian_low",
             "fft_lowboost",
             "illumination_low",
+            "band_noise",
+            "colored_noise",
+            "progressive_spectral_noise",
+            "wavelet_noise",
         )
         if not self.guide_aug_methods:
             raise ValueError("guide_aug_methods must contain at least one method.")
@@ -500,6 +504,101 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         centered = illumination - illumination.mean(dim=(2, 3), keepdim=True)
         return torch.clamp(pixels + self.guide_aug_strength * centered, 0.0, 1.0)
 
+    @staticmethod
+    def _fft_radius_grid(height: int, width: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+        fy = torch.fft.fftfreq(height, device=device, dtype=dtype).view(1, 1, height, 1)
+        fx = torch.fft.fftfreq(width, device=device, dtype=dtype).view(1, 1, 1, width)
+        radius = torch.sqrt(fx.square() + fy.square())
+        return radius / radius.max().clamp_min(1e-8)
+
+    @staticmethod
+    def _standardize_delta(delta: torch.Tensor) -> torch.Tensor:
+        flat = delta.flatten(1)
+        std = flat.std(dim=1, keepdim=True, unbiased=False).view(-1, 1, 1, 1).clamp_min(1e-8)
+        return delta / std
+
+    def _sample_weighted_spectral_delta(self, pixels: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+        work = pixels.float()
+        noise = torch.randn(work.shape, device=pixels.device, dtype=work.dtype)
+        noise_f = torch.fft.fft2(noise, dim=(-2, -1), norm="ortho")
+        delta = torch.fft.ifft2(noise_f * weight.to(pixels.device, work.dtype), dim=(-2, -1), norm="ortho").real
+        return self._standardize_delta(delta)
+
+    def _band_noise_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        height, width = pixels.shape[-2:]
+        work = pixels.float()
+        radius = self._fft_radius_grid(height, width, pixels.device, work.dtype)
+        mask = ((radius >= 0.12) & (radius <= 0.35)).to(work.dtype)
+        delta = self._sample_weighted_spectral_delta(pixels, mask)
+        return torch.clamp(work + self.guide_aug_strength * delta, 0.0, 1.0).to(pixels.dtype)
+
+    def _colored_noise_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        height, width = pixels.shape[-2:]
+        work = pixels.float()
+        radius = self._fft_radius_grid(height, width, pixels.device, work.dtype)
+        weight = torch.where(radius > 0, torch.pow(radius + 0.05, -0.75), torch.zeros_like(radius))
+        weight = weight / weight.max().clamp_min(1e-8)
+        delta = self._sample_weighted_spectral_delta(pixels, weight)
+        return torch.clamp(work + self.guide_aug_strength * delta, 0.0, 1.0).to(pixels.dtype)
+
+    def _progressive_spectral_noise_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        height, width = pixels.shape[-2:]
+        work = pixels.float()
+        radius = self._fft_radius_grid(height, width, pixels.device, work.dtype)
+        low_weight = torch.exp(-0.5 * (radius / 0.18).square())
+        mid_weight = torch.exp(-0.5 * ((radius - 0.32) / 0.14).square())
+        max_beta = min(0.95, self.guide_aug_strength * self.guide_aug_strength)
+        if max_beta <= 0:
+            return pixels
+
+        x = work
+        steps = 3
+        for step in range(steps):
+            progress = float(step + 1) / float(steps)
+            beta = max_beta * progress
+            weight = (1.0 - progress) * low_weight + progress * mid_weight
+            delta = self._sample_weighted_spectral_delta(pixels, weight)
+            noise_image = torch.clamp(0.5 + 0.25 * delta, 0.0, 1.0)
+            x = (1.0 - beta) ** 0.5 * x + beta ** 0.5 * noise_image
+            x = torch.clamp(x, 0.0, 1.0)
+        return x.to(pixels.dtype)
+
+    def _wavelet_noise_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        work = pixels.float()
+        _batch, _channels, height, width = work.shape
+        pad_h = height % 2
+        pad_w = width % 2
+        if pad_h or pad_w:
+            work = F.pad(work, (0, pad_w, 0, pad_h), mode="reflect")
+
+        x00 = work[..., 0::2, 0::2]
+        x01 = work[..., 0::2, 1::2]
+        x10 = work[..., 1::2, 0::2]
+        x11 = work[..., 1::2, 1::2]
+        ll = (x00 + x01 + x10 + x11) * 0.5
+        lh = (x00 - x01 + x10 - x11) * 0.5
+        hl = (x00 + x01 - x10 - x11) * 0.5
+        hh = (x00 - x01 - x10 + x11) * 0.5
+
+        strength = self.guide_aug_strength
+        ll = ll + torch.randn_like(ll) * (0.5 * strength)
+        lh = lh + torch.randn_like(lh) * strength
+        hl = hl + torch.randn_like(hl) * strength
+        hh = hh + torch.randn_like(hh) * strength
+
+        y00 = (ll + lh + hl + hh) * 0.5
+        y01 = (ll - lh + hl - hh) * 0.5
+        y10 = (ll + lh - hl - hh) * 0.5
+        y11 = (ll - lh - hl + hh) * 0.5
+
+        out = torch.empty_like(work)
+        out[..., 0::2, 0::2] = y00
+        out[..., 0::2, 1::2] = y01
+        out[..., 1::2, 0::2] = y10
+        out[..., 1::2, 1::2] = y11
+        out = out[..., :height, :width]
+        return torch.clamp(out, 0.0, 1.0).to(pixels.dtype)
+
     def _augment_full_image(self, pixels: torch.Tensor, method: str) -> torch.Tensor:
         strength = self.guide_aug_strength
         if strength <= 0:
@@ -527,6 +626,14 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             return self._fft_lowboost_pixels(pixels)
         if method == "illumination_low":
             return self._illumination_low_pixels(pixels)
+        if method == "band_noise":
+            return self._band_noise_pixels(pixels)
+        if method == "colored_noise":
+            return self._colored_noise_pixels(pixels)
+        if method == "progressive_spectral_noise":
+            return self._progressive_spectral_noise_pixels(pixels)
+        if method == "wavelet_noise":
+            return self._wavelet_noise_pixels(pixels)
         raise ValueError(f"Unsupported guide augmentation method: {method}")
 
     def _guide_augmented_pixels(
