@@ -181,10 +181,10 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             "laplacian_low",
             "fft_lowboost",
             "illumination_low",
-            "band_noise",
-            "colored_noise",
-            "progressive_spectral_noise",
-            "wavelet_noise",
+            "band_noise", "band_noise_low", "band_noise_mid", "band_noise_high",
+            "colored_noise", "colored_noise_low", "colored_noise_mid", "colored_noise_high",
+            "progressive_spectral_noise", "progressive_spectral_noise_low", "progressive_spectral_noise_mid", "progressive_spectral_noise_high",
+            "wavelet_noise", "wavelet_noise_low", "wavelet_noise_mid", "wavelet_noise_high",
         )
         if not self.guide_aug_methods:
             raise ValueError("guide_aug_methods must contain at least one method.")
@@ -524,29 +524,45 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         delta = torch.fft.ifft2(noise_f * weight.to(pixels.device, work.dtype), dim=(-2, -1), norm="ortho").real
         return self._standardize_delta(delta)
 
-    def _band_noise_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+    def _band_noise_pixels(self, pixels: torch.Tensor, band: str = "mid") -> torch.Tensor:
         height, width = pixels.shape[-2:]
         work = pixels.float()
         radius = self._fft_radius_grid(height, width, pixels.device, work.dtype)
-        mask = ((radius >= 0.12) & (radius <= 0.35)).to(work.dtype)
+        if band == "low":
+            mask = (radius < 0.15).to(work.dtype)
+        elif band == "high":
+            mask = (radius > 0.30).to(work.dtype)
+        else:
+            mask = ((radius >= 0.12) & (radius <= 0.35)).to(work.dtype)
         delta = self._sample_weighted_spectral_delta(pixels, mask)
         return torch.clamp(work + self.guide_aug_strength * delta, 0.0, 1.0).to(pixels.dtype)
 
-    def _colored_noise_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+    def _colored_noise_pixels(self, pixels: torch.Tensor, band: str = "mid") -> torch.Tensor:
         height, width = pixels.shape[-2:]
         work = pixels.float()
         radius = self._fft_radius_grid(height, width, pixels.device, work.dtype)
-        weight = torch.where(radius > 0, torch.pow(radius + 0.05, -0.75), torch.zeros_like(radius))
+        if band == "low":
+            weight = torch.where(radius > 0, torch.pow(radius + 0.01, -1.2), torch.zeros_like(radius))
+        elif band == "high":
+            weight = torch.where(radius > 0, torch.pow(radius + 0.02, 0.6), torch.zeros_like(radius))
+        else:
+            weight = torch.where(radius > 0, torch.pow(radius + 0.05, -0.75), torch.zeros_like(radius))
         weight = weight / weight.max().clamp_min(1e-8)
         delta = self._sample_weighted_spectral_delta(pixels, weight)
         return torch.clamp(work + self.guide_aug_strength * delta, 0.0, 1.0).to(pixels.dtype)
 
-    def _progressive_spectral_noise_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+    def _progressive_spectral_noise_pixels(self, pixels: torch.Tensor, band: str = "mid") -> torch.Tensor:
         height, width = pixels.shape[-2:]
         work = pixels.float()
         radius = self._fft_radius_grid(height, width, pixels.device, work.dtype)
-        low_weight = torch.exp(-0.5 * (radius / 0.18).square())
-        mid_weight = torch.exp(-0.5 * ((radius - 0.32) / 0.14).square())
+        if band == "low":
+            low_r1, low_r2 = 0.05, 0.15
+        elif band == "high":
+            low_r1, low_r2 = 0.15, 0.42
+        else:
+            low_r1, low_r2 = 0.18, 0.32
+        low_weight = torch.exp(-0.5 * (radius / low_r1).square())
+        mid_weight = torch.exp(-0.5 * ((radius - low_r2) / 0.14).square())
         max_beta = min(0.95, self.guide_aug_strength * self.guide_aug_strength)
         if max_beta <= 0:
             return pixels
@@ -563,7 +579,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             x = torch.clamp(x, 0.0, 1.0)
         return x.to(pixels.dtype)
 
-    def _wavelet_noise_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+    def _wavelet_noise_pixels(self, pixels: torch.Tensor, band: str = "mid") -> torch.Tensor:
         work = pixels.float()
         _batch, _channels, height, width = work.shape
         pad_h = height % 2
@@ -581,10 +597,18 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         hh = (x00 - x01 - x10 + x11) * 0.5
 
         strength = self.guide_aug_strength
-        ll = ll + torch.randn_like(ll) * (0.5 * strength)
-        lh = lh + torch.randn_like(lh) * strength
-        hl = hl + torch.randn_like(hl) * strength
-        hh = hh + torch.randn_like(hh) * strength
+        if band == "low":
+            ll = ll + torch.randn_like(ll) * (0.5 * strength)
+            lh, hl, hh = lh * 1.0, hl * 1.0, hh * 1.0
+        elif band == "high":
+            lh = lh + torch.randn_like(lh) * strength
+            hl = hl + torch.randn_like(hl) * strength
+            hh = hh + torch.randn_like(hh) * strength
+        else:
+            ll = ll + torch.randn_like(ll) * (0.5 * strength)
+            lh = lh + torch.randn_like(lh) * strength
+            hl = hl + torch.randn_like(hl) * strength
+            hh = hh + torch.randn_like(hh) * strength
 
         y00 = (ll + lh + hl + hh) * 0.5
         y01 = (ll - lh + hl - hh) * 0.5
@@ -626,14 +650,18 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             return self._fft_lowboost_pixels(pixels)
         if method == "illumination_low":
             return self._illumination_low_pixels(pixels)
-        if method == "band_noise":
-            return self._band_noise_pixels(pixels)
-        if method == "colored_noise":
-            return self._colored_noise_pixels(pixels)
-        if method == "progressive_spectral_noise":
-            return self._progressive_spectral_noise_pixels(pixels)
-        if method == "wavelet_noise":
-            return self._wavelet_noise_pixels(pixels)
+        if method in ("band_noise", "band_noise_low", "band_noise_mid", "band_noise_high"):
+            band = method.replace("band_noise", "").strip("_") or "mid"
+            return self._band_noise_pixels(pixels, band)
+        if method in ("colored_noise", "colored_noise_low", "colored_noise_mid", "colored_noise_high"):
+            band = method.replace("colored_noise", "").strip("_") or "mid"
+            return self._colored_noise_pixels(pixels, band)
+        if method in ("progressive_spectral_noise", "progressive_spectral_noise_low", "progressive_spectral_noise_mid", "progressive_spectral_noise_high"):
+            band = method.replace("progressive_spectral_noise", "").strip("_") or "mid"
+            return self._progressive_spectral_noise_pixels(pixels, band)
+        if method in ("wavelet_noise", "wavelet_noise_low", "wavelet_noise_mid", "wavelet_noise_high"):
+            band = method.replace("wavelet_noise", "").strip("_") or "mid"
+            return self._wavelet_noise_pixels(pixels, band)
         raise ValueError(f"Unsupported guide augmentation method: {method}")
 
     def _guide_augmented_pixels(
