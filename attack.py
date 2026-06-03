@@ -186,6 +186,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             "progressive_spectral_noise", "progressive_spectral_noise_low", "progressive_spectral_noise_mid", "progressive_spectral_noise_high",
             "wavelet_noise", "wavelet_noise_low", "wavelet_noise_mid", "wavelet_noise_high",
             "wavelet_noise_fglow_bghigh",
+            "white_noise",
         )
         if not self.guide_aug_methods:
             raise ValueError("guide_aug_methods must contain at least one method.")
@@ -624,6 +625,10 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         out = out[..., :height, :width]
         return torch.clamp(out, 0.0, 1.0).to(pixels.dtype)
 
+    def _white_noise_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        noise = torch.randn_like(pixels, dtype=pixels.dtype)
+        return torch.clamp(pixels + self.guide_aug_strength * noise, 0.0, 1.0)
+
     def _augment_full_image(self, pixels: torch.Tensor, method: str) -> torch.Tensor:
         strength = self.guide_aug_strength
         if strength <= 0:
@@ -663,6 +668,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if method in ("wavelet_noise", "wavelet_noise_low", "wavelet_noise_mid", "wavelet_noise_high"):
             band = method.replace("wavelet_noise", "").strip("_") or "mid"
             return self._wavelet_noise_pixels(pixels, band)
+        if method == "white_noise":
+            return self._white_noise_pixels(pixels)
         raise ValueError(f"Unsupported guide augmentation method: {method}")
 
     def _guide_augmented_pixels(
