@@ -185,6 +185,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             "colored_noise", "colored_noise_low", "colored_noise_mid", "colored_noise_high",
             "progressive_spectral_noise", "progressive_spectral_noise_low", "progressive_spectral_noise_mid", "progressive_spectral_noise_high",
             "wavelet_noise", "wavelet_noise_low", "wavelet_noise_mid", "wavelet_noise_high",
+            "wavelet_noise_fglow_bghigh",
         )
         if not self.guide_aug_methods:
             raise ValueError("guide_aug_methods must contain at least one method.")
@@ -670,6 +671,13 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         guide_pixel_map: torch.Tensor | None,
         method: str,
     ) -> torch.Tensor:
+        if method == "wavelet_noise_fglow_bghigh":
+            if guide_pixel_map is None:
+                raise ValueError("guide_pixel_map is required for wavelet_noise_fglow_bghigh.")
+            guide = guide_pixel_map.to(pixels.device, pixels.dtype).clamp(0.0, 1.0)
+            low_aug = self._augment_full_image(pixels, "wavelet_noise_low")
+            high_aug = self._augment_full_image(pixels, "wavelet_noise_high")
+            return torch.clamp(low_aug * guide + high_aug * (1.0 - guide), 0.0, 1.0)
         augmented = self._augment_full_image(pixels, method)
         if self.guide_aug_area == "all":
             return augmented
