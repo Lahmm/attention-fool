@@ -216,3 +216,16 @@ DEFAULT_MODEL_NAME = "vit_base_patch16_224"
 
 迁移评估中的黑盒模型由 `transfer_eval.py` 的 `--model-name` 控制，不会使用 `nets.py` 的 hook 包装。
 这是ds
+
+## 梯度迁移性因果分析
+
+独立入口 `causal_analysis.py` 固定使用当前 DIM + low-attention background augmentation 基准，支持逐步追踪、空间频率干预、MI 开关和汇总报告：
+
+```powershell
+python causal_analysis.py trace --max-samples 100 --gradient-decomposition --output-dir outputs/causal/trace_s0
+python causal_analysis.py frequency-intervention --component haar:LLH --region low --intervention drop --evaluate-targets --output-dir outputs/causal/drop_llh
+python causal_analysis.py mi-switch --mi-switch reset --switch-step 10 --evaluate-targets --output-dir outputs/causal/mi_reset_10
+python causal_analysis.py report --input-dir outputs/causal/drop_llh --output-dir outputs/causal/drop_llh
+```
+
+FFT 分量写作 `fft:BAND[:ORIENTATION]`，BAND 为 `0..7`，方向可选 `all/horizontal/vertical/diagonal`；三级 Haar 小波包分量写作 `haar:PATH`。无干预执行器逐像素复现现有攻击路径；FFT 和 Haar 投影有 Parseval 能量守恒及重建测试。
