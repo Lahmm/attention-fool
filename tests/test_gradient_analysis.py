@@ -54,4 +54,23 @@ class ProjectionTests(unittest.TestCase):
         self.assertTrue(torch.equal(actual, expected))
         torch.manual_seed(123); traced = run_analyzed_attack(attacker, images, labels, diagnostics=True)
         self.assertTrue(torch.equal(traced, expected))
+
+    def test_dim_forward_and_backward_paths_are_independently_selectable(self):
+        model = TinyModel(); images = torch.randn(2, 3, 8, 8, requires_grad=True)
+        attacker = LazyAggregationAttacker(model, steps=1, ti_sigma=0, input_diversity=True,
+            dim_resize_range=(0.5, 0.5), dim_mode="full-fixed", device=torch.device("cpu"))
+        torch.manual_seed(4); full = attacker._input_diversity(images); full.sum().backward(); full_grad = images.grad.clone()
+        images.grad.zero_(); attacker.dim_mode = "forward-only"; forward = attacker._input_diversity(images); forward.sum().backward()
+        self.assertTrue(torch.allclose(forward, full)); self.assertTrue(torch.equal(images.grad, torch.ones_like(images)))
+        images.grad.zero_(); attacker.dim_mode = "backward-fixed"; backward = attacker._input_diversity(images); backward.sum().backward()
+        self.assertTrue(torch.allclose(backward, images)); self.assertTrue(torch.equal(images.grad, full_grad))
+
+    def test_fixed_dim_reuses_transform_and_random_dim_resamples(self):
+        model = TinyModel(); images = torch.randn(1, 3, 8, 8)
+        attacker = LazyAggregationAttacker(model, steps=1, ti_sigma=0, input_diversity=True,
+            dim_resize_range=(0.5, 0.5), dim_mode="full-fixed", device=torch.device("cpu"))
+        torch.manual_seed(9); first = attacker._input_diversity(images); second = attacker._input_diversity(images)
+        self.assertTrue(torch.equal(first, second))
+        attacker.dim_mode = "full-random"; draws = [attacker._input_diversity(images) for _ in range(4)]
+        self.assertTrue(any(not torch.equal(draws[0], draw) for draw in draws[1:]))
 if __name__ == "__main__": unittest.main()

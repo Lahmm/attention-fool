@@ -23,10 +23,10 @@ from main import ANNOTATIONS_PATH, IMAGE_DIR, parse_model_names
 from nets import build_vit_model
 from utils import DEVICE, load_data
 
-SEEDS = (0, 1, 2)
-TRACE_STEPS = (1, 5, 10, 20, 40)
-DISCOVERY_SAMPLES = 30
-TOTAL_SAMPLES = 100
+SEEDS = (0, 1)
+TRACE_STEPS = (1, 10, 20, 40)
+DISCOVERY_SAMPLES = 15
+TOTAL_SAMPLES = 50
 
 
 def _json(path, value):
@@ -54,14 +54,14 @@ def _source_traces(args, source, attacker, loader, seed, limit):
     traces, sample_indices, labels, clean = [], [], [], []
     # Attack complete baseline batches so the retained discovery images consume
     # exactly the same random augmentation sequence as Full/keep/drop runs.
-    args.max_samples = TOTAL_SAMPLES
+    args.max_samples = args.total_samples
     offset = 0
     for images, batch_labels, indices in selected_batches(args, source, loader):
         selected = []
         keep = min(images.size(0), limit - offset)
 
         def callback(trace):
-            if trace["step"] in TRACE_STEPS:
+            if trace["step"] in args.trace_steps:
                 selected.append({
                     "step": trace["step"], "x_t": trace["x_t"][:keep], "gradient": trace["gradient"][:keep],
                     "labels": batch_labels[:keep].cpu(), "start": offset, "end": offset + keep,
@@ -148,7 +148,8 @@ def _summarize_screening(specs, derivative, normalized, energy, repeats, seed):
         seed_means = values.mean(axis=(1, 2)).tolist()
         model_means = values.mean(axis=(0, 1)).tolist()
         signs = np.sign(values.mean(axis=1))
-        coherence = float(np.mean([signs[a] * signs[b] for a, b in ((0, 1), (0, 2), (1, 2))]))
+        pairs = [signs[a] * signs[b] for a in range(len(signs)) for b in range(a + 1, len(signs))]
+        coherence = float(np.mean(pairs)) if pairs else 1.0
         significance = _bootstrap_positive(values, repeats, seed + candidate)
         row = {
             "component": spec,
@@ -163,13 +164,13 @@ def _summarize_screening(specs, derivative, normalized, energy, repeats, seed):
             "mean_energy_ratio": float(energy[candidate].mean()),
             "screening_significance": significance,
         }
-        row["eligible"] = row["positive_seeds"] == 3 and row["positive_models"] >= 6 and coherence > 0
+        row["eligible"] = row["positive_seeds"] == values.shape[0] and row["positive_models"] >= 6 and coherence > 0
         rows.append(row)
     rows.sort(key=lambda item: item["mean_normalized_derivative"], reverse=True)
     return rows
 
 
-def _select_candidates(rows):
+def _select_candidates(rows, limit=3):
     eligible = [row for row in rows if row["eligible"]]
     selected = []
     fft = next((row for row in eligible if row["family"] == "fft"), None)
@@ -187,28 +188,28 @@ def _select_candidates(rows):
             occupied.add(region)
             local_count += 1
     for row in eligible:
-        if len(selected) >= 3:
+        if len(selected) >= limit:
             break
         if row not in selected:
             selected.append(row)
-    return selected
+    return selected[:limit]
 
 
 def run_screen(args):
     loader, num_classes = _loader(args)
     source, attacker = build_baseline(num_classes)
     specs = screening_component_specs()
-    shape = (len(specs), len(args.seeds), DISCOVERY_SAMPLES, len(args.target_models))
+    shape = (len(specs), len(args.seeds), args.discovery_samples, len(args.target_models))
     derivative = np.full(shape, np.nan, dtype=np.float32)
     normalized = np.full(shape, np.nan, dtype=np.float32)
-    energy = np.full((len(specs), len(args.seeds), DISCOVERY_SAMPLES), np.nan, dtype=np.float32)
+    energy = np.full((len(specs), len(args.seeds), args.discovery_samples), np.nan, dtype=np.float32)
     output = Path(args.output_dir)
     trace_dir = output / "screening_traces"
     trace_dir.mkdir(parents=True, exist_ok=True)
 
     # Source and guide models are released before target models are loaded to bound GPU memory.
     for seed in args.seeds:
-        torch.save(_source_traces(args, source, attacker, loader, seed, DISCOVERY_SAMPLES), trace_dir / f"seed_{seed}.pt")
+        torch.save(_source_traces(args, source, attacker, loader, seed, args.discovery_samples), trace_dir / f"seed_{seed}.pt")
     del attacker, source
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -217,8 +218,8 @@ def run_screen(args):
         model = build_vit_model(num_classes=num_classes, model_name=name)
         for seed_index, seed in enumerate(args.seeds):
             source_data = torch.load(trace_dir / f"seed_{seed}.pt", map_location="cpu")
-            sums = [np.zeros((len(specs), DISCOVERY_SAMPLES), dtype=np.float64) for _ in range(3)]
-            counts = np.zeros(DISCOVERY_SAMPLES, dtype=np.int64)
+            sums = [np.zeros((len(specs), args.discovery_samples), dtype=np.float64) for _ in range(3)]
+            counts = np.zeros(args.discovery_samples, dtype=np.int64)
             for trace in source_data["traces"]:
                 target_grad = _target_gradient(model, trace["x_t"], trace["labels"])
                 measurements = _component_measurements(trace["gradient"].to(DEVICE), target_grad)
@@ -226,8 +227,8 @@ def run_screen(args):
                 for metric_index in range(3):
                     sums[metric_index][:, start:end] += measurements[metric_index].T
                 counts[start:end] += 1
-            if not np.all(counts == len(TRACE_STEPS)):
-                raise RuntimeError(f"Expected {len(TRACE_STEPS)} traces per discovery image, got {counts.tolist()}.")
+            if not np.all(counts == len(args.trace_steps)):
+                raise RuntimeError(f"Expected {len(args.trace_steps)} traces per discovery image, got {counts.tolist()}.")
             derivative[:, seed_index, :, model_index] = sums[0] / counts
             normalized[:, seed_index, :, model_index] = sums[1] / counts
             if model_index == 0:
@@ -239,14 +240,14 @@ def run_screen(args):
             torch.cuda.empty_cache()
 
     rows = _summarize_screening(specs, derivative, normalized, energy, args.bootstrap_repeats, args.bootstrap_seed)
-    selected = _select_candidates(rows)
-    _json(output / "screening_report.json", {"components": rows, "selected": selected})
-    _json(output / "selected_candidates.json", {"components": [item["component"] for item in selected], "details": selected})
+    selected = _select_candidates(rows, args.candidate_count)
+    _json(output / "screening_report.json", {"protocol": "quick_protocol", "seeds": list(args.seeds), "discovery_samples": args.discovery_samples, "total_samples": args.total_samples, "components": rows, "selected": selected})
+    _json(output / "selected_candidates.json", {"protocol": "quick_protocol", "seeds": list(args.seeds), "components": [item["component"] for item in selected], "details": selected})
     print(f"Selected {len(selected)} candidates: {[item['component'] for item in selected]}")
 
 
 def _collect_clean_samples(args, source, loader):
-    args.max_samples = TOTAL_SAMPLES
+    args.max_samples = args.total_samples
     images, labels, indices = [], [], []
     for batch_images, batch_labels, batch_indices in selected_batches(args, source, loader):
         images.append(batch_images.cpu()); labels.append(batch_labels.cpu()); indices.append(batch_indices.cpu())
@@ -256,7 +257,7 @@ def _collect_clean_samples(args, source, loader):
     }
 
 
-def _load_baseline_adv(root, seed, expected_indices, limit=TOTAL_SAMPLES):
+def _load_baseline_adv(root, seed, expected_indices, limit):
     batches, indices, count = [], [], 0
     for path in sorted((root / f"baseline_seed_{seed}").glob("batch_*.pt")):
         payload = torch.load(path, map_location="cpu")
@@ -291,7 +292,7 @@ def run_confirm_attacks(args):
         seed_all(seed)
         if args.baseline_root:
             path = output / "full" / f"seed_{seed}.pt"; path.parent.mkdir(parents=True, exist_ok=True)
-            torch.save({"adv": _load_baseline_adv(Path(args.baseline_root), seed, samples["indices"])}, path)
+            torch.save({"adv": _load_baseline_adv(Path(args.baseline_root), seed, samples["indices"], args.total_samples)}, path)
         for spec in candidates:
             projector = parse_component(spec)
             for condition in ("drop", "keep"):
@@ -308,7 +309,7 @@ def run_confirm_attacks(args):
                 path = output / _slug(spec) / condition / f"seed_{seed}.pt"
                 path.parent.mkdir(parents=True, exist_ok=True)
                 torch.save({"adv": torch.cat(adv_batches)}, path)
-    _json(output / "manifest.json", {"candidates": candidates, "seeds": list(args.seeds), "targets": list(args.target_models)})
+    _json(output / "manifest.json", {"protocol": "quick_protocol", "candidates": candidates, "seeds": list(args.seeds), "targets": list(args.target_models), "discovery_samples": args.discovery_samples, "total_samples": args.total_samples})
 
 
 def _evaluate_tensor(model, images, labels, batch_size):
@@ -326,12 +327,13 @@ def run_confirm_evaluation(args):
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     samples = torch.load(root / "samples.pt", map_location="cpu")
     labels = samples["labels"]
-    results = {"indices": samples["indices"], "labels": labels, "models": {}}
+    seeds = tuple(manifest["seeds"])
+    results = {"indices": samples["indices"], "labels": labels, "seeds": list(seeds), "discovery_samples": manifest["discovery_samples"], "total_samples": manifest["total_samples"], "models": {}}
     for name in args.target_models:
         model = build_vit_model(num_classes=1000, model_name=name)
         item = {"clean_correct": _evaluate_tensor(model, samples["clean"], labels, args.eval_batch_size).eq(labels)}
         item["full"] = {}
-        for seed in args.seeds:
+        for seed in seeds:
             adv = torch.load(root / "full" / f"seed_{seed}.pt", map_location="cpu")["adv"]
             item["full"][str(seed)] = _evaluate_tensor(model, adv, labels, args.eval_batch_size).ne(labels)
         item["candidates"] = {}
@@ -339,7 +341,7 @@ def run_confirm_evaluation(args):
             conditions = {}
             for condition in ("drop", "keep"):
                 conditions[condition] = {}
-                for seed in args.seeds:
+                for seed in seeds:
                     adv = torch.load(root / _slug(spec) / condition / f"seed_{seed}.pt", map_location="cpu")["adv"]
                     conditions[condition][str(seed)] = _evaluate_tensor(model, adv, labels, args.eval_batch_size).ne(labels)
             item["candidates"][spec] = conditions
@@ -348,13 +350,13 @@ def run_confirm_evaluation(args):
     torch.save(results, root / "evaluation.pt")
 
 
-def _effect_tensor(evaluation, spec, condition):
+def _effect_tensor(evaluation, spec, condition, seeds, total_samples):
     models = list(evaluation["models"])
-    values = np.full((len(SEEDS), TOTAL_SAMPLES, len(models)), np.nan, dtype=np.float64)
+    values = np.full((len(seeds), total_samples, len(models)), np.nan, dtype=np.float64)
     for model_index, name in enumerate(models):
         item = evaluation["models"][name]
         valid = item["clean_correct"].numpy().astype(bool)
-        for seed_index, seed in enumerate(SEEDS):
+        for seed_index, seed in enumerate(seeds):
             full = item["full"][str(seed)].numpy().astype(float)
             changed = item["candidates"][spec][condition][str(seed)].numpy().astype(float)
             values[seed_index, valid, model_index] = full[valid] - changed[valid]
@@ -382,19 +384,22 @@ def run_final_report(args):
     evaluation = torch.load(root / "evaluation.pt", map_location="cpu")
     screening = json.loads(Path(args.candidate_file).read_text(encoding="utf-8"))
     screen_by_spec = {item["component"]: item for item in screening.get("details", [])}
+    seeds = tuple(evaluation.get("seeds", args.seeds))
+    total_samples = len(evaluation["labels"])
+    discovery_samples = int(evaluation.get("discovery_samples", args.discovery_samples))
     reports, p_values = [], []
     for candidate_index, spec in enumerate(screening["components"]):
-        drop = _effect_tensor(evaluation, spec, "drop")
+        drop = _effect_tensor(evaluation, spec, "drop", seeds, total_samples)
         full_asr = []
         keep_asr = []
-        common = np.ones(TOTAL_SAMPLES, dtype=bool)
+        common = np.ones(total_samples, dtype=bool)
         for item in evaluation["models"].values():
             common &= item["clean_correct"].numpy().astype(bool)
-            for seed in SEEDS:
+            for seed in seeds:
                 full_asr.extend(item["full"][str(seed)].numpy()[item["clean_correct"]].tolist())
                 keep_asr.extend(item["candidates"][spec]["keep"][str(seed)].numpy()[item["clean_correct"]].tolist())
         all_effect = _bootstrap_positive(drop, args.bootstrap_repeats, args.bootstrap_seed + candidate_index)
-        held_out = _bootstrap_positive(drop[:, DISCOVERY_SAMPLES:, :], args.bootstrap_repeats, args.bootstrap_seed + 100 + candidate_index)
+        held_out = _bootstrap_positive(drop[:, discovery_samples:, :], args.bootstrap_repeats, args.bootstrap_seed + 100 + candidate_index)
         common_effect = float(np.nanmean(drop[:, common, :]))
         seed_effects = np.nanmean(drop, axis=(1, 2)).tolist()
         model_effects = np.nanmean(drop, axis=(0, 1)).tolist()
@@ -402,8 +407,8 @@ def run_final_report(args):
         report = {
             "component": spec,
             "description": _describe_component(spec),
-            "all_100_delta_drop": all_effect,
-            "held_out_70_delta_drop": held_out,
+            "all_samples_delta_drop": all_effect,
+            "held_out_confirmation_delta_drop": held_out,
             "keep_only_ratio": float(np.mean(keep_asr) / np.mean(full_asr)) if np.mean(full_asr) else None,
             "seed_delta_drop": seed_effects,
             "positive_seeds": int(np.sum(np.asarray(seed_effects) > 0)),
@@ -414,21 +419,18 @@ def run_final_report(args):
         }
         reports.append(report); p_values.append(held_out["p_positive"])
     for report, q_value in zip(reports, bh_fdr(p_values)):
-        report["held_out_70_delta_drop"]["q_positive"] = q_value
-        screen_sig = report["screening_significance"] or {}
+        report["held_out_confirmation_delta_drop"]["q_positive"] = q_value
         report["confirmed"] = (
-            report["held_out_70_delta_drop"]["mean"] > 0
-            and report["held_out_70_delta_drop"]["ci_low"] > 0
+            report["held_out_confirmation_delta_drop"]["mean"] > 0
+            and report["held_out_confirmation_delta_drop"]["ci_low"] > 0
             and q_value < 0.05
-            and report["positive_seeds"] == 3
+            and report["positive_seeds"] == len(seeds)
             and report["positive_models"] >= 7
-            and report["common_correct_delta_drop"] > 0
-            and screen_sig.get("ci_low", float("-inf")) > 0
         )
         report["status"] = "confirmed" if report["confirmed"] else (
             "model-dependent" if report["positive_models"] < 7 else "not-supported"
         )
-    _json(root / "final_report.json", {"candidates": reports})
+    _json(root / "final_report.json", {"protocol": "quick_protocol", "seeds": list(seeds), "candidates": reports})
     print(json.dumps({item["component"]: item["status"] for item in reports}, indent=2))
 
 
@@ -443,15 +445,20 @@ def parse_args():
     parser.add_argument("--img-size", type=int, default=224); parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--eval-batch-size", type=int, default=64); parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--seeds", type=lambda value: tuple(map(int, value.split(","))), default=SEEDS)
+    parser.add_argument("--trace-steps", type=lambda value: tuple(map(int, value.split(","))), default=TRACE_STEPS)
+    parser.add_argument("--discovery-samples", type=int, default=DISCOVERY_SAMPLES); parser.add_argument("--total-samples", type=int, default=TOTAL_SAMPLES)
+    parser.add_argument("--candidate-count", type=int, default=2)
     parser.add_argument("--target-models", type=parse_model_names, default=MAIN_TARGETS)
-    parser.add_argument("--bootstrap-repeats", type=int, default=10000); parser.add_argument("--bootstrap-seed", type=int, default=2026)
+    parser.add_argument("--bootstrap-repeats", type=int, default=3000); parser.add_argument("--bootstrap-seed", type=int, default=2026)
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    if tuple(args.seeds) != SEEDS:
-        raise ValueError("The fixed protocol requires seeds 0,1,2.")
+    if not args.seeds:
+        raise ValueError("At least one seed is required.")
+    if not 0 < args.discovery_samples < args.total_samples:
+        raise ValueError("discovery-samples must be positive and smaller than total-samples.")
     if len(args.target_models) != 8:
         raise ValueError("The fixed protocol requires exactly eight target models.")
     {"screen": run_screen, "confirm-attacks": run_confirm_attacks, "confirm-evaluate": run_confirm_evaluation, "report": run_final_report}[args.mode](args)

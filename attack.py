@@ -98,6 +98,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         ti_sigma: float = 3.0,
         input_diversity: bool = False,
         dim_resize_range: tuple[float, float] = (0.85, 1.0),
+        dim_mode: str = "full-random",
         use_si: bool = False,
         si_scales: int = 1,
         use_eot: bool = False,
@@ -141,6 +142,11 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.ti_sigma = float(ti_sigma)
         self.input_diversity = bool(input_diversity)
         self.dim_resize_range = tuple(float(r) for r in dim_resize_range)
+        valid_dim_modes = ("full-random", "forward-only", "backward-only", "full-fixed", "backward-fixed")
+        if dim_mode not in valid_dim_modes:
+            raise ValueError(f"dim_mode must be one of {valid_dim_modes}, got {dim_mode!r}.")
+        self.dim_mode = dim_mode
+        self._fixed_dim_params = None
         self.use_si = bool(use_si)
         self.si_scales = int(si_scales)
         self.use_eot = bool(use_eot)
@@ -239,22 +245,42 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             return grad
         return self._apply_depthwise_kernel(grad, self._ti_kernel)
 
-    def _input_diversity(self, images: torch.Tensor) -> torch.Tensor:
-        if not self.input_diversity:
-            return images
+    def reset_fixed_dim(self) -> None:
+        self._fixed_dim_params = None
+
+    def _sample_dim_params(self, images: torch.Tensor) -> tuple[int, int, int, int]:
         _batch_size, _channels, height, width = images.shape
         lo, hi = self.dim_resize_range
         scale = lo + (hi - lo) * torch.rand(1, device=images.device)
         new_h = max(1, min(height, int(round(height * scale.item()))))
         new_w = max(1, min(width, int(round(width * scale.item()))))
-        resized = F.interpolate(images, size=(new_h, new_w), mode="bilinear", align_corners=False)
-        pad_h = height - new_h
-        pad_w = width - new_w
+        pad_h, pad_w = height - new_h, width - new_w
         top = torch.randint(0, pad_h + 1, (1,), device=images.device).item() if pad_h > 0 else 0
         left = torch.randint(0, pad_w + 1, (1,), device=images.device).item() if pad_w > 0 else 0
-        bottom = pad_h - top
-        right = pad_w - left
-        return F.pad(resized, (left, right, top, bottom), value=0.0)
+        return new_h, new_w, top, left
+
+    @staticmethod
+    def _apply_dim_transform(images: torch.Tensor, params: tuple[int, int, int, int]) -> torch.Tensor:
+        _batch_size, _channels, height, width = images.shape
+        new_h, new_w, top, left = params
+        resized = F.interpolate(images, size=(new_h, new_w), mode="bilinear", align_corners=False)
+        return F.pad(resized, (left, width - new_w - left, top, height - new_h - top), value=0.0)
+
+    def _input_diversity(self, images: torch.Tensor) -> torch.Tensor:
+        if not self.input_diversity:
+            return images
+        if self.dim_mode.endswith("fixed"):
+            if self._fixed_dim_params is None:
+                self._fixed_dim_params = self._sample_dim_params(images)
+            params = self._fixed_dim_params
+        else:
+            params = self._sample_dim_params(images)
+        transformed = self._apply_dim_transform(images, params)
+        if self.dim_mode == "forward-only":
+            return images + (transformed - images).detach()
+        if self.dim_mode in ("backward-only", "backward-fixed"):
+            return transformed + (images - transformed).detach()
+        return transformed
 
     @staticmethod
     def _normalize_weights(weights: torch.Tensor) -> torch.Tensor:

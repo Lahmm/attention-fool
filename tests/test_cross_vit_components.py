@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import torch
 
-from cross_vit_components import _component_measurements, _select_candidates
+from cross_vit_components import _component_measurements, _effect_tensor, _select_candidates, _summarize_screening
 from gradient_analysis import parse_component, screening_component_specs
 
 
@@ -33,6 +33,17 @@ class ComponentScreeningTests(unittest.TestCase):
         self.assertEqual([item["component"] for item in selected], [
             "fft:2:horizontal", "haar:LLL:0:0", "haar:LHL:1:1",
         ])
+
+    def test_screening_and_effect_tensor_use_runtime_seed_dimension(self):
+        specs = ["fft:0:horizontal"]
+        derivative = np.ones((1, 2, 3, 8)); normalized = derivative.copy(); energy = np.ones((1, 2, 3))
+        rows = _summarize_screening(specs, derivative, normalized, energy, repeats=20, seed=0)
+        self.assertTrue(rows[0]["eligible"]); self.assertEqual(rows[0]["positive_seeds"], 2)
+        item = {"clean_correct": torch.tensor([True, True, False]),
+                "full": {"4": torch.tensor([True, True, False]), "9": torch.tensor([True, False, False])},
+                "candidates": {specs[0]: {"drop": {"4": torch.tensor([False, True, False]), "9": torch.tensor([False, False, False])}}}}
+        values = _effect_tensor({"models": {"m": item}}, specs[0], "drop", (4, 9), 3)
+        self.assertEqual(values.shape, (2, 3, 1)); self.assertTrue(np.isnan(values[:, 2]).all())
 
 
 if __name__ == "__main__":

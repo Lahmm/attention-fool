@@ -252,13 +252,22 @@ python cross_vit_components.py report --output-dir outputs/cross_vit_components 
 bash scripts/run_cross_vit_component_experiment.sh outputs/cross_vit_components
 ```
 
-筛选阶段只使用前 30 张图和步骤 `1,5,10,20,40`，逐目标模型流式计算方向导数、能量归一化方向导数、跨 seed 相干度、目标模型方向一致性和分量能量比例。它选择最高排名的合格 FFT 分量，以及两个系数区域互不重叠的合格 Haar 分量；缺失类别按总排名递补。
+快速协议筛选阶段使用前 15 张图和步骤 `1,10,20,40`，逐目标模型流式计算方向导数、能量归一化方向导数、跨 seed 相干度、目标模型方向一致性和分量能量比例。它从合格 FFT/Haar 分量中确认最高排名的 2 个候选。
 
-确认阶段默认从 `outputs/causal_full/baseline_seed_{0,1,2}` 复用 Full 攻击，并严格校验图像索引。`--batch-size` 默认 64，与这些 baseline 的随机增强批次序列一致。每个候选运行 `drop` 和 `keep`，最终报告使用后 70 张图做正式推断，对 3 个候选执行 10,000 次按 seed、图像、目标模型分层的配对 bootstrap 和 Benjamini-Hochberg FDR。主要产物：
+确认阶段使用 seeds `0,1` 的 Full 攻击并严格校验图像索引。每个候选运行 `drop` 和 `keep`，最终报告使用后 35 张图做独立确认，对 2 个候选执行 3000 次按 seed、图像、目标模型分层的配对 bootstrap 和 Benjamini-Hochberg FDR。主要产物：
 
 ```text
 screening_metrics.npz       # 1048 个候选的紧凑筛选观测
 screening_report.json       # 候选排名、资格条件和筛选显著性
-selected_candidates.json    # 进入因果确认的 3 个候选
-final_report.json           # 后 70 张确认判定和全部 100 张效应量
+selected_candidates.json    # 进入因果确认的 2 个候选
+final_report.json           # 后 35 张确认判定和全部 50 张效应量
 ```
+## 5-6 小时双实验快速协议
+
+严格串行运行 DIM/BG 机制实验与跨 ViT 分量确认：
+
+```bash
+bash scripts/run_dim_bg_then_cross_vit_quick.sh outputs/quick_serial
+```
+
+协议统一使用 seeds `0,1`。DIM/BG 阶段输出 `method_high_frequency_ranking.json` 和 `dim_bg_mechanism_report.json`；跨 ViT 阶段使用 15 张筛选、35 张独立确认、8 个目标模型、top-2 候选和 3000 次 bootstrap，输出 `cross_vit_quick/final_report.json`。总控脚本检查各阶段产物并支持断点续跑，最后生成 `combined_conclusion.md`。
