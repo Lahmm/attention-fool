@@ -47,7 +47,7 @@ def selected_batches(args,source,loader):
         if not correct.any(): continue
         remaining=args.max_samples-selected
         if remaining<=0: break
-        images,labels,indices=images[correct][:remaining],labels[correct][:remaining],indices[correct][:remaining]
+        images,labels,indices=images[correct][:remaining],labels[correct][:remaining],indices[correct.cpu()][:remaining]
         selected+=images.size(0); yield images,labels,indices
 
 def _target_normalize(model,pixels):
