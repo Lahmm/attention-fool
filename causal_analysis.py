@@ -30,13 +30,13 @@ def paired_bootstrap(values,repeats=10000,seed=0):
         draws[idx]=values[np.ix_(ii,mi)].mean()
     return {"mean":float(values.mean()),"ci_low":float(np.quantile(draws,.025)),"ci_high":float(np.quantile(draws,.975)),"p_positive":float((draws<=0).mean())}
 
-def build_baseline(num_classes):
+def build_baseline(num_classes, dim=True, guide_aug=True, guide_methods=("dropout","jitter","freq")):
     source=build_vit_model(num_classes=num_classes,model_name="vit_base_patch16_224")
     guides=tuple(build_vit_model(num_classes=num_classes,model_name=n) for n in ("deit_base_patch16_224","pit_s_224","cait_s24_224"))
     attacker=create_attacker(model=source,epsilon=16/255,step_size=None,steps=40,layers=(0,1,4,9,11),ti_sigma=0,
-        dim=True,mi=True,mi_decay=1,normalize_grad=False,dim_resize_range=(.85,1),attention_guide_models=guides,
+        dim=dim,mi=True,mi_decay=1,normalize_grad=False,dim_resize_range=(.85,1),attention_guide_models=guides,
         attention_guide_type="qk_cls",attention_guide_build_method="patch",attention_guide_patch_size=16,
-        guide_aug=True,guide_aug_area="background",guide_aug_methods=("dropout","jitter","freq"),guide_aug_copies=3,guide_aug_strength=.2)
+        guide_aug=guide_aug,guide_aug_area="background",guide_aug_methods=guide_methods,guide_aug_copies=3,guide_aug_strength=.2)
     return source,attacker
 
 def selected_batches(args,source,loader):
@@ -92,7 +92,7 @@ def target_metrics(clean,adv,labels,names,with_gradients=False,traces=None):
 def run_experiment(args):
     loader,num_classes=load_data(image_dir_arg=args.image_dir,annotations_path_arg=args.annotations_path,batch_size=args.batch_size,
         num_workers=args.num_workers,prefetch_factor=2,img_size=args.img_size)
-    source,attacker=build_baseline(num_classes); output=Path(args.output_dir); output.mkdir(parents=True,exist_ok=True)
+    source,attacker=build_baseline(num_classes,args.dim_enabled,args.guide_aug_enabled,args.guide_methods); output=Path(args.output_dir); output.mkdir(parents=True,exist_ok=True)
     projector=parse_component(args.component) if args.component else None
     transform=component_transform(projector,args.intervention,args.region) if projector else None
     switch=MISwitch(args.mi_switch,args.switch_step); seed_all(args.seed); batches=[]
@@ -124,6 +124,7 @@ def parse_args():
     p.add_argument("--image-dir",default=IMAGE_DIR); p.add_argument("--annotations-path",default=ANNOTATIONS_PATH); p.add_argument("--img-size",type=int,default=224)
     p.add_argument("--batch-size",type=int,default=4); p.add_argument("--num-workers",type=int,default=4); p.add_argument("--max-samples",type=int,default=100); p.add_argument("--seed",type=int,default=0)
     p.add_argument("--component",default=None,help="fft:BAND[:ORIENTATION] or haar:PATH"); p.add_argument("--region",choices=("all","low","mid","high"),default="all"); p.add_argument("--intervention",choices=("keep","drop"),default="keep")
+    p.add_argument("--dim-enabled",action=argparse.BooleanOptionalAction,default=True); p.add_argument("--guide-aug-enabled",action=argparse.BooleanOptionalAction,default=True); p.add_argument("--guide-methods",type=parse_model_names,default=("dropout","jitter","freq"))
     p.add_argument("--mi-switch",choices=("always","never","on","off","reset"),default="always"); p.add_argument("--switch-step",type=int,default=1)
     p.add_argument("--evaluate-targets",action="store_true"); p.add_argument("--target-gradients",action="store_true"); p.add_argument("--gradient-decomposition",action="store_true")
     p.add_argument("--target-models",type=parse_model_names,default=MAIN_TARGETS+HELD_OUT_TARGETS); return p.parse_args()
