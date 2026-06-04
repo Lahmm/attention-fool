@@ -229,3 +229,36 @@ python causal_analysis.py report --input-dir outputs/causal/drop_llh --output-di
 ```
 
 FFT 分量写作 `fft:BAND[:ORIENTATION]`，BAND 为 `0..7`，方向可选 `all/horizontal/vertical/diagonal`；三级 Haar 小波包分量写作 `haar:PATH`。无干预执行器逐像素复现现有攻击路径；FFT 和 Haar 投影有 Parseval 能量守恒及重建测试。
+
+## 跨 ViT 梯度分量发现与因果确认
+
+`cross_vit_components.py` 实现固定的 100 图、seeds `0,1,2`、8 个 ViT/Transformer 目标模型协议。它分析完整攻击在增强平均后、进入 MI 累积前的梯度，并使用两组正交分量：
+
+- `fft:BAND:ORIENTATION`：8 个径向频带乘以 `horizontal/vertical/diagonal`，共 24 个全局分量。
+- `haar:PATH:ROW:COL`：三级 Haar 小波包的 64 条路径乘以 `4x4` 系数区域，共 1024 个局部分量。区域在小波系数域选择，避免直接空间 mask 的频谱泄漏。
+
+完整流程：
+
+```powershell
+python cross_vit_components.py screen --output-dir outputs/cross_vit_components
+python cross_vit_components.py confirm-attacks --output-dir outputs/cross_vit_components --candidate-file outputs/cross_vit_components/selected_candidates.json
+python cross_vit_components.py confirm-evaluate --output-dir outputs/cross_vit_components --candidate-file outputs/cross_vit_components/selected_candidates.json
+python cross_vit_components.py report --output-dir outputs/cross_vit_components --candidate-file outputs/cross_vit_components/selected_candidates.json
+```
+
+也可以直接运行：
+
+```powershell
+bash scripts/run_cross_vit_component_experiment.sh outputs/cross_vit_components
+```
+
+筛选阶段只使用前 30 张图和步骤 `1,5,10,20,40`，逐目标模型流式计算方向导数、能量归一化方向导数、跨 seed 相干度、目标模型方向一致性和分量能量比例。它选择最高排名的合格 FFT 分量，以及两个系数区域互不重叠的合格 Haar 分量；缺失类别按总排名递补。
+
+确认阶段默认从 `outputs/causal_full/baseline_seed_{0,1,2}` 复用 Full 攻击，并严格校验图像索引。`--batch-size` 默认 64，与这些 baseline 的随机增强批次序列一致。每个候选运行 `drop` 和 `keep`，最终报告使用后 70 张图做正式推断，对 3 个候选执行 10,000 次按 seed、图像、目标模型分层的配对 bootstrap 和 Benjamini-Hochberg FDR。主要产物：
+
+```text
+screening_metrics.npz       # 1048 个候选的紧凑筛选观测
+screening_report.json       # 候选排名、资格条件和筛选显著性
+selected_candidates.json    # 进入因果确认的 3 个候选
+final_report.json           # 后 70 张确认判定和全部 100 张效应量
+```

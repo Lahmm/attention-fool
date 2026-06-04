@@ -2,7 +2,15 @@ import unittest
 import torch
 import torch.nn as nn
 from attack import LazyAggregationAttacker
-from gradient_analysis import fft_decompose, haar_packet_paths, haar_packet_project, run_analyzed_attack
+from gradient_analysis import (
+    fft_decompose,
+    haar_packet_paths,
+    haar_packet_project,
+    haar_packet_region_project,
+    parse_component,
+    run_analyzed_attack,
+    screening_component_specs,
+)
 
 class TinyModel(nn.Module):
     def __init__(self):
@@ -19,6 +27,22 @@ class ProjectionTests(unittest.TestCase):
         parts = [haar_packet_project(x, p) for p in haar_packet_paths()]
         self.assertLess((sum(parts)-x).abs().max().item(), 1e-10)
         self.assertAlmostEqual(sum(p.square().sum().item() for p in parts), x.square().sum().item(), places=8)
+    def test_local_haar_regions_are_orthogonal_and_reconstruct_path(self):
+        x = torch.randn(2, 3, 32, 32, dtype=torch.float64)
+        regions = [haar_packet_region_project(x, "LHD", row, col) for row in range(4) for col in range(4)]
+        expected = haar_packet_project(x, "LHD")
+        self.assertLess((sum(regions) - expected).abs().max().item(), 1e-10)
+        self.assertAlmostEqual(sum(part.square().sum().item() for part in regions), expected.square().sum().item(), places=8)
+        self.assertLess((regions[0] * regions[1]).sum().abs().item(), 1e-10)
+        self.assertTrue(torch.equal(parse_component("haar:LHD:0:0")(x), regions[0]))
+
+    def test_fixed_screening_candidate_set(self):
+        specs = screening_component_specs()
+        self.assertEqual(len(specs), 24 + 1024)
+        self.assertEqual(len(set(specs)), len(specs))
+        self.assertEqual(sum(spec.startswith("fft:") for spec in specs), 24)
+        self.assertEqual(sum(spec.startswith("haar:") for spec in specs), 1024)
+
     def test_unobserved_runner_matches_current_attack(self):
         torch.manual_seed(7); model = TinyModel()
         attacker = LazyAggregationAttacker(model, epsilon=0.1, steps=3, ti_sigma=0, input_diversity=True,

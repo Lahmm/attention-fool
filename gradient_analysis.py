@@ -5,6 +5,7 @@ import torch
 
 FFT_BANDS = (0.0, 0.04, 0.08, 0.12, 0.18, 0.25, 0.35, 0.50, 1.0)
 FFT_ORIENTATIONS = ("all", "horizontal", "vertical", "diagonal")
+SCREENING_FFT_ORIENTATIONS = ("horizontal", "vertical", "diagonal")
 
 
 def fft_mask(height, width, band, orientation="all", *, device=None, dtype=torch.float32):
@@ -81,6 +82,71 @@ def haar_packet_paths(levels=3):
     for _ in range(levels):
         paths = [prefix + suffix for prefix in paths for suffix in "LHVD"]
     return paths
+
+
+def haar_packet_coefficients(x, levels=3):
+    """Return all orthonormal Haar packet coefficient maps at ``levels``."""
+    if levels <= 0:
+        raise ValueError("levels must be positive.")
+    nodes = {"": x if x.dtype == torch.float64 else x.float()}
+    for _ in range(levels):
+        nodes = {
+            path + suffix: coefficient
+            for path, node in nodes.items()
+            for suffix, coefficient in _haar_split(node).items()
+        }
+    return nodes
+
+
+def haar_packet_reconstruct(coefficients, levels=3):
+    """Reconstruct a tensor from a complete level-wise Haar packet mapping."""
+    expected = set(haar_packet_paths(levels))
+    if set(coefficients) != expected:
+        missing = sorted(expected - set(coefficients))
+        extra = sorted(set(coefficients) - expected)
+        raise ValueError(f"Expected complete level-{levels} coefficients; missing={missing}, extra={extra}.")
+    nodes = dict(coefficients)
+    for depth in range(levels - 1, -1, -1):
+        parents = sorted({path[:depth] for path in nodes})
+        nodes = {
+            parent: _haar_merge({suffix: nodes[parent + suffix] for suffix in "LHVD"})
+            for parent in parents
+        }
+    return nodes[""]
+
+
+def haar_packet_region_project(x, path, row, col, grid=4, levels=3):
+    """Project onto one path and one non-overlapping coefficient-map region."""
+    if path not in haar_packet_paths(levels):
+        raise ValueError(f"Invalid level-{levels} Haar path: {path!r}.")
+    if grid <= 0 or not 0 <= row < grid or not 0 <= col < grid:
+        raise ValueError(f"row and col must be in [0, {grid - 1}].")
+    work = x if x.dtype == torch.float64 else x.float()
+    coefficients = haar_packet_coefficients(work, levels)
+    height, width = coefficients[path].shape[-2:]
+    if height % grid or width % grid:
+        raise ValueError(f"Coefficient shape {(height, width)} must be divisible by grid={grid}.")
+    projected = {key: torch.zeros_like(value) for key, value in coefficients.items()}
+    rh, rw = height // grid, width // grid
+    projected[path][..., row * rh:(row + 1) * rh, col * rw:(col + 1) * rw] = \
+        coefficients[path][..., row * rh:(row + 1) * rh, col * rw:(col + 1) * rw]
+    return haar_packet_reconstruct(projected, levels).to(x.dtype)
+
+
+def screening_component_specs(levels=3, grid=4):
+    """Return the fixed 24 global FFT and 1024 local Haar candidate specs."""
+    fft = [
+        f"fft:{band}:{orientation}"
+        for band in range(len(FFT_BANDS) - 1)
+        for orientation in SCREENING_FFT_ORIENTATIONS
+    ]
+    haar = [
+        f"haar:{path}:{row}:{col}"
+        for path in haar_packet_paths(levels)
+        for row in range(grid)
+        for col in range(grid)
+    ]
+    return fft + haar
 
 
 def attention_thirds(guide):
@@ -204,4 +270,10 @@ def parse_component(spec):
         band, orientation = int(fields[1]), fields[2] if len(fields) == 3 else "all"
         return lambda x: fft_project(x, band, orientation)
     if fields[0] == "haar" and len(fields) == 2: return lambda x: haar_packet_project(x, fields[1])
-    raise ValueError(f"Invalid component {spec!r}; expected fft:BAND[:ORIENTATION] or haar:PATH.")
+    if fields[0] == "haar" and len(fields) == 4:
+        path, row, col = fields[1], int(fields[2]), int(fields[3])
+        return lambda x: haar_packet_region_project(x, path, row, col)
+    raise ValueError(
+        f"Invalid component {spec!r}; expected fft:BAND[:ORIENTATION], haar:PATH, "
+        "or haar:PATH:ROW:COL."
+    )
