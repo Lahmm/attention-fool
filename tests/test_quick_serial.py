@@ -38,9 +38,12 @@ esac
             command = ["bash", "scripts/run_dim_bg_then_cross_vit_quick.sh", str(output)]
             subprocess.run(command, check=True, env=env, cwd=Path(__file__).parents[1])
             first = log.read_text().splitlines(); self.assertIn("dim_bg_mechanism.py rank", first[0])
+            experiment = next(x for x in first if "dim_bg_mechanism.py experiment" in x)
+            self.assertIn("--max-samples 50", experiment); self.assertIn("--gradient-probes 2", experiment)
+            self.assertIn("background:forward-only", experiment); self.assertNotIn("backward-only", experiment)
             self.assertLess(next(i for i, x in enumerate(first) if "dim_bg_mechanism.py report" in x), next(i for i, x in enumerate(first) if "cross_vit_components.py screen" in x))
             subprocess.run(command, check=True, env=env, cwd=Path(__file__).parents[1])
-            second = log.read_text().splitlines(); self.assertEqual(sum("dim_bg_mechanism.py rank" in x for x in second), 1)
+            second = log.read_text().splitlines(); self.assertEqual(sum("dim_bg_mechanism.py rank" in x for x in second), 2)
             self.assertEqual(sum("cross_vit_components.py screen" in x for x in second), 1)
             self.assertTrue((output / "combined_conclusion.md").is_file())
 

@@ -262,7 +262,7 @@ screening_report.json       # 候选排名、资格条件和筛选显著性
 selected_candidates.json    # 进入因果确认的 2 个候选
 final_report.json           # 后 35 张确认判定和全部 50 张效应量
 ```
-## 5-6 小时双实验快速协议
+## 12 小时内双实验快速协议
 
 严格串行运行 DIM/BG 机制实验与跨 ViT 分量确认：
 
@@ -270,4 +270,4 @@ final_report.json           # 后 35 张确认判定和全部 50 张效应量
 bash scripts/run_dim_bg_then_cross_vit_quick.sh outputs/quick_serial
 ```
 
-协议统一使用 seeds `0,1`。DIM/BG 阶段输出 `method_high_frequency_ranking.json` 和 `dim_bg_mechanism_report.json`；跨 ViT 阶段使用 15 张筛选、35 张独立确认、8 个目标模型、top-2 候选和 3000 次 bootstrap，输出 `cross_vit_quick/final_report.json`。总控脚本检查各阶段产物并支持断点续跑，最后生成 `combined_conclusion.md`。
+协议统一使用 seeds `0,1`。DIM/BG 阶段使用 50 张图、2 次梯度一致性探测，并只运行 6 个核心配置：`background` 下的 `none/full-random/forward-only/full-fixed`，以及 `all` 下的 `none/full-random`，共 12 个 seed-config 运行。它删除人工 `backward-only/backward-fixed` 配置，同时保留前向 DIM、随机平均和背景区域选择的核心对照。DIM/BG 阶段输出 `method_high_frequency_ranking.json` 和 `dim_bg_mechanism_report.json`；跨 ViT 阶段使用 15 张筛选、35 张独立确认、8 个目标模型、top-2 候选和 3000 次 bootstrap，输出 `cross_vit_quick/final_report.json`。总控脚本检查各阶段产物并支持断点续跑，最后生成 `combined_conclusion.md`。RTX 3080 首次完整运行预计约 5.5-11 小时；已完成阶段会按协议校验后跳过。

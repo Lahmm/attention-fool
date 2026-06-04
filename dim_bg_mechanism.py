@@ -16,6 +16,8 @@ from utils import DEVICE, load_data
 
 DIM_VARIANTS = ("none", "full-random", "forward-only", "backward-only", "full-fixed", "backward-fixed")
 AREAS = ("background", "all")
+QUICK_CONFIGS = (("background", "none"), ("background", "full-random"), ("background", "forward-only"),
+                 ("background", "full-fixed"), ("all", "none"), ("all", "full-random"))
 AUGMENTATION_METHODS = (
     "dropout", "jitter", "freq", "lowpass_gauss", "laplacian_low", "fft_lowboost", "illumination_low",
     "band_noise", "band_noise_low", "band_noise_mid", "band_noise_high",
@@ -28,6 +30,20 @@ AUGMENTATION_METHODS = (
 def _json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2), encoding="utf-8")
+
+
+def _matches_protocol(path, args, *, run=False):
+    if not path.exists() or args.force:
+        return False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if payload.get("protocol") != "12h_quick_protocol":
+        return False
+    if run:
+        return payload.get("samples") == args.max_samples_requested and payload.get("gradient_probes") == args.gradient_probes
+    return True
 
 
 def _loader(args):
@@ -65,7 +81,7 @@ def _configure(attacker, area, variant):
     attacker.reset_fixed_dim()
 
 
-def _source_run(attacker, clean, labels, sizes, trace_steps):
+def _source_run(attacker, clean, labels, sizes, gradient_probes):
     adv, band_rows, coherence, input_hf = [], {key: [] for key in ("low", "mid", "high")}, [], []
     start = 0
     for size in sizes:
@@ -74,7 +90,7 @@ def _source_run(attacker, clean, labels, sizes, trace_steps):
         pixels = attacker._denormalize(x).detach()
         guide = attacker._build_guide_pixel_map(x, pixels.size(-1)) if attacker.guide_aug_area != "all" else None
         samples = []
-        for _ in range(3):
+        for _ in range(gradient_probes):
             probe = pixels.detach().requires_grad_(True)
             samples.append(attacker._attack_grad(probe, y, guide).detach())
         mean = torch.stack(samples).mean(0)
@@ -119,26 +135,26 @@ def _target_metrics(args, clean, adv, labels):
 
 def run_experiment(args):
     output = Path(args.output_dir) / "runs"
-    for area in args.areas:
-        for variant in args.variants:
-            for seed in args.seeds:
-                path = output / f"{area}__{variant}__seed_{seed}.json"
-                if path.exists() and not args.force: continue
-                seed_all(seed); loader, num_classes = _loader(args); source, attacker = build_baseline(num_classes)
-                _configure(attacker, area, variant)
-                clean, labels, indices, sizes = _collect_samples(args, source, loader)
-                adv, source_metrics = _source_run(attacker, clean, labels, sizes, args.trace_steps)
-                del attacker, source, loader
-                _release()
-                targets = _target_metrics(args, clean, adv, labels)
-                _json(path, {"protocol": "quick_protocol", "area": area, "dim_variant": variant, "seed": seed,
-                             "indices": indices.tolist(), "source_metrics": source_metrics, "targets": targets})
-                print(f"wrote {path}")
+    for area, variant in args.configs:
+        for seed in args.seeds:
+            path = output / f"{area}__{variant}__seed_{seed}.json"
+            if _matches_protocol(path, args, run=True): continue
+            seed_all(seed); loader, num_classes = _loader(args); source, attacker = build_baseline(num_classes)
+            _configure(attacker, area, variant)
+            clean, labels, indices, sizes = _collect_samples(args, source, loader)
+            adv, source_metrics = _source_run(attacker, clean, labels, sizes, args.gradient_probes)
+            del attacker, source, loader
+            _release()
+            targets = _target_metrics(args, clean, adv, labels)
+            _json(path, {"protocol": "12h_quick_protocol", "area": area, "dim_variant": variant, "seed": seed,
+                         "samples": len(indices), "gradient_probes": args.gradient_probes,
+                         "indices": indices.tolist(), "source_metrics": source_metrics, "targets": targets})
+            print(f"wrote {path}")
 
 
 def run_ranking(args):
     path = Path(args.output_dir) / "method_high_frequency_ranking.json"
-    if path.exists() and not args.force: return
+    if _matches_protocol(path, args, run=True): return
     seed_all(args.seeds[0]); loader, num_classes = _loader(args); source, attacker = build_baseline(num_classes)
     clean, _labels, _indices, _sizes = _collect_samples(args, source, loader); pixels = attacker._denormalize(clean.to(DEVICE))
     guide = attacker._build_guide_pixel_map(clean.to(DEVICE), pixels.size(-1)); rows, norms = [], []
@@ -150,19 +166,28 @@ def run_ranking(args):
     matched_l2 = float(torch.stack(norms).median(0).values.mean())
     for row in rows: row["matched_l2"] = matched_l2
     rows.sort(key=lambda row: row["high_frequency_ratio"], reverse=True)
-    _json(path, {"protocol": "quick_protocol", "l2_matching": "per-image median augmentation L2", "ranking": rows})
+    _json(path, {"protocol": "12h_quick_protocol", "samples": len(clean), "gradient_probes": args.gradient_probes, "l2_matching": "per-image median augmentation L2", "ranking": rows})
     del attacker, source, loader
     _release()
 
 
 def run_report(args):
     root = Path(args.output_dir); rows = []
+    expected = {(area, variant, seed) for area, variant in args.configs for seed in args.seeds}
+    found = set()
     for path in sorted((root / "runs").glob("*.json")):
-        payload = json.loads(path.read_text()); targets = payload["targets"]
+        payload = json.loads(path.read_text())
+        key = (payload.get("area"), payload.get("dim_variant"), payload.get("seed"))
+        if key not in expected or payload.get("protocol") != "12h_quick_protocol":
+            continue
+        found.add(key); targets = payload["targets"]
         rows.append({"area": payload["area"], "dim_variant": payload["dim_variant"], "seed": payload["seed"],
                      **payload["source_metrics"], "mean_asr": float(np.mean([x["asr"] for x in targets.values()])),
                      "mean_direction_derivative": float(np.mean([x["direction_derivative"] for x in targets.values()])),
                      "target_asr": {key: value["asr"] for key, value in targets.items()}})
+    missing = sorted(expected - found)
+    if missing:
+        raise RuntimeError(f"Missing 12h quick-protocol runs: {missing}")
     grouped = {}
     for row in rows:
         key = f'{row["area"]}/{row["dim_variant"]}'; grouped.setdefault(key, []).append(row)
@@ -172,21 +197,33 @@ def run_report(args):
                      "gradient_consistency": float(np.mean([x["gradient_consistency"] for x in values])),
                      "input_high_frequency_ratio": float(np.mean([x["input_high_frequency_ratio"] for x in values]))}
                for key, values in grouped.items()}
-    _json(root / "dim_bg_mechanism_report.json", {"protocol": "quick_protocol", "seeds": list(args.seeds), "runs": rows, "summary": summary})
+    _json(root / "dim_bg_mechanism_report.json", {"protocol": "12h_quick_protocol", "seeds": list(args.seeds), "configs": [list(item) for item in args.configs], "samples": args.max_samples_requested, "gradient_probes": args.gradient_probes, "runs": rows, "summary": summary})
+
+
+def _parse_configs(value):
+    configs = []
+    for item in value.split(","):
+        area, variant = item.split(":", 1)
+        if area not in AREAS or variant not in DIM_VARIANTS:
+            raise argparse.ArgumentTypeError(f"Unsupported mechanism config: {item}")
+        configs.append((area, variant))
+    return tuple(configs)
 
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__); p.add_argument("mode", choices=("all", "rank", "experiment", "report"))
     p.add_argument("--output-dir", default="outputs/dim_bg_mechanism_quick"); p.add_argument("--image-dir", default=IMAGE_DIR); p.add_argument("--annotations-path", default=ANNOTATIONS_PATH)
     p.add_argument("--img-size", type=int, default=224); p.add_argument("--batch-size", type=int, default=4); p.add_argument("--eval-batch-size", type=int, default=32); p.add_argument("--num-workers", type=int, default=4)
-    p.add_argument("--max-samples", dest="max_samples_requested", type=int, default=100); p.add_argument("--seeds", type=lambda x: tuple(map(int, x.split(','))), default=(0, 1))
-    p.add_argument("--trace-steps", type=lambda x: tuple(map(int, x.split(','))), default=(1, 10, 20, 40)); p.add_argument("--target-models", type=parse_model_names, default=MAIN_TARGETS)
-    p.add_argument("--areas", type=parse_model_names, default=AREAS); p.add_argument("--variants", type=parse_model_names, default=DIM_VARIANTS); p.add_argument("--force", action="store_true")
+    p.add_argument("--max-samples", dest="max_samples_requested", type=int, default=50); p.add_argument("--seeds", type=lambda x: tuple(map(int, x.split(','))), default=(0, 1))
+    p.add_argument("--gradient-probes", type=int, default=2); p.add_argument("--target-models", type=parse_model_names, default=MAIN_TARGETS)
+    p.add_argument("--configs", type=_parse_configs, default=QUICK_CONFIGS); p.add_argument("--force", action="store_true")
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.gradient_probes < 2:
+        raise ValueError("gradient-probes must be at least 2 to measure consistency.")
     if args.mode in ("all", "rank"): run_ranking(args)
     if args.mode in ("all", "experiment"): run_experiment(args)
     if args.mode in ("all", "report"): run_report(args)
