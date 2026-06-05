@@ -185,7 +185,7 @@ def dim_operator_frequency_response(args):
         vals = []
         radius = (FFT_BANDS[band] + FFT_BANDS[band + 1]) * 0.25
         freq = max(1, int(round(radius * min(height, width))))
-        basis = torch.cos(2 * np.pi * freq * xx / width).view(1, 1, height, width).repeat(1, 3, 1, 1)
+        basis = torch.cos(2 * np.pi * freq * (xx / width + yy / height)).view(1, 1, height, width).repeat(1, 3, 1, 1)
         basis = basis / basis.flatten(1).norm(dim=1).view(-1, 1, 1, 1).clamp_min(1e-20)
         for _ in range(args.operator_samples):
             scale = torch.empty((), device=DEVICE).uniform_(args.dim_resize_min, args.dim_resize_max).item()
