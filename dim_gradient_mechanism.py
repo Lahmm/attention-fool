@@ -231,6 +231,7 @@ def run_experiment(args):
         _release()
         for model_name in args.target_models:
             model = build_vit_model(num_classes=1000, model_name=model_name)
+            model.eval()
             sample_start = 0
             for batch_idx, offset in enumerate(range(0, len(trace["rows"]), len(args.trace_steps))):
                 rows = trace["rows"][offset:offset + len(args.trace_steps)]
