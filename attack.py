@@ -121,7 +121,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         guide_aug_strength: float = 0.2,
         guide_grad_norm_area: str = "none",
         lowmid_grad_tuning: bool = False,
-        lowmid_grad_high_scale: float = 0.5,
+        lowmid_grad_rotation_strength: float = 0.5,
         lowmid_grad_preserve_norm: bool = True,
         device: torch.device | None = None,
     ) -> None:
@@ -143,8 +143,10 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             raise ValueError(f"eot_iter must be positive, got {eot_iter}.")
         if nesterov and not use_momentum:
             raise ValueError("--ni requires --mi because Nesterov lookahead depends on momentum.")
-        if lowmid_grad_high_scale < 0:
-            raise ValueError(f"lowmid_grad_high_scale must be non-negative, got {lowmid_grad_high_scale}.")
+        if not 0 <= lowmid_grad_rotation_strength < 1:
+            raise ValueError(
+                f"lowmid_grad_rotation_strength must be in [0, 1), got {lowmid_grad_rotation_strength}."
+            )
         if not isinstance(lowmid_grad_preserve_norm, bool):
             raise ValueError(
                 f"lowmid_grad_preserve_norm must be bool, got {type(lowmid_grad_preserve_norm).__name__}."
@@ -167,7 +169,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.nesterov = bool(nesterov)
         self.normalize_grad = bool(normalize_grad)
         self.lowmid_grad_tuning = bool(lowmid_grad_tuning)
-        self.lowmid_grad_high_scale = float(lowmid_grad_high_scale)
+        self.lowmid_grad_rotation_strength = float(lowmid_grad_rotation_strength)
         self.lowmid_grad_preserve_norm = lowmid_grad_preserve_norm
         self.attention_guide_models = tuple(attention_guide_models or ())
 
@@ -288,10 +290,29 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             return grad
         lowmid = sum((self._fft_project_grad(grad, band) for band in range(6)), torch.zeros_like(grad))
         high = sum((self._fft_project_grad(grad, band) for band in range(6, 8)), torch.zeros_like(grad))
-        tuned = lowmid + self.lowmid_grad_high_scale * high
+
+        eps = 1e-12
+        lowmid_norm = lowmid.flatten(1).norm(p=2, dim=1).view(-1, 1, 1, 1)
+        high_norm = high.flatten(1).norm(p=2, dim=1).view(-1, 1, 1, 1)
+        valid = (lowmid_norm > eps) & (high_norm > eps)
+        if not valid.any():
+            return grad
+
+        strength = torch.as_tensor(self.lowmid_grad_rotation_strength, device=grad.device, dtype=lowmid_norm.dtype)
+        theta = strength * torch.atan2(high_norm, lowmid_norm)
+        cos_theta = torch.cos(theta)
+        sin_theta = torch.sin(theta)
+        rotated_lowmid_coeff = lowmid_norm * cos_theta + high_norm * sin_theta
+        rotated_high_coeff = -lowmid_norm * sin_theta + high_norm * cos_theta
+
+        lowmid_unit = lowmid / lowmid_norm.clamp_min(eps)
+        high_unit = high / high_norm.clamp_min(eps)
+        rotated = rotated_lowmid_coeff * lowmid_unit + rotated_high_coeff * high_unit
+        tuned = torch.where(valid, rotated, grad)
+
         if self.lowmid_grad_preserve_norm:
             grad_norm = grad.flatten(1).norm(p=2, dim=1).view(-1, 1, 1, 1)
-            tuned_norm = tuned.flatten(1).norm(p=2, dim=1).view(-1, 1, 1, 1).clamp_min(1e-12)
+            tuned_norm = tuned.flatten(1).norm(p=2, dim=1).view(-1, 1, 1, 1).clamp_min(eps)
             tuned = tuned * (grad_norm / tuned_norm)
         return tuned
 

@@ -57,41 +57,55 @@ class LowMidGradientTuningTests(unittest.TestCase):
         grad = torch.randn(2, 3, 16, 16)
         self.assertIs(attacker._tune_lowmid_gradient(grad), grad)
 
-    def test_enabled_tuning_preserves_shape(self):
+    def test_enabled_tuning_preserves_shape_and_is_finite(self):
         attacker = make_attacker(lowmid_grad_tuning=True)
         grad = torch.randn(2, 3, 16, 16)
-        self.assertEqual(attacker._tune_lowmid_gradient(grad).shape, grad.shape)
+        tuned = attacker._tune_lowmid_gradient(grad)
+        self.assertEqual(tuned.shape, grad.shape)
+        self.assertTrue(torch.isfinite(tuned).all())
 
-    def test_high_scale_one_reconstructs_original_gradient(self):
-        attacker = make_attacker(lowmid_grad_tuning=True, lowmid_grad_high_scale=1.0)
+    def test_zero_rotation_strength_reconstructs_original_gradient(self):
+        attacker = make_attacker(lowmid_grad_tuning=True, lowmid_grad_rotation_strength=0.0)
         grad = torch.randn(2, 3, 16, 16, dtype=torch.float64)
         tuned = attacker._tune_lowmid_gradient(grad)
         self.assertTrue(torch.allclose(tuned, grad, atol=1e-10, rtol=1e-10))
 
-    def test_high_scale_zero_removes_high_band_energy(self):
-        attacker = make_attacker(lowmid_grad_tuning=True, lowmid_grad_high_scale=0.0)
+    def test_rotation_increases_lowmid_energy_ratio_without_dropping_high(self):
+        attacker = make_attacker(lowmid_grad_tuning=True, lowmid_grad_rotation_strength=0.5)
         grad = torch.randn(2, 3, 16, 16, dtype=torch.float64)
         tuned = attacker._tune_lowmid_gradient(grad)
-        self.assertLess(band_energy(attacker, tuned, range(6, 8)), 1e-18)
+        self.assertGreater(lowmid_ratio(attacker, tuned), lowmid_ratio(attacker, grad))
+        self.assertGreater(band_energy(attacker, tuned, range(6, 8)), 1e-12)
 
-    def test_subunit_high_scale_does_not_reduce_lowmid_ratio(self):
-        attacker = make_attacker(lowmid_grad_tuning=True, lowmid_grad_high_scale=0.5)
+    def test_stronger_rotation_increases_lowmid_ratio_more(self):
         grad = torch.randn(2, 3, 16, 16, dtype=torch.float64)
-        tuned = attacker._tune_lowmid_gradient(grad)
-        self.assertGreaterEqual(lowmid_ratio(attacker, tuned) + 1e-12, lowmid_ratio(attacker, grad))
+        weak = make_attacker(lowmid_grad_tuning=True, lowmid_grad_rotation_strength=0.25)._tune_lowmid_gradient(grad)
+        strong_attacker = make_attacker(lowmid_grad_tuning=True, lowmid_grad_rotation_strength=0.75)
+        strong = strong_attacker._tune_lowmid_gradient(grad)
+        self.assertGreater(lowmid_ratio(strong_attacker, strong), lowmid_ratio(strong_attacker, weak))
 
     def test_preserve_norm_matches_per_sample_original_norm(self):
         attacker = make_attacker(
             lowmid_grad_tuning=True,
-            lowmid_grad_high_scale=0.25,
+            lowmid_grad_rotation_strength=0.5,
             lowmid_grad_preserve_norm=True,
         )
         grad = torch.randn(2, 3, 16, 16, dtype=torch.float64)
         tuned = attacker._tune_lowmid_gradient(grad)
         self.assertTrue(torch.allclose(tuned.flatten(1).norm(dim=1), grad.flatten(1).norm(dim=1), atol=1e-10))
 
+    def test_degenerate_gradients_are_stable(self):
+        attacker = make_attacker(lowmid_grad_tuning=True, lowmid_grad_rotation_strength=0.5)
+        grad = torch.randn(2, 3, 16, 16, dtype=torch.float64)
+        pure_lowmid = sum((attacker._fft_project_grad(grad, band) for band in range(6)), torch.zeros_like(grad))
+        pure_high = sum((attacker._fft_project_grad(grad, band) for band in range(6, 8)), torch.zeros_like(grad))
+        for sample in (pure_lowmid, pure_high, torch.zeros_like(grad)):
+            tuned = attacker._tune_lowmid_gradient(sample)
+            self.assertTrue(torch.isfinite(tuned).all())
+            self.assertTrue(torch.allclose(tuned, sample, atol=1e-10, rtol=1e-10))
+
     def test_attack_batch_smoke_with_tuning(self):
-        attacker = make_attacker(lowmid_grad_tuning=True, lowmid_grad_high_scale=0.5)
+        attacker = make_attacker(lowmid_grad_tuning=True, lowmid_grad_rotation_strength=0.5)
         images = torch.randn(2, 3, 16, 16)
         labels = torch.tensor([1, 2])
         adv = attacker.attack_batch(images, labels)
@@ -99,7 +113,9 @@ class LowMidGradientTuningTests(unittest.TestCase):
 
     def test_constructor_validates_lowmid_options(self):
         with self.assertRaises(ValueError):
-            make_attacker(lowmid_grad_high_scale=-0.1)
+            make_attacker(lowmid_grad_rotation_strength=-0.1)
+        with self.assertRaises(ValueError):
+            make_attacker(lowmid_grad_rotation_strength=1.0)
         with self.assertRaises(ValueError):
             make_attacker(lowmid_grad_preserve_norm=1)
 
@@ -110,14 +126,14 @@ class LowMidGradientTuningCLITests(unittest.TestCase):
         argv = [
             "main.py",
             "--lowmid-grad-tuning",
-            "--lowmid-grad-high-scale",
+            "--lowmid-grad-rotation-strength",
             "0.25",
             "--no-lowmid-grad-preserve-norm",
         ]
         with mock.patch.object(sys, "argv", argv):
             args = main.parse_args()
         self.assertTrue(args.lowmid_grad_tuning)
-        self.assertEqual(args.lowmid_grad_high_scale, 0.25)
+        self.assertEqual(args.lowmid_grad_rotation_strength, 0.25)
         self.assertFalse(args.lowmid_grad_preserve_norm)
 
     def test_create_attacker_forwards_lowmid_options(self):
@@ -129,11 +145,11 @@ class LowMidGradientTuningCLITests(unittest.TestCase):
             layers=(-1,),
             ti_sigma=0,
             lowmid_grad_tuning=True,
-            lowmid_grad_high_scale=0.25,
+            lowmid_grad_rotation_strength=0.25,
             lowmid_grad_preserve_norm=False,
         )
         self.assertTrue(attacker.lowmid_grad_tuning)
-        self.assertEqual(attacker.lowmid_grad_high_scale, 0.25)
+        self.assertEqual(attacker.lowmid_grad_rotation_strength, 0.25)
         self.assertFalse(attacker.lowmid_grad_preserve_norm)
 
 
