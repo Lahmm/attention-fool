@@ -49,6 +49,9 @@ def create_attacker(
     guide_aug_copies: int = 3,
     guide_aug_strength: float = 0.2,
     guide_grad_norm_area: str = "none",
+    lowmid_grad_tuning: bool = False,
+    lowmid_grad_high_scale: float = 0.5,
+    lowmid_grad_preserve_norm: bool = True,
 ) -> LazyAggregationAttacker:
     return LazyAggregationAttacker(
         model=model,
@@ -78,6 +81,9 @@ def create_attacker(
         guide_aug_copies=guide_aug_copies,
         guide_aug_strength=guide_aug_strength,
         guide_grad_norm_area=guide_grad_norm_area,
+        lowmid_grad_tuning=lowmid_grad_tuning,
+        lowmid_grad_high_scale=lowmid_grad_high_scale,
+        lowmid_grad_preserve_norm=lowmid_grad_preserve_norm,
         device=DEVICE,
     )
 
@@ -253,6 +259,10 @@ def parse_args():
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Random copies per guide augmentation method.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
     parser.add_argument("--guide-grad-norm-area", choices=["none", "foreground", "background"], default="none", help="Attention-guide region whose input gradients are normalized after backprop. none disables guided gradient normalization.")
+    parser.add_argument("--lowmid-grad-tuning", action="store_true", help="Enable low/mid frequency gradient tuning after TI smoothing and before momentum.")
+    parser.add_argument("--lowmid-grad-high-scale", type=float, default=0.5, help="Scale applied to high-frequency gradient bands when --lowmid-grad-tuning is enabled.")
+    parser.add_argument("--no-lowmid-grad-preserve-norm", dest="lowmid_grad_preserve_norm", action="store_false", help="Do not preserve per-sample gradient L2 norm after low/mid gradient tuning.")
+    parser.set_defaults(lowmid_grad_preserve_norm=True)
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode, use --output-dir outputs/attack/lazyagg.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
@@ -294,6 +304,9 @@ def main(
     guide_aug_copies: int = 3,
     guide_aug_strength: float = 0.2,
     guide_grad_norm_area: str = "none",
+    lowmid_grad_tuning: bool = False,
+    lowmid_grad_high_scale: float = 0.5,
+    lowmid_grad_preserve_norm: bool = True,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -359,6 +372,9 @@ def main(
         guide_aug_copies=guide_aug_copies,
         guide_aug_strength=guide_aug_strength,
         guide_grad_norm_area=guide_grad_norm_area,
+        lowmid_grad_tuning=lowmid_grad_tuning,
+        lowmid_grad_high_scale=lowmid_grad_high_scale,
+        lowmid_grad_preserve_norm=lowmid_grad_preserve_norm,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
         dataloader=dataloader,
@@ -417,6 +433,9 @@ if __name__ == "__main__":
         guide_aug_copies=args.guide_aug_copies,
         guide_aug_strength=args.guide_aug_strength,
         guide_grad_norm_area=args.guide_grad_norm_area,
+        lowmid_grad_tuning=args.lowmid_grad_tuning,
+        lowmid_grad_high_scale=args.lowmid_grad_high_scale,
+        lowmid_grad_preserve_norm=args.lowmid_grad_preserve_norm,
         output_dir=args.output_dir,
         mode=args.mode,
         image_dir=args.image_dir,

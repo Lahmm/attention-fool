@@ -4,6 +4,9 @@ import torch.nn.functional as F
 from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
 
 
+_LOWMID_GRAD_FFT_BANDS = (0.0, 0.04, 0.08, 0.12, 0.18, 0.25, 0.35, 0.50, 1.0)
+
+
 class MIFGSMAttacker:
     """Momentum Iterative FGSM over the whole input image under an L_inf bound."""
 
@@ -117,6 +120,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         guide_aug_copies: int = 3,
         guide_aug_strength: float = 0.2,
         guide_grad_norm_area: str = "none",
+        lowmid_grad_tuning: bool = False,
+        lowmid_grad_high_scale: float = 0.5,
+        lowmid_grad_preserve_norm: bool = True,
         device: torch.device | None = None,
     ) -> None:
         super().__init__(
@@ -137,6 +143,12 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             raise ValueError(f"eot_iter must be positive, got {eot_iter}.")
         if nesterov and not use_momentum:
             raise ValueError("--ni requires --mi because Nesterov lookahead depends on momentum.")
+        if lowmid_grad_high_scale < 0:
+            raise ValueError(f"lowmid_grad_high_scale must be non-negative, got {lowmid_grad_high_scale}.")
+        if not isinstance(lowmid_grad_preserve_norm, bool):
+            raise ValueError(
+                f"lowmid_grad_preserve_norm must be bool, got {type(lowmid_grad_preserve_norm).__name__}."
+            )
 
         self.layers = tuple(int(layer) for layer in layers)
         self.ti_sigma = float(ti_sigma)
@@ -154,6 +166,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.use_momentum = bool(use_momentum)
         self.nesterov = bool(nesterov)
         self.normalize_grad = bool(normalize_grad)
+        self.lowmid_grad_tuning = bool(lowmid_grad_tuning)
+        self.lowmid_grad_high_scale = float(lowmid_grad_high_scale)
+        self.lowmid_grad_preserve_norm = lowmid_grad_preserve_norm
         self.attention_guide_models = tuple(attention_guide_models or ())
 
         guide_types = tuple(item.strip() for item in attention_guide_type.split(",") if item.strip())
@@ -244,6 +259,41 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if self._ti_kernel is None or self.ti_sigma <= 0:
             return grad
         return self._apply_depthwise_kernel(grad, self._ti_kernel)
+
+    @staticmethod
+    def _fft_grad_mask(height: int, width: int, band: int, *, device=None, dtype=torch.float32) -> torch.Tensor:
+        if not 0 <= band < len(_LOWMID_GRAD_FFT_BANDS) - 1:
+            raise ValueError(f"band must be in [0, {len(_LOWMID_GRAD_FFT_BANDS) - 2}], got {band}.")
+        fy = torch.fft.fftfreq(height, device=device, dtype=dtype).view(height, 1)
+        fx = torch.fft.fftfreq(width, device=device, dtype=dtype).view(1, width)
+        radius = torch.sqrt((fy / 0.5).square() + (fx / 0.5).square()) / (2.0 ** 0.5)
+        lo, hi = _LOWMID_GRAD_FFT_BANDS[band], _LOWMID_GRAD_FFT_BANDS[band + 1]
+        return (radius >= lo) & (radius <= hi) if band == 0 else (radius > lo) & (radius <= hi)
+
+    @staticmethod
+    def _fft_project_grad(grad: torch.Tensor, band: int) -> torch.Tensor:
+        work = grad if grad.dtype == torch.float64 else grad.float()
+        mask = LazyAggregationAttacker._fft_grad_mask(
+            grad.size(-2),
+            grad.size(-1),
+            band,
+            device=grad.device,
+            dtype=work.dtype,
+        )
+        freq = torch.fft.fft2(work, dim=(-2, -1), norm="ortho")
+        return torch.fft.ifft2(freq * mask, dim=(-2, -1), norm="ortho").real.to(grad.dtype)
+
+    def _tune_lowmid_gradient(self, grad: torch.Tensor) -> torch.Tensor:
+        if not self.lowmid_grad_tuning:
+            return grad
+        lowmid = sum((self._fft_project_grad(grad, band) for band in range(6)), torch.zeros_like(grad))
+        high = sum((self._fft_project_grad(grad, band) for band in range(6, 8)), torch.zeros_like(grad))
+        tuned = lowmid + self.lowmid_grad_high_scale * high
+        if self.lowmid_grad_preserve_norm:
+            grad_norm = grad.flatten(1).norm(p=2, dim=1).view(-1, 1, 1, 1)
+            tuned_norm = tuned.flatten(1).norm(p=2, dim=1).view(-1, 1, 1, 1).clamp_min(1e-12)
+            tuned = tuned * (grad_norm / tuned_norm)
+        return tuned
 
     def reset_fixed_dim(self) -> None:
         self._fixed_dim_params = None
@@ -798,6 +848,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 grad = self._normalize_grad(grad)
             grad = self._normalize_guided_grad(grad, guide_pixel_map)
             grad = self._smooth_grad(grad)
+            grad = self._tune_lowmid_gradient(grad)
             if self.use_momentum:
                 momentum = self.decay * momentum + grad
                 update = momentum
