@@ -111,6 +111,44 @@ class LowMidGradientTuningTests(unittest.TestCase):
         adv = attacker.attack_batch(images, labels)
         self.assertEqual(adv.shape, images.shape)
 
+
+    def test_lowmid_dss_sign_filter_threshold_is_monotonic(self):
+        grad = torch.randn(2, 3, 16, 16, dtype=torch.float64)
+        term_grads = (grad, -grad, grad)
+        loose = make_attacker(
+            lowmid_dss_filter=True,
+            lowmid_dss_consistency="sign",
+            lowmid_dss_agreement_threshold=0.34,
+        )._apply_lowmid_dss_filter(grad, term_grads)
+        strict = make_attacker(
+            lowmid_dss_filter=True,
+            lowmid_dss_consistency="sign",
+            lowmid_dss_agreement_threshold=1.0,
+        )._apply_lowmid_dss_filter(grad, term_grads)
+        self.assertGreaterEqual(band_energy(make_attacker(), loose, range(6)), band_energy(make_attacker(), strict, range(6)))
+
+    def test_lowmid_dss_filter_preserves_high_component(self):
+        attacker = make_attacker(lowmid_dss_filter=True, lowmid_dss_consistency="sign")
+        grad = torch.randn(2, 3, 16, 16, dtype=torch.float64)
+        term_grads = (grad, -grad, grad)
+        filtered = attacker._apply_lowmid_dss_filter(grad, term_grads)
+        raw_high = sum((attacker._fft_project_grad(grad, band) for band in range(6, 8)), torch.zeros_like(grad))
+        filtered_high = sum((attacker._fft_project_grad(filtered, band) for band in range(6, 8)), torch.zeros_like(filtered))
+        self.assertTrue(torch.allclose(filtered_high, raw_high, atol=1e-10, rtol=1e-10))
+
+    def test_lowmid_dss_cos_filter_is_finite_and_shape_preserving(self):
+        attacker = make_attacker(lowmid_dss_filter=True, lowmid_dss_consistency="cos")
+        grad = torch.randn(2, 3, 16, 16)
+        term_grads = (grad, grad + 0.01 * torch.randn_like(grad), -grad)
+        filtered = attacker._apply_lowmid_dss_filter(grad, term_grads)
+        self.assertEqual(filtered.shape, grad.shape)
+        self.assertTrue(torch.isfinite(filtered).all())
+
+    def test_lowmid_dss_disabled_returns_original_gradient_object(self):
+        attacker = make_attacker(lowmid_dss_filter=False)
+        grad = torch.randn(2, 3, 16, 16)
+        self.assertIs(attacker._apply_lowmid_dss_filter(grad, (grad,)), grad)
+
     def test_constructor_validates_lowmid_options(self):
         with self.assertRaises(ValueError):
             make_attacker(lowmid_grad_rotation_strength=-0.1)
@@ -118,6 +156,10 @@ class LowMidGradientTuningTests(unittest.TestCase):
             make_attacker(lowmid_grad_rotation_strength=1.0)
         with self.assertRaises(ValueError):
             make_attacker(lowmid_grad_preserve_norm=1)
+        with self.assertRaises(ValueError):
+            make_attacker(lowmid_dss_consistency="bad")
+        with self.assertRaises(ValueError):
+            make_attacker(lowmid_dss_agreement_threshold=1.5)
 
 
 @unittest.skipIf(main is None, f"main import failed: {MAIN_IMPORT_ERROR}")
@@ -129,12 +171,20 @@ class LowMidGradientTuningCLITests(unittest.TestCase):
             "--lowmid-grad-rotation-strength",
             "0.25",
             "--no-lowmid-grad-preserve-norm",
+            "--lowmid-dss-filter",
+            "--lowmid-dss-consistency",
+            "cos",
+            "--lowmid-dss-agreement-threshold",
+            "0.8",
         ]
         with mock.patch.object(sys, "argv", argv):
             args = main.parse_args()
         self.assertTrue(args.lowmid_grad_tuning)
         self.assertEqual(args.lowmid_grad_rotation_strength, 0.25)
         self.assertFalse(args.lowmid_grad_preserve_norm)
+        self.assertTrue(args.lowmid_dss_filter)
+        self.assertEqual(args.lowmid_dss_consistency, "cos")
+        self.assertEqual(args.lowmid_dss_agreement_threshold, 0.8)
 
     def test_create_attacker_forwards_lowmid_options(self):
         attacker = main.create_attacker(
@@ -147,10 +197,16 @@ class LowMidGradientTuningCLITests(unittest.TestCase):
             lowmid_grad_tuning=True,
             lowmid_grad_rotation_strength=0.25,
             lowmid_grad_preserve_norm=False,
+            lowmid_dss_filter=True,
+            lowmid_dss_consistency="cos",
+            lowmid_dss_agreement_threshold=0.8,
         )
         self.assertTrue(attacker.lowmid_grad_tuning)
         self.assertEqual(attacker.lowmid_grad_rotation_strength, 0.25)
         self.assertFalse(attacker.lowmid_grad_preserve_norm)
+        self.assertTrue(attacker.lowmid_dss_filter)
+        self.assertEqual(attacker.lowmid_dss_consistency, "cos")
+        self.assertEqual(attacker.lowmid_dss_agreement_threshold, 0.8)
 
 
 if __name__ == "__main__":

@@ -52,6 +52,9 @@ def create_attacker(
     lowmid_grad_tuning: bool = False,
     lowmid_grad_rotation_strength: float = 0.5,
     lowmid_grad_preserve_norm: bool = True,
+    lowmid_dss_filter: bool = False,
+    lowmid_dss_consistency: str = "sign",
+    lowmid_dss_agreement_threshold: float = 0.67,
 ) -> LazyAggregationAttacker:
     return LazyAggregationAttacker(
         model=model,
@@ -84,6 +87,9 @@ def create_attacker(
         lowmid_grad_tuning=lowmid_grad_tuning,
         lowmid_grad_rotation_strength=lowmid_grad_rotation_strength,
         lowmid_grad_preserve_norm=lowmid_grad_preserve_norm,
+        lowmid_dss_filter=lowmid_dss_filter,
+        lowmid_dss_consistency=lowmid_dss_consistency,
+        lowmid_dss_agreement_threshold=lowmid_dss_agreement_threshold,
         device=DEVICE,
     )
 
@@ -262,6 +268,9 @@ def parse_args():
     parser.add_argument("--lowmid-grad-tuning", action="store_true", help="Enable low/mid frequency gradient tuning after TI smoothing and before momentum.")
     parser.add_argument("--lowmid-grad-rotation-strength", type=float, default=0.5, help="Givens rotation strength toward low/mid-frequency gradient subspace when --lowmid-grad-tuning is enabled.")
     parser.add_argument("--no-lowmid-grad-preserve-norm", dest="lowmid_grad_preserve_norm", action="store_false", help="Do not preserve per-sample gradient L2 norm after low/mid gradient tuning.")
+    parser.add_argument("--lowmid-dss-filter", action="store_true", help="Filter low/mid gradient components by source-side augmentation direction stability before low/mid rotation and momentum.")
+    parser.add_argument("--lowmid-dss-consistency", choices=["sign", "cos"], default="sign", help="Consistency rule for --lowmid-dss-filter: per-element sign agreement or per-sample cosine gate.")
+    parser.add_argument("--lowmid-dss-agreement-threshold", type=float, default=0.67, help="Minimum per-element augmentation sign agreement for --lowmid-dss-consistency sign.")
     parser.set_defaults(lowmid_grad_preserve_norm=True)
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode, use --output-dir outputs/attack/lazyagg.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
@@ -307,6 +316,9 @@ def main(
     lowmid_grad_tuning: bool = False,
     lowmid_grad_rotation_strength: float = 0.5,
     lowmid_grad_preserve_norm: bool = True,
+    lowmid_dss_filter: bool = False,
+    lowmid_dss_consistency: str = "sign",
+    lowmid_dss_agreement_threshold: float = 0.67,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -375,6 +387,9 @@ def main(
         lowmid_grad_tuning=lowmid_grad_tuning,
         lowmid_grad_rotation_strength=lowmid_grad_rotation_strength,
         lowmid_grad_preserve_norm=lowmid_grad_preserve_norm,
+        lowmid_dss_filter=lowmid_dss_filter,
+        lowmid_dss_consistency=lowmid_dss_consistency,
+        lowmid_dss_agreement_threshold=lowmid_dss_agreement_threshold,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
         dataloader=dataloader,
@@ -436,6 +451,9 @@ if __name__ == "__main__":
         lowmid_grad_tuning=args.lowmid_grad_tuning,
         lowmid_grad_rotation_strength=args.lowmid_grad_rotation_strength,
         lowmid_grad_preserve_norm=args.lowmid_grad_preserve_norm,
+        lowmid_dss_filter=args.lowmid_dss_filter,
+        lowmid_dss_consistency=args.lowmid_dss_consistency,
+        lowmid_dss_agreement_threshold=args.lowmid_dss_agreement_threshold,
         output_dir=args.output_dir,
         mode=args.mode,
         image_dir=args.image_dir,

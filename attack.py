@@ -123,6 +123,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         lowmid_grad_tuning: bool = False,
         lowmid_grad_rotation_strength: float = 0.5,
         lowmid_grad_preserve_norm: bool = True,
+        lowmid_dss_filter: bool = False,
+        lowmid_dss_consistency: str = "sign",
+        lowmid_dss_agreement_threshold: float = 0.67,
         device: torch.device | None = None,
     ) -> None:
         super().__init__(
@@ -151,6 +154,14 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             raise ValueError(
                 f"lowmid_grad_preserve_norm must be bool, got {type(lowmid_grad_preserve_norm).__name__}."
             )
+        if lowmid_dss_consistency not in ("sign", "cos"):
+            raise ValueError(
+                f"lowmid_dss_consistency must be 'sign' or 'cos', got {lowmid_dss_consistency!r}."
+            )
+        if not 0.0 <= lowmid_dss_agreement_threshold <= 1.0:
+            raise ValueError(
+                f"lowmid_dss_agreement_threshold must be in [0, 1], got {lowmid_dss_agreement_threshold}."
+            )
 
         self.layers = tuple(int(layer) for layer in layers)
         self.ti_sigma = float(ti_sigma)
@@ -171,6 +182,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.lowmid_grad_tuning = bool(lowmid_grad_tuning)
         self.lowmid_grad_rotation_strength = float(lowmid_grad_rotation_strength)
         self.lowmid_grad_preserve_norm = lowmid_grad_preserve_norm
+        self.lowmid_dss_filter = bool(lowmid_dss_filter)
+        self.lowmid_dss_consistency = lowmid_dss_consistency
+        self.lowmid_dss_agreement_threshold = float(lowmid_dss_agreement_threshold)
         self.attention_guide_models = tuple(attention_guide_models or ())
 
         guide_types = tuple(item.strip() for item in attention_guide_type.split(",") if item.strip())
@@ -285,11 +299,43 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         freq = torch.fft.fft2(work, dim=(-2, -1), norm="ortho")
         return torch.fft.ifft2(freq * mask, dim=(-2, -1), norm="ortho").real.to(grad.dtype)
 
+    def _lowmid_high_components(self, grad: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        lowmid = sum((self._fft_project_grad(grad, band) for band in range(6)), torch.zeros_like(grad))
+        high = sum((self._fft_project_grad(grad, band) for band in range(6, 8)), torch.zeros_like(grad))
+        return lowmid, high
+
+    def _apply_lowmid_dss_filter(
+        self,
+        grad: torch.Tensor,
+        term_grads: tuple[torch.Tensor, ...] | None,
+    ) -> torch.Tensor:
+        if not self.lowmid_dss_filter:
+            return grad
+        if not term_grads:
+            return grad
+
+        lowmid, high = self._lowmid_high_components(grad)
+        term_lowmid = torch.stack([self._lowmid_high_components(term)[0] for term in term_grads], dim=0)
+        ref = term_lowmid.mean(dim=0)
+        eps = 1e-12
+
+        if self.lowmid_dss_consistency == "sign":
+            agreement = term_lowmid.sign().eq(ref.sign().unsqueeze(0)).to(grad.dtype).mean(dim=0)
+            mask = (agreement >= self.lowmid_dss_agreement_threshold).to(grad.dtype)
+            filtered_lowmid = lowmid * mask
+        else:
+            ref_norm = ref.flatten(1).norm(p=2, dim=1).clamp_min(eps)
+            term_norm = term_lowmid.flatten(2).norm(p=2, dim=2).clamp_min(eps)
+            cos = (term_lowmid * ref.unsqueeze(0)).flatten(2).sum(2) / (term_norm * ref_norm.unsqueeze(0))
+            gate = ((cos.mean(dim=0) + 1.0) * 0.5).clamp(0.0, 1.0).view(-1, 1, 1, 1)
+            filtered_lowmid = lowmid * gate
+
+        return filtered_lowmid + high
+
     def _tune_lowmid_gradient(self, grad: torch.Tensor) -> torch.Tensor:
         if not self.lowmid_grad_tuning:
             return grad
-        lowmid = sum((self._fft_project_grad(grad, band) for band in range(6)), torch.zeros_like(grad))
-        high = sum((self._fft_project_grad(grad, band) for band in range(6, 8)), torch.zeros_like(grad))
+        lowmid, high = self._lowmid_high_components(grad)
 
         eps = 1e-12
         lowmid_norm = lowmid.flatten(1).norm(p=2, dim=1).view(-1, 1, 1, 1)
@@ -824,21 +870,30 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     )
                     yield F.cross_entropy(logits_adv, labels)
 
+    def _attack_grad_terms(
+        self,
+        pixels: torch.Tensor,
+        labels: torch.Tensor,
+        guide_pixel_map: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]]:
+        grad_sum = None
+        term_grads = []
+        for ce_loss in self._iter_attack_losses(pixels, labels, guide_pixel_map):
+            grad_term = torch.autograd.grad(ce_loss, pixels, retain_graph=False)[0]
+            term_grads.append(grad_term)
+            grad_sum = grad_term if grad_sum is None else grad_sum + grad_term
+        if grad_sum is None:
+            raise RuntimeError("No attack loss terms were generated.")
+        return grad_sum / float(len(term_grads)), tuple(term_grads)
+
     def _attack_grad(
         self,
         pixels: torch.Tensor,
         labels: torch.Tensor,
         guide_pixel_map: torch.Tensor | None,
     ) -> torch.Tensor:
-        grad_sum = None
-        term_count = 0
-        for ce_loss in self._iter_attack_losses(pixels, labels, guide_pixel_map):
-            grad_term = torch.autograd.grad(ce_loss, pixels)[0]
-            grad_sum = grad_term if grad_sum is None else grad_sum + grad_term
-            term_count += 1
-        if grad_sum is None:
-            raise RuntimeError("No attack loss terms were generated.")
-        return grad_sum / float(term_count)
+        grad, _term_grads = self._attack_grad_terms(pixels, labels, guide_pixel_map)
+        return grad
 
     def attack_batch(
         self,
@@ -864,11 +919,21 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     delta = torch.clamp(grad_pixels - clean_pixels, -self.epsilon, self.epsilon)
                     grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
             grad_pixels = grad_pixels.detach().requires_grad_(True)
-            grad = self._attack_grad(grad_pixels, labels, guide_pixel_map)
+            if self.lowmid_dss_filter:
+                grad, term_grads = self._attack_grad_terms(grad_pixels, labels, guide_pixel_map)
+            else:
+                grad, term_grads = self._attack_grad(grad_pixels, labels, guide_pixel_map), None
             if self.normalize_grad:
                 grad = self._normalize_grad(grad)
+                if term_grads is not None:
+                    term_grads = tuple(self._normalize_grad(term) for term in term_grads)
             grad = self._normalize_guided_grad(grad, guide_pixel_map)
+            if term_grads is not None:
+                term_grads = tuple(self._normalize_guided_grad(term, guide_pixel_map) for term in term_grads)
             grad = self._smooth_grad(grad)
+            if term_grads is not None:
+                term_grads = tuple(self._smooth_grad(term) for term in term_grads)
+            grad = self._apply_lowmid_dss_filter(grad, term_grads)
             grad = self._tune_lowmid_gradient(grad)
             if self.use_momentum:
                 momentum = self.decay * momentum + grad
