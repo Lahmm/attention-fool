@@ -94,7 +94,8 @@ class NoStepProjectionExperimentTests(unittest.TestCase):
         _rows, tensors, adv = trace_attack(attacker, images, labels, "no_step_projection_no_mi", keep_steps={1, 2})
         clean = attacker._denormalize(images)
         self.assertGreater((adv.cpu() - clean).abs().max().item(), attacker.epsilon)
-        self.assertTrue(torch.allclose(tensors[-1]["x_next"] - tensors[-1]["clean"], torch.full_like(tensors[-1]["clean"], 0.2)))
+        self.assertTrue(torch.allclose(tensors[-1]["delta_t"], torch.full_like(tensors[-1]["delta_t"], 0.1)))
+        self.assertTrue(torch.allclose(tensors[-1]["x_next"] - tensors[-1]["x_t"], torch.full_like(tensors[-1]["delta_t"], 0.1)))
 
     def test_manual_accumulator_matches_mi_update_sign_under_no_step_projection(self):
         torch.manual_seed(4)
