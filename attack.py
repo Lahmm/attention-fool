@@ -126,6 +126,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         lowmid_dss_filter: bool = False,
         lowmid_dss_consistency: str = "sign",
         lowmid_dss_agreement_threshold: float = 0.67,
+        project_each_step: bool = True,
         device: torch.device | None = None,
     ) -> None:
         super().__init__(
@@ -185,6 +186,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.lowmid_dss_filter = bool(lowmid_dss_filter)
         self.lowmid_dss_consistency = lowmid_dss_consistency
         self.lowmid_dss_agreement_threshold = float(lowmid_dss_agreement_threshold)
+        self.project_each_step = bool(project_each_step)
         self.attention_guide_models = tuple(attention_guide_models or ())
 
         guide_types = tuple(item.strip() for item in attention_guide_type.split(",") if item.strip())
@@ -943,7 +945,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
 
             with torch.no_grad():
                 adv_pixels = adv_pixels + self.step_size * update.sign()
-                delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
-                adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
+                if self.project_each_step:
+                    delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
+                    adv_pixels = clean_pixels + delta
+                adv_pixels = torch.clamp(adv_pixels, 0.0, 1.0)
 
         return self._normalize(adv_pixels)
