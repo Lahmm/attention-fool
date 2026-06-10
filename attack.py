@@ -128,6 +128,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         lowmid_dss_agreement_threshold: float = 0.67,
         temporal_persistence_filter: bool = False,
         temporal_persistence_k: int = 5,
+        spectral_momentum: bool = False,
+        spectral_momentum_high_decay: float = 0.7,
         project_each_step: bool = True,
         device: torch.device | None = None,
     ) -> None:
@@ -190,6 +192,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.lowmid_dss_agreement_threshold = float(lowmid_dss_agreement_threshold)
         self.temporal_persistence_filter = bool(temporal_persistence_filter)
         self.temporal_persistence_k = int(temporal_persistence_k)
+        self.spectral_momentum = bool(spectral_momentum)
+        self.spectral_momentum_high_decay = float(spectral_momentum_high_decay)
         self.project_each_step = bool(project_each_step)
         self.attention_guide_models = tuple(attention_guide_models or ())
 
@@ -945,13 +949,24 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             guide_pixel_map = self._build_guide_pixel_map(images, clean_pixels.size(-1))
         adv_pixels = clean_pixels.clone().detach()
         momentum = torch.zeros_like(adv_pixels)
+        mom_lowmid: torch.Tensor | None = None
+        mom_high: torch.Tensor | None = None
+        if self.spectral_momentum:
+            mom_lowmid = torch.zeros_like(adv_pixels)
+            mom_high = torch.zeros_like(adv_pixels)
         grad_buffer: list[torch.Tensor] = []
 
         for step_idx in range(self.steps):
             grad_pixels = adv_pixels.detach()
             if self.nesterov and step_idx > 0:
                 with torch.no_grad():
-                    grad_pixels = grad_pixels + self.decay * self.step_size * momentum.sign()
+                    # Use combined momentum for Nesterov lookahead.
+                    effective = (
+                        momentum
+                        if not self.spectral_momentum
+                        else (mom_lowmid + mom_high)  # type: ignore[operator]
+                    )
+                    grad_pixels = grad_pixels + self.decay * self.step_size * effective.sign()
                     delta = torch.clamp(grad_pixels - clean_pixels, -self.epsilon, self.epsilon)
                     grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
             grad_pixels = grad_pixels.detach().requires_grad_(True)
@@ -963,19 +978,28 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             grad = self._apply_lowmid_dss_filter(grad, momentum)
             grad = self._tune_lowmid_gradient(grad)
 
-            # Temporal sign persistence filter: gate gradient elements by their
-            # sign consistency across the last K steps.  Elements with stable
-            # sign across time are amplified; unstable ones are dampened.
+            # Temporal sign persistence filter.
             if self.temporal_persistence_filter:
                 grad_buffer.append(grad.detach().clone())
                 if len(grad_buffer) > self.temporal_persistence_k:
                     grad_buffer.pop(0)
                 if len(grad_buffer) >= 2:
                     signs = torch.stack([g.sign() for g in grad_buffer], dim=0)
-                    persistence = signs.float().mean(dim=0).abs()  # [B,3,H,W] ∈ [0,1]
+                    persistence = signs.float().mean(dim=0).abs()
                     grad = grad * persistence
 
-            if self.use_momentum:
+            if self.spectral_momentum and mom_lowmid is not None and mom_high is not None:
+                # Spectral momentum: frequency-dependent decay.
+                # Low/mid components (bands 0-5) are temporally stable →
+                # full accumulation (μ=1.0).
+                # High components (bands 6-7) are temporally noisy →
+                # faster decay (μ < 1.0), naturally suppressing their
+                # long-term contribution.
+                g_lm, g_hi = self._lowmid_high_components(grad)
+                mom_lowmid = 1.0 * mom_lowmid + g_lm
+                mom_high = self.spectral_momentum_high_decay * mom_high + g_hi
+                update = mom_lowmid + mom_high
+            elif self.use_momentum:
                 momentum = self.decay * momentum + grad
                 update = momentum
             else:
