@@ -126,6 +126,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         lowmid_dss_filter: bool = False,
         lowmid_dss_consistency: str = "sign",
         lowmid_dss_agreement_threshold: float = 0.67,
+        temporal_persistence_filter: bool = False,
+        temporal_persistence_k: int = 5,
         project_each_step: bool = True,
         device: torch.device | None = None,
     ) -> None:
@@ -186,6 +188,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.lowmid_dss_filter = bool(lowmid_dss_filter)
         self.lowmid_dss_consistency = lowmid_dss_consistency
         self.lowmid_dss_agreement_threshold = float(lowmid_dss_agreement_threshold)
+        self.temporal_persistence_filter = bool(temporal_persistence_filter)
+        self.temporal_persistence_k = int(temporal_persistence_k)
         self.project_each_step = bool(project_each_step)
         self.attention_guide_models = tuple(attention_guide_models or ())
 
@@ -941,6 +945,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             guide_pixel_map = self._build_guide_pixel_map(images, clean_pixels.size(-1))
         adv_pixels = clean_pixels.clone().detach()
         momentum = torch.zeros_like(adv_pixels)
+        grad_buffer: list[torch.Tensor] = []
 
         for step_idx in range(self.steps):
             grad_pixels = adv_pixels.detach()
@@ -957,6 +962,19 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             grad = self._smooth_grad(grad)
             grad = self._apply_lowmid_dss_filter(grad, momentum)
             grad = self._tune_lowmid_gradient(grad)
+
+            # Temporal sign persistence filter: gate gradient elements by their
+            # sign consistency across the last K steps.  Elements with stable
+            # sign across time are amplified; unstable ones are dampened.
+            if self.temporal_persistence_filter:
+                grad_buffer.append(grad.detach().clone())
+                if len(grad_buffer) > self.temporal_persistence_k:
+                    grad_buffer.pop(0)
+                if len(grad_buffer) >= 2:
+                    signs = torch.stack([g.sign() for g in grad_buffer], dim=0)
+                    persistence = signs.float().mean(dim=0).abs()  # [B,3,H,W] ∈ [0,1]
+                    grad = grad * persistence
+
             if self.use_momentum:
                 momentum = self.decay * momentum + grad
                 update = momentum

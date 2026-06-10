@@ -55,6 +55,8 @@ def create_attacker(
     lowmid_dss_filter: bool = False,
     lowmid_dss_consistency: str = "sign",
     lowmid_dss_agreement_threshold: float = 0.67,
+    temporal_persistence_filter: bool = False,
+    temporal_persistence_k: int = 5,
     project_each_step: bool = True,
 ) -> LazyAggregationAttacker:
     return LazyAggregationAttacker(
@@ -91,6 +93,8 @@ def create_attacker(
         lowmid_dss_filter=lowmid_dss_filter,
         lowmid_dss_consistency=lowmid_dss_consistency,
         lowmid_dss_agreement_threshold=lowmid_dss_agreement_threshold,
+        temporal_persistence_filter=temporal_persistence_filter,
+        temporal_persistence_k=temporal_persistence_k,
         project_each_step=project_each_step,
         device=DEVICE,
     )
@@ -273,6 +277,8 @@ def parse_args():
     parser.add_argument("--lowmid-dss-filter", action="store_true", help="Filter low/mid gradient components by source-side augmentation direction stability before low/mid rotation and momentum.")
     parser.add_argument("--lowmid-dss-consistency", choices=["sign", "cos"], default="sign", help="Consistency rule for --lowmid-dss-filter: per-element sign agreement or per-sample cosine gate.")
     parser.add_argument("--lowmid-dss-agreement-threshold", type=float, default=0.67, help="Minimum per-element augmentation sign agreement for --lowmid-dss-consistency sign.")
+    parser.add_argument("--temporal-persistence-filter", action="store_true", help="Gate gradient elements by temporal sign persistence across the last K steps before momentum accumulation.")
+    parser.add_argument("--temporal-persistence-k", type=int, default=5, help="Number of past gradients to buffer for --temporal-persistence-filter.")
     parser.add_argument("--no-step-projection", dest="project_each_step", action="store_false", help="Disable per-step L_inf projection; only clamp pixels to [0, 1] after each IFGSM-style update.")
     parser.set_defaults(lowmid_grad_preserve_norm=True, project_each_step=True)
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode, use --output-dir outputs/attack/lazyagg.")
@@ -322,6 +328,8 @@ def main(
     lowmid_dss_filter: bool = False,
     lowmid_dss_consistency: str = "sign",
     lowmid_dss_agreement_threshold: float = 0.67,
+    temporal_persistence_filter: bool = False,
+    temporal_persistence_k: int = 5,
     project_each_step: bool = True,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
@@ -394,6 +402,8 @@ def main(
         lowmid_dss_filter=lowmid_dss_filter,
         lowmid_dss_consistency=lowmid_dss_consistency,
         lowmid_dss_agreement_threshold=lowmid_dss_agreement_threshold,
+        temporal_persistence_filter=temporal_persistence_filter,
+        temporal_persistence_k=temporal_persistence_k,
         project_each_step=project_each_step,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
@@ -459,6 +469,8 @@ if __name__ == "__main__":
         lowmid_dss_filter=args.lowmid_dss_filter,
         lowmid_dss_consistency=args.lowmid_dss_consistency,
         lowmid_dss_agreement_threshold=args.lowmid_dss_agreement_threshold,
+        temporal_persistence_filter=args.temporal_persistence_filter,
+        temporal_persistence_k=args.temporal_persistence_k,
         project_each_step=args.project_each_step,
         output_dir=args.output_dir,
         mode=args.mode,
