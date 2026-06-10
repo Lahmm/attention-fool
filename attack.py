@@ -245,6 +245,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 f"got {guide_grad_norm_area!r}."
             )
         self.guide_grad_norm_area = guide_grad_norm_area
+        self._momentum_lowmid_agreement: torch.Tensor | None = None
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
         self._guide_lowpass_kernel = self._build_gaussian_kernel(kernel_size=15, sigma=3.0)
         self._guide_illumination_kernel = self._build_gaussian_kernel(kernel_size=31, sigma=8.0)
@@ -309,28 +310,52 @@ class LazyAggregationAttacker(MIFGSMAttacker):
     def _apply_lowmid_dss_filter(
         self,
         grad: torch.Tensor,
-        term_grads: tuple[torch.Tensor, ...] | None,
+        momentum: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """Cross-timestep LM-DSS: gate low/mid components by agreement with momentum.
+
+        Compares the current gradient's low/mid FFT component against the historical
+        momentum buffer instead of across augmented-input copies.  This avoids the
+        contradiction with input diversity: the diversity from augmented copies is
+        preserved through simple averaging, while ``momentum`` serves as an independent,
+        temporally-stable reference for direction consistency.
+
+        The per-sample agreement score is stored in ``self._momentum_lowmid_agreement``
+        so that ``_tune_lowmid_gradient`` can modulate the rotation strength accordingly.
+        """
         if not self.lowmid_dss_filter:
             return grad
-        if not term_grads:
+
+        # First step: momentum is all-zero — no meaningful reference yet.
+        if momentum is None or momentum.abs().sum() < 1e-12:
+            self._momentum_lowmid_agreement = None
             return grad
 
         lowmid, high = self._lowmid_high_components(grad)
-        term_lowmid = torch.stack([self._lowmid_high_components(term)[0] for term in term_grads], dim=0)
-        ref = term_lowmid.mean(dim=0)
+        mom_lowmid, _mom_high = self._lowmid_high_components(momentum)
         eps = 1e-12
 
         if self.lowmid_dss_consistency == "sign":
-            agreement = term_lowmid.sign().eq(ref.sign().unsqueeze(0)).to(grad.dtype).mean(dim=0)
-            mask = (agreement >= self.lowmid_dss_agreement_threshold).to(grad.dtype)
-            filtered_lowmid = lowmid * mask
-        else:
-            ref_norm = ref.flatten(1).norm(p=2, dim=1).clamp_min(eps)
-            term_norm = term_lowmid.flatten(2).norm(p=2, dim=2).clamp_min(eps)
-            cos = (term_lowmid * ref.unsqueeze(0)).flatten(2).sum(2) / (term_norm * ref_norm.unsqueeze(0))
-            gate = ((cos.mean(dim=0) + 1.0) * 0.5).clamp(0.0, 1.0).view(-1, 1, 1, 1)
+            # Per-element sign agreement with momentum.
+            agreement = lowmid.sign().eq(mom_lowmid.sign()).to(grad.dtype)
+            # Soft gate: agreeing elements pass unchanged; disagreeing elements are
+            # attenuated by (1 - threshold) so they are damped rather than zeroed.
+            gate = torch.where(
+                agreement.bool(),
+                torch.ones_like(agreement),
+                torch.full_like(agreement, 1.0 - self.lowmid_dss_agreement_threshold),
+            )
             filtered_lowmid = lowmid * gate
+            # Per-sample mean agreement for rotation modulation.
+            self._momentum_lowmid_agreement = agreement.flatten(1).mean(1).detach()
+        else:
+            # Per-sample cosine similarity between grad and momentum low/mid.
+            g_norm = lowmid.flatten(1).norm(p=2, dim=1).clamp_min(eps)
+            m_norm = mom_lowmid.flatten(1).norm(p=2, dim=1).clamp_min(eps)
+            cos_sim = (lowmid * mom_lowmid).flatten(1).sum(1) / (g_norm * m_norm)
+            cos_gate = ((cos_sim + 1.0) * 0.5).clamp(0.0, 1.0)
+            filtered_lowmid = lowmid * cos_gate.view(-1, 1, 1, 1)
+            self._momentum_lowmid_agreement = cos_gate.detach()
 
         return filtered_lowmid + high
 
@@ -346,7 +371,25 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if not valid.any():
             return grad
 
-        strength = torch.as_tensor(self.lowmid_grad_rotation_strength, device=grad.device, dtype=lowmid_norm.dtype)
+        base_strength = torch.as_tensor(
+            self.lowmid_grad_rotation_strength, device=grad.device, dtype=lowmid_norm.dtype,
+        )
+        # Cross-timestep DSS: modulate rotation strength by momentum agreement.
+        # When the current low/mid direction agrees with historical momentum,
+        # rotate more aggressively; when they disagree, rotate less.
+        if (
+            self.lowmid_dss_filter
+            and hasattr(self, '_momentum_lowmid_agreement')
+            and self._momentum_lowmid_agreement is not None
+        ):
+            agreement = self._momentum_lowmid_agreement.to(
+                device=grad.device, dtype=lowmid_norm.dtype,
+            ).view(-1, 1, 1, 1)
+            # Clamp to [0, 1] so disagreement never reverses the rotation.
+            strength = base_strength * agreement.clamp(0.0, 1.0)
+        else:
+            strength = base_strength
+
         theta = strength * torch.atan2(high_norm, lowmid_norm)
         cos_theta = torch.cos(theta)
         sin_theta = torch.sin(theta)
@@ -921,21 +964,12 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     delta = torch.clamp(grad_pixels - clean_pixels, -self.epsilon, self.epsilon)
                     grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
             grad_pixels = grad_pixels.detach().requires_grad_(True)
-            if self.lowmid_dss_filter:
-                grad, term_grads = self._attack_grad_terms(grad_pixels, labels, guide_pixel_map)
-            else:
-                grad, term_grads = self._attack_grad(grad_pixels, labels, guide_pixel_map), None
+            grad = self._attack_grad(grad_pixels, labels, guide_pixel_map)
             if self.normalize_grad:
                 grad = self._normalize_grad(grad)
-                if term_grads is not None:
-                    term_grads = tuple(self._normalize_grad(term) for term in term_grads)
             grad = self._normalize_guided_grad(grad, guide_pixel_map)
-            if term_grads is not None:
-                term_grads = tuple(self._normalize_guided_grad(term, guide_pixel_map) for term in term_grads)
             grad = self._smooth_grad(grad)
-            if term_grads is not None:
-                term_grads = tuple(self._smooth_grad(term) for term in term_grads)
-            grad = self._apply_lowmid_dss_filter(grad, term_grads)
+            grad = self._apply_lowmid_dss_filter(grad, momentum)
             grad = self._tune_lowmid_gradient(grad)
             if self.use_momentum:
                 momentum = self.decay * momentum + grad
