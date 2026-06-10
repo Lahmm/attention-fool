@@ -130,6 +130,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         temporal_persistence_k: int = 5,
         spectral_momentum: bool = False,
         spectral_momentum_high_decay: float = 0.7,
+        spectral_hook_rotation: bool = False,
+        spectral_hook_rotation_strength: float = 0.5,
         project_each_step: bool = True,
         device: torch.device | None = None,
     ) -> None:
@@ -194,6 +196,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.temporal_persistence_k = int(temporal_persistence_k)
         self.spectral_momentum = bool(spectral_momentum)
         self.spectral_momentum_high_decay = float(spectral_momentum_high_decay)
+        self.spectral_hook_rotation = bool(spectral_hook_rotation)
+        self.spectral_hook_rotation_strength = float(spectral_hook_rotation_strength)
         self.project_each_step = bool(project_each_step)
         self.attention_guide_models = tuple(attention_guide_models or ())
 
@@ -314,6 +318,95 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         lowmid = sum((self._fft_project_grad(grad, band) for band in range(6)), torch.zeros_like(grad))
         high = sum((self._fft_project_grad(grad, band) for band in range(6, 8)), torch.zeros_like(grad))
         return lowmid, high
+
+    def _register_spectral_hook(self) -> list:
+        """Register a backward hook on the first attention block's qkv output.
+
+        The hook decomposes the V-portion gradient into FFT bands and applies a
+        Givens rotation toward low/mid frequencies — operating *during* backprop
+        (GNS-style), not on the final input gradient.
+        """
+        hooks: list = []
+        strength = self.spectral_hook_rotation_strength
+
+        def _spectral_hook(module, grad_input, grad_output):
+            # grad_input[0] is grad w.r.t. qkv input: [B, N_tokens, 3*D]
+            g = grad_input[0]
+            if g is None or g.ndim != 3:
+                return grad_input
+
+            B, N, C3 = g.shape
+            # Split Q, K, V: each has C3//3 channels
+            C = C3 // 3
+            g_q, g_k, g_v = g[..., :C], g[..., C:2 * C], g[..., 2 * C:]
+
+            # Exclude CLS token, keep patches: [B, N_patches, C]
+            N_patches = N - 1
+            g_v_patches = g_v[:, 1:, :]  # [B, N_patches, C]
+            grid = int(N_patches ** 0.5)
+            if grid * grid != N_patches:
+                return grad_input  # non-square, skip
+
+            # Reshape to spatial: [B, C, grid, grid]
+            work = g_v_patches.transpose(1, 2).reshape(B, C, grid, grid).float()
+
+            # FFT decompose into low/mid + high
+            bands_lm = torch.stack(
+                [torch.fft.ifft2(
+                    torch.fft.fft2(work, dim=(-2, -1), norm='ortho')
+                    * self._fft_grad_mask(grid, grid, b, device=work.device, dtype=torch.float32),
+                    dim=(-2, -1), norm='ortho',
+                ).real for b in range(6)],
+                dim=0,
+            ).sum(0)  # [B, C, grid, grid]
+            bands_hi = torch.stack(
+                [torch.fft.ifft2(
+                    torch.fft.fft2(work, dim=(-2, -1), norm='ortho')
+                    * self._fft_grad_mask(grid, grid, b, device=work.device, dtype=torch.float32),
+                    dim=(-2, -1), norm='ortho',
+                ).real for b in range(6, 8)],
+                dim=0,
+            ).sum(0)  # [B, C, grid, grid]
+
+            # Per-channel Givens rotation toward low/mid
+            eps = 1e-12
+            lm_norm = bands_lm.reshape(B, C, -1).norm(p=2, dim=2)  # [B, C]
+            hi_norm = bands_hi.reshape(B, C, -1).norm(p=2, dim=2)  # [B, C]
+            valid = (lm_norm > eps) & (hi_norm > eps)  # [B, C]
+
+            theta = strength * torch.atan2(hi_norm, lm_norm)  # [B, C]
+            cos_t, sin_t = torch.cos(theta), torch.sin(theta)
+            new_lm = (lm_norm * cos_t + hi_norm * sin_t).view(B, C, 1, 1)
+            new_hi = (-lm_norm * sin_t + hi_norm * cos_t).view(B, C, 1, 1)
+
+            lm_unit = bands_lm / lm_norm.clamp_min(eps).view(B, C, 1, 1)
+            hi_unit = bands_hi / hi_norm.clamp_min(eps).view(B, C, 1, 1)
+            rotated = new_lm * lm_unit + new_hi * hi_unit  # [B, C, grid, grid]
+
+            # Preserve norm per-channel
+            orig_norm = work.reshape(B, C, -1).norm(p=2, dim=2).view(B, C, 1, 1)
+            rot_norm = rotated.reshape(B, C, -1).norm(p=2, dim=2).view(B, C, 1, 1).clamp_min(eps)
+            rotated = rotated * (orig_norm / rot_norm)
+
+            # Only modify where valid
+            mask = valid.view(B, C, 1, 1).to(work.dtype)
+            rotated = rotated * mask + work * (1.0 - mask)
+
+            # Reshape back: [B, C, grid, grid] → [B, N_patches, C]
+            g_v_patches_new = rotated.reshape(B, C, N_patches).transpose(1, 2).to(g.dtype)
+
+            # Reassemble: CLS gradient unchanged
+            g[:, 1:, 2 * C:3 * C] = g_v_patches_new
+
+            return (g, *grad_input[1:])
+
+        # Register hook on block 0's qkv
+        model = self.model.model if hasattr(self.model, 'model') else self.model
+        for name, module in model.named_modules():
+            if name == 'blocks.0.attn.qkv':
+                hooks.append(module.register_backward_hook(_spectral_hook))
+                break
+        return hooks
 
     def _apply_lowmid_dss_filter(
         self,
@@ -956,6 +1049,11 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             mom_high = torch.zeros_like(adv_pixels)
         grad_buffer: list[torch.Tensor] = []
 
+        # GNS-style hook: rotate attn.qkv gradients toward low/mid during backprop.
+        spectral_hooks: list = []
+        if self.spectral_hook_rotation:
+            spectral_hooks = self._register_spectral_hook()
+
         for step_idx in range(self.steps):
             grad_pixels = adv_pixels.detach()
             if self.nesterov and step_idx > 0:
@@ -1011,5 +1109,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
                     adv_pixels = clean_pixels + delta
                 adv_pixels = torch.clamp(adv_pixels, 0.0, 1.0)
+
+        for hook in spectral_hooks:
+            hook.remove()
 
         return self._normalize(adv_pixels)

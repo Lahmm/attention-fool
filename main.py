@@ -59,6 +59,8 @@ def create_attacker(
     temporal_persistence_k: int = 5,
     spectral_momentum: bool = False,
     spectral_momentum_high_decay: float = 0.7,
+    spectral_hook_rotation: bool = False,
+    spectral_hook_rotation_strength: float = 0.5,
     project_each_step: bool = True,
 ) -> LazyAggregationAttacker:
     return LazyAggregationAttacker(
@@ -99,6 +101,8 @@ def create_attacker(
         temporal_persistence_k=temporal_persistence_k,
         spectral_momentum=spectral_momentum,
         spectral_momentum_high_decay=spectral_momentum_high_decay,
+        spectral_hook_rotation=spectral_hook_rotation,
+        spectral_hook_rotation_strength=spectral_hook_rotation_strength,
         project_each_step=project_each_step,
         device=DEVICE,
     )
@@ -285,6 +289,8 @@ def parse_args():
     parser.add_argument("--temporal-persistence-k", type=int, default=5, help="Number of past gradients to buffer for --temporal-persistence-filter.")
     parser.add_argument("--spectral-momentum", action="store_true", help="Frequency-dependent momentum decay: low/mid components accumulate fully (decay=1.0), high components decay faster.")
     parser.add_argument("--spectral-momentum-high-decay", type=float, default=0.7, help="Momentum decay factor for high-frequency gradient components when --spectral-momentum is enabled.")
+    parser.add_argument("--spectral-hook-rotation", action="store_true", help="GNS-style: register backward hook on block 0 attn.qkv to rotate V-projection gradients toward low/mid frequencies during backprop.")
+    parser.add_argument("--spectral-hook-rotation-strength", type=float, default=0.5, help="Rotation strength for --spectral-hook-rotation.")
     parser.add_argument("--no-step-projection", dest="project_each_step", action="store_false", help="Disable per-step L_inf projection; only clamp pixels to [0, 1] after each IFGSM-style update.")
     parser.set_defaults(lowmid_grad_preserve_norm=True, project_each_step=True)
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode, use --output-dir outputs/attack/lazyagg.")
@@ -338,6 +344,8 @@ def main(
     temporal_persistence_k: int = 5,
     spectral_momentum: bool = False,
     spectral_momentum_high_decay: float = 0.7,
+    spectral_hook_rotation: bool = False,
+    spectral_hook_rotation_strength: float = 0.5,
     project_each_step: bool = True,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
@@ -414,6 +422,8 @@ def main(
         temporal_persistence_k=temporal_persistence_k,
         spectral_momentum=spectral_momentum,
         spectral_momentum_high_decay=spectral_momentum_high_decay,
+        spectral_hook_rotation=spectral_hook_rotation,
+        spectral_hook_rotation_strength=spectral_hook_rotation_strength,
         project_each_step=project_each_step,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
@@ -483,6 +493,8 @@ if __name__ == "__main__":
         temporal_persistence_k=args.temporal_persistence_k,
         spectral_momentum=args.spectral_momentum,
         spectral_momentum_high_decay=args.spectral_momentum_high_decay,
+        spectral_hook_rotation=args.spectral_hook_rotation,
+        spectral_hook_rotation_strength=args.spectral_hook_rotation_strength,
         project_each_step=args.project_each_step,
         output_dir=args.output_dir,
         mode=args.mode,
