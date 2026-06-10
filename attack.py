@@ -132,6 +132,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         spectral_momentum_high_decay: float = 0.7,
         spectral_hook_rotation: bool = False,
         spectral_hook_rotation_strength: float = 0.5,
+        grm_enabled: bool = False,
+        grm_alpha: float = 0.5,
         project_each_step: bool = True,
         device: torch.device | None = None,
     ) -> None:
@@ -198,6 +200,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.spectral_momentum_high_decay = float(spectral_momentum_high_decay)
         self.spectral_hook_rotation = bool(spectral_hook_rotation)
         self.spectral_hook_rotation_strength = float(spectral_hook_rotation_strength)
+        self.grm_enabled = bool(grm_enabled)
+        self.grm_alpha = float(grm_alpha)
         self.project_each_step = bool(project_each_step)
         self.attention_guide_models = tuple(attention_guide_models or ())
 
@@ -1027,6 +1031,38 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         grad, _term_grads = self._attack_grad_terms(pixels, labels, guide_pixel_map)
         return grad
 
+    def _attack_grad_with_robustness(
+        self,
+        pixels: torch.Tensor,
+        labels: torch.Tensor,
+        guide_pixel_map: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Mean gradient + per-element cross-augmentation sign robustness.
+
+        Robustness ρ ∈ [0,1] measures how many of the 9 augmented samples agree
+        with the mean sign at each spatial element.  Elements with ρ ≈ 1 are
+        robust to input perturbations (likely transferable); elements with ρ ≈ 0
+        are augmentation-sensitive (likely overfitting).
+        """
+        grad_sum = None
+        term_grads: list[torch.Tensor] = []
+        for ce_loss in self._iter_attack_losses(pixels, labels, guide_pixel_map):
+            g = torch.autograd.grad(ce_loss, pixels, retain_graph=False)[0]
+            term_grads.append(g)
+            grad_sum = g if grad_sum is None else grad_sum + g
+        if grad_sum is None:
+            raise RuntimeError("No attack loss terms were generated.")
+
+        grad_mean = grad_sum / float(len(term_grads))
+        mean_sign = grad_mean.sign()
+
+        robustness = torch.zeros_like(grad_mean)
+        for g in term_grads:
+            robustness += g.sign().eq(mean_sign).to(grad_mean.dtype)
+        robustness /= float(len(term_grads))  # ∈ [0, 1]
+
+        return grad_mean, robustness
+
     def attack_batch(
         self,
         images: torch.Tensor,
@@ -1068,7 +1104,16 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                     delta = torch.clamp(grad_pixels - clean_pixels, -self.epsilon, self.epsilon)
                     grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
             grad_pixels = grad_pixels.detach().requires_grad_(True)
-            grad = self._attack_grad(grad_pixels, labels, guide_pixel_map)
+
+            # GRM: compute gradient + per-element cross-augmentation robustness.
+            robustness: torch.Tensor | None = None
+            if self.grm_enabled:
+                grad, robustness = self._attack_grad_with_robustness(
+                    grad_pixels, labels, guide_pixel_map,
+                )
+            else:
+                grad = self._attack_grad(grad_pixels, labels, guide_pixel_map)
+
             if self.normalize_grad:
                 grad = self._normalize_grad(grad)
             grad = self._normalize_guided_grad(grad, guide_pixel_map)
@@ -1098,7 +1143,17 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 mom_high = self.spectral_momentum_high_decay * mom_high + g_hi
                 update = mom_lowmid + mom_high
             elif self.use_momentum:
-                momentum = self.decay * momentum + grad
+                if self.grm_enabled and robustness is not None:
+                    # Robustness-weighted momentum decay (GRM).
+                    # ρ ∈ [0,1]: μ_eff = μ · (α + (1-α) · ρ)
+                    #   ρ=1 → μ_eff = μ    (full accumulation for robust elements)
+                    #   ρ=0 → μ_eff = μ·α  (fast decay for unreliable elements)
+                    mu_eff = self.decay * (
+                        self.grm_alpha + (1.0 - self.grm_alpha) * robustness
+                    )
+                    momentum = mu_eff * momentum + grad
+                else:
+                    momentum = self.decay * momentum + grad
                 update = momentum
             else:
                 update = grad

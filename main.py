@@ -61,6 +61,8 @@ def create_attacker(
     spectral_momentum_high_decay: float = 0.7,
     spectral_hook_rotation: bool = False,
     spectral_hook_rotation_strength: float = 0.5,
+    grm_enabled: bool = False,
+    grm_alpha: float = 0.5,
     project_each_step: bool = True,
 ) -> LazyAggregationAttacker:
     return LazyAggregationAttacker(
@@ -103,6 +105,8 @@ def create_attacker(
         spectral_momentum_high_decay=spectral_momentum_high_decay,
         spectral_hook_rotation=spectral_hook_rotation,
         spectral_hook_rotation_strength=spectral_hook_rotation_strength,
+        grm_enabled=grm_enabled,
+        grm_alpha=grm_alpha,
         project_each_step=project_each_step,
         device=DEVICE,
     )
@@ -291,6 +295,8 @@ def parse_args():
     parser.add_argument("--spectral-momentum-high-decay", type=float, default=0.7, help="Momentum decay factor for high-frequency gradient components when --spectral-momentum is enabled.")
     parser.add_argument("--spectral-hook-rotation", action="store_true", help="GNS-style: register backward hook on block 0 attn.qkv to rotate V-projection gradients toward low/mid frequencies during backprop.")
     parser.add_argument("--spectral-hook-rotation-strength", type=float, default=0.5, help="Rotation strength for --spectral-hook-rotation.")
+    parser.add_argument("--grm", action="store_true", dest="grm_enabled", help="Gradient Robustness-weighted Momentum: per-element cross-augmentation sign robustness modulates momentum decay.")
+    parser.add_argument("--grm-alpha", type=float, default=0.5, help="Minimum decay fraction for GRM. Elements with zero robustness decay at μ*alpha.")
     parser.add_argument("--no-step-projection", dest="project_each_step", action="store_false", help="Disable per-step L_inf projection; only clamp pixels to [0, 1] after each IFGSM-style update.")
     parser.set_defaults(lowmid_grad_preserve_norm=True, project_each_step=True)
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode, use --output-dir outputs/attack/lazyagg.")
@@ -346,6 +352,8 @@ def main(
     spectral_momentum_high_decay: float = 0.7,
     spectral_hook_rotation: bool = False,
     spectral_hook_rotation_strength: float = 0.5,
+    grm_enabled: bool = False,
+    grm_alpha: float = 0.5,
     project_each_step: bool = True,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
@@ -424,6 +432,8 @@ def main(
         spectral_momentum_high_decay=spectral_momentum_high_decay,
         spectral_hook_rotation=spectral_hook_rotation,
         spectral_hook_rotation_strength=spectral_hook_rotation_strength,
+        grm_enabled=grm_enabled,
+        grm_alpha=grm_alpha,
         project_each_step=project_each_step,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
@@ -495,6 +505,8 @@ if __name__ == "__main__":
         spectral_momentum_high_decay=args.spectral_momentum_high_decay,
         spectral_hook_rotation=args.spectral_hook_rotation,
         spectral_hook_rotation_strength=args.spectral_hook_rotation_strength,
+        grm_enabled=args.grm_enabled,
+        grm_alpha=args.grm_alpha,
         project_each_step=args.project_each_step,
         output_dir=args.output_dir,
         mode=args.mode,
