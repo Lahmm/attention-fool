@@ -312,52 +312,38 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         grad: torch.Tensor,
         momentum: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Cross-timestep LM-DSS: gate low/mid components by agreement with momentum.
+        """Cross-timestep LM-DSS: measure momentum agreement, store for rotation.
 
         Compares the current gradient's low/mid FFT component against the historical
-        momentum buffer instead of across augmented-input copies.  This avoids the
-        contradiction with input diversity: the diversity from augmented copies is
-        preserved through simple averaging, while ``momentum`` serves as an independent,
-        temporally-stable reference for direction consistency.
+        momentum buffer and stores a per-sample agreement score in
+        ``self._momentum_lowmid_agreement`` so that ``_tune_lowmid_gradient`` can
+        modulate the rotation strength accordingly.
 
-        The per-sample agreement score is stored in ``self._momentum_lowmid_agreement``
-        so that ``_tune_lowmid_gradient`` can modulate the rotation strength accordingly.
+        The gradient passes through **unchanged** — this method only measures, it
+        does not filter.  The agreement signal is consumed exclusively by rotation
+        strength modulation, avoiding double-counting the same information.
         """
         if not self.lowmid_dss_filter:
             return grad
 
-        # First step: momentum is all-zero — no meaningful reference yet.
         if momentum is None or momentum.abs().sum() < 1e-12:
             self._momentum_lowmid_agreement = None
             return grad
 
-        lowmid, high = self._lowmid_high_components(grad)
+        lowmid, _high = self._lowmid_high_components(grad)
         mom_lowmid, _mom_high = self._lowmid_high_components(momentum)
         eps = 1e-12
 
         if self.lowmid_dss_consistency == "sign":
-            # Per-element sign agreement with momentum.
             agreement = lowmid.sign().eq(mom_lowmid.sign()).to(grad.dtype)
-            # Soft gate: agreeing elements pass unchanged; disagreeing elements are
-            # attenuated by (1 - threshold) so they are damped rather than zeroed.
-            gate = torch.where(
-                agreement.bool(),
-                torch.ones_like(agreement),
-                torch.full_like(agreement, 1.0 - self.lowmid_dss_agreement_threshold),
-            )
-            filtered_lowmid = lowmid * gate
-            # Per-sample mean agreement for rotation modulation.
             self._momentum_lowmid_agreement = agreement.flatten(1).mean(1).detach()
         else:
-            # Per-sample cosine similarity between grad and momentum low/mid.
             g_norm = lowmid.flatten(1).norm(p=2, dim=1).clamp_min(eps)
             m_norm = mom_lowmid.flatten(1).norm(p=2, dim=1).clamp_min(eps)
             cos_sim = (lowmid * mom_lowmid).flatten(1).sum(1) / (g_norm * m_norm)
-            cos_gate = ((cos_sim + 1.0) * 0.5).clamp(0.0, 1.0)
-            filtered_lowmid = lowmid * cos_gate.view(-1, 1, 1, 1)
-            self._momentum_lowmid_agreement = cos_gate.detach()
+            self._momentum_lowmid_agreement = ((cos_sim + 1.0) * 0.5).clamp(0.0, 1.0).detach()
 
-        return filtered_lowmid + high
+        return grad
 
     def _tune_lowmid_gradient(self, grad: torch.Tensor) -> torch.Tensor:
         if not self.lowmid_grad_tuning:
