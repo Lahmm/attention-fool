@@ -81,6 +81,22 @@ class TransferImageDataset(Dataset):
         return tensor, int(target)
 
 
+def _annotation_stem_index(annotations: Dict[str, Dict[str, int | str]]) -> Dict[str, str]:
+    return {Path(name).stem: name for name in annotations}
+
+
+def _lookup_annotation(
+    annotations: Dict[str, Dict[str, int | str]],
+    stem_index: Dict[str, str],
+    original_name: str,
+) -> Dict[str, int | str] | None:
+    label_info = annotations.get(original_name)
+    if label_info is not None:
+        return label_info
+    stem_key = stem_index.get(Path(original_name).stem)
+    return None if stem_key is None else annotations.get(stem_key)
+
+
 def build_transfer_samples(
     image_paths: List[Path],
     annotations: Dict[str, Dict[str, int | str]],
@@ -88,9 +104,10 @@ def build_transfer_samples(
 ) -> Tuple[List[Tuple[Path, int]], int]:
     samples: List[Tuple[Path, int]] = []
     skipped = 0
+    stem_index = _annotation_stem_index(annotations)
     for path in image_paths:
         original_name = extract_original_name(path.name, prefix)
-        label_info = annotations.get(original_name)
+        label_info = _lookup_annotation(annotations, stem_index, original_name)
         if label_info is None:
             skipped += 1
             continue
