@@ -525,9 +525,9 @@ def save_images(
         if filenames is None:
             filename = f"{prefix}_{start_index + idx:05d}.png"
         else:
-            original_name = Path(filenames[idx]).name
+            original_stem = Path(filenames[idx]).stem
             separator = "" if prefix.endswith("_") else "_"
-            filename = f"{prefix}{separator}{original_name}"
+            filename = f"{prefix}{separator}{original_stem}.png"
         path = output_dir_path / filename
         save_image(img, str(path))
         saved_paths.append(path)
