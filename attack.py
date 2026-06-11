@@ -241,6 +241,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             "progressive_spectral_noise", "progressive_spectral_noise_low", "progressive_spectral_noise_mid", "progressive_spectral_noise_high",
             "wavelet_noise", "wavelet_noise_low", "wavelet_noise_mid", "wavelet_noise_high",
             "wavelet_noise_fglow_bghigh",
+            "dim_resonance",
             "white_noise",
         )
         if not self.guide_aug_methods:
@@ -431,6 +432,11 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if not self.lowmid_dss_filter:
             return grad
 
+        if isinstance(momentum, tuple):
+            if not momentum:
+                momentum = None
+            else:
+                momentum = torch.stack([item.detach() for item in momentum]).mean(0)
         if momentum is None or momentum.abs().sum() < 1e-12:
             self._momentum_lowmid_agreement = None
             return grad
@@ -860,6 +866,23 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             x = torch.clamp(x, 0.0, 1.0)
         return x.to(pixels.dtype)
 
+    def _dim_resonance_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        """Boost the image subspace emphasized by the DIM adjoint.
+
+        For a sampled DIM resize/pad operator J, the source gradient contains
+        J^T grad L(f(Jx), y). Applying J^T J to the image and adding that
+        non-DC component creates an augmentation whose local Jacobian is
+        approximately I + gamma C J^T J, so the backward path amplifies the
+        same low/mid-frequency subspace that random DIM preserves.
+        """
+        _batch, _channels, height, width = pixels.shape
+        new_h, new_w, top, left = self._sample_dim_params(pixels)
+        transformed = self._apply_dim_transform(pixels, (new_h, new_w, top, left))
+        cropped = transformed[..., top:top + new_h, left:left + new_w]
+        restored = F.interpolate(cropped, size=(height, width), mode="bilinear", align_corners=False)
+        non_dc = restored - restored.mean(dim=(2, 3), keepdim=True)
+        return torch.clamp(pixels + self.guide_aug_strength * non_dc, 0.0, 1.0)
+
     def _wavelet_noise_pixels(self, pixels: torch.Tensor, band: str = "mid") -> torch.Tensor:
         work = pixels.float()
         _batch, _channels, height, width = work.shape
@@ -944,6 +967,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if method in ("progressive_spectral_noise", "progressive_spectral_noise_low", "progressive_spectral_noise_mid", "progressive_spectral_noise_high"):
             band = method.replace("progressive_spectral_noise", "").strip("_") or "mid"
             return self._progressive_spectral_noise_pixels(pixels, band)
+        if method == "dim_resonance":
+            return self._dim_resonance_pixels(pixels)
         if method in ("wavelet_noise", "wavelet_noise_low", "wavelet_noise_mid", "wavelet_noise_high"):
             band = method.replace("wavelet_noise", "").strip("_") or "mid"
             return self._wavelet_noise_pixels(pixels, band)

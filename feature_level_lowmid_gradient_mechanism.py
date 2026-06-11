@@ -24,7 +24,7 @@ PROTOCOL = "feature_level_lowmid_gradient_mechanism_v1"
 TRACE_STEPS = (1, 10, 20, 40)
 BAND_GROUPS = {"low": (0, 1, 2), "mid": (3, 4, 5), "high": (6, 7), "low_mid": (0, 1, 2, 3, 4, 5)}
 FEATURE_REGIONS = ("fg_attention", "bg_attention", "texture_stable", "shape_boundary", "contextual_background", "texture_noise")
-AUG_METHODS = ("dropout", "jitter", "freq", "fft_lowboost", "illumination_low", "band_noise_low", "band_noise_mid", "white_noise", "band_noise_high")
+AUG_METHODS = ("dropout", "jitter", "freq", "fft_lowboost", "illumination_low", "dim_resonance", "band_noise_low", "band_noise_mid", "white_noise", "band_noise_high")
 DIM_MODES = ("resize_only", "pad_only", "resize_pad", "nearest_resize", "bicubic_resize")
 
 

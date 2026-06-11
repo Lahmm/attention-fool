@@ -111,6 +111,16 @@ class LowMidGradientTuningTests(unittest.TestCase):
         adv = attacker.attack_batch(images, labels)
         self.assertEqual(adv.shape, images.shape)
 
+    def test_dim_resonance_augmentation_is_finite_lowmid_biased(self):
+        torch.manual_seed(9)
+        attacker = make_attacker(guide_aug_strength=0.5, dim_resize_range=(0.5, 0.5))
+        pixels = torch.rand(2, 3, 16, 16)
+        augmented = attacker._augment_full_image(pixels, "dim_resonance")
+        delta = augmented - pixels
+        self.assertEqual(augmented.shape, pixels.shape)
+        self.assertTrue(torch.isfinite(augmented).all())
+        self.assertGreater(lowmid_ratio(attacker, delta), 0.75)
+
     def test_no_step_projection_allows_delta_to_exceed_epsilon(self):
         images = torch.zeros(1, 3, 16, 16)
         labels = torch.tensor([1])
