@@ -5,7 +5,7 @@ ROOT="${ROOT:-outputs/attack/lazyagg/dim_resonance_effectiveness}"
 PYTHON_BIN="${PYTHON_BIN:-/root/miniconda3/envs/att-atk/bin/python}"
 MAX_SAMPLES="${MAX_SAMPLES:-500}"
 STEPS="${STEPS:-40}"
-BATCH_SIZE="${BATCH_SIZE:-64}"
+BATCH_SIZE="${BATCH_SIZE:-16}"
 EVAL_BATCH_SIZE="${EVAL_BATCH_SIZE:-128}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
 EVAL_WORKERS="${EVAL_WORKERS:-8}"
@@ -27,12 +27,20 @@ run_cmd() {
   "$@"
 }
 
+attack_complete() {
+  local out_dir="$1"
+  [[ -d "$out_dir" ]] || return 1
+  local count
+  count=$(find "$out_dir" -maxdepth 1 -type f -name 'adv_*' | wc -l)
+  [[ "$count" -ge "$MAX_SAMPLES" ]]
+}
+
 attack_and_eval() {
   local name="$1"
   local methods="$2"
   local out_dir="${ROOT}/${name}"
 
-  if [[ ! -d "$out_dir" || "${FORCE_ATTACK:-0}" == "1" ]]; then
+  if [[ "${FORCE_ATTACK:-0}" == "1" ]] || ! attack_complete "$out_dir"; then
     run_cmd "$PYTHON_BIN" main.py \
       --mode attack \
       --max-attacked-samples "$MAX_SAMPLES" \
@@ -76,7 +84,7 @@ attack_and_eval "fft_lowboost_djf" "dropout,jitter,freq,fft_lowboost"
 
 # Plain DIM-MI baseline with the same steps and no gradient normalization.
 BASELINE_DIR="${ROOT}/dim_mi_noaug"
-if [[ ! -d "$BASELINE_DIR" || "${FORCE_ATTACK:-0}" == "1" ]]; then
+if [[ "${FORCE_ATTACK:-0}" == "1" ]] || ! attack_complete "$BASELINE_DIR"; then
   run_cmd "$PYTHON_BIN" main.py \
     --mode attack \
     --max-attacked-samples "$MAX_SAMPLES" \
