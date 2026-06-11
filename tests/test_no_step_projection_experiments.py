@@ -7,8 +7,8 @@ import torch
 import torch.nn as nn
 
 from attack import LazyAggregationAttacker
-from lm_dss_no_step_projection_mi_ablation_s100 import BRANCHES, build_attack_cmd
-from mi_no_step_projection_mechanism import (
+from experiments.lm_dss_no_step_projection_mi_ablation_s100 import BRANCHES, build_attack_cmd
+from experiments.mi_no_step_projection_mechanism import (
     aggregate_report,
     make_attacker as make_full_attacker,
     trace_attack,

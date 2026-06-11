@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 
 from attack import LazyAggregationAttacker
-from mi_gradient_accumulation_mechanism import (
+from experiments.mi_gradient_accumulation_mechanism import (
     aggregate_report,
     build_conclusion_zh,
     trace_attack,

@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import torch
 
-from feature_level_lowmid_gradient_mechanism import (
+from experiments.feature_level_lowmid_gradient_mechanism import (
     FEATURE_REGIONS,
     classify_report_rule,
     dim_cross_band_leakage,

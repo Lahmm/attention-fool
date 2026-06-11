@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 
 from attack import LazyAggregationAttacker
-from lowmid_rotation_mechanism import (
+from experiments.lowmid_rotation_mechanism import (
     DEFAULT_ASR,
     aggregate_report,
     band_energy,

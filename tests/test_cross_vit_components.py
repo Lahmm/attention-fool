@@ -3,8 +3,8 @@ import unittest
 import numpy as np
 import torch
 
-from cross_vit_components import _component_measurements, _effect_tensor, _select_candidates, _summarize_screening
-from gradient_analysis import parse_component, screening_component_specs
+from experiments.cross_vit_components import _component_measurements, _effect_tensor, _select_candidates, _summarize_screening
+from experiments.gradient_analysis import parse_component, screening_component_specs
 
 
 class ComponentScreeningTests(unittest.TestCase):

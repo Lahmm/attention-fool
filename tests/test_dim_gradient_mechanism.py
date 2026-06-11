@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from attack import LazyAggregationAttacker
-from dim_gradient_mechanism import (
+from experiments.dim_gradient_mechanism import (
     VARIANTS,
     build_report,
     classify_band,

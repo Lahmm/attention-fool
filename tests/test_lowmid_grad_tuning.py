@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 from attack import LazyAggregationAttacker, _LOWMID_GRAD_FFT_BANDS
-from gradient_analysis import FFT_BANDS
+from experiments.gradient_analysis import FFT_BANDS
 
 try:
     import main

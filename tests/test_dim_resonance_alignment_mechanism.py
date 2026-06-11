@@ -1,6 +1,6 @@
 import unittest
 
-from dim_resonance_alignment_mechanism import aggregate_rows, build_conclusion
+from experiments.dim_resonance_alignment_mechanism import aggregate_rows, build_conclusion
 
 
 class DimResonanceAlignmentMechanismTest(unittest.TestCase):

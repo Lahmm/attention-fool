@@ -2,8 +2,8 @@ import unittest
 
 import torch
 
-from gradient_analysis import FFT_BANDS
-from dim_bg_image_gradient_frequency_math import (
+from experiments.gradient_analysis import FFT_BANDS
+from experiments.dim_bg_image_gradient_frequency_math import (
     ablate_image_band,
     band_energy_ratios,
     cross_band_patch_correlation,

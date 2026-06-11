@@ -2,7 +2,7 @@ import unittest
 import torch
 import torch.nn as nn
 from attack import LazyAggregationAttacker
-from gradient_analysis import (
+from experiments.gradient_analysis import (
     fft_decompose,
     haar_packet_paths,
     haar_packet_project,
