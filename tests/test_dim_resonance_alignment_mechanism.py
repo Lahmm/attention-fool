@@ -16,7 +16,7 @@ class DimResonanceAlignmentMechanismTest(unittest.TestCase):
 
     def test_conclusion_reports_dim_resonance_supported_when_best_on_both_axes(self):
         summary = {}
-        for variant in ("reference_djf", "dim_resonance_only", "dim_resonance_djf", "fft_lowboost_djf"):
+        for variant in ("reference_djf", "dim_resonance_only", "dim_resonance_djf", "fft_lowboost_djf", "dim_adjoint_echo_only", "dim_adjoint_echo_djf"):
             for group in ("low_mid", "high"):
                 summary[f"source_dim_alignment/{variant}/{group}"] = {
                     "dim_projection_gain": 1.0,
@@ -49,7 +49,7 @@ class DimResonanceAlignmentMechanismTest(unittest.TestCase):
         summary["increment_vs_reference/dim_resonance_djf/low_mid"]["increment_dim_projection"] = 0.3
         summary["increment_target_alignment/dim_resonance_djf/low_mid"]["increment_target_dot"] = 0.4
         text = build_conclusion(summary, {"dim_resonance_djf": 0.83})
-        self.assertIn("同时最大化低/中频 DIM 同向投影增益", text)
+        self.assertIn("机制支持候选", text)
         self.assertIn("avg ASR=0.830000", text)
 
 

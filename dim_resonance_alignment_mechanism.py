@@ -36,6 +36,8 @@ VARIANTS = {
     "dim_resonance_only": {"dim": True, "guide_aug": True, "methods": ("dim_resonance",)},
     "dim_resonance_djf": {"dim": True, "guide_aug": True, "methods": ("dropout", "jitter", "freq", "dim_resonance")},
     "fft_lowboost_djf": {"dim": True, "guide_aug": True, "methods": ("dropout", "jitter", "freq", "fft_lowboost")},
+    "dim_adjoint_echo_only": {"dim": True, "guide_aug": True, "methods": ("dim_adjoint_echo",)},
+    "dim_adjoint_echo_djf": {"dim": True, "guide_aug": True, "methods": ("dropout", "jitter", "freq", "dim_adjoint_echo")},
 }
 
 
@@ -230,6 +232,8 @@ def build_conclusion(summary: dict[str, dict[str, float | int | str]], effective
     best_target_delta = max(rows, key=lambda item: item[3])
     best_increment_lowmid = max(increment_rows, key=lambda item: item[1]) if increment_rows else None
     best_increment_target = max(increment_rows, key=lambda item: item[3]) if increment_rows else None
+    supported_increments = [item for item in increment_rows if item[1] > 0 and item[3] > 0]
+    supported_increments.sort(key=lambda item: (item[3], item[1]), reverse=True)
     lines = [
         "# DIM Resonance Alignment Mechanism",
         "",
@@ -256,12 +260,13 @@ def build_conclusion(summary: dict[str, dict[str, float | int | str]], effective
         "",
         "## 结论",
     ])
-    if best_lowmid_gain[0] == "dim_resonance_djf" and best_target_delta[0] == "dim_resonance_djf":
-        lines.append("dim_resonance_djf 同时最大化低/中频 DIM 同向投影增益和 target-gradient 对齐增量，机制证据支持它是在放大 DIM 的可迁移低/中频梯度。")
-    elif best_lowmid_gain[0] == "dim_resonance_djf":
-        lines.append("dim_resonance_djf 最强地放大了 DIM 的低/中频同向分量，但 target 对齐最优项并非同一个增强；机制证据支持低/中频同向放大，但迁移优势仍需结合 ASR 长跑判断。")
+    if supported_increments:
+        names = ", ".join(f"{item[0]}(DIM投影={item[1]:.6g}, target-dot={item[3]:.6g})" for item in supported_increments)
+        lines.append(f"相对 reference_djf 同时给出正 low/mid DIM 同向新增投影和正 low/mid target-dot 的机制支持候选: {names}。")
+    elif best_lowmid_gain[0] == best_target_delta[0]:
+        lines.append(f"{best_lowmid_gain[0]} 同时最大化绝对 low/mid DIM 投影增益和 target-cos 增量，但还需要检查相对 reference 的新增分量是否为正。")
     else:
-        lines.append("当前机制证据不支持 dim_resonance_djf 独占地放大 DIM 低/中频同向分量；需要继续搜索或调整增强。")
+        lines.append("当前机制证据尚未找到同时具有正 DIM 同向新增投影和正 target 对齐新增量的候选；需要继续搜索或结合真实 ASR 判断。")
     lines.append("注意：projection_gain 只证明相对 DIM 方向的放大，target-cos/dot 才是迁移相关性证据；二者必须一起解释。")
     return "\n".join(lines) + "\n"
 

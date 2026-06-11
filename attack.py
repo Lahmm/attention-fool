@@ -242,6 +242,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             "wavelet_noise", "wavelet_noise_low", "wavelet_noise_mid", "wavelet_noise_high",
             "wavelet_noise_fglow_bghigh",
             "dim_resonance",
+            "dim_adjoint_echo",
             "white_noise",
         )
         if not self.guide_aug_methods:
@@ -866,6 +867,13 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             x = torch.clamp(x, 0.0, 1.0)
         return x.to(pixels.dtype)
 
+    def _dim_adjoint_restore_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        _batch, _channels, height, width = pixels.shape
+        new_h, new_w, top, left = self._sample_dim_params(pixels)
+        transformed = self._apply_dim_transform(pixels, (new_h, new_w, top, left))
+        cropped = transformed[..., top:top + new_h, left:left + new_w]
+        return F.interpolate(cropped, size=(height, width), mode="bilinear", align_corners=False)
+
     def _dim_resonance_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
         """Boost the image subspace emphasized by the DIM adjoint.
 
@@ -875,13 +883,22 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         approximately I + gamma C J^T J, so the backward path amplifies the
         same low/mid-frequency subspace that random DIM preserves.
         """
-        _batch, _channels, height, width = pixels.shape
-        new_h, new_w, top, left = self._sample_dim_params(pixels)
-        transformed = self._apply_dim_transform(pixels, (new_h, new_w, top, left))
-        cropped = transformed[..., top:top + new_h, left:left + new_w]
-        restored = F.interpolate(cropped, size=(height, width), mode="bilinear", align_corners=False)
+        restored = self._dim_adjoint_restore_pixels(pixels)
         non_dc = restored - restored.mean(dim=(2, 3), keepdim=True)
         return torch.clamp(pixels + self.guide_aug_strength * non_dc, 0.0, 1.0)
+
+    def _dim_adjoint_echo_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        """Forward-identity DIM-adjoint echo augmentation.
+
+        The returned tensor has the same forward value as ``pixels`` but its
+        backward Jacobian is approximately I + gamma J^T J for a sampled DIM
+        resize/pad operator J. This directly probes whether amplifying the DIM
+        adjoint low/mid subspace improves transferable gradients without
+        moving the loss evaluation point in image space.
+        """
+        restored = self._dim_adjoint_restore_pixels(pixels)
+        augmented = pixels + self.guide_aug_strength * restored
+        return (augmented + (pixels - augmented).detach()).to(pixels.dtype)
 
     def _wavelet_noise_pixels(self, pixels: torch.Tensor, band: str = "mid") -> torch.Tensor:
         work = pixels.float()
@@ -969,6 +986,8 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             return self._progressive_spectral_noise_pixels(pixels, band)
         if method == "dim_resonance":
             return self._dim_resonance_pixels(pixels)
+        if method == "dim_adjoint_echo":
+            return self._dim_adjoint_echo_pixels(pixels)
         if method in ("wavelet_noise", "wavelet_noise_low", "wavelet_noise_mid", "wavelet_noise_high"):
             band = method.replace("wavelet_noise", "").strip("_") or "mid"
             return self._wavelet_noise_pixels(pixels, band)

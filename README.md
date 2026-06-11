@@ -122,11 +122,11 @@ python main.py --mode attack --max-attacked-samples 500 --layers=-6,-5,-4,-3,-2,
 --ti-sigma 3
 ```
 
-`--guide-aug-area` 可选 `foreground`、`background`、`all`；`all` 不使用 attention guide map。`--guide-aug-method` 可传 `dropout,jitter,freq,lowpass_gauss,laplacian_low,fft_lowboost,illumination_low,dim_resonance,band_noise,colored_noise,progressive_spectral_noise,wavelet_noise` 中的一个或多个，实际前向分支数为 `len(methods) * guide_aug_copies`。其中新增低频方法分别对应 Gaussian scale-space 低通、Laplacian pyramid 高频残差抑制、FFT2D 径向低频增益、低频 illumination field 调制，以及 DIM adjoint resonance 的随机低/中频结构增强；频谱/小波噪声方法分别对应带通频域噪声、有色频域噪声、渐进式频谱噪声和 Haar 小波子带噪声。它们先生成整图增强版本，再由 pixel/patch attention guide map 选择前景或背景区域混合。
+`--guide-aug-area` 可选 `foreground`、`background`、`all`；`all` 不使用 attention guide map。`--guide-aug-method` 可传 `dropout,jitter,freq,lowpass_gauss,laplacian_low,fft_lowboost,illumination_low,dim_resonance,band_noise,colored_noise,progressive_spectral_noise,wavelet_noise,dim_adjoint_echo` 中的一个或多个，实际前向分支数为 `len(methods) * guide_aug_copies`。其中新增低频方法分别对应 Gaussian scale-space 低通、Laplacian pyramid 高频残差抑制、FFT2D 径向低频增益、低频 illumination field 调制，DIM adjoint resonance 的随机低/中频结构增强，以及 forward-identity DIM adjoint echo 梯度增强；频谱/小波噪声方法分别对应带通频域噪声、有色频域噪声、渐进式频谱噪声和 Haar 小波子带噪声。它们先生成整图增强版本，再由 pixel/patch attention guide map 选择前景或背景区域混合。
 
 ## DIM Resonance 长跑评估
 
-`dim_resonance` 是基于 DIM adjoint 机制的增强候选。完整 effectiveness 协议固定当前最强的 DIM + MI + background patch/qk/fpridx/no-normgrad 设置，只替换 guide augmentation 方法，比较 `dropout,jitter,freq`、`dim_resonance`、二者组合、`fft_lowboost` 对照和普通 DIM-MI：
+`dim_resonance` 是基于 DIM adjoint 机制的增强候选。完整 effectiveness 协议固定当前最强的 DIM + MI + background patch/qk/fpridx/no-normgrad 设置，只替换 guide augmentation 方法，比较 `dropout,jitter,freq`、`dim_resonance`、二者组合、`fft_lowboost` 对照、`dim_adjoint_echo` 候选和普通 DIM-MI：
 
 ```powershell
 bash scripts/run_dim_resonance_effectiveness.sh

@@ -81,6 +81,8 @@ attack_and_eval "dim_resonance_only" "dim_resonance"
 attack_and_eval "dim_resonance_djf" "dropout,jitter,freq,dim_resonance"
 attack_and_eval "fft_lowboost_only" "fft_lowboost"
 attack_and_eval "fft_lowboost_djf" "dropout,jitter,freq,fft_lowboost"
+attack_and_eval "dim_adjoint_echo_only" "dim_adjoint_echo"
+attack_and_eval "dim_adjoint_echo_djf" "dropout,jitter,freq,dim_adjoint_echo"
 
 # Plain DIM-MI baseline with the same steps and no gradient normalization.
 BASELINE_DIR="${ROOT}/dim_mi_noaug"

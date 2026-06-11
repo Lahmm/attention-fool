@@ -121,6 +121,19 @@ class LowMidGradientTuningTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(augmented).all())
         self.assertGreater(lowmid_ratio(attacker, delta), 0.75)
 
+    def test_dim_adjoint_echo_is_forward_identity_with_dim_adjoint_backward(self):
+        torch.manual_seed(11)
+        attacker = make_attacker(guide_aug_strength=0.5, dim_resize_range=(0.5, 0.5))
+        pixels = torch.rand(1, 3, 16, 16, requires_grad=True)
+        weight = torch.linspace(0, 1, pixels.numel(), dtype=pixels.dtype).view_as(pixels)
+        augmented = attacker._augment_full_image(pixels, "dim_adjoint_echo")
+        self.assertTrue(torch.allclose(augmented, pixels))
+        loss = (augmented * weight).sum()
+        grad = torch.autograd.grad(loss, pixels)[0]
+        self.assertEqual(grad.shape, pixels.shape)
+        self.assertTrue(torch.isfinite(grad).all())
+        self.assertGreater((grad - weight).abs().mean().item(), 1e-4)
+
     def test_no_step_projection_allows_delta_to_exceed_epsilon(self):
         images = torch.zeros(1, 3, 16, 16)
         labels = torch.tensor([1])

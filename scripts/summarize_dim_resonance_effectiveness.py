@@ -17,6 +17,8 @@ VARIANTS = (
     "dim_resonance_djf",
     "fft_lowboost_only",
     "fft_lowboost_djf",
+    "dim_adjoint_echo_only",
+    "dim_adjoint_echo_djf",
 )
 MODEL_COLS = (
     "deit_base_patch16_224",
