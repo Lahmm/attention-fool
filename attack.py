@@ -686,8 +686,6 @@ class LMDSSAttacker:
             return torch.clamp(pixels * (1.0 - strength) + corrupt * strength, 0.0, 1.0)
         if method == "dim_resonance":
             return self._dim_resonance_pixels(pixels)
-        if method == "dim_adjoint_echo":
-            return self._dim_adjoint_echo_pixels(pixels)
         if method == "white_noise":
             return self._white_noise_pixels(pixels)
         raise ValueError(f"Unsupported guide augmentation method: {method}")
@@ -718,7 +716,17 @@ class LMDSSAttacker:
         if not self.guide_aug:
             yield pixels
             return
-        for method in self.guide_aug_methods:
+
+        ordinary_methods = tuple(
+            method for method in self.guide_aug_methods
+            if method != "dim_adjoint_echo"
+        )
+        if not ordinary_methods:
+            for _copy_idx in range(self.guide_aug_copies):
+                yield pixels
+            return
+
+        for method in ordinary_methods:
             for _copy_idx in range(self.guide_aug_copies):
                 yield self._guide_augmented_pixels(pixels, guide_pixel_map, method)
 
@@ -728,9 +736,13 @@ class LMDSSAttacker:
         labels: torch.Tensor,
         guide_pixel_map: torch.Tensor | None,
     ):
+        use_dim_adjoint_echo = self.guide_aug and "dim_adjoint_echo" in self.guide_aug_methods
         for forward_pixels in self._iter_forward_pixels(pixels, guide_pixel_map):
+            if use_dim_adjoint_echo:
+                forward_pixels = self._dim_adjoint_echo_pixels(forward_pixels)
+            model_pixels = self._input_diversity(forward_pixels)
             logits_adv = self.model(
-                self._input_diversity(self._normalize(forward_pixels)),
+                self._normalize(model_pixels),
                 return_attn=False,
             )
             yield F.cross_entropy(logits_adv, labels)

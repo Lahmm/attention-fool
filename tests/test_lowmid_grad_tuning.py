@@ -132,7 +132,7 @@ class LowMidGradientTuningTests(unittest.TestCase):
         attacker = make_attacker(guide_aug_strength=0.5, dim_resize_range=(0.5, 0.5))
         pixels = torch.rand(1, 3, 16, 16, requires_grad=True)
         weight = torch.linspace(0, 1, pixels.numel(), dtype=pixels.dtype).view_as(pixels)
-        augmented = attacker._augment_full_image(pixels, "dim_adjoint_echo")
+        augmented = attacker._dim_adjoint_echo_pixels(pixels)
         self.assertTrue(torch.allclose(augmented, pixels))
         loss = (augmented * weight).sum()
         grad = torch.autograd.grad(loss, pixels)[0]

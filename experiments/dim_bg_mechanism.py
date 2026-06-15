@@ -90,8 +90,8 @@ def _source_run(attacker, clean, labels, sizes, gradient_probes):
         mean = torch.stack(samples).mean(0)
         coherence.extend(torch.stack([F.cosine_similarity(row.flatten(1), mean.flatten(1)) for row in samples]).mean(0).cpu().tolist())
         for key, values in _band_metrics(mean).items(): band_rows[key].extend(values.tolist())
-        transformed = attacker._input_diversity(attacker._normalize(pixels)) if attacker.input_diversity else attacker._normalize(pixels)
-        delta = transformed - attacker._normalize(pixels)
+        transformed = attacker._input_diversity(pixels) if attacker.input_diversity else pixels
+        delta = transformed - pixels
         input_hf.extend(_band_metrics(delta)["high"].tolist() if delta.abs().sum() else [0.0] * size)
         adv.append(run_analyzed_attack(attacker, x, y).cpu())
         start = end
