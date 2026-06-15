@@ -3,7 +3,7 @@ import unittest
 import torch
 import torch.nn as nn
 
-from attack import LazyAggregationAttacker
+from attack import LMDSSAttacker
 from experiments.dim_gradient_mechanism import (
     VARIANTS,
     build_report,
@@ -23,7 +23,7 @@ class TinyModel(nn.Module):
 
 
 def _attacker():
-    return LazyAggregationAttacker(
+    return LMDSSAttacker(
         TinyModel(),
         steps=1,
         ti_sigma=0,

@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-from attack import LazyAggregationAttacker
+from attack import LMDSSAttacker
 from experiments.mi_gradient_accumulation_mechanism import (
     aggregate_report,
     build_conclusion_zh,
@@ -25,7 +25,7 @@ class TinyModel(nn.Module):
 
 
 def make_attacker(**kwargs):
-    return LazyAggregationAttacker(
+    return LMDSSAttacker(
         TinyModel(),
         epsilon=0.1,
         steps=2,

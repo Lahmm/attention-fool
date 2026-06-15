@@ -1,7 +1,7 @@
 import unittest
 import torch
 import torch.nn as nn
-from attack import LazyAggregationAttacker
+from attack import LMDSSAttacker
 from experiments.gradient_analysis import (
     fft_decompose,
     haar_packet_paths,
@@ -45,7 +45,7 @@ class ProjectionTests(unittest.TestCase):
 
     def test_unobserved_runner_matches_current_attack(self):
         torch.manual_seed(7); model = TinyModel()
-        attacker = LazyAggregationAttacker(model, epsilon=0.1, steps=3, ti_sigma=0, input_diversity=True,
+        attacker = LMDSSAttacker(model, epsilon=0.1, steps=3, ti_sigma=0, input_diversity=True,
             use_momentum=True, guide_aug=True, guide_aug_area="all", guide_aug_methods=("dropout","jitter","freq"),
             guide_aug_copies=2, device=torch.device("cpu"))
         images, labels = torch.randn(2,3,8,8), torch.tensor([1,2])
@@ -57,7 +57,7 @@ class ProjectionTests(unittest.TestCase):
 
     def test_dim_forward_and_backward_paths_are_independently_selectable(self):
         model = TinyModel(); images = torch.randn(2, 3, 8, 8, requires_grad=True)
-        attacker = LazyAggregationAttacker(model, steps=1, ti_sigma=0, input_diversity=True,
+        attacker = LMDSSAttacker(model, steps=1, ti_sigma=0, input_diversity=True,
             dim_resize_range=(0.5, 0.5), dim_mode="full-fixed", device=torch.device("cpu"))
         torch.manual_seed(4); full = attacker._input_diversity(images); full.sum().backward(); full_grad = images.grad.clone()
         images.grad.zero_(); attacker.dim_mode = "forward-only"; forward = attacker._input_diversity(images); forward.sum().backward()
@@ -67,7 +67,7 @@ class ProjectionTests(unittest.TestCase):
 
     def test_fixed_dim_reuses_transform_and_random_dim_resamples(self):
         model = TinyModel(); images = torch.randn(1, 3, 8, 8)
-        attacker = LazyAggregationAttacker(model, steps=1, ti_sigma=0, input_diversity=True,
+        attacker = LMDSSAttacker(model, steps=1, ti_sigma=0, input_diversity=True,
             dim_resize_range=(0.5, 0.5), dim_mode="full-fixed", device=torch.device("cpu"))
         torch.manual_seed(9); first = attacker._input_diversity(images); second = attacker._input_diversity(images)
         self.assertTrue(torch.equal(first, second))

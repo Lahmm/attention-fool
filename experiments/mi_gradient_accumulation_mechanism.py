@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from attack import LazyAggregationAttacker
+from attack import LMDSSAttacker
 from causal_analysis import MAIN_TARGETS, _target_normalize, seed_all, selected_batches
 from gradient_analysis import FFT_BANDS, fft_project
 from main import ANNOTATIONS_PATH, IMAGE_DIR, create_attacker, parse_model_names
@@ -113,7 +113,6 @@ def make_attacker(num_classes: int, *, mi: bool, steps: int = 40):
         dim=True,
         mi=mi,
         mi_decay=1.0,
-        normalize_grad=False,
         attention_guide_models=guides,
         attention_guide_type="qk_cls",
         attention_guide_build_method="patch",
@@ -133,24 +132,20 @@ def make_attacker(num_classes: int, *, mi: bool, steps: int = 40):
 
 
 def _process_grad_terms(
-    attacker: LazyAggregationAttacker,
+    attacker: LMDSSAttacker,
     raw: torch.Tensor,
     term_grads: tuple[torch.Tensor, ...],
     guide: torch.Tensor | None,
 ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...], torch.Tensor, torch.Tensor]:
-    after_normalize = attacker._normalize_grad(raw) if attacker.normalize_grad else raw
-    processed_terms = tuple(attacker._normalize_grad(term) for term in term_grads) if attacker.normalize_grad else term_grads
-    after_guided = attacker._normalize_guided_grad(after_normalize, guide)
-    processed_terms = tuple(attacker._normalize_guided_grad(term, guide) for term in processed_terms)
-    after_ti = attacker._smooth_grad(after_guided)
-    processed_terms = tuple(attacker._smooth_grad(term) for term in processed_terms)
+    after_ti = attacker._smooth_grad(raw)
+    processed_terms = tuple(attacker._smooth_grad(term) for term in term_grads)
     after_filter = attacker._apply_lowmid_dss_filter(after_ti, processed_terms)
     after_rotation = attacker._tune_lowmid_gradient(after_filter)
     return after_ti, processed_terms, after_filter, after_rotation
 
 
 def trace_attack(
-    attacker: LazyAggregationAttacker,
+    attacker: LMDSSAttacker,
     images: torch.Tensor,
     labels: torch.Tensor,
     branch: str,
@@ -162,7 +157,7 @@ def trace_attack(
     keep_steps = set(DEFAULT_TRACE_STEPS if keep_steps is None else keep_steps)
     images, labels = images.to(attacker.device), labels.to(attacker.device)
     clean = attacker._denormalize(images).detach()
-    needs_guide = (attacker.guide_aug and attacker.guide_aug_area != "all") or attacker.guide_grad_norm_area != "none"
+    needs_guide = attacker.guide_aug and attacker.guide_aug_area != "all"
     guide = attacker._build_guide_pixel_map(images, clean.size(-1)) if needs_guide else None
     adv = clean.clone().detach()
     accumulator = torch.zeros_like(clean)
@@ -182,8 +177,7 @@ def trace_attack(
         history = accumulator - after_rotation
         with torch.no_grad():
             adv = adv + attacker.step_size * update.sign()
-            delta = torch.clamp(adv - clean, -attacker.epsilon, attacker.epsilon)
-            adv = torch.clamp(clean + delta, 0.0, 1.0)
+            adv = torch.clamp(adv, 0.0, 1.0)
             x_next = adv.detach()
 
         if step in keep_steps:

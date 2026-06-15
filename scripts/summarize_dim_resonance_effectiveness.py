@@ -15,8 +15,6 @@ VARIANTS = (
     "reference_djf",
     "dim_resonance_only",
     "dim_resonance_djf",
-    "fft_lowboost_only",
-    "fft_lowboost_djf",
     "dim_adjoint_echo_only",
     "dim_adjoint_echo_djf",
 )

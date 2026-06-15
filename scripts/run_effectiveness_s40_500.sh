@@ -29,7 +29,6 @@ run_cmd python main.py \
   --ti-sigma 0 \
   --mi \
   --mi-decay 1.0 \
-  --normalize-grad \
   --output-dir "${ROOT}/baseline_mifgsm_s40_500"
 
 run_cmd python main.py \
@@ -48,7 +47,6 @@ run_cmd python main.py \
   --dim \
   --mi \
   --mi-decay 1.0 \
-  --normalize-grad \
   --output-dir "${ROOT}/dim_mifgsm_s40_500"
 
 for DIM_NAME in nodim dim; do
@@ -81,8 +79,7 @@ for DIM_NAME in nodim dim; do
             --ti-sigma 0 \
             --mi \
             --mi-decay 1.0 \
-            --normalize-grad \
-            --guide-aug \
+                      --guide-aug \
             --guide-aug-area "$AREA" \
             --guide-aug-method "$METHODS" \
             --guide-aug-copies 3 \

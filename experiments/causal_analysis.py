@@ -34,7 +34,7 @@ def build_baseline(num_classes, dim=True, guide_aug=True, guide_methods=("dropou
     source=build_vit_model(num_classes=num_classes,model_name="vit_base_patch16_224")
     guides=tuple(build_vit_model(num_classes=num_classes,model_name=n) for n in ("deit_base_patch16_224","pit_s_224","cait_s24_224"))
     attacker=create_attacker(model=source,epsilon=16/255,step_size=None,steps=40,layers=(0,1,4,9,11),ti_sigma=0,
-        dim=dim,mi=True,mi_decay=1,normalize_grad=False,dim_resize_range=(.85,1),attention_guide_models=guides,
+        dim=dim,mi=True,mi_decay=1,dim_resize_range=(.85,1),attention_guide_models=guides,
         attention_guide_type="qk_cls",attention_guide_build_method="patch",attention_guide_patch_size=16,
         guide_aug=guide_aug,guide_aug_area="background",guide_aug_methods=guide_methods,guide_aug_copies=3,guide_aug_strength=.2)
     return source,attacker

@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from attack import LazyAggregationAttacker
+from attack import LMDSSAttacker
 from nets import build_vit_model
 from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
 
@@ -37,14 +37,13 @@ CONFIG = dict(
     steps=40,
     use_momentum=True,
     momentum_decay=1.0,
-    normalize_grad=True,
     input_diversity=True,
 )
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Visualize attention guide map from LazyAggregationAttacker."
+        description="Visualize attention guide map from LMDSSAttacker."
     )
     parser.add_argument(
         "--image-dir",
@@ -98,7 +97,7 @@ def preprocess_rgb(rgb: np.ndarray) -> torch.Tensor:
     return (tensor - mean) / std
 
 
-def build_attacker(num_classes: int) -> LazyAggregationAttacker:
+def build_attacker(num_classes: int) -> LMDSSAttacker:
     c = CONFIG
     white_box = build_vit_model(num_classes=num_classes, model_name=c["white_box_model"])
     white_box.eval()
@@ -106,7 +105,7 @@ def build_attacker(num_classes: int) -> LazyAggregationAttacker:
         build_vit_model(num_classes=num_classes, model_name=name).eval()
         for name in c["guide_models"]
     )
-    attacker = LazyAggregationAttacker(
+    attacker = LMDSSAttacker(
         model=white_box,
         epsilon=c["epsilon"],
         steps=c["steps"],
@@ -122,7 +121,6 @@ def build_attacker(num_classes: int) -> LazyAggregationAttacker:
         guide_aug_strength=c["guide_aug_strength"],
         use_momentum=c["use_momentum"],
         momentum_decay=c["momentum_decay"],
-        normalize_grad=c["normalize_grad"],
         input_diversity=c["input_diversity"],
         device=DEVICE,
     )
@@ -131,7 +129,7 @@ def build_attacker(num_classes: int) -> LazyAggregationAttacker:
 
 @torch.no_grad()
 def compute_guide_and_blends(
-    attacker: LazyAggregationAttacker, image_tensor: torch.Tensor, img_size: int
+    attacker: LMDSSAttacker, image_tensor: torch.Tensor, img_size: int
 ):
     clean_pixels = attacker._denormalize(image_tensor).detach()
     guide_pixel_map = attacker._build_guide_pixel_map(image_tensor, img_size)

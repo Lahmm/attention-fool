@@ -35,7 +35,6 @@ VARIANTS = {
     "reference_djf": {"dim": True, "guide_aug": True, "methods": ("dropout", "jitter", "freq")},
     "dim_resonance_only": {"dim": True, "guide_aug": True, "methods": ("dim_resonance",)},
     "dim_resonance_djf": {"dim": True, "guide_aug": True, "methods": ("dropout", "jitter", "freq", "dim_resonance")},
-    "fft_lowboost_djf": {"dim": True, "guide_aug": True, "methods": ("dropout", "jitter", "freq", "fft_lowboost")},
     "dim_adjoint_echo_only": {"dim": True, "guide_aug": True, "methods": ("dim_adjoint_echo",)},
     "dim_adjoint_echo_djf": {"dim": True, "guide_aug": True, "methods": ("dropout", "jitter", "freq", "dim_adjoint_echo")},
 }

@@ -5,7 +5,7 @@ from unittest import mock
 import torch
 import torch.nn as nn
 
-from attack import LazyAggregationAttacker, _LOWMID_GRAD_FFT_BANDS
+from attack import LMDSSAttacker, MIFGSMAttacker, _LOWMID_GRAD_FFT_BANDS
 from experiments.gradient_analysis import FFT_BANDS
 
 try:
@@ -27,7 +27,7 @@ class TinyModel(nn.Module):
 
 
 def make_attacker(**kwargs):
-    return LazyAggregationAttacker(
+    return LMDSSAttacker(
         TinyModel(),
         epsilon=0.1,
         steps=2,
@@ -51,6 +51,12 @@ def lowmid_ratio(attacker, x):
 class LowMidGradientTuningTests(unittest.TestCase):
     def test_private_fft_bands_match_gradient_analysis(self):
         self.assertEqual(_LOWMID_GRAD_FFT_BANDS, FFT_BANDS)
+
+    def test_lmdss_is_not_mifgsm_subclass(self):
+        self.assertFalse(issubclass(LMDSSAttacker, MIFGSMAttacker))
+
+    def test_momentum_is_enabled_by_default(self):
+        self.assertTrue(make_attacker().use_momentum)
 
     def test_disabled_tuning_returns_original_gradient_object(self):
         attacker = make_attacker(lowmid_grad_tuning=False)
@@ -134,26 +140,6 @@ class LowMidGradientTuningTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(grad).all())
         self.assertGreater((grad - weight).abs().mean().item(), 1e-4)
 
-    def test_no_step_projection_allows_delta_to_exceed_epsilon(self):
-        images = torch.zeros(1, 3, 16, 16)
-        labels = torch.tensor([1])
-        projected = LazyAggregationAttacker(
-            TinyModel(), epsilon=0.1, step_size=0.1, steps=2, ti_sigma=0, layers=(-1,),
-            project_each_step=True, device=torch.device("cpu")
-        )
-        unprojected = LazyAggregationAttacker(
-            TinyModel(), epsilon=0.1, step_size=0.1, steps=2, ti_sigma=0, layers=(-1,),
-            project_each_step=False, device=torch.device("cpu")
-        )
-        for attacker in (projected, unprojected):
-            attacker._attack_grad = lambda pixels, _labels, _guide: torch.ones_like(pixels)
-        projected_adv = projected._denormalize(projected.attack_batch(images, labels))
-        unprojected_adv = unprojected._denormalize(unprojected.attack_batch(images, labels))
-        clean = projected._denormalize(images)
-        self.assertLessEqual((projected_adv - clean).abs().max().item(), 0.10001)
-        self.assertGreater((unprojected_adv - clean).abs().max().item(), 0.15)
-
-
     def test_lowmid_dss_sign_filter_threshold_is_monotonic(self):
         grad = torch.randn(2, 3, 16, 16, dtype=torch.float64)
         term_grads = (grad, -grad, grad)
@@ -218,7 +204,7 @@ class LowMidGradientTuningCLITests(unittest.TestCase):
             "cos",
             "--lowmid-dss-agreement-threshold",
             "0.8",
-            "--no-step-projection",
+            "--no-mi",
         ]
         with mock.patch.object(sys, "argv", argv):
             args = main.parse_args()
@@ -228,7 +214,7 @@ class LowMidGradientTuningCLITests(unittest.TestCase):
         self.assertTrue(args.lowmid_dss_filter)
         self.assertEqual(args.lowmid_dss_consistency, "cos")
         self.assertEqual(args.lowmid_dss_agreement_threshold, 0.8)
-        self.assertFalse(args.project_each_step)
+        self.assertFalse(args.mi)
 
     def test_create_attacker_forwards_lowmid_options(self):
         attacker = main.create_attacker(
@@ -244,7 +230,7 @@ class LowMidGradientTuningCLITests(unittest.TestCase):
             lowmid_dss_filter=True,
             lowmid_dss_consistency="cos",
             lowmid_dss_agreement_threshold=0.8,
-            project_each_step=False,
+            mi=False,
         )
         self.assertTrue(attacker.lowmid_grad_tuning)
         self.assertEqual(attacker.lowmid_grad_rotation_strength, 0.25)
@@ -252,7 +238,7 @@ class LowMidGradientTuningCLITests(unittest.TestCase):
         self.assertTrue(attacker.lowmid_dss_filter)
         self.assertEqual(attacker.lowmid_dss_consistency, "cos")
         self.assertEqual(attacker.lowmid_dss_agreement_threshold, 0.8)
-        self.assertFalse(attacker.project_each_step)
+        self.assertFalse(attacker.use_momentum)
 
 
 if __name__ == "__main__":

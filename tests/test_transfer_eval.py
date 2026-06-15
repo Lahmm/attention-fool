@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from experiments.transfer_eval import build_transfer_samples, extract_original_name
+from transfer_eval import build_transfer_samples, extract_original_name
 
 
 class TransferEvalAnnotationTests(unittest.TestCase):

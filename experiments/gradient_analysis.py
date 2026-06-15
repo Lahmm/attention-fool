@@ -217,7 +217,7 @@ def run_analyzed_attack(attacker, images, labels, *, grad_transform=None, mi_swi
     """Run the existing attack algorithm with optional observation/intervention."""
     images, labels = images.to(attacker.device), labels.to(attacker.device)
     clean = attacker._denormalize(images).detach()
-    needs_guide = (attacker.guide_aug and attacker.guide_aug_area != "all") or attacker.guide_grad_norm_area != "none"
+    needs_guide = attacker.guide_aug and attacker.guide_aug_area != "all"
     guide = attacker._build_guide_pixel_map(images, clean.size(-1)) if needs_guide else None
     adv, momentum = clean.clone().detach(), torch.zeros_like(clean)
     switch = mi_switch or MISwitch("always" if attacker.use_momentum else "never")
@@ -226,16 +226,14 @@ def run_analyzed_attack(attacker, images, labels, *, grad_transform=None, mi_swi
         if attacker.nesterov and step_idx > 0:
             with torch.no_grad():
                 grad_pixels = grad_pixels + attacker.decay * attacker.step_size * momentum.sign()
-                delta = torch.clamp(grad_pixels-clean, -attacker.epsilon, attacker.epsilon)
-                grad_pixels = torch.clamp(clean+delta, 0.0, 1.0)
+                grad_pixels = torch.clamp(grad_pixels, 0.0, 1.0)
         grad_pixels = grad_pixels.detach().requires_grad_(True)
         before_rng = _rng_state()
         grad = attacker._attack_grad(grad_pixels, labels, guide)
         after_rng = _rng_state()
         diagnostic_grads = gradient_diagnostics(attacker, grad_pixels, labels, guide, before_rng) if diagnostics else None
         _set_rng_state(after_rng)
-        if attacker.normalize_grad: grad = attacker._normalize_grad(grad)
-        grad = attacker._smooth_grad(attacker._normalize_guided_grad(grad, guide))
+        grad = attacker._smooth_grad(grad)
         if grad_transform is not None: grad = grad_transform(grad, guide, step)
         previous = torch.zeros_like(momentum) if switch.kind == "reset" and step == switch.step else momentum
         momentum = attacker.decay * previous + grad

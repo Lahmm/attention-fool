@@ -227,8 +227,6 @@ def write_report(
             "attention_guide_build_method": "patch",
             "layers": "0,1,4,9,11",
             "ti_sigma": 0,
-            "normalize_grad": False,
-            "project_each_step": True,
             "epsilon": "16/255",
         },
         "branch_descriptions": {b["name"]: b["description"] for b in BRANCHES},

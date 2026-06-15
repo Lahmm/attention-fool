@@ -6,7 +6,7 @@ from typing import List
 import torch
 from tqdm import tqdm
 
-from attack import LazyAggregationAttacker
+from attack import LMDSSAttacker
 from nets import ViTWithHook, build_vit_model
 from utils import (
     DEVICE,
@@ -29,14 +29,9 @@ def create_attacker(
     layers: tuple[int, ...],
     ti_sigma: float = 3.0,
     dim: bool = False,
-    si: bool = False,
-    si_scales: int = 1,
-    eot: bool = False,
-    eot_iter: int = 1,
-    mi: bool = False,
+    mi: bool = True,
     mi_decay: float = 1.0,
     ni: bool = False,
-    normalize_grad: bool = False,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
     dim_mode: str = "full-random",
     attention_guide_models: tuple[ViTWithHook, ...] = (),
@@ -48,24 +43,14 @@ def create_attacker(
     guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
     guide_aug_strength: float = 0.2,
-    guide_grad_norm_area: str = "none",
     lowmid_grad_tuning: bool = False,
     lowmid_grad_rotation_strength: float = 0.5,
     lowmid_grad_preserve_norm: bool = True,
     lowmid_dss_filter: bool = False,
     lowmid_dss_consistency: str = "sign",
     lowmid_dss_agreement_threshold: float = 0.67,
-    temporal_persistence_filter: bool = False,
-    temporal_persistence_k: int = 5,
-    spectral_momentum: bool = False,
-    spectral_momentum_high_decay: float = 0.7,
-    spectral_hook_rotation: bool = False,
-    spectral_hook_rotation_strength: float = 0.5,
-    grm_enabled: bool = False,
-    grm_alpha: float = 0.5,
-    project_each_step: bool = True,
-) -> LazyAggregationAttacker:
-    return LazyAggregationAttacker(
+) -> LMDSSAttacker:
+    return LMDSSAttacker(
         model=model,
         epsilon=epsilon,
         step_size=step_size,
@@ -75,14 +60,9 @@ def create_attacker(
         input_diversity=dim,
         dim_resize_range=dim_resize_range,
         dim_mode=dim_mode,
-        use_si=si,
-        si_scales=si_scales,
-        use_eot=eot,
-        eot_iter=eot_iter,
         use_momentum=mi,
         momentum_decay=mi_decay,
         nesterov=ni,
-        normalize_grad=normalize_grad,
         attention_guide_models=attention_guide_models,
         attention_guide_type=attention_guide_type,
         attention_guide_build_method=attention_guide_build_method,
@@ -92,25 +72,14 @@ def create_attacker(
         guide_aug_methods=guide_aug_methods,
         guide_aug_copies=guide_aug_copies,
         guide_aug_strength=guide_aug_strength,
-        guide_grad_norm_area=guide_grad_norm_area,
         lowmid_grad_tuning=lowmid_grad_tuning,
         lowmid_grad_rotation_strength=lowmid_grad_rotation_strength,
         lowmid_grad_preserve_norm=lowmid_grad_preserve_norm,
         lowmid_dss_filter=lowmid_dss_filter,
         lowmid_dss_consistency=lowmid_dss_consistency,
         lowmid_dss_agreement_threshold=lowmid_dss_agreement_threshold,
-        temporal_persistence_filter=temporal_persistence_filter,
-        temporal_persistence_k=temporal_persistence_k,
-        spectral_momentum=spectral_momentum,
-        spectral_momentum_high_decay=spectral_momentum_high_decay,
-        spectral_hook_rotation=spectral_hook_rotation,
-        spectral_hook_rotation_strength=spectral_hook_rotation_strength,
-        grm_enabled=grm_enabled,
-        grm_alpha=grm_alpha,
-        project_each_step=project_each_step,
         device=DEVICE,
     )
-
 
 def parse_layers(value: str) -> tuple[int, ...]:
     layers = tuple(int(item.strip()) for item in value.split(",") if item.strip())
@@ -134,7 +103,7 @@ def parse_model_names(value: str) -> tuple[str, ...]:
 
 
 def expected_attack_output_dir() -> Path:
-    return Path("outputs") / "attack" / "lazyagg"
+    return Path("outputs") / "attack" / "lmdss"
 
 
 def validate_attack_output_dir(output_dir: str | None) -> Path:
@@ -167,7 +136,7 @@ def clear_directory_contents(directory: Path) -> None:
 def attack_correctly_classified_samples(
     dataloader,
     model: ViTWithHook,
-    attacker: LazyAggregationAttacker,
+    attacker: LMDSSAttacker,
     correct_mask: List[bool],
     output_dir: str | None,
     max_attacked_samples: int | None,
@@ -256,50 +225,36 @@ def attack_correctly_classified_samples(
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Generate adversarial samples with configurable lazy aggregation attack.")
+    parser = argparse.ArgumentParser(description="Generate adversarial samples with the LMDSS attack.")
     parser.add_argument("--max-attacked-samples", type=int, default=5, help="Maximum number of correctly classified samples to attack.")
-    parser.add_argument("--epsilon", type=float, default=16.0 / 255.0, help="L_inf perturbation budget in pixel range [0, 1].")
+    parser.add_argument("--epsilon", type=float, default=16.0 / 255.0, help="L_inf step budget in pixel range [0, 1].")
     parser.add_argument("--step-size", type=float, default=None, help="Step size. Defaults to epsilon / steps.")
     parser.add_argument("--steps", type=int, default=20, help="Number of attack iterations.")
     parser.add_argument("--layers", type=parse_layers, default=(-6, -5, -4, -3, -2, -1), help='Comma-separated token layers, e.g. "-6,-5,-4,-3,-2,-1".')
-    parser.add_argument("--ti-sigma", type=float, default=3.0, help="TI-FGSM Gaussian kernel sigma for gradient smoothing. 0=disabled.")
-    parser.add_argument("--mi", action="store_true", help="Enable momentum iterative gradients.")
-    parser.add_argument("--mi-decay", type=float, default=1.0, help="Momentum decay factor used when --mi is enabled.")
-    parser.add_argument("--ni", action="store_true", help="Enable Nesterov lookahead. Requires --mi.")
-    parser.add_argument("--normalize-grad", action="store_true", help="Normalize input gradients before TI/momentum updates.")
+    parser.add_argument("--ti-sigma", type=float, default=3.0, help="TI Gaussian kernel sigma for gradient smoothing. 0=disabled.")
+    parser.add_argument("--mi", dest="mi", action="store_true", help="Enable momentum iterative gradients. Enabled by default.")
+    parser.add_argument("--no-mi", dest="mi", action="store_false", help="Disable momentum iterative gradients.")
+    parser.add_argument("--mi-decay", type=float, default=1.0, help="Momentum decay factor used when MI is enabled.")
+    parser.add_argument("--ni", action="store_true", help="Enable Nesterov lookahead. Requires MI.")
     parser.add_argument("--dim", action="store_true", help="Enable input diversity (DIM).")
     parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0), help='DIM resize scale range, e.g. "0.85,1.0".')
-    parser.add_argument("--si", action="store_true", help="Enable scale-invariant forward copies.")
-    parser.add_argument("--si-scales", type=int, default=1, help="Number of scale-invariant CE gradient copies when --si is enabled.")
-    parser.add_argument("--eot", action="store_true", help="Enable EOT repeated stochastic forward samples.")
-    parser.add_argument("--eot-iter", type=int, default=1, help="Number of EOT samples when --eot is enabled.")
     parser.add_argument("--attention-guide-models", type=parse_model_names, default=(), help="Comma-separated extra models for clean stable-attention guide maps.")
     parser.add_argument("--attention-guide-type", type=str, default="postsoftmax_cls", help="Comma-separated guide types: postsoftmax_cls,qk_cls,qk_all_queries. The first entry is used.")
     parser.add_argument("--attention-guide-build-method", choices=["pixel", "patch"], default="pixel", help="Build guide masks as pixel-level bilinear maps or patch-wise nearest maps.")
     parser.add_argument("--attention-guide-patch-size", type=int, default=16, help="Rendered guide patch size for --attention-guide-build-method patch. Must divide --img-size.")
     parser.add_argument("--guide-aug", action="store_true", help="Enable attention-guided forward augmentation.")
     parser.add_argument("--guide-aug-area", choices=["foreground", "background", "all"], default="background", help="Region affected by guide augmentation. all ignores attention guide maps.")
-    parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,lowpass_gauss,laplacian_low,fft_lowboost,illumination_low,band_noise,band_noise_low,band_noise_mid,band_noise_high,colored_noise,colored_noise_low,colored_noise_mid,colored_noise_high,progressive_spectral_noise,progressive_spectral_noise_low,progressive_spectral_noise_mid,progressive_spectral_noise_high,wavelet_noise,wavelet_noise_low,wavelet_noise_mid,wavelet_noise_high,wavelet_noise_fglow_bghigh,dim_resonance,dim_adjoint_echo.")
+    parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,dim_resonance,dim_adjoint_echo,white_noise.")
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Random copies per guide augmentation method.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
-    parser.add_argument("--guide-grad-norm-area", choices=["none", "foreground", "background"], default="none", help="Attention-guide region whose input gradients are normalized after backprop. none disables guided gradient normalization.")
     parser.add_argument("--lowmid-grad-tuning", action="store_true", help="Enable low/mid frequency gradient tuning after TI smoothing and before momentum.")
     parser.add_argument("--lowmid-grad-rotation-strength", type=float, default=0.5, help="Givens rotation strength toward low/mid-frequency gradient subspace when --lowmid-grad-tuning is enabled.")
     parser.add_argument("--no-lowmid-grad-preserve-norm", dest="lowmid_grad_preserve_norm", action="store_false", help="Do not preserve per-sample gradient L2 norm after low/mid gradient tuning.")
-    parser.add_argument("--lowmid-dss-filter", action="store_true", help="Filter low/mid gradient components by source-side augmentation direction stability before low/mid rotation and momentum.")
+    parser.add_argument("--lowmid-dss-filter", action="store_true", help="Measure low/mid agreement with historical momentum to modulate low/mid rotation.")
     parser.add_argument("--lowmid-dss-consistency", choices=["sign", "cos"], default="sign", help="Consistency rule for --lowmid-dss-filter: per-element sign agreement or per-sample cosine gate.")
-    parser.add_argument("--lowmid-dss-agreement-threshold", type=float, default=0.67, help="Minimum per-element augmentation sign agreement for --lowmid-dss-consistency sign.")
-    parser.add_argument("--temporal-persistence-filter", action="store_true", help="Gate gradient elements by temporal sign persistence across the last K steps before momentum accumulation.")
-    parser.add_argument("--temporal-persistence-k", type=int, default=5, help="Number of past gradients to buffer for --temporal-persistence-filter.")
-    parser.add_argument("--spectral-momentum", action="store_true", help="Frequency-dependent momentum decay: low/mid components accumulate fully (decay=1.0), high components decay faster.")
-    parser.add_argument("--spectral-momentum-high-decay", type=float, default=0.7, help="Momentum decay factor for high-frequency gradient components when --spectral-momentum is enabled.")
-    parser.add_argument("--spectral-hook-rotation", action="store_true", help="GNS-style: register backward hook on block 0 attn.qkv to rotate V-projection gradients toward low/mid frequencies during backprop.")
-    parser.add_argument("--spectral-hook-rotation-strength", type=float, default=0.5, help="Rotation strength for --spectral-hook-rotation.")
-    parser.add_argument("--grm", action="store_true", dest="grm_enabled", help="Gradient Robustness-weighted Momentum: per-element cross-augmentation sign robustness modulates momentum decay.")
-    parser.add_argument("--grm-alpha", type=float, default=0.5, help="Minimum decay fraction for GRM. Elements with zero robustness decay at μ*alpha.")
-    parser.add_argument("--no-step-projection", dest="project_each_step", action="store_false", help="Disable per-step L_inf projection; only clamp pixels to [0, 1] after each IFGSM-style update.")
-    parser.set_defaults(lowmid_grad_preserve_norm=True, project_each_step=True)
-    parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode, use --output-dir outputs/attack/lazyagg.")
+    parser.add_argument("--lowmid-dss-agreement-threshold", type=float, default=0.67, help="Reserved agreement threshold for LMDSS compatibility.")
+    parser.set_defaults(mi=True, lowmid_grad_preserve_norm=True)
+    parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode, use --output-dir outputs/attack/lmdss.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
     parser.add_argument("--annotations-path", default=ANNOTATIONS_PATH, help="Path to image label annotations.")
@@ -320,16 +275,11 @@ def main(
     output_dir: str | None,
     mode: str,
     ti_sigma: float = 3.0,
-    mi: bool = False,
+    mi: bool = True,
     mi_decay: float = 1.0,
     ni: bool = False,
-    normalize_grad: bool = False,
     dim: bool = False,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
-    si: bool = False,
-    si_scales: int = 1,
-    eot: bool = False,
-    eot_iter: int = 1,
     attention_guide_models_arg: tuple[str, ...] = (),
     attention_guide_type: str = "postsoftmax_cls",
     attention_guide_build_method: str = "pixel",
@@ -339,22 +289,12 @@ def main(
     guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
     guide_aug_strength: float = 0.2,
-    guide_grad_norm_area: str = "none",
     lowmid_grad_tuning: bool = False,
     lowmid_grad_rotation_strength: float = 0.5,
     lowmid_grad_preserve_norm: bool = True,
     lowmid_dss_filter: bool = False,
     lowmid_dss_consistency: str = "sign",
     lowmid_dss_agreement_threshold: float = 0.67,
-    temporal_persistence_filter: bool = False,
-    temporal_persistence_k: int = 5,
-    spectral_momentum: bool = False,
-    spectral_momentum_high_decay: float = 0.7,
-    spectral_hook_rotation: bool = False,
-    spectral_hook_rotation_strength: float = 0.5,
-    grm_enabled: bool = False,
-    grm_alpha: float = 0.5,
-    project_each_step: bool = True,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -386,7 +326,7 @@ def main(
     model = build_vit_model(num_classes=num_classes)
 
     attention_guide_models: tuple[ViTWithHook, ...] = ()
-    needs_attention_guide = (guide_aug and guide_aug_area != "all") or guide_grad_norm_area != "none"
+    needs_attention_guide = guide_aug and guide_aug_area != "all"
     if needs_attention_guide and attention_guide_models_arg:
         attention_guide_models = tuple(
             build_vit_model(num_classes=num_classes, model_name=model_name)
@@ -401,14 +341,9 @@ def main(
         layers=layers,
         ti_sigma=ti_sigma,
         dim=dim,
-        si=si,
-        si_scales=si_scales,
-        eot=eot,
-        eot_iter=eot_iter,
         mi=mi,
         mi_decay=mi_decay,
         ni=ni,
-        normalize_grad=normalize_grad,
         dim_resize_range=dim_resize_range,
         attention_guide_models=attention_guide_models,
         attention_guide_type=attention_guide_type,
@@ -419,22 +354,12 @@ def main(
         guide_aug_methods=guide_aug_methods,
         guide_aug_copies=guide_aug_copies,
         guide_aug_strength=guide_aug_strength,
-        guide_grad_norm_area=guide_grad_norm_area,
         lowmid_grad_tuning=lowmid_grad_tuning,
         lowmid_grad_rotation_strength=lowmid_grad_rotation_strength,
         lowmid_grad_preserve_norm=lowmid_grad_preserve_norm,
         lowmid_dss_filter=lowmid_dss_filter,
         lowmid_dss_consistency=lowmid_dss_consistency,
         lowmid_dss_agreement_threshold=lowmid_dss_agreement_threshold,
-        temporal_persistence_filter=temporal_persistence_filter,
-        temporal_persistence_k=temporal_persistence_k,
-        spectral_momentum=spectral_momentum,
-        spectral_momentum_high_decay=spectral_momentum_high_decay,
-        spectral_hook_rotation=spectral_hook_rotation,
-        spectral_hook_rotation_strength=spectral_hook_rotation_strength,
-        grm_enabled=grm_enabled,
-        grm_alpha=grm_alpha,
-        project_each_step=project_each_step,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
         dataloader=dataloader,
@@ -476,13 +401,8 @@ if __name__ == "__main__":
         mi=args.mi,
         mi_decay=args.mi_decay,
         ni=args.ni,
-        normalize_grad=args.normalize_grad,
         dim=args.dim,
         dim_resize_range=args.dim_resize_range,
-        si=args.si,
-        si_scales=args.si_scales,
-        eot=args.eot,
-        eot_iter=args.eot_iter,
         attention_guide_models_arg=args.attention_guide_models,
         attention_guide_type=args.attention_guide_type,
         attention_guide_build_method=args.attention_guide_build_method,
@@ -492,22 +412,12 @@ if __name__ == "__main__":
         guide_aug_methods=args.guide_aug_method,
         guide_aug_copies=args.guide_aug_copies,
         guide_aug_strength=args.guide_aug_strength,
-        guide_grad_norm_area=args.guide_grad_norm_area,
         lowmid_grad_tuning=args.lowmid_grad_tuning,
         lowmid_grad_rotation_strength=args.lowmid_grad_rotation_strength,
         lowmid_grad_preserve_norm=args.lowmid_grad_preserve_norm,
         lowmid_dss_filter=args.lowmid_dss_filter,
         lowmid_dss_consistency=args.lowmid_dss_consistency,
         lowmid_dss_agreement_threshold=args.lowmid_dss_agreement_threshold,
-        temporal_persistence_filter=args.temporal_persistence_filter,
-        temporal_persistence_k=args.temporal_persistence_k,
-        spectral_momentum=args.spectral_momentum,
-        spectral_momentum_high_decay=args.spectral_momentum_high_decay,
-        spectral_hook_rotation=args.spectral_hook_rotation,
-        spectral_hook_rotation_strength=args.spectral_hook_rotation_strength,
-        grm_enabled=args.grm_enabled,
-        grm_alpha=args.grm_alpha,
-        project_each_step=args.project_each_step,
         output_dir=args.output_dir,
         mode=args.mode,
         image_dir=args.image_dir,

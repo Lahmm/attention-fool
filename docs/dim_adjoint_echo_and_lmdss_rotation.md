@@ -27,11 +27,9 @@
       ═══  dim_adjoint_echo 的后效：     ← g → g + γ·JᵀJ(g)
       ═══   梯度被隐式低通平滑
            │
-      ├── normalize_grad               
       ├── smooth_grad (TI-FGSM)        
       ├── apply_lowmid_dss_filter       ═══ 本文方法 2a：只度量
       ├── tune_lowmid_gradient           ═══ 本文方法 2b：真正修改
-      ├── temporal_persistence          
       ├── momentum / GRM               
       └── update.sign() → 像素更新      
 ```

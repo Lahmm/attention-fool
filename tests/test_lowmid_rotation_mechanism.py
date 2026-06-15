@@ -7,7 +7,7 @@ from unittest import mock
 import torch
 import torch.nn as nn
 
-from attack import LazyAggregationAttacker
+from attack import LMDSSAttacker
 from experiments.lowmid_rotation_mechanism import (
     DEFAULT_ASR,
     aggregate_report,
@@ -30,7 +30,7 @@ class TinyModel(nn.Module):
 
 
 def make_attacker(**kwargs):
-    return LazyAggregationAttacker(
+    return LMDSSAttacker(
         TinyModel(),
         epsilon=0.1,
         steps=2,

@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from attack import LazyAggregationAttacker
+from attack import LMDSSAttacker
 from main import ANNOTATIONS_PATH, DEFAULT_IMG_SIZE, IMAGE_DIR, parse_model_names
 from nets import build_vit_model
 from utils import DEVICE, load_data
@@ -86,7 +86,7 @@ def pair_metrics(a, b, ratio):
 
 def collect_guides(models, images, guide_type, ratio):
     guides = {}
-    helper = LazyAggregationAttacker(next(iter(models.values())), attention_guide_type=guide_type, device=DEVICE)
+    helper = LMDSSAttacker(next(iter(models.values())), attention_guide_type=guide_type, device=DEVICE)
     for name, model in models.items():
         score = helper._collect_cls_attention_scores(model, images, attention_guide_type=guide_type)
         if score is not None:

@@ -18,13 +18,7 @@ DIM_VARIANTS = ("none", "full-random", "forward-only", "backward-only", "full-fi
 AREAS = ("background", "all")
 QUICK_CONFIGS = (("background", "none"), ("background", "full-random"), ("background", "forward-only"),
                  ("background", "full-fixed"), ("all", "none"), ("all", "full-random"))
-AUGMENTATION_METHODS = (
-    "dropout", "jitter", "freq", "lowpass_gauss", "laplacian_low", "fft_lowboost", "illumination_low",
-    "band_noise", "band_noise_low", "band_noise_mid", "band_noise_high",
-    "colored_noise", "colored_noise_low", "colored_noise_mid", "colored_noise_high",
-    "progressive_spectral_noise", "progressive_spectral_noise_low", "progressive_spectral_noise_mid", "progressive_spectral_noise_high",
-    "wavelet_noise", "wavelet_noise_low", "wavelet_noise_mid", "wavelet_noise_high", "wavelet_noise_fglow_bghigh", "white_noise",
-)
+AUGMENTATION_METHODS = ("dropout", "jitter", "freq", "dim_resonance", "dim_adjoint_echo", "white_noise")
 
 
 def _json(path, value):

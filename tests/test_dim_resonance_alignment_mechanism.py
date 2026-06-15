@@ -16,7 +16,7 @@ class DimResonanceAlignmentMechanismTest(unittest.TestCase):
 
     def test_conclusion_reports_dim_resonance_supported_when_best_on_both_axes(self):
         summary = {}
-        for variant in ("reference_djf", "dim_resonance_only", "dim_resonance_djf", "fft_lowboost_djf", "dim_adjoint_echo_only", "dim_adjoint_echo_djf"):
+        for variant in ("reference_djf", "dim_resonance_only", "dim_resonance_djf", "dim_adjoint_echo_only", "dim_adjoint_echo_djf"):
             for group in ("low_mid", "high"):
                 summary[f"source_dim_alignment/{variant}/{group}"] = {
                     "dim_projection_gain": 1.0,

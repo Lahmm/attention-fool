@@ -85,10 +85,10 @@ class MIFGSMAttacker:
         return self._normalize(adv_pixels)
 
 
-class LazyAggregationAttacker(MIFGSMAttacker):
+class LMDSSAttacker:
     """
-    Configurable iterative FGSM attack with optional forward augmentations,
-    attention-guided augmentation, and gradient refinement modules.
+    LMDSS transfer attack with attention-guided forward augmentations,
+    DIM, TI smoothing, MI/NI updates, and low/mid-frequency DSS tuning.
     """
 
     def __init__(
@@ -102,14 +102,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         input_diversity: bool = False,
         dim_resize_range: tuple[float, float] = (0.85, 1.0),
         dim_mode: str = "full-random",
-        use_si: bool = False,
-        si_scales: int = 1,
-        use_eot: bool = False,
-        eot_iter: int = 1,
-        use_momentum: bool = False,
+        use_momentum: bool = True,
         momentum_decay: float = 1.0,
         nesterov: bool = False,
-        normalize_grad: bool = False,
         attention_guide_models: tuple[torch.nn.Module, ...] | None = None,
         attention_guide_type: str = "postsoftmax_cls",
         attention_guide_build_method: str = "pixel",
@@ -119,42 +114,26 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         guide_aug_methods: tuple[str, ...] = ("dropout",),
         guide_aug_copies: int = 3,
         guide_aug_strength: float = 0.2,
-        guide_grad_norm_area: str = "none",
         lowmid_grad_tuning: bool = False,
         lowmid_grad_rotation_strength: float = 0.5,
         lowmid_grad_preserve_norm: bool = True,
         lowmid_dss_filter: bool = False,
         lowmid_dss_consistency: str = "sign",
         lowmid_dss_agreement_threshold: float = 0.67,
-        temporal_persistence_filter: bool = False,
-        temporal_persistence_k: int = 5,
-        spectral_momentum: bool = False,
-        spectral_momentum_high_decay: float = 0.7,
-        spectral_hook_rotation: bool = False,
-        spectral_hook_rotation_strength: float = 0.5,
-        grm_enabled: bool = False,
-        grm_alpha: float = 0.5,
-        project_each_step: bool = True,
         device: torch.device | None = None,
     ) -> None:
-        super().__init__(
-            model=model,
-            epsilon=epsilon,
-            step_size=step_size,
-            steps=steps,
-            decay=momentum_decay,
-            device=device,
-        )
+        if epsilon < 0:
+            raise ValueError(f"epsilon must be non-negative, got {epsilon}.")
+        if steps <= 0:
+            raise ValueError(f"steps must be positive, got {steps}.")
+        if step_size is not None and step_size <= 0:
+            raise ValueError(f"step_size must be positive, got {step_size}.")
         if not layers:
             raise ValueError("layers must contain at least one layer index.")
         if ti_sigma < 0:
             raise ValueError(f"ti_sigma must be non-negative, got {ti_sigma}.")
-        if si_scales <= 0:
-            raise ValueError(f"si_scales must be positive, got {si_scales}.")
-        if eot_iter <= 0:
-            raise ValueError(f"eot_iter must be positive, got {eot_iter}.")
         if nesterov and not use_momentum:
-            raise ValueError("--ni requires --mi because Nesterov lookahead depends on momentum.")
+            raise ValueError("--ni requires MI because Nesterov lookahead depends on momentum.")
         if not 0 <= lowmid_grad_rotation_strength < 1:
             raise ValueError(
                 f"lowmid_grad_rotation_strength must be in [0, 1), got {lowmid_grad_rotation_strength}."
@@ -172,6 +151,24 @@ class LazyAggregationAttacker(MIFGSMAttacker):
                 f"lowmid_dss_agreement_threshold must be in [0, 1], got {lowmid_dss_agreement_threshold}."
             )
 
+        self.model = model
+        self.model.eval()
+        self.epsilon = float(epsilon)
+        self.steps = int(steps)
+        self.step_size = float(step_size) if step_size is not None else self.epsilon / self.steps
+        self.decay = float(momentum_decay)
+        self.device = device if device is not None else DEVICE
+        self.pixel_mean = torch.tensor(
+            IMAGENET_MEAN,
+            dtype=torch.float32,
+            device=self.device,
+        ).view(1, 3, 1, 1)
+        self.pixel_std = torch.tensor(
+            IMAGENET_STD,
+            dtype=torch.float32,
+            device=self.device,
+        ).view(1, 3, 1, 1)
+
         self.layers = tuple(int(layer) for layer in layers)
         self.ti_sigma = float(ti_sigma)
         self.input_diversity = bool(input_diversity)
@@ -181,28 +178,14 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             raise ValueError(f"dim_mode must be one of {valid_dim_modes}, got {dim_mode!r}.")
         self.dim_mode = dim_mode
         self._fixed_dim_params = None
-        self.use_si = bool(use_si)
-        self.si_scales = int(si_scales)
-        self.use_eot = bool(use_eot)
-        self.eot_iter = int(eot_iter)
         self.use_momentum = bool(use_momentum)
         self.nesterov = bool(nesterov)
-        self.normalize_grad = bool(normalize_grad)
         self.lowmid_grad_tuning = bool(lowmid_grad_tuning)
         self.lowmid_grad_rotation_strength = float(lowmid_grad_rotation_strength)
         self.lowmid_grad_preserve_norm = lowmid_grad_preserve_norm
         self.lowmid_dss_filter = bool(lowmid_dss_filter)
         self.lowmid_dss_consistency = lowmid_dss_consistency
         self.lowmid_dss_agreement_threshold = float(lowmid_dss_agreement_threshold)
-        self.temporal_persistence_filter = bool(temporal_persistence_filter)
-        self.temporal_persistence_k = int(temporal_persistence_k)
-        self.spectral_momentum = bool(spectral_momentum)
-        self.spectral_momentum_high_decay = float(spectral_momentum_high_decay)
-        self.spectral_hook_rotation = bool(spectral_hook_rotation)
-        self.spectral_hook_rotation_strength = float(spectral_hook_rotation_strength)
-        self.grm_enabled = bool(grm_enabled)
-        self.grm_alpha = float(grm_alpha)
-        self.project_each_step = bool(project_each_step)
         self.attention_guide_models = tuple(attention_guide_models or ())
 
         guide_types = tuple(item.strip() for item in attention_guide_type.split(",") if item.strip())
@@ -232,15 +215,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             "dropout",
             "jitter",
             "freq",
-            "lowpass_gauss",
-            "laplacian_low",
-            "fft_lowboost",
-            "illumination_low",
-            "band_noise", "band_noise_low", "band_noise_mid", "band_noise_high",
-            "colored_noise", "colored_noise_low", "colored_noise_mid", "colored_noise_high",
-            "progressive_spectral_noise", "progressive_spectral_noise_low", "progressive_spectral_noise_mid", "progressive_spectral_noise_high",
-            "wavelet_noise", "wavelet_noise_low", "wavelet_noise_mid", "wavelet_noise_high",
-            "wavelet_noise_fglow_bghigh",
             "dim_resonance",
             "dim_adjoint_echo",
             "white_noise",
@@ -256,17 +230,19 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         self.guide_aug_strength = float(guide_aug_strength)
         if self.guide_aug_strength < 0:
             raise ValueError(f"guide_aug_strength must be non-negative, got {guide_aug_strength}.")
-        valid_guide_grad_norm_areas = ("none", "foreground", "background")
-        if guide_grad_norm_area not in valid_guide_grad_norm_areas:
-            raise ValueError(
-                f"guide_grad_norm_area must be one of {valid_guide_grad_norm_areas}, "
-                f"got {guide_grad_norm_area!r}."
-            )
-        self.guide_grad_norm_area = guide_grad_norm_area
         self._momentum_lowmid_agreement: torch.Tensor | None = None
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
-        self._guide_lowpass_kernel = self._build_gaussian_kernel(kernel_size=15, sigma=3.0)
-        self._guide_illumination_kernel = self._build_gaussian_kernel(kernel_size=31, sigma=8.0)
+
+    def _denormalize(self, images: torch.Tensor) -> torch.Tensor:
+        return images * self.pixel_std + self.pixel_mean
+
+    def _normalize(self, images: torch.Tensor) -> torch.Tensor:
+        return (images - self.pixel_mean) / self.pixel_std
+
+    @staticmethod
+    def _normalize_grad(grad: torch.Tensor) -> torch.Tensor:
+        denom = grad.abs().mean(dim=(1, 2, 3), keepdim=True).clamp_min(1e-12)
+        return grad / denom
 
     @staticmethod
     def _build_gaussian_kernel(kernel_size: int, sigma: float) -> torch.Tensor:
@@ -285,7 +261,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
     def _build_ti_kernel(sigma: float) -> torch.Tensor:
         radius = int(3 * sigma)
         kernel_size = 2 * radius + 1
-        return LazyAggregationAttacker._build_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
+        return LMDSSAttacker._build_gaussian_kernel(kernel_size=kernel_size, sigma=sigma)
 
     def _apply_depthwise_kernel(self, pixels: torch.Tensor, kernel: torch.Tensor) -> torch.Tensor:
         kernel = kernel.to(pixels.device, pixels.dtype).repeat(pixels.size(1), 1, 1, 1)
@@ -310,7 +286,7 @@ class LazyAggregationAttacker(MIFGSMAttacker):
     @staticmethod
     def _fft_project_grad(grad: torch.Tensor, band: int) -> torch.Tensor:
         work = grad if grad.dtype == torch.float64 else grad.float()
-        mask = LazyAggregationAttacker._fft_grad_mask(
+        mask = LMDSSAttacker._fft_grad_mask(
             grad.size(-2),
             grad.size(-1),
             band,
@@ -324,95 +300,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         lowmid = sum((self._fft_project_grad(grad, band) for band in range(6)), torch.zeros_like(grad))
         high = sum((self._fft_project_grad(grad, band) for band in range(6, 8)), torch.zeros_like(grad))
         return lowmid, high
-
-    def _register_spectral_hook(self) -> list:
-        """Register a backward hook on the first attention block's qkv output.
-
-        The hook decomposes the V-portion gradient into FFT bands and applies a
-        Givens rotation toward low/mid frequencies — operating *during* backprop
-        (GNS-style), not on the final input gradient.
-        """
-        hooks: list = []
-        strength = self.spectral_hook_rotation_strength
-
-        def _spectral_hook(module, grad_input, grad_output):
-            # grad_input[0] is grad w.r.t. qkv input: [B, N_tokens, 3*D]
-            g = grad_input[0]
-            if g is None or g.ndim != 3:
-                return grad_input
-
-            B, N, C3 = g.shape
-            # Split Q, K, V: each has C3//3 channels
-            C = C3 // 3
-            g_q, g_k, g_v = g[..., :C], g[..., C:2 * C], g[..., 2 * C:]
-
-            # Exclude CLS token, keep patches: [B, N_patches, C]
-            N_patches = N - 1
-            g_v_patches = g_v[:, 1:, :]  # [B, N_patches, C]
-            grid = int(N_patches ** 0.5)
-            if grid * grid != N_patches:
-                return grad_input  # non-square, skip
-
-            # Reshape to spatial: [B, C, grid, grid]
-            work = g_v_patches.transpose(1, 2).reshape(B, C, grid, grid).float()
-
-            # FFT decompose into low/mid + high
-            bands_lm = torch.stack(
-                [torch.fft.ifft2(
-                    torch.fft.fft2(work, dim=(-2, -1), norm='ortho')
-                    * self._fft_grad_mask(grid, grid, b, device=work.device, dtype=torch.float32),
-                    dim=(-2, -1), norm='ortho',
-                ).real for b in range(6)],
-                dim=0,
-            ).sum(0)  # [B, C, grid, grid]
-            bands_hi = torch.stack(
-                [torch.fft.ifft2(
-                    torch.fft.fft2(work, dim=(-2, -1), norm='ortho')
-                    * self._fft_grad_mask(grid, grid, b, device=work.device, dtype=torch.float32),
-                    dim=(-2, -1), norm='ortho',
-                ).real for b in range(6, 8)],
-                dim=0,
-            ).sum(0)  # [B, C, grid, grid]
-
-            # Per-channel Givens rotation toward low/mid
-            eps = 1e-12
-            lm_norm = bands_lm.reshape(B, C, -1).norm(p=2, dim=2)  # [B, C]
-            hi_norm = bands_hi.reshape(B, C, -1).norm(p=2, dim=2)  # [B, C]
-            valid = (lm_norm > eps) & (hi_norm > eps)  # [B, C]
-
-            theta = strength * torch.atan2(hi_norm, lm_norm)  # [B, C]
-            cos_t, sin_t = torch.cos(theta), torch.sin(theta)
-            new_lm = (lm_norm * cos_t + hi_norm * sin_t).view(B, C, 1, 1)
-            new_hi = (-lm_norm * sin_t + hi_norm * cos_t).view(B, C, 1, 1)
-
-            lm_unit = bands_lm / lm_norm.clamp_min(eps).view(B, C, 1, 1)
-            hi_unit = bands_hi / hi_norm.clamp_min(eps).view(B, C, 1, 1)
-            rotated = new_lm * lm_unit + new_hi * hi_unit  # [B, C, grid, grid]
-
-            # Preserve norm per-channel
-            orig_norm = work.reshape(B, C, -1).norm(p=2, dim=2).view(B, C, 1, 1)
-            rot_norm = rotated.reshape(B, C, -1).norm(p=2, dim=2).view(B, C, 1, 1).clamp_min(eps)
-            rotated = rotated * (orig_norm / rot_norm)
-
-            # Only modify where valid
-            mask = valid.view(B, C, 1, 1).to(work.dtype)
-            rotated = rotated * mask + work * (1.0 - mask)
-
-            # Reshape back: [B, C, grid, grid] → [B, N_patches, C]
-            g_v_patches_new = rotated.reshape(B, C, N_patches).transpose(1, 2).to(g.dtype)
-
-            # Reassemble: CLS gradient unchanged
-            g[:, 1:, 2 * C:3 * C] = g_v_patches_new
-
-            return (g, *grad_input[1:])
-
-        # Register hook on block 0's qkv
-        model = self.model.model if hasattr(self.model, 'model') else self.model
-        for name, module in model.named_modules():
-            if name == 'blocks.0.attn.qkv':
-                hooks.append(module.register_backward_hook(_spectral_hook))
-                break
-        return hooks
 
     def _apply_lowmid_dss_filter(
         self,
@@ -732,32 +619,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         max_vals = flat.max(dim=1, keepdim=True).values.view(-1, 1, 1, 1)
         return ((pixel_map - min_vals) / (max_vals - min_vals).clamp_min(1e-12)).detach()
 
-    def _normalize_guided_grad(
-        self,
-        grad: torch.Tensor,
-        guide_pixel_map: torch.Tensor | None,
-    ) -> torch.Tensor:
-        if self.guide_grad_norm_area == "none":
-            return grad
-        if guide_pixel_map is None:
-            raise ValueError("guide_pixel_map is required when guide_grad_norm_area is enabled.")
-
-        guide = guide_pixel_map.to(grad.device, grad.dtype).clamp(0.0, 1.0)
-        if self.guide_grad_norm_area == "foreground":
-            region = guide
-        elif self.guide_grad_norm_area == "background":
-            region = 1.0 - guide
-        else:
-            raise ValueError(f"Unsupported guide_grad_norm_area: {self.guide_grad_norm_area}")
-
-        region = region.expand_as(grad)
-        denom = (
-            (grad.abs() * region).sum(dim=(1, 2, 3), keepdim=True)
-            / region.sum(dim=(1, 2, 3), keepdim=True).clamp_min(1e-12)
-        ).clamp_min(1e-12)
-        normalized_region_grad = grad / denom
-        return normalized_region_grad * region + grad * (1.0 - region)
-
     def _build_guide_pixel_map(self, images: torch.Tensor, img_size: int) -> torch.Tensor:
         guide_token_map = self._build_stable_attention_token_map(images)
         if self.attention_guide_build_method == "pixel":
@@ -765,107 +626,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         if self.attention_guide_build_method == "patch":
             return self._token_map_to_patch_pixel_map(guide_token_map, img_size)
         raise ValueError(f"Unsupported attention_guide_build_method: {self.attention_guide_build_method}")
-
-    def _lowpass_gauss_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
-        return self._apply_depthwise_kernel(pixels, self._guide_lowpass_kernel)
-
-    def _laplacian_low_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
-        low = self._lowpass_gauss_pixels(pixels)
-        high = pixels - low
-        high_scale = max(0.0, 1.0 - 2.5 * self.guide_aug_strength)
-        return torch.clamp(low + high * high_scale, 0.0, 1.0)
-
-    def _fft_lowboost_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
-        height, width = pixels.shape[-2:]
-        work = pixels.float()
-        freq = torch.fft.rfft2(work, dim=(-2, -1), norm="ortho")
-        fy = torch.fft.fftfreq(height, device=pixels.device, dtype=work.dtype).view(1, 1, height, 1)
-        fx = torch.fft.rfftfreq(width, device=pixels.device, dtype=work.dtype).view(1, 1, 1, width // 2 + 1)
-        radius = torch.sqrt(fx.square() + fy.square())
-        low_weight = torch.exp(-0.5 * (radius / 0.12).square())
-        boosted = freq * (1.0 + self.guide_aug_strength * low_weight)
-        augmented = torch.fft.irfft2(boosted, s=(height, width), dim=(-2, -1), norm="ortho")
-        return torch.clamp(augmented.to(pixels.dtype), 0.0, 1.0)
-
-    def _illumination_low_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
-        illumination = self._apply_depthwise_kernel(pixels, self._guide_illumination_kernel)
-        centered = illumination - illumination.mean(dim=(2, 3), keepdim=True)
-        return torch.clamp(pixels + self.guide_aug_strength * centered, 0.0, 1.0)
-
-    @staticmethod
-    def _fft_radius_grid(height: int, width: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
-        fy = torch.fft.fftfreq(height, device=device, dtype=dtype).view(1, 1, height, 1)
-        fx = torch.fft.fftfreq(width, device=device, dtype=dtype).view(1, 1, 1, width)
-        radius = torch.sqrt(fx.square() + fy.square())
-        return radius / radius.max().clamp_min(1e-8)
-
-    @staticmethod
-    def _standardize_delta(delta: torch.Tensor) -> torch.Tensor:
-        flat = delta.flatten(1)
-        std = flat.std(dim=1, keepdim=True, unbiased=False).view(-1, 1, 1, 1).clamp_min(1e-8)
-        return delta / std
-
-    def _sample_weighted_spectral_delta(self, pixels: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-        work = pixels.float()
-        noise = torch.randn(work.shape, device=pixels.device, dtype=work.dtype)
-        noise_f = torch.fft.fft2(noise, dim=(-2, -1), norm="ortho")
-        delta = torch.fft.ifft2(noise_f * weight.to(pixels.device, work.dtype), dim=(-2, -1), norm="ortho").real
-        return self._standardize_delta(delta)
-
-    def _band_noise_pixels(self, pixels: torch.Tensor, band: str = "mid") -> torch.Tensor:
-        height, width = pixels.shape[-2:]
-        work = pixels.float()
-        radius = self._fft_radius_grid(height, width, pixels.device, work.dtype)
-        if band == "low":
-            mask = (radius < 0.15).to(work.dtype)
-        elif band == "high":
-            mask = (radius > 0.30).to(work.dtype)
-        else:
-            mask = ((radius >= 0.12) & (radius <= 0.35)).to(work.dtype)
-        delta = self._sample_weighted_spectral_delta(pixels, mask)
-        return torch.clamp(work + self.guide_aug_strength * delta, 0.0, 1.0).to(pixels.dtype)
-
-    def _colored_noise_pixels(self, pixels: torch.Tensor, band: str = "mid") -> torch.Tensor:
-        height, width = pixels.shape[-2:]
-        work = pixels.float()
-        radius = self._fft_radius_grid(height, width, pixels.device, work.dtype)
-        if band == "low":
-            weight = torch.where(radius > 0, torch.pow(radius + 0.01, -1.2), torch.zeros_like(radius))
-        elif band == "high":
-            weight = torch.where(radius > 0, torch.pow(radius + 0.02, 0.6), torch.zeros_like(radius))
-        else:
-            weight = torch.where(radius > 0, torch.pow(radius + 0.05, -0.75), torch.zeros_like(radius))
-        weight = weight / weight.max().clamp_min(1e-8)
-        delta = self._sample_weighted_spectral_delta(pixels, weight)
-        return torch.clamp(work + self.guide_aug_strength * delta, 0.0, 1.0).to(pixels.dtype)
-
-    def _progressive_spectral_noise_pixels(self, pixels: torch.Tensor, band: str = "mid") -> torch.Tensor:
-        height, width = pixels.shape[-2:]
-        work = pixels.float()
-        radius = self._fft_radius_grid(height, width, pixels.device, work.dtype)
-        if band == "low":
-            low_r1, low_r2 = 0.05, 0.15
-        elif band == "high":
-            low_r1, low_r2 = 0.15, 0.42
-        else:
-            low_r1, low_r2 = 0.18, 0.32
-        low_weight = torch.exp(-0.5 * (radius / low_r1).square())
-        mid_weight = torch.exp(-0.5 * ((radius - low_r2) / 0.14).square())
-        max_beta = min(0.95, self.guide_aug_strength * self.guide_aug_strength)
-        if max_beta <= 0:
-            return pixels
-
-        x = work
-        steps = 3
-        for step in range(steps):
-            progress = float(step + 1) / float(steps)
-            beta = max_beta * progress
-            weight = (1.0 - progress) * low_weight + progress * mid_weight
-            delta = self._sample_weighted_spectral_delta(pixels, weight)
-            noise_image = torch.clamp(0.5 + 0.25 * delta, 0.0, 1.0)
-            x = (1.0 - beta) ** 0.5 * x + beta ** 0.5 * noise_image
-            x = torch.clamp(x, 0.0, 1.0)
-        return x.to(pixels.dtype)
 
     def _dim_adjoint_restore_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
         _batch, _channels, height, width = pixels.shape
@@ -900,50 +660,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         augmented = pixels + self.guide_aug_strength * restored
         return (augmented + (pixels - augmented).detach()).to(pixels.dtype)
 
-    def _wavelet_noise_pixels(self, pixels: torch.Tensor, band: str = "mid") -> torch.Tensor:
-        work = pixels.float()
-        _batch, _channels, height, width = work.shape
-        pad_h = height % 2
-        pad_w = width % 2
-        if pad_h or pad_w:
-            work = F.pad(work, (0, pad_w, 0, pad_h), mode="reflect")
-
-        x00 = work[..., 0::2, 0::2]
-        x01 = work[..., 0::2, 1::2]
-        x10 = work[..., 1::2, 0::2]
-        x11 = work[..., 1::2, 1::2]
-        ll = (x00 + x01 + x10 + x11) * 0.5
-        lh = (x00 - x01 + x10 - x11) * 0.5
-        hl = (x00 + x01 - x10 - x11) * 0.5
-        hh = (x00 - x01 - x10 + x11) * 0.5
-
-        strength = self.guide_aug_strength
-        if band == "low":
-            ll = ll + torch.randn_like(ll) * (0.5 * strength)
-            lh, hl, hh = lh * 1.0, hl * 1.0, hh * 1.0
-        elif band == "high":
-            lh = lh + torch.randn_like(lh) * strength
-            hl = hl + torch.randn_like(hl) * strength
-            hh = hh + torch.randn_like(hh) * strength
-        else:
-            ll = ll + torch.randn_like(ll) * (0.5 * strength)
-            lh = lh + torch.randn_like(lh) * strength
-            hl = hl + torch.randn_like(hl) * strength
-            hh = hh + torch.randn_like(hh) * strength
-
-        y00 = (ll + lh + hl + hh) * 0.5
-        y01 = (ll - lh + hl - hh) * 0.5
-        y10 = (ll + lh - hl - hh) * 0.5
-        y11 = (ll - lh - hl + hh) * 0.5
-
-        out = torch.empty_like(work)
-        out[..., 0::2, 0::2] = y00
-        out[..., 0::2, 1::2] = y01
-        out[..., 1::2, 0::2] = y10
-        out[..., 1::2, 1::2] = y11
-        out = out[..., :height, :width]
-        return torch.clamp(out, 0.0, 1.0).to(pixels.dtype)
-
     def _white_noise_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
         noise = torch.randn_like(pixels, dtype=pixels.dtype)
         return torch.clamp(pixels + self.guide_aug_strength * noise, 0.0, 1.0)
@@ -958,7 +674,9 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             corrupt = 0.5 * noise + 0.5 * blurred
             return torch.clamp(pixels * (1.0 - strength) + corrupt * strength, 0.0, 1.0)
         if method == "jitter":
-            brightness = (torch.rand(pixels.size(0), 1, 1, 1, device=pixels.device, dtype=pixels.dtype) * 2.0 - 1.0) * strength
+            brightness = (
+                torch.rand(pixels.size(0), 1, 1, 1, device=pixels.device, dtype=pixels.dtype) * 2.0 - 1.0
+            ) * strength
             noise = torch.randn_like(pixels) * (strength / 2.0)
             return torch.clamp(pixels * (1.0 + brightness) + noise, 0.0, 1.0)
         if method == "freq":
@@ -966,31 +684,10 @@ class LazyAggregationAttacker(MIFGSMAttacker):
             noise = F.avg_pool2d(torch.rand_like(pixels), kernel_size=9, stride=1, padding=4)
             corrupt = 0.7 * pooled + 0.3 * noise
             return torch.clamp(pixels * (1.0 - strength) + corrupt * strength, 0.0, 1.0)
-        if method == "lowpass_gauss":
-            low = self._lowpass_gauss_pixels(pixels)
-            return torch.clamp(pixels * (1.0 - strength) + low * strength, 0.0, 1.0)
-        if method == "laplacian_low":
-            return self._laplacian_low_pixels(pixels)
-        if method == "fft_lowboost":
-            return self._fft_lowboost_pixels(pixels)
-        if method == "illumination_low":
-            return self._illumination_low_pixels(pixels)
-        if method in ("band_noise", "band_noise_low", "band_noise_mid", "band_noise_high"):
-            band = method.replace("band_noise", "").strip("_") or "mid"
-            return self._band_noise_pixels(pixels, band)
-        if method in ("colored_noise", "colored_noise_low", "colored_noise_mid", "colored_noise_high"):
-            band = method.replace("colored_noise", "").strip("_") or "mid"
-            return self._colored_noise_pixels(pixels, band)
-        if method in ("progressive_spectral_noise", "progressive_spectral_noise_low", "progressive_spectral_noise_mid", "progressive_spectral_noise_high"):
-            band = method.replace("progressive_spectral_noise", "").strip("_") or "mid"
-            return self._progressive_spectral_noise_pixels(pixels, band)
         if method == "dim_resonance":
             return self._dim_resonance_pixels(pixels)
         if method == "dim_adjoint_echo":
             return self._dim_adjoint_echo_pixels(pixels)
-        if method in ("wavelet_noise", "wavelet_noise_low", "wavelet_noise_mid", "wavelet_noise_high"):
-            band = method.replace("wavelet_noise", "").strip("_") or "mid"
-            return self._wavelet_noise_pixels(pixels, band)
         if method == "white_noise":
             return self._white_noise_pixels(pixels)
         raise ValueError(f"Unsupported guide augmentation method: {method}")
@@ -1001,13 +698,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         guide_pixel_map: torch.Tensor | None,
         method: str,
     ) -> torch.Tensor:
-        if method == "wavelet_noise_fglow_bghigh":
-            if guide_pixel_map is None:
-                raise ValueError("guide_pixel_map is required for wavelet_noise_fglow_bghigh.")
-            guide = guide_pixel_map.to(pixels.device, pixels.dtype).clamp(0.0, 1.0)
-            low_aug = self._augment_full_image(pixels, "wavelet_noise_low")
-            high_aug = self._augment_full_image(pixels, "wavelet_noise_high")
-            return torch.clamp(low_aug * guide + high_aug * (1.0 - guide), 0.0, 1.0)
         augmented = self._augment_full_image(pixels, method)
         if self.guide_aug_area == "all":
             return augmented
@@ -1038,17 +728,12 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         labels: torch.Tensor,
         guide_pixel_map: torch.Tensor | None,
     ):
-        si_count = self.si_scales if self.use_si else 1
-        eot_count = self.eot_iter if self.use_eot else 1
-        for scale_idx in range(si_count):
-            scale = float(2 ** scale_idx)
-            for _eot_idx in range(eot_count):
-                for forward_pixels in self._iter_forward_pixels(pixels, guide_pixel_map):
-                    logits_adv = self.model(
-                        self._input_diversity(self._normalize(forward_pixels) / scale),
-                        return_attn=False,
-                    )
-                    yield F.cross_entropy(logits_adv, labels)
+        for forward_pixels in self._iter_forward_pixels(pixels, guide_pixel_map):
+            logits_adv = self.model(
+                self._input_diversity(self._normalize(forward_pixels)),
+                return_attn=False,
+            )
+            yield F.cross_entropy(logits_adv, labels)
 
     def _attack_grad_terms(
         self,
@@ -1075,38 +760,6 @@ class LazyAggregationAttacker(MIFGSMAttacker):
         grad, _term_grads = self._attack_grad_terms(pixels, labels, guide_pixel_map)
         return grad
 
-    def _attack_grad_with_robustness(
-        self,
-        pixels: torch.Tensor,
-        labels: torch.Tensor,
-        guide_pixel_map: torch.Tensor | None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Mean gradient + per-element cross-augmentation sign robustness.
-
-        Robustness ρ ∈ [0,1] measures how many of the 9 augmented samples agree
-        with the mean sign at each spatial element.  Elements with ρ ≈ 1 are
-        robust to input perturbations (likely transferable); elements with ρ ≈ 0
-        are augmentation-sensitive (likely overfitting).
-        """
-        grad_sum = None
-        term_grads: list[torch.Tensor] = []
-        for ce_loss in self._iter_attack_losses(pixels, labels, guide_pixel_map):
-            g = torch.autograd.grad(ce_loss, pixels, retain_graph=False)[0]
-            term_grads.append(g)
-            grad_sum = g if grad_sum is None else grad_sum + g
-        if grad_sum is None:
-            raise RuntimeError("No attack loss terms were generated.")
-
-        grad_mean = grad_sum / float(len(term_grads))
-        mean_sign = grad_mean.sign()
-
-        robustness = torch.zeros_like(grad_mean)
-        for g in term_grads:
-            robustness += g.sign().eq(mean_sign).to(grad_mean.dtype)
-        robustness /= float(len(term_grads))  # ∈ [0, 1]
-
-        return grad_mean, robustness
-
     def attack_batch(
         self,
         images: torch.Tensor,
@@ -1117,99 +770,33 @@ class LazyAggregationAttacker(MIFGSMAttacker):
 
         clean_pixels = self._denormalize(images).detach()
         guide_pixel_map = None
-        needs_guide_map = (self.guide_aug and self.guide_aug_area != "all") or self.guide_grad_norm_area != "none"
-        if needs_guide_map:
+        if self.guide_aug and self.guide_aug_area != "all":
             guide_pixel_map = self._build_guide_pixel_map(images, clean_pixels.size(-1))
+
         adv_pixels = clean_pixels.clone().detach()
         momentum = torch.zeros_like(adv_pixels)
-        mom_lowmid: torch.Tensor | None = None
-        mom_high: torch.Tensor | None = None
-        if self.spectral_momentum:
-            mom_lowmid = torch.zeros_like(adv_pixels)
-            mom_high = torch.zeros_like(adv_pixels)
-        grad_buffer: list[torch.Tensor] = []
-
-        # GNS-style hook: rotate attn.qkv gradients toward low/mid during backprop.
-        spectral_hooks: list = []
-        if self.spectral_hook_rotation:
-            spectral_hooks = self._register_spectral_hook()
 
         for step_idx in range(self.steps):
             grad_pixels = adv_pixels.detach()
             if self.nesterov and step_idx > 0:
                 with torch.no_grad():
-                    # Use combined momentum for Nesterov lookahead.
-                    effective = (
-                        momentum
-                        if not self.spectral_momentum
-                        else (mom_lowmid + mom_high)  # type: ignore[operator]
-                    )
-                    grad_pixels = grad_pixels + self.decay * self.step_size * effective.sign()
-                    delta = torch.clamp(grad_pixels - clean_pixels, -self.epsilon, self.epsilon)
-                    grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
+                    grad_pixels = grad_pixels + self.decay * self.step_size * momentum.sign()
+                    grad_pixels = torch.clamp(grad_pixels, 0.0, 1.0)
+
             grad_pixels = grad_pixels.detach().requires_grad_(True)
-
-            # GRM: compute gradient + per-element cross-augmentation robustness.
-            robustness: torch.Tensor | None = None
-            if self.grm_enabled:
-                grad, robustness = self._attack_grad_with_robustness(
-                    grad_pixels, labels, guide_pixel_map,
-                )
-            else:
-                grad = self._attack_grad(grad_pixels, labels, guide_pixel_map)
-
-            if self.normalize_grad:
-                grad = self._normalize_grad(grad)
-            grad = self._normalize_guided_grad(grad, guide_pixel_map)
+            grad = self._attack_grad(grad_pixels, labels, guide_pixel_map)
             grad = self._smooth_grad(grad)
             grad = self._apply_lowmid_dss_filter(grad, momentum)
             grad = self._tune_lowmid_gradient(grad)
 
-            # Temporal sign persistence filter.
-            if self.temporal_persistence_filter:
-                grad_buffer.append(grad.detach().clone())
-                if len(grad_buffer) > self.temporal_persistence_k:
-                    grad_buffer.pop(0)
-                if len(grad_buffer) >= 2:
-                    signs = torch.stack([g.sign() for g in grad_buffer], dim=0)
-                    persistence = signs.float().mean(dim=0).abs()
-                    grad = grad * persistence
-
-            if self.spectral_momentum and mom_lowmid is not None and mom_high is not None:
-                # Spectral momentum: frequency-dependent decay.
-                # Low/mid components (bands 0-5) are temporally stable →
-                # full accumulation (μ=1.0).
-                # High components (bands 6-7) are temporally noisy →
-                # faster decay (μ < 1.0), naturally suppressing their
-                # long-term contribution.
-                g_lm, g_hi = self._lowmid_high_components(grad)
-                mom_lowmid = 1.0 * mom_lowmid + g_lm
-                mom_high = self.spectral_momentum_high_decay * mom_high + g_hi
-                update = mom_lowmid + mom_high
-            elif self.use_momentum:
-                if self.grm_enabled and robustness is not None:
-                    # Robustness-weighted momentum decay (GRM).
-                    # ρ ∈ [0,1]: μ_eff = μ · (α + (1-α) · ρ)
-                    #   ρ=1 → μ_eff = μ    (full accumulation for robust elements)
-                    #   ρ=0 → μ_eff = μ·α  (fast decay for unreliable elements)
-                    mu_eff = self.decay * (
-                        self.grm_alpha + (1.0 - self.grm_alpha) * robustness
-                    )
-                    momentum = mu_eff * momentum + grad
-                else:
-                    momentum = self.decay * momentum + grad
+            if self.use_momentum:
+                momentum = self.decay * momentum + grad
                 update = momentum
             else:
                 update = grad
 
             with torch.no_grad():
                 adv_pixels = adv_pixels + self.step_size * update.sign()
-                if self.project_each_step:
-                    delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
-                    adv_pixels = clean_pixels + delta
-                adv_pixels = torch.clamp(adv_pixels, 0.0, 1.0)
-
-        for hook in spectral_hooks:
-            hook.remove()
+                adv_pixels = torch.clamp(adv_pixels, 0.0, 1.0).detach()
 
         return self._normalize(adv_pixels)

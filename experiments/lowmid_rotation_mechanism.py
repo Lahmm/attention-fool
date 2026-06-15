@@ -16,7 +16,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from attack import LazyAggregationAttacker
+from attack import LMDSSAttacker
 from causal_analysis import MAIN_TARGETS, _target_normalize, seed_all, selected_batches
 from gradient_analysis import FFT_BANDS, fft_project
 from main import ANNOTATIONS_PATH, IMAGE_DIR, create_attacker, parse_model_names
@@ -150,7 +150,6 @@ def make_attacker(num_classes: int, *, mi: bool, rotation: bool):
         dim=True,
         mi=mi,
         mi_decay=1.0,
-        normalize_grad=False,
         attention_guide_models=guides,
         attention_guide_type="qk_cls",
         attention_guide_build_method="patch",
@@ -165,10 +164,10 @@ def make_attacker(num_classes: int, *, mi: bool, rotation: bool):
     return source, attacker
 
 
-def trace_attack(attacker: LazyAggregationAttacker, images: torch.Tensor, labels: torch.Tensor, branch: str, keep_steps: set[int]):
+def trace_attack(attacker: LMDSSAttacker, images: torch.Tensor, labels: torch.Tensor, branch: str, keep_steps: set[int]):
     images, labels = images.to(attacker.device), labels.to(attacker.device)
     clean = attacker._denormalize(images).detach()
-    needs_guide = (attacker.guide_aug and attacker.guide_aug_area != "all") or attacker.guide_grad_norm_area != "none"
+    needs_guide = attacker.guide_aug and attacker.guide_aug_area != "all"
     guide = attacker._build_guide_pixel_map(images, clean.size(-1)) if needs_guide else None
     adv = clean.clone().detach()
     momentum = torch.zeros_like(clean)
@@ -177,9 +176,7 @@ def trace_attack(attacker: LazyAggregationAttacker, images: torch.Tensor, labels
         step = step_idx + 1
         grad_pixels = adv.detach().requires_grad_(True)
         raw = attacker._attack_grad(grad_pixels, labels, guide)
-        if attacker.normalize_grad:
-            raw = attacker._normalize_grad(raw)
-        raw = attacker._smooth_grad(attacker._normalize_guided_grad(raw, guide))
+        raw = attacker._smooth_grad(raw)
         rot = attacker._tune_lowmid_gradient(raw)
         previous = momentum
         momentum = attacker.decay * momentum + rot
@@ -198,8 +195,7 @@ def trace_attack(attacker: LazyAggregationAttacker, images: torch.Tensor, labels
             })
         with torch.no_grad():
             adv = adv + attacker.step_size * update.sign()
-            delta = torch.clamp(adv - clean, -attacker.epsilon, attacker.epsilon)
-            adv = torch.clamp(clean + delta, 0.0, 1.0)
+            adv = torch.clamp(adv, 0.0, 1.0)
     return rows
 
 
