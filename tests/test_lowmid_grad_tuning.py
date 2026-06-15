@@ -204,6 +204,7 @@ class LowMidGradientTuningCLITests(unittest.TestCase):
             "cos",
             "--lowmid-dss-agreement-threshold",
             "0.8",
+            "--dim-adjoint-echo",
             "--no-mi",
         ]
         with mock.patch.object(sys, "argv", argv):
@@ -214,6 +215,7 @@ class LowMidGradientTuningCLITests(unittest.TestCase):
         self.assertTrue(args.lowmid_dss_filter)
         self.assertEqual(args.lowmid_dss_consistency, "cos")
         self.assertEqual(args.lowmid_dss_agreement_threshold, 0.8)
+        self.assertTrue(args.dim_adjoint_echo)
         self.assertFalse(args.mi)
 
     def test_create_attacker_forwards_lowmid_options(self):
@@ -230,6 +232,7 @@ class LowMidGradientTuningCLITests(unittest.TestCase):
             lowmid_dss_filter=True,
             lowmid_dss_consistency="cos",
             lowmid_dss_agreement_threshold=0.8,
+            dim_adjoint_echo=True,
             mi=False,
         )
         self.assertTrue(attacker.lowmid_grad_tuning)
@@ -238,6 +241,7 @@ class LowMidGradientTuningCLITests(unittest.TestCase):
         self.assertTrue(attacker.lowmid_dss_filter)
         self.assertEqual(attacker.lowmid_dss_consistency, "cos")
         self.assertEqual(attacker.lowmid_dss_agreement_threshold, 0.8)
+        self.assertTrue(attacker.dim_adjoint_echo)
         self.assertFalse(attacker.use_momentum)
 
 

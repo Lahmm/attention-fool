@@ -43,6 +43,7 @@ def create_attacker(
     guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
     guide_aug_strength: float = 0.2,
+    dim_adjoint_echo: bool = False,
     lowmid_grad_tuning: bool = False,
     lowmid_grad_rotation_strength: float = 0.5,
     lowmid_grad_preserve_norm: bool = True,
@@ -72,6 +73,7 @@ def create_attacker(
         guide_aug_methods=guide_aug_methods,
         guide_aug_copies=guide_aug_copies,
         guide_aug_strength=guide_aug_strength,
+        dim_adjoint_echo=dim_adjoint_echo,
         lowmid_grad_tuning=lowmid_grad_tuning,
         lowmid_grad_rotation_strength=lowmid_grad_rotation_strength,
         lowmid_grad_preserve_norm=lowmid_grad_preserve_norm,
@@ -244,9 +246,10 @@ def parse_args():
     parser.add_argument("--attention-guide-patch-size", type=int, default=16, help="Rendered guide patch size for --attention-guide-build-method patch. Must divide --img-size.")
     parser.add_argument("--guide-aug", action="store_true", help="Enable attention-guided forward augmentation.")
     parser.add_argument("--guide-aug-area", choices=["foreground", "background", "all"], default="background", help="Region affected by guide augmentation. all ignores attention guide maps.")
-    parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,dim_resonance,dim_adjoint_echo,white_noise.")
+    parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,dim_resonance,white_noise.")
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Random copies per guide augmentation method.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
+    parser.add_argument("--dim-adjoint-echo", action="store_true", help="Apply DIM-adjoint echo after guide augmentation and before DIM/normalization.")
     parser.add_argument("--lowmid-grad-tuning", action="store_true", help="Enable low/mid frequency gradient tuning after TI smoothing and before momentum.")
     parser.add_argument("--lowmid-grad-rotation-strength", type=float, default=0.5, help="Givens rotation strength toward low/mid-frequency gradient subspace when --lowmid-grad-tuning is enabled.")
     parser.add_argument("--no-lowmid-grad-preserve-norm", dest="lowmid_grad_preserve_norm", action="store_false", help="Do not preserve per-sample gradient L2 norm after low/mid gradient tuning.")
@@ -289,6 +292,7 @@ def main(
     guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
     guide_aug_strength: float = 0.2,
+    dim_adjoint_echo: bool = False,
     lowmid_grad_tuning: bool = False,
     lowmid_grad_rotation_strength: float = 0.5,
     lowmid_grad_preserve_norm: bool = True,
@@ -354,6 +358,7 @@ def main(
         guide_aug_methods=guide_aug_methods,
         guide_aug_copies=guide_aug_copies,
         guide_aug_strength=guide_aug_strength,
+        dim_adjoint_echo=dim_adjoint_echo,
         lowmid_grad_tuning=lowmid_grad_tuning,
         lowmid_grad_rotation_strength=lowmid_grad_rotation_strength,
         lowmid_grad_preserve_norm=lowmid_grad_preserve_norm,
@@ -412,6 +417,7 @@ if __name__ == "__main__":
         guide_aug_methods=args.guide_aug_method,
         guide_aug_copies=args.guide_aug_copies,
         guide_aug_strength=args.guide_aug_strength,
+        dim_adjoint_echo=args.dim_adjoint_echo,
         lowmid_grad_tuning=args.lowmid_grad_tuning,
         lowmid_grad_rotation_strength=args.lowmid_grad_rotation_strength,
         lowmid_grad_preserve_norm=args.lowmid_grad_preserve_norm,

@@ -106,7 +106,7 @@ python main.py --mode attack --max-attacked-samples 50 --steps 1 --ti-sigma 0 --
 注意力引导增强示例：
 
 ```powershell
-python main.py --mode attack --max-attacked-samples 500 --layers=-6,-5,-4,-3,-2,-1 --guide-aug --guide-aug-area background --guide-aug-method dropout,jitter,freq --guide-aug-copies 3 --attention-guide-type postsoftmax_cls --attention-guide-build-method pixel --output-dir outputs/attack/lazyagg/bgaug_s02_lastsix_500
+python main.py --mode attack --max-attacked-samples 500 --layers=-6,-5,-4,-3,-2,-1 --guide-aug --guide-aug-area background --guide-aug-method dropout,jitter,freq --guide-aug-copies 3 --attention-guide-type postsoftmax_cls --attention-guide-build-method pixel --output-dir outputs/attack/lmdss/bgaug_s02_lastsix_500
 ```
 
 前向增强与反向梯度模块均由独立参数控制：
@@ -120,11 +120,11 @@ python main.py --mode attack --max-attacked-samples 500 --layers=-6,-5,-4,-3,-2,
 --ti-sigma 3
 ```
 
-`--guide-aug-area` 可选 `foreground`、`background`、`all`；`all` 不使用 attention guide map。`--guide-aug-method` 可传 `dropout,jitter,freq,dim_resonance,dim_adjoint_echo,white_noise` 中的一个或多个。普通增强会先生成并按 guide 区域混合；如果包含 `dim_adjoint_echo`，它会作为串行梯度调制器应用在普通增强之后、DIM 之前，而不是作为一个平级普通增强分支参与平均。
+`--guide-aug-area` 可选 `foreground`、`background`、`all`；`all` 不使用 attention guide map。`--guide-aug-method` 可传 `dropout,jitter,freq,dim_resonance,white_noise` 中的一个或多个。普通增强会先生成并按 guide 区域混合；`--dim-adjoint-echo` 是独立开关，会把 echo 作为串行梯度调制器应用在普通增强之后、DIM 之前。
 
 ## DIM Resonance 长跑评估
 
-`dim_resonance` 是基于 DIM adjoint 机制的前向结构增强候选；`dim_adjoint_echo` 是 forward-identity/backward-modified 的梯度通路调制器。完整 effectiveness 协议固定当前 DIM + MI + background patch/qk 设置，比较 `dropout,jitter,freq`、`dim_resonance`、二者组合、`dim_adjoint_echo` 候选和普通 DIM-MI：
+`dim_resonance` 是基于 DIM adjoint 机制的前向结构增强候选；`--dim-adjoint-echo` 是 forward-identity/backward-modified 的梯度通路调制器。完整 effectiveness 协议固定当前 DIM + MI + background patch/qk 设置，比较 `dropout,jitter,freq`、`dim_resonance`、二者组合、echo 开关候选和普通 DIM-MI：
 
 ```powershell
 bash scripts/run_dim_resonance_effectiveness.sh

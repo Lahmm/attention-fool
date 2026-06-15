@@ -18,7 +18,7 @@ DIM_VARIANTS = ("none", "full-random", "forward-only", "backward-only", "full-fi
 AREAS = ("background", "all")
 QUICK_CONFIGS = (("background", "none"), ("background", "full-random"), ("background", "forward-only"),
                  ("background", "full-fixed"), ("all", "none"), ("all", "full-random"))
-AUGMENTATION_METHODS = ("dropout", "jitter", "freq", "dim_resonance", "dim_adjoint_echo", "white_noise")
+AUGMENTATION_METHODS = ("dropout", "jitter", "freq", "dim_resonance", "white_noise")
 
 
 def _json(path, value):

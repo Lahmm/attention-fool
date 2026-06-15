@@ -31,12 +31,12 @@ BAND_GROUPS = {
     "high": (6, 7),
 }
 VARIANTS = {
-    "dim_only": {"dim": True, "guide_aug": False, "methods": ("dropout",)},
-    "reference_djf": {"dim": True, "guide_aug": True, "methods": ("dropout", "jitter", "freq")},
-    "dim_resonance_only": {"dim": True, "guide_aug": True, "methods": ("dim_resonance",)},
-    "dim_resonance_djf": {"dim": True, "guide_aug": True, "methods": ("dropout", "jitter", "freq", "dim_resonance")},
-    "dim_adjoint_echo_only": {"dim": True, "guide_aug": True, "methods": ("dim_adjoint_echo",)},
-    "dim_adjoint_echo_djf": {"dim": True, "guide_aug": True, "methods": ("dropout", "jitter", "freq", "dim_adjoint_echo")},
+    "dim_only": {"dim": True, "guide_aug": False, "methods": ("dropout",), "dim_adjoint_echo": False},
+    "reference_djf": {"dim": True, "guide_aug": True, "methods": ("dropout", "jitter", "freq"), "dim_adjoint_echo": False},
+    "dim_resonance_only": {"dim": True, "guide_aug": True, "methods": ("dim_resonance",), "dim_adjoint_echo": False},
+    "dim_resonance_djf": {"dim": True, "guide_aug": True, "methods": ("dropout", "jitter", "freq", "dim_resonance"), "dim_adjoint_echo": False},
+    "dim_adjoint_echo_only": {"dim": True, "guide_aug": False, "methods": ("dropout",), "dim_adjoint_echo": True},
+    "dim_adjoint_echo_djf": {"dim": True, "guide_aug": True, "methods": ("dropout", "jitter", "freq"), "dim_adjoint_echo": True},
 }
 
 
@@ -81,6 +81,7 @@ def gradient_for_variant(attacker, pixels, labels, guide, config) -> torch.Tenso
         guide_aug=config["guide_aug"],
         guide_aug_methods=config["methods"],
         guide_aug_area="background",
+        dim_adjoint_echo=config.get("dim_adjoint_echo", False),
     ):
         probe = pixels.detach().requires_grad_(True)
         return attacker._attack_grad(probe, labels, guide).detach()

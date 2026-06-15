@@ -38,29 +38,40 @@ attack_complete() {
 attack_and_eval() {
   local name="$1"
   local methods="$2"
+  local echo="${3:-0}"
   local out_dir="${ROOT}/${name}"
 
   if [[ "${FORCE_ATTACK:-0}" == "1" ]] || ! attack_complete "$out_dir"; then
-    run_cmd "$PYTHON_BIN" main.py \
-      --mode attack \
-      --max-attacked-samples "$MAX_SAMPLES" \
-      --steps "$STEPS" \
-      --batch-size "$BATCH_SIZE" \
-      --num-workers "$NUM_WORKERS" \
-      --ti-sigma 0 \
-      --dim \
-      --mi \
-      --mi-decay 1.0 \
-      --guide-aug \
-      --guide-aug-area "$GUIDE_AREA" \
-      --guide-aug-method "$methods" \
-      --guide-aug-copies "$GUIDE_COPIES" \
-      --guide-aug-strength "$GUIDE_STRENGTH" \
-      --attention-guide-models "$GUIDE_MODELS" \
-      --attention-guide-type "$GUIDE_TYPE" \
-      --attention-guide-build-method "$GUIDE_BUILD" \
-      --layers="$LAYERS" \
+    local cmd=(
+      "$PYTHON_BIN" main.py
+      --mode attack
+      --max-attacked-samples "$MAX_SAMPLES"
+      --steps "$STEPS"
+      --batch-size "$BATCH_SIZE"
+      --num-workers "$NUM_WORKERS"
+      --ti-sigma 0
+      --dim
+      --mi
+      --mi-decay 1.0
+      --attention-guide-models "$GUIDE_MODELS"
+      --attention-guide-type "$GUIDE_TYPE"
+      --attention-guide-build-method "$GUIDE_BUILD"
+      --layers="$LAYERS"
       --output-dir "$out_dir"
+    )
+    if [[ "$methods" != "none" ]]; then
+      cmd+=(
+        --guide-aug
+        --guide-aug-area "$GUIDE_AREA"
+        --guide-aug-method "$methods"
+        --guide-aug-copies "$GUIDE_COPIES"
+        --guide-aug-strength "$GUIDE_STRENGTH"
+      )
+    fi
+    if [[ "$echo" == "1" ]]; then
+      cmd+=(--dim-adjoint-echo)
+    fi
+    run_cmd "${cmd[@]}"
   fi
 
   run_cmd "$PYTHON_BIN" transfer_eval.py \
@@ -79,8 +90,8 @@ attack_and_eval() {
 attack_and_eval "reference_djf" "dropout,jitter,freq"
 attack_and_eval "dim_resonance_only" "dim_resonance"
 attack_and_eval "dim_resonance_djf" "dropout,jitter,freq,dim_resonance"
-attack_and_eval "dim_adjoint_echo_only" "dim_adjoint_echo"
-attack_and_eval "dim_adjoint_echo_djf" "dropout,jitter,freq,dim_adjoint_echo"
+attack_and_eval "dim_adjoint_echo_only" "none" "1"
+attack_and_eval "dim_adjoint_echo_djf" "dropout,jitter,freq" "1"
 
 # Plain DIM-MI baseline with the same steps and no gradient normalization.
 BASELINE_DIR="${ROOT}/dim_mi_noaug"

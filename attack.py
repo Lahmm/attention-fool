@@ -114,6 +114,7 @@ class LMDSSAttacker:
         guide_aug_methods: tuple[str, ...] = ("dropout",),
         guide_aug_copies: int = 3,
         guide_aug_strength: float = 0.2,
+        dim_adjoint_echo: bool = False,
         lowmid_grad_tuning: bool = False,
         lowmid_grad_rotation_strength: float = 0.5,
         lowmid_grad_preserve_norm: bool = True,
@@ -180,6 +181,7 @@ class LMDSSAttacker:
         self._fixed_dim_params = None
         self.use_momentum = bool(use_momentum)
         self.nesterov = bool(nesterov)
+        self.dim_adjoint_echo = bool(dim_adjoint_echo)
         self.lowmid_grad_tuning = bool(lowmid_grad_tuning)
         self.lowmid_grad_rotation_strength = float(lowmid_grad_rotation_strength)
         self.lowmid_grad_preserve_norm = lowmid_grad_preserve_norm
@@ -216,7 +218,6 @@ class LMDSSAttacker:
             "jitter",
             "freq",
             "dim_resonance",
-            "dim_adjoint_echo",
             "white_noise",
         )
         if not self.guide_aug_methods:
@@ -717,16 +718,7 @@ class LMDSSAttacker:
             yield pixels
             return
 
-        ordinary_methods = tuple(
-            method for method in self.guide_aug_methods
-            if method != "dim_adjoint_echo"
-        )
-        if not ordinary_methods:
-            for _copy_idx in range(self.guide_aug_copies):
-                yield pixels
-            return
-
-        for method in ordinary_methods:
+        for method in self.guide_aug_methods:
             for _copy_idx in range(self.guide_aug_copies):
                 yield self._guide_augmented_pixels(pixels, guide_pixel_map, method)
 
@@ -736,9 +728,8 @@ class LMDSSAttacker:
         labels: torch.Tensor,
         guide_pixel_map: torch.Tensor | None,
     ):
-        use_dim_adjoint_echo = self.guide_aug and "dim_adjoint_echo" in self.guide_aug_methods
         for forward_pixels in self._iter_forward_pixels(pixels, guide_pixel_map):
-            if use_dim_adjoint_echo:
+            if self.dim_adjoint_echo:
                 forward_pixels = self._dim_adjoint_echo_pixels(forward_pixels)
             model_pixels = self._input_diversity(forward_pixels)
             logits_adv = self.model(
