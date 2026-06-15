@@ -9,14 +9,21 @@ from typing import Any
 
 
 MODEL_COLS = [
-    "deit_base_patch16_224",
-    "beit_base_patch16_224",
-    "swin_tiny_patch4_window7_224",
-    "pvt_v2_b2",
-    "cait_s24_224",
     "levit_256",
-    "pit_s_224",
-    "crossvit_15_240",
+    "pit_b_224",
+    "deit_base_patch16_224",
+    "vit_base_patch16_224",
+    "tnt_s_patch16_224",
+    "convit_base",
+    "visformer_small",
+    "cait_s24_224",
+    "inception_v3",
+    "inception_v4",
+    "inception_resnet_v2",
+    "resnet101",
+    "inception_v3_adv_3",
+    "inception_v3_adv_4",
+    "inception_resnet_v2_adv",
 ]
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 

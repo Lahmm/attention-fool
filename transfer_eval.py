@@ -1,6 +1,7 @@
 import argparse
 from contextlib import nullcontext
 import json
+import os
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -15,16 +16,57 @@ from tqdm import tqdm
 from record_experiment import record_results
 from utils import DEVICE
 
-DEFAULT_BLACK_BOX_MODELS = [
-    "deit_base_patch16_224",
-    "beit_base_patch16_224",
-    "swin_tiny_patch4_window7_224",
-    "pvt_v2_b2",
-    "cait_s24_224",
+DEFAULT_VIT_BLACK_BOX_MODELS = [
     "levit_256",
-    "pit_s_224",
-    "crossvit_15_240",
+    "pit_b_224",
+    "deit_base_patch16_224",
+    "vit_base_patch16_224",
+    "tnt_s_patch16_224",
+    "convit_base",
+    "visformer_small",
+    "cait_s24_224",
 ]
+DEFAULT_CNN_BLACK_BOX_MODELS = [
+    "inception_v3",
+    "inception_v4",
+    "inception_resnet_v2",
+    "resnet101",
+    "inception_v3_adv_3",
+    "inception_v3_adv_4",
+    "inception_resnet_v2_adv",
+]
+DEFAULT_BLACK_BOX_MODELS = DEFAULT_VIT_BLACK_BOX_MODELS + DEFAULT_CNN_BLACK_BOX_MODELS
+
+MODEL_ALIASES = {
+    "LeViT-256": "levit_256",
+    "PiT-B": "pit_b_224",
+    "DeiT-B": "deit_base_patch16_224",
+    "ViT-B/16": "vit_base_patch16_224",
+    "TNT-S": "tnt_s_patch16_224",
+    "ConViT-B": "convit_base",
+    "Visformer-S": "visformer_small",
+    "CaiT-S/24": "cait_s24_224",
+    "Inc-v3": "inception_v3",
+    "Inception-v3": "inception_v3",
+    "Inc-v4": "inception_v4",
+    "Inception-v4": "inception_v4",
+    "IncRes-v2": "inception_resnet_v2",
+    "InceptionResNet-v2": "inception_resnet_v2",
+    "ResNet-101": "resnet101",
+    "Inc-v3-adv-3": "inception_v3_adv_3",
+    "Inc-v3-adv-4": "inception_v3_adv_4",
+    "IncRes-v2-adv": "inception_resnet_v2_adv",
+}
+ADVERSARIAL_MODEL_BASES = {
+    "inception_v3_adv_3": "inception_v3",
+    "inception_v3_adv_4": "inception_v3",
+    "inception_resnet_v2_adv": "inception_resnet_v2",
+}
+ADVERSARIAL_CHECKPOINT_ENVS = {
+    "inception_v3_adv_3": "INC_V3_ADV_3_CHECKPOINT",
+    "inception_v3_adv_4": "INC_V3_ADV_4_CHECKPOINT",
+    "inception_resnet_v2_adv": "INCRES_V2_ADV_CHECKPOINT",
+}
 
 
 def parse_model_names(value: str) -> List[str]:
@@ -56,8 +98,54 @@ def extract_original_name(filename: str, prefix: str) -> str:
     return filename[len(prefix):]
 
 
+class ModelUnavailableError(RuntimeError):
+    pass
+
+
+def resolve_model_name(model_name: str) -> str:
+    return MODEL_ALIASES.get(model_name, model_name)
+
+
+def _checkpoint_state_dict(checkpoint):
+    if isinstance(checkpoint, dict):
+        for key in ("state_dict", "model", "model_state_dict", "net"):
+            value = checkpoint.get(key)
+            if isinstance(value, dict):
+                checkpoint = value
+                break
+    if not isinstance(checkpoint, dict):
+        raise ValueError("checkpoint must be a state_dict or contain a state_dict-like entry")
+    return {key.removeprefix("module."): value for key, value in checkpoint.items()}
+
+
+def _load_adversarial_checkpoint(model, model_name: str) -> None:
+    env_name = ADVERSARIAL_CHECKPOINT_ENVS[model_name]
+    checkpoint_path = os.environ.get(env_name)
+    if not checkpoint_path:
+        raise ModelUnavailableError(
+            f"{model_name} requires a PyTorch checkpoint path in ${env_name}. "
+            "The current timm install does not ship this adversarially trained model."
+        )
+    path = Path(checkpoint_path).expanduser()
+    if not path.is_file():
+        raise ModelUnavailableError(f"{model_name} checkpoint not found: {path}")
+    checkpoint = torch.load(path, map_location="cpu")
+    state_dict = _checkpoint_state_dict(checkpoint)
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    if missing or unexpected:
+        print(
+            f"Warning: loaded {model_name} with missing={len(missing)} "
+            f"unexpected={len(unexpected)} checkpoint keys."
+        )
+
+
 def build_black_box_model(model_name: str):
-    model = timm.create_model(model_name, pretrained=True)
+    resolved_name = resolve_model_name(model_name)
+    if resolved_name in ADVERSARIAL_MODEL_BASES:
+        model = timm.create_model(ADVERSARIAL_MODEL_BASES[resolved_name], pretrained=False)
+        _load_adversarial_checkpoint(model, resolved_name)
+    else:
+        model = timm.create_model(resolved_name, pretrained=True)
     model.to(DEVICE)
     model.eval()
     config = resolve_data_config({}, model=model)
@@ -260,6 +348,7 @@ def main(
     record_excel: bool,
     exp_name: str | None,
     pre_cache: bool = True,
+    skip_unavailable: bool = True,
 ) -> None:
     configure_eval_runtime(use_tf32=use_tf32)
     image_dir_path = Path(image_dir)
@@ -283,17 +372,23 @@ def main(
     metrics_by_model: Dict[str, Dict[str, float | int]] = {}
 
     for black_model in model_names:
-        correct, total, skipped = evaluate(
-            image_paths=image_paths,
-            annotations=annotations,
-            prefix=prefix,
-            model_name=black_model,
-            batch_size=batch_size,
-            num_workers=num_workers,
-            prefetch_factor=prefetch_factor,
-            use_amp=use_amp,
-            pre_cache=pre_cache,
-        )
+        try:
+            correct, total, skipped = evaluate(
+                image_paths=image_paths,
+                annotations=annotations,
+                prefix=prefix,
+                model_name=black_model,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                prefetch_factor=prefetch_factor,
+                use_amp=use_amp,
+                pre_cache=pre_cache,
+            )
+        except ModelUnavailableError as exc:
+            if not skip_unavailable:
+                raise
+            print(f"model={black_model} unavailable: {exc}")
+            continue
         acc = correct / total if total > 0 else 0.0
         asr = 1.0 - acc if total > 0 else 0.0
         asr_by_model[black_model] = asr
@@ -308,6 +403,10 @@ def main(
             f"model={black_model} total={total} skipped={skipped} "
             f"correct={correct} acc={acc:.4f} ASR={asr:.4f}"
         )
+
+    if not asr_by_model:
+        print("No models were evaluated. Check model names or adversarial CNN checkpoint env vars.")
+        return
 
     print("ASR by model:")
     print({model_name: round(asr, 6) for model_name, asr in asr_by_model.items()})
@@ -364,11 +463,12 @@ if __name__ == "__main__":
     parser.add_argument("--exp-name", default=None, help="Experiment name recorded in the Excel output. Defaults to the image-dir name.")
     parser.add_argument("--no-record", action="store_true", help="Disable automatic Excel recording.")
     parser.add_argument("--no-pre-cache", action="store_true", help="Disable pre-caching images in RAM (slower, lower memory).")
+    parser.add_argument("--strict-model-loading", action="store_true", help="Fail instead of skipping unavailable optional models such as adversarial CNN checkpoints.")
     parser.add_argument(
         "--model-name",
         type=parse_model_names,
         default=DEFAULT_BLACK_BOX_MODELS,
-        help="Black-box timm model name(s), comma-separated for multiple models.",
+        help="Black-box model name(s) or aliases, comma-separated for multiple models.",
     )
     args = parser.parse_args()
     main(
@@ -384,4 +484,5 @@ if __name__ == "__main__":
         record_excel=not args.no_record,
         exp_name=args.exp_name,
         pre_cache=not args.no_pre_cache,
+        skip_unavailable=not args.strict_model_loading,
     )
