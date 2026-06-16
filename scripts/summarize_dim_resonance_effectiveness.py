@@ -22,7 +22,6 @@ MODEL_COLS = (
     "levit_256",
     "pit_b_224",
     "deit_base_patch16_224",
-    "vit_base_patch16_224",
     "tnt_s_patch16_224",
     "convit_base",
     "visformer_small",
