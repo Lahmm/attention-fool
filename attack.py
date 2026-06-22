@@ -231,7 +231,6 @@ class LMDSSAttacker:
         self.guide_aug_strength = float(guide_aug_strength)
         if self.guide_aug_strength < 0:
             raise ValueError(f"guide_aug_strength must be non-negative, got {guide_aug_strength}.")
-        self._momentum_lowmid_agreement: torch.Tensor | None = None
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
 
     def _denormalize(self, images: torch.Tensor) -> torch.Tensor:
@@ -305,45 +304,30 @@ class LMDSSAttacker:
     def _apply_lowmid_dss_filter(
         self,
         grad: torch.Tensor,
-        momentum: torch.Tensor | None = None,
+        term_grads: tuple[torch.Tensor, ...] | None,
     ) -> torch.Tensor:
-        """Cross-timestep LM-DSS: measure momentum agreement, store for rotation.
-
-        Compares the current gradient's low/mid FFT component against the historical
-        momentum buffer and stores a per-sample agreement score in
-        ``self._momentum_lowmid_agreement`` so that ``_tune_lowmid_gradient`` can
-        modulate the rotation strength accordingly.
-
-        The gradient passes through **unchanged** — this method only measures, it
-        does not filter.  The agreement signal is consumed exclusively by rotation
-        strength modulation, avoiding double-counting the same information.
-        """
         if not self.lowmid_dss_filter:
             return grad
-
-        if isinstance(momentum, tuple):
-            if not momentum:
-                momentum = None
-            else:
-                momentum = torch.stack([item.detach() for item in momentum]).mean(0)
-        if momentum is None or momentum.abs().sum() < 1e-12:
-            self._momentum_lowmid_agreement = None
+        if not term_grads:
             return grad
 
-        lowmid, _high = self._lowmid_high_components(grad)
-        mom_lowmid, _mom_high = self._lowmid_high_components(momentum)
+        lowmid, high = self._lowmid_high_components(grad)
+        term_lowmid = torch.stack([self._lowmid_high_components(term)[0] for term in term_grads], dim=0)
+        ref = term_lowmid.mean(dim=0)
         eps = 1e-12
 
         if self.lowmid_dss_consistency == "sign":
-            agreement = lowmid.sign().eq(mom_lowmid.sign()).to(grad.dtype)
-            self._momentum_lowmid_agreement = agreement.flatten(1).mean(1).detach()
+            agreement = term_lowmid.sign().eq(ref.sign().unsqueeze(0)).to(grad.dtype).mean(dim=0)
+            mask = (agreement >= self.lowmid_dss_agreement_threshold).to(grad.dtype)
+            filtered_lowmid = lowmid * mask
         else:
-            g_norm = lowmid.flatten(1).norm(p=2, dim=1).clamp_min(eps)
-            m_norm = mom_lowmid.flatten(1).norm(p=2, dim=1).clamp_min(eps)
-            cos_sim = (lowmid * mom_lowmid).flatten(1).sum(1) / (g_norm * m_norm)
-            self._momentum_lowmid_agreement = ((cos_sim + 1.0) * 0.5).clamp(0.0, 1.0).detach()
+            ref_norm = ref.flatten(1).norm(p=2, dim=1).clamp_min(eps)
+            term_norm = term_lowmid.flatten(2).norm(p=2, dim=2).clamp_min(eps)
+            cos = (term_lowmid * ref.unsqueeze(0)).flatten(2).sum(2) / (term_norm * ref_norm.unsqueeze(0))
+            gate = ((cos.mean(dim=0) + 1.0) * 0.5).clamp(0.0, 1.0).view(-1, 1, 1, 1)
+            filtered_lowmid = lowmid * gate
 
-        return grad
+        return filtered_lowmid + high
 
     def _tune_lowmid_gradient(self, grad: torch.Tensor) -> torch.Tensor:
         if not self.lowmid_grad_tuning:
@@ -357,25 +341,7 @@ class LMDSSAttacker:
         if not valid.any():
             return grad
 
-        base_strength = torch.as_tensor(
-            self.lowmid_grad_rotation_strength, device=grad.device, dtype=lowmid_norm.dtype,
-        )
-        # Cross-timestep DSS: modulate rotation strength by momentum agreement.
-        # When the current low/mid direction agrees with historical momentum,
-        # rotate more aggressively; when they disagree, rotate less.
-        if (
-            self.lowmid_dss_filter
-            and hasattr(self, '_momentum_lowmid_agreement')
-            and self._momentum_lowmid_agreement is not None
-        ):
-            agreement = self._momentum_lowmid_agreement.to(
-                device=grad.device, dtype=lowmid_norm.dtype,
-            ).view(-1, 1, 1, 1)
-            # Clamp to [0, 1] so disagreement never reverses the rotation.
-            strength = base_strength * agreement.clamp(0.0, 1.0)
-        else:
-            strength = base_strength
-
+        strength = torch.as_tensor(self.lowmid_grad_rotation_strength, device=grad.device, dtype=lowmid_norm.dtype)
         theta = strength * torch.atan2(high_norm, lowmid_norm)
         cos_theta = torch.cos(theta)
         sin_theta = torch.sin(theta)
@@ -787,9 +753,14 @@ class LMDSSAttacker:
                     grad_pixels = torch.clamp(grad_pixels, 0.0, 1.0)
 
             grad_pixels = grad_pixels.detach().requires_grad_(True)
-            grad = self._attack_grad(grad_pixels, labels, guide_pixel_map)
+            if self.lowmid_dss_filter:
+                grad, term_grads = self._attack_grad_terms(grad_pixels, labels, guide_pixel_map)
+            else:
+                grad, term_grads = self._attack_grad(grad_pixels, labels, guide_pixel_map), None
             grad = self._smooth_grad(grad)
-            grad = self._apply_lowmid_dss_filter(grad, momentum)
+            if term_grads is not None:
+                term_grads = tuple(self._smooth_grad(term) for term in term_grads)
+            grad = self._apply_lowmid_dss_filter(grad, term_grads)
             grad = self._tune_lowmid_gradient(grad)
 
             if self.use_momentum:
