@@ -121,6 +121,8 @@ class LMDSSAttacker:
         lowmid_dss_filter: bool = False,
         lowmid_dss_consistency: str = "sign",
         lowmid_dss_agreement_threshold: float = 0.67,
+        attack_loss: str = "logits",
+        feature_layer: int = 10,
         device: torch.device | None = None,
     ) -> None:
         if epsilon < 0:
@@ -151,6 +153,9 @@ class LMDSSAttacker:
             raise ValueError(
                 f"lowmid_dss_agreement_threshold must be in [0, 1], got {lowmid_dss_agreement_threshold}."
             )
+
+        if attack_loss not in ("logits", "feature"):
+            raise ValueError(f"attack_loss must be 'logits' or 'feature', got {attack_loss!r}.")
 
         self.model = model
         self.model.eval()
@@ -188,6 +193,8 @@ class LMDSSAttacker:
         self.lowmid_dss_filter = bool(lowmid_dss_filter)
         self.lowmid_dss_consistency = lowmid_dss_consistency
         self.lowmid_dss_agreement_threshold = float(lowmid_dss_agreement_threshold)
+        self.attack_loss = attack_loss
+        self.feature_layer = int(feature_layer)
         self.attention_guide_models = tuple(attention_guide_models or ())
 
         guide_types = tuple(item.strip() for item in attention_guide_type.split(",") if item.strip())
@@ -218,6 +225,7 @@ class LMDSSAttacker:
             "jitter",
             "freq",
             "dim_resonance",
+            "lowmid_shift",
             "white_noise",
         )
         if not self.guide_aug_methods:
@@ -631,6 +639,15 @@ class LMDSSAttacker:
         noise = torch.randn_like(pixels, dtype=pixels.dtype)
         return torch.clamp(pixels + self.guide_aug_strength * noise, 0.0, 1.0)
 
+    def _lowmid_shift_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        lowmid = F.avg_pool2d(pixels, kernel_size=11, stride=1, padding=5)
+        max_shift = max(1, int(round(min(pixels.size(-2), pixels.size(-1)) * 0.08)))
+        shift_y = int(torch.randint(-max_shift, max_shift + 1, (1,), device=pixels.device).item())
+        shift_x = int(torch.randint(-max_shift, max_shift + 1, (1,), device=pixels.device).item())
+        shifted_lowmid = torch.roll(lowmid, shifts=(shift_y, shift_x), dims=(-2, -1))
+        augmented = pixels + self.guide_aug_strength * (shifted_lowmid - lowmid)
+        return torch.clamp(augmented, 0.0, 1.0)
+
     def _augment_full_image(self, pixels: torch.Tensor, method: str) -> torch.Tensor:
         strength = self.guide_aug_strength
         if strength <= 0:
@@ -653,6 +670,8 @@ class LMDSSAttacker:
             return torch.clamp(pixels * (1.0 - strength) + corrupt * strength, 0.0, 1.0)
         if method == "dim_resonance":
             return self._dim_resonance_pixels(pixels)
+        if method == "lowmid_shift":
+            return self._lowmid_shift_pixels(pixels)
         if method == "white_noise":
             return self._white_noise_pixels(pixels)
         raise ValueError(f"Unsupported guide augmentation method: {method}")
@@ -693,27 +712,61 @@ class LMDSSAttacker:
         pixels: torch.Tensor,
         labels: torch.Tensor,
         guide_pixel_map: torch.Tensor | None,
+        clean_feature_target: torch.Tensor | None = None,
     ):
         for forward_pixels in self._iter_forward_pixels(pixels, guide_pixel_map):
             if self.dim_adjoint_echo:
                 forward_pixels = self._dim_adjoint_echo_pixels(forward_pixels)
             model_pixels = self._input_diversity(forward_pixels)
-            logits_adv = self.model(
-                self._normalize(model_pixels),
-                return_attn=False,
+            if self.attack_loss == "logits":
+                logits_adv = self.model(
+                    self._normalize(model_pixels),
+                    return_attn=False,
+                )
+                yield F.cross_entropy(logits_adv, labels)
+                continue
+
+            if clean_feature_target is None:
+                raise RuntimeError("clean_feature_target is required for feature loss.")
+            adv_features = self._extract_layer_patch_features(model_pixels)
+            cosine = F.cosine_similarity(adv_features, clean_feature_target, dim=-1)
+            yield 1.0 - cosine.mean()
+
+    def _extract_layer_patch_features(self, pixels: torch.Tensor) -> torch.Tensor:
+        outputs = self.model(
+            self._normalize(pixels),
+            return_attn=False,
+            return_tokens=True,
+        )
+        if not isinstance(outputs, tuple) or len(outputs) != 2:
+            raise TypeError(
+                "Feature loss requires a model that returns "
+                "(logits, block_tokens) with return_tokens=True."
             )
-            yield F.cross_entropy(logits_adv, labels)
+        _logits, block_tokens = outputs
+        num_layers = len(block_tokens)
+        layer_idx = self.feature_layer if self.feature_layer >= 0 else num_layers + self.feature_layer
+        if layer_idx < 0 or layer_idx >= num_layers:
+            raise ValueError(f"feature_layer {self.feature_layer} is out of range for {num_layers} blocks.")
+        features = block_tokens[layer_idx]
+        if features.ndim != 3 or features.size(1) < 2:
+            raise ValueError(
+                f"Block {layer_idx} must return CLS and patch tokens with shape [B,N,D], "
+                f"got {tuple(features.shape)}."
+            )
+        return features[:, 1:, :]
 
     def _attack_grad_terms(
         self,
         pixels: torch.Tensor,
         labels: torch.Tensor,
         guide_pixel_map: torch.Tensor | None,
+        clean_feature_target: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]]:
         grad_sum = None
         term_grads = []
-        for ce_loss in self._iter_attack_losses(pixels, labels, guide_pixel_map):
-            grad_term = torch.autograd.grad(ce_loss, pixels, retain_graph=False)[0]
+        for attack_loss in self._iter_attack_losses(pixels, labels, guide_pixel_map, clean_feature_target):
+            grad_term = torch.autograd.grad(attack_loss, pixels, retain_graph=False)[0]
             term_grads.append(grad_term)
             grad_sum = grad_term if grad_sum is None else grad_sum + grad_term
         if grad_sum is None:
@@ -725,8 +778,11 @@ class LMDSSAttacker:
         pixels: torch.Tensor,
         labels: torch.Tensor,
         guide_pixel_map: torch.Tensor | None,
+        clean_feature_target: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        grad, _term_grads = self._attack_grad_terms(pixels, labels, guide_pixel_map)
+        grad, _term_grads = self._attack_grad_terms(
+            pixels, labels, guide_pixel_map, clean_feature_target
+        )
         return grad
 
     def attack_batch(
@@ -738,6 +794,10 @@ class LMDSSAttacker:
         labels = labels.to(self.device)
 
         clean_pixels = self._denormalize(images).detach()
+        clean_feature_target = None
+        if self.attack_loss == "feature":
+            with torch.no_grad():
+                clean_feature_target = self._extract_layer_patch_features(clean_pixels).detach()
         guide_pixel_map = None
         if self.guide_aug and self.guide_aug_area != "all":
             guide_pixel_map = self._build_guide_pixel_map(images, clean_pixels.size(-1))
@@ -750,18 +810,25 @@ class LMDSSAttacker:
             if self.nesterov and step_idx > 0:
                 with torch.no_grad():
                     grad_pixels = grad_pixels + self.decay * self.step_size * momentum.sign()
-                    grad_pixels = torch.clamp(grad_pixels, 0.0, 1.0)
+                    delta = grad_pixels - clean_pixels
+                    delta = torch.clamp(delta, -self.epsilon, self.epsilon)
+                    grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
 
             grad_pixels = grad_pixels.detach().requires_grad_(True)
             if self.lowmid_dss_filter:
-                grad, term_grads = self._attack_grad_terms(grad_pixels, labels, guide_pixel_map)
+                grad, term_grads = self._attack_grad_terms(
+                    grad_pixels, labels, guide_pixel_map, clean_feature_target
+                )
             else:
-                grad, term_grads = self._attack_grad(grad_pixels, labels, guide_pixel_map), None
+                grad = self._attack_grad(grad_pixels, labels, guide_pixel_map, clean_feature_target)
+                term_grads = None
             grad = self._smooth_grad(grad)
             if term_grads is not None:
                 term_grads = tuple(self._smooth_grad(term) for term in term_grads)
             grad = self._apply_lowmid_dss_filter(grad, term_grads)
             grad = self._tune_lowmid_gradient(grad)
+            if self.attack_loss == "feature":
+                grad = self._normalize_grad(grad)
 
             if self.use_momentum:
                 momentum = self.decay * momentum + grad
@@ -771,6 +838,8 @@ class LMDSSAttacker:
 
             with torch.no_grad():
                 adv_pixels = adv_pixels + self.step_size * update.sign()
-                adv_pixels = torch.clamp(adv_pixels, 0.0, 1.0).detach()
+                delta = adv_pixels - clean_pixels
+                delta = torch.clamp(delta, -self.epsilon, self.epsilon)
+                adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0).detach()
 
         return self._normalize(adv_pixels)

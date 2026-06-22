@@ -50,6 +50,8 @@ def create_attacker(
     lowmid_dss_filter: bool = False,
     lowmid_dss_consistency: str = "sign",
     lowmid_dss_agreement_threshold: float = 0.67,
+    attack_loss: str = "logits",
+    feature_layer: int = 10,
 ) -> LMDSSAttacker:
     return LMDSSAttacker(
         model=model,
@@ -80,6 +82,8 @@ def create_attacker(
         lowmid_dss_filter=lowmid_dss_filter,
         lowmid_dss_consistency=lowmid_dss_consistency,
         lowmid_dss_agreement_threshold=lowmid_dss_agreement_threshold,
+        attack_loss=attack_loss,
+        feature_layer=feature_layer,
         device=DEVICE,
     )
 
@@ -246,7 +250,7 @@ def parse_args():
     parser.add_argument("--attention-guide-patch-size", type=int, default=16, help="Rendered guide patch size for --attention-guide-build-method patch. Must divide --img-size.")
     parser.add_argument("--guide-aug", action="store_true", help="Enable attention-guided forward augmentation.")
     parser.add_argument("--guide-aug-area", choices=["foreground", "background", "all"], default="background", help="Region affected by guide augmentation. all ignores attention guide maps.")
-    parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,dim_resonance,white_noise.")
+    parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,dim_resonance,lowmid_shift,white_noise.")
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Random copies per guide augmentation method.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
     parser.add_argument("--dim-adjoint-echo", action="store_true", help="Apply DIM-adjoint echo after guide augmentation and before DIM/normalization.")
@@ -256,6 +260,8 @@ def parse_args():
     parser.add_argument("--lowmid-dss-filter", action="store_true", help="Measure low/mid agreement with historical momentum to modulate low/mid rotation.")
     parser.add_argument("--lowmid-dss-consistency", choices=["sign", "cos"], default="sign", help="Consistency rule for --lowmid-dss-filter: per-element sign agreement or per-sample cosine gate.")
     parser.add_argument("--lowmid-dss-agreement-threshold", type=float, default=0.67, help="Reserved agreement threshold for LMDSS compatibility.")
+    parser.add_argument("--attack-loss", choices=["logits", "feature"], default="logits", help="Attack final logits with CE or one block's patch-token features with cosine distance.")
+    parser.add_argument("--feature-layer", type=int, default=10, help="Transformer block index used by --attack-loss feature. Negative indices count from the end.")
     parser.set_defaults(mi=True, lowmid_grad_preserve_norm=True)
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode, use --output-dir outputs/attack/lmdss.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
@@ -299,6 +305,8 @@ def main(
     lowmid_dss_filter: bool = False,
     lowmid_dss_consistency: str = "sign",
     lowmid_dss_agreement_threshold: float = 0.67,
+    attack_loss: str = "logits",
+    feature_layer: int = 10,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -365,6 +373,8 @@ def main(
         lowmid_dss_filter=lowmid_dss_filter,
         lowmid_dss_consistency=lowmid_dss_consistency,
         lowmid_dss_agreement_threshold=lowmid_dss_agreement_threshold,
+        attack_loss=attack_loss,
+        feature_layer=feature_layer,
     )
     _clean_acc, correct_mask = evaluate_clean_dataset(
         dataloader=dataloader,
@@ -424,6 +434,8 @@ if __name__ == "__main__":
         lowmid_dss_filter=args.lowmid_dss_filter,
         lowmid_dss_consistency=args.lowmid_dss_consistency,
         lowmid_dss_agreement_threshold=args.lowmid_dss_agreement_threshold,
+        attack_loss=args.attack_loss,
+        feature_layer=args.feature_layer,
         output_dir=args.output_dir,
         mode=args.mode,
         image_dir=args.image_dir,

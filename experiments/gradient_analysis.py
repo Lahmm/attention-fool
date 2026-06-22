@@ -244,9 +244,7 @@ def run_analyzed_attack(attacker, images, labels, *, grad_transform=None, mi_swi
                 "raw_update": grad.sign().detach().cpu(), "mi_update": momentum.sign().detach().cpu(),
                 "guide_map": None if guide is None else guide.detach().cpu(), "diagnostic_gradients": diagnostic_grads})
         with torch.no_grad():
-            adv = adv + attacker.step_size * update.sign()
-            delta = torch.clamp(adv-clean, -attacker.epsilon, attacker.epsilon)
-            adv = torch.clamp(clean+delta, 0.0, 1.0)
+            adv = torch.clamp(adv + attacker.step_size * update.sign(), 0.0, 1.0)
     return attacker._normalize(adv)
 
 
