@@ -77,6 +77,18 @@ class AntitheticTransportTests(unittest.TestCase):
         self.assertEqual(len(terms), 9)
         self.assertTrue(torch.isfinite(gradient).all())
 
+    def test_multiscale_adjoint_is_forward_identity_with_distinct_view_gradients(self):
+        attacker = make_attacker(copies=9, method="multiscale_adjoint_ensemble")
+        pixels = torch.rand(2, 3, 16, 16)
+        views = list(attacker._iter_forward_pixels(pixels, None))
+        self.assertEqual(len(views), 9)
+        for view in views:
+            torch.testing.assert_close(view, pixels)
+        probe = pixels.clone().requires_grad_(True)
+        gradient, terms = attacker._attack_grad_terms(probe, torch.tensor([0, 1]), None)
+        self.assertEqual(len(terms), 9)
+        self.assertFalse(torch.equal(terms[0], terms[-1]))
+
     def test_natural_spectrum_transport_preserves_dc_and_backward_path(self):
         torch.manual_seed(11)
         attacker = make_attacker(copies=1, method="natural_spectrum_transport")

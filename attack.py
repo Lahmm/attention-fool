@@ -230,6 +230,7 @@ class LMDSSAttacker:
             "antithetic_transport",
             "natural_spectrum_transport",
             "antithetic_filter_bank",
+            "multiscale_adjoint_ensemble",
         )
         if not self.guide_aug_methods:
             raise ValueError("guide_aug_methods must contain at least one method.")
@@ -748,6 +749,21 @@ class LMDSSAttacker:
         if copies % 2:
             yield pixels
 
+    def _iter_multiscale_adjoint_pixels(
+        self,
+        pixels: torch.Tensor,
+        guide_pixel_map: torch.Tensor | None,
+        copies: int,
+    ):
+        """Keep forward pixels fixed while sampling scale-space Jacobians."""
+        kernel_sizes = (1, 3, 5, 7, 9, 11, 15, 19, 23)
+        for copy_index in range(copies):
+            kernel_size = kernel_sizes[copy_index % len(kernel_sizes)]
+            filtered = pixels if kernel_size == 1 else F.avg_pool2d(pixels, kernel_size, 1, kernel_size // 2)
+            differentiable = pixels + self.guide_aug_strength * (filtered - pixels)
+            augmented = differentiable + (pixels - differentiable).detach()
+            yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+
     def _natural_spectrum_transport_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
         """Transfer normalized natural-image amplitudes while preserving phase and DC."""
         batch = pixels.size(0)
@@ -836,6 +852,11 @@ class LMDSSAttacker:
                 continue
             if method == "antithetic_filter_bank":
                 yield from self._iter_antithetic_filter_bank_pixels(
+                    pixels, guide_pixel_map, self.guide_aug_copies
+                )
+                continue
+            if method == "multiscale_adjoint_ensemble":
+                yield from self._iter_multiscale_adjoint_pixels(
                     pixels, guide_pixel_map, self.guide_aug_copies
                 )
                 continue
