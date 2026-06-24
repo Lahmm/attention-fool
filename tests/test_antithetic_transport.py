@@ -59,6 +59,19 @@ class AntitheticTransportTests(unittest.TestCase):
         for view in views:
             torch.testing.assert_close(view, pixels)
 
+    def test_filter_bank_is_antithetic_and_uses_exact_budget(self):
+        torch.manual_seed(13)
+        attacker = make_attacker(copies=9, method="antithetic_filter_bank")
+        pixels = (torch.rand(2, 3, 16, 16) * 0.4 + 0.3).requires_grad_(True)
+        views = list(attacker._iter_forward_pixels(pixels, None))
+        self.assertEqual(len(views), 9)
+        torch.testing.assert_close(views[-1], pixels)
+        torch.testing.assert_close(
+            (views[0] - pixels) + (views[1] - pixels), torch.zeros_like(pixels), atol=1e-6, rtol=1e-6
+        )
+        sum(view.mean() for view in views).backward()
+        self.assertTrue(torch.isfinite(pixels.grad).all())
+
     def test_natural_spectrum_transport_preserves_dc_and_backward_path(self):
         torch.manual_seed(11)
         attacker = make_attacker(copies=1, method="natural_spectrum_transport")

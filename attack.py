@@ -229,6 +229,7 @@ class LMDSSAttacker:
             "white_noise",
             "antithetic_transport",
             "natural_spectrum_transport",
+            "antithetic_filter_bank",
         )
         if not self.guide_aug_methods:
             raise ValueError("guide_aug_methods must contain at least one method.")
@@ -708,6 +709,35 @@ class LMDSSAttacker:
         if copies % 2:
             yield pixels
 
+    @staticmethod
+    def _random_zero_dc_filter_response(pixels: torch.Tensor, kernel_size: int) -> torch.Tensor:
+        batch, channels, height, width = pixels.shape
+        kernels = torch.randn(batch, 1, kernel_size, kernel_size, device=pixels.device, dtype=pixels.dtype)
+        kernels = kernels - kernels.mean(dim=(2, 3), keepdim=True)
+        kernels = kernels / kernels.abs().sum(dim=(2, 3), keepdim=True).clamp_min(1e-12)
+        weights = kernels.repeat_interleave(channels, dim=0)
+        padding = kernel_size // 2
+        flat = F.pad(pixels, (padding,) * 4, mode="reflect").reshape(1, batch * channels, height + 2 * padding, width + 2 * padding)
+        response = F.conv2d(flat, weights, groups=batch * channels)
+        return response.reshape(batch, channels, height, width)
+
+    def _iter_antithetic_filter_bank_pixels(
+        self,
+        pixels: torch.Tensor,
+        guide_pixel_map: torch.Tensor | None,
+        copies: int,
+    ):
+        """Yield paired zero-DC random filters and an identity view."""
+        pair_count = copies // 2
+        kernel_sizes = (3, 5, 7, 9)
+        for pair_index in range(pair_count):
+            response = self._random_zero_dc_filter_response(pixels, kernel_sizes[pair_index % 4])
+            for direction in (1.0, -1.0):
+                augmented = (pixels + direction * self.guide_aug_strength * response).clamp(0.0, 1.0)
+                yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+        if copies % 2:
+            yield pixels
+
     def _natural_spectrum_transport_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
         """Transfer normalized natural-image amplitudes while preserving phase and DC."""
         batch = pixels.size(0)
@@ -791,6 +821,11 @@ class LMDSSAttacker:
         for method in self.guide_aug_methods:
             if method == "antithetic_transport":
                 yield from self._iter_antithetic_transport_pixels(
+                    pixels, guide_pixel_map, self.guide_aug_copies
+                )
+                continue
+            if method == "antithetic_filter_bank":
+                yield from self._iter_antithetic_filter_bank_pixels(
                     pixels, guide_pixel_map, self.guide_aug_copies
                 )
                 continue
