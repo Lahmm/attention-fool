@@ -760,7 +760,7 @@ class LMDSSAttacker:
         for copy_index in range(copies):
             kernel_size = kernel_sizes[copy_index % len(kernel_sizes)]
             filtered = pixels if kernel_size == 1 else F.avg_pool2d(pixels, kernel_size, 1, kernel_size // 2)
-            differentiable = pixels + self.guide_aug_strength * (filtered - pixels)
+            differentiable = pixels + self.guide_aug_strength * filtered
             augmented = differentiable + (pixels - differentiable).detach()
             yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
 
