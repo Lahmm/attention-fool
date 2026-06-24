@@ -227,6 +227,7 @@ class LMDSSAttacker:
             "dim_resonance",
             "lowmid_shift",
             "white_noise",
+            "antithetic_transport",
         )
         if not self.guide_aug_methods:
             raise ValueError("guide_aug_methods must contain at least one method.")
@@ -648,6 +649,64 @@ class LMDSSAttacker:
         augmented = pixels + self.guide_aug_strength * (shifted_lowmid - lowmid)
         return torch.clamp(augmented, 0.0, 1.0)
 
+    def _sample_transport_field(self, pixels: torch.Tensor, grid_size: int) -> torch.Tensor:
+        """Sample a smooth, zero-mean displacement field in normalized coordinates."""
+        batch, _channels, height, width = pixels.shape
+        coarse = torch.randn(batch, 2, grid_size, grid_size, device=pixels.device, dtype=pixels.dtype)
+        field = F.interpolate(coarse, size=(height, width), mode="bicubic", align_corners=False)
+        field = field - field.mean(dim=(2, 3), keepdim=True)
+        field = field / field.square().mean(dim=(1, 2, 3), keepdim=True).sqrt().clamp_min(1e-12)
+        max_pixels = self.guide_aug_strength * 0.08 * float(min(height, width))
+        field[:, 0] *= 2.0 * max_pixels / float(width)
+        field[:, 1] *= 2.0 * max_pixels / float(height)
+        return field
+
+    @staticmethod
+    def _transport_pixels(pixels: torch.Tensor, field: torch.Tensor, direction: float) -> torch.Tensor:
+        batch, _channels, height, width = pixels.shape
+        yy = (torch.arange(height, device=pixels.device, dtype=pixels.dtype) + 0.5) * (2.0 / height) - 1.0
+        xx = (torch.arange(width, device=pixels.device, dtype=pixels.dtype) + 0.5) * (2.0 / width) - 1.0
+        grid_y, grid_x = torch.meshgrid(yy, xx, indexing="ij")
+        base = torch.stack((grid_x, grid_y), dim=-1).unsqueeze(0).expand(batch, -1, -1, -1)
+        displacement = field.permute(0, 2, 3, 1) * float(direction)
+        return F.grid_sample(
+            pixels, base + displacement, mode="bilinear", padding_mode="reflection", align_corners=False
+        ).clamp(0.0, 1.0)
+
+    def _blend_guide_augmentation(
+        self,
+        pixels: torch.Tensor,
+        augmented: torch.Tensor,
+        guide_pixel_map: torch.Tensor | None,
+    ) -> torch.Tensor:
+        if self.guide_aug_area == "all":
+            return augmented
+        if guide_pixel_map is None:
+            raise ValueError("guide_pixel_map is required unless guide_aug_area='all'.")
+        guide = guide_pixel_map.to(pixels.device, pixels.dtype).clamp(0.0, 1.0)
+        if self.guide_aug_area == "foreground":
+            return torch.clamp(augmented * guide + pixels * (1.0 - guide), 0.0, 1.0)
+        if self.guide_aug_area == "background":
+            return torch.clamp(pixels * guide + augmented * (1.0 - guide), 0.0, 1.0)
+        raise ValueError(f"Unsupported guide augmentation area: {self.guide_aug_area}")
+
+    def _iter_antithetic_transport_pixels(
+        self,
+        pixels: torch.Tensor,
+        guide_pixel_map: torch.Tensor | None,
+        copies: int,
+    ):
+        """Yield +/- local transports, cancelling first-order sampling error."""
+        pair_count = copies // 2
+        grid_sizes = (3, 5, 7, 9)
+        for pair_index in range(pair_count):
+            field = self._sample_transport_field(pixels, grid_sizes[pair_index % len(grid_sizes)])
+            for direction in (1.0, -1.0):
+                augmented = self._transport_pixels(pixels, field, direction)
+                yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+        if copies % 2:
+            yield pixels
+
     def _augment_full_image(self, pixels: torch.Tensor, method: str) -> torch.Tensor:
         strength = self.guide_aug_strength
         if strength <= 0:
@@ -704,6 +763,11 @@ class LMDSSAttacker:
             return
 
         for method in self.guide_aug_methods:
+            if method == "antithetic_transport":
+                yield from self._iter_antithetic_transport_pixels(
+                    pixels, guide_pixel_map, self.guide_aug_copies
+                )
+                continue
             for _copy_idx in range(self.guide_aug_copies):
                 yield self._guide_augmented_pixels(pixels, guide_pixel_map, method)
 
