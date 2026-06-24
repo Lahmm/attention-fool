@@ -228,6 +228,7 @@ class LMDSSAttacker:
             "lowmid_shift",
             "white_noise",
             "antithetic_transport",
+            "natural_spectrum_transport",
         )
         if not self.guide_aug_methods:
             raise ValueError("guide_aug_methods must contain at least one method.")
@@ -707,6 +708,29 @@ class LMDSSAttacker:
         if copies % 2:
             yield pixels
 
+    def _natural_spectrum_transport_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        """Transfer normalized natural-image amplitudes while preserving phase and DC."""
+        batch = pixels.size(0)
+        if batch > 1:
+            shift = int(torch.randint(1, batch, (1,), device=pixels.device).item())
+            donor = torch.roll(pixels.detach(), shifts=shift, dims=0)
+        else:
+            donor = torch.roll(pixels.detach(), shifts=1, dims=1)
+        work = pixels if pixels.dtype == torch.float64 else pixels.float()
+        donor_work = donor.to(work.dtype)
+        source_fft = torch.fft.rfft2(work, dim=(-2, -1), norm="ortho")
+        donor_fft = torch.fft.rfft2(donor_work, dim=(-2, -1), norm="ortho")
+        source_amp, donor_amp = source_fft.abs(), donor_fft.abs()
+        source_scale = source_amp.flatten(2)[:, :, 1:].square().mean(2, keepdim=True).sqrt()
+        donor_scale = donor_amp.flatten(2)[:, :, 1:].square().mean(2, keepdim=True).sqrt()
+        donor_amp = donor_amp * (source_scale / donor_scale.clamp_min(1e-12)).unsqueeze(-1)
+        unit_phase = source_fft / source_amp.clamp_min(1e-12)
+        mixed_amp = torch.lerp(source_amp, donor_amp, self.guide_aug_strength)
+        mixed_amp = mixed_amp.clone()
+        mixed_amp[..., 0, 0] = source_amp[..., 0, 0]
+        transported = torch.fft.irfft2(unit_phase * mixed_amp, s=pixels.shape[-2:], norm="ortho")
+        return transported.to(pixels.dtype).clamp(0.0, 1.0)
+
     def _augment_full_image(self, pixels: torch.Tensor, method: str) -> torch.Tensor:
         strength = self.guide_aug_strength
         if strength <= 0:
@@ -733,6 +757,8 @@ class LMDSSAttacker:
             return self._lowmid_shift_pixels(pixels)
         if method == "white_noise":
             return self._white_noise_pixels(pixels)
+        if method == "natural_spectrum_transport":
+            return self._natural_spectrum_transport_pixels(pixels)
         raise ValueError(f"Unsupported guide augmentation method: {method}")
 
     def _guide_augmented_pixels(

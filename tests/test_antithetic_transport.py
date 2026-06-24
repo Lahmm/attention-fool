@@ -12,7 +12,7 @@ class TinyModel(nn.Module):
         return x.mean(dim=(2, 3))
 
 
-def make_attacker(copies=9, area="all"):
+def make_attacker(copies=9, area="all", method="antithetic_transport"):
     return LMDSSAttacker(
         TinyModel(),
         epsilon=0.1,
@@ -21,7 +21,7 @@ def make_attacker(copies=9, area="all"):
         layers=(-1,),
         guide_aug=True,
         guide_aug_area=area,
-        guide_aug_methods=("antithetic_transport",),
+        guide_aug_methods=(method,),
         guide_aug_copies=copies,
         guide_aug_strength=0.2,
         device=torch.device("cpu"),
@@ -58,6 +58,19 @@ class AntitheticTransportTests(unittest.TestCase):
         views = list(attacker._iter_forward_pixels(pixels, guide))
         for view in views:
             torch.testing.assert_close(view, pixels)
+
+    def test_natural_spectrum_transport_preserves_dc_and_backward_path(self):
+        torch.manual_seed(11)
+        attacker = make_attacker(copies=1, method="natural_spectrum_transport")
+        pixels = (torch.rand(4, 3, 16, 16) * 0.4 + 0.3).requires_grad_(True)
+        transformed = next(attacker._iter_forward_pixels(pixels, None))
+        self.assertGreater(float((transformed - pixels).abs().mean().detach()), 0.0)
+        torch.testing.assert_close(
+            transformed.mean(dim=(2, 3)), pixels.mean(dim=(2, 3)), atol=1e-5, rtol=1e-5
+        )
+        transformed.square().mean().backward()
+        self.assertIsNotNone(pixels.grad)
+        self.assertTrue(torch.isfinite(pixels.grad).all())
 
 
 if __name__ == "__main__":
