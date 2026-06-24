@@ -231,6 +231,7 @@ class LMDSSAttacker:
             "natural_spectrum_transport",
             "antithetic_filter_bank",
             "multiscale_adjoint_ensemble",
+            "orthogonal_photometric_ensemble",
         )
         if not self.guide_aug_methods:
             raise ValueError("guide_aug_methods must contain at least one method.")
@@ -764,6 +765,41 @@ class LMDSSAttacker:
             augmented = differentiable + (pixels - differentiable).detach()
             yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
 
+    def _iter_orthogonal_photometric_pixels(
+        self,
+        pixels: torch.Tensor,
+        guide_pixel_map: torch.Tensor | None,
+        copies: int,
+    ):
+        """Yield paired exposure, contrast, saturation, and gamma views.
+
+        The four axes alter distinct first-order image statistics. Pairing
+        opposite directions cancels the ensemble's first-order photometric
+        bias while retaining curvature from semantic-preserving evaluations.
+        An odd view budget includes the clean image.
+        """
+        gray_weights = pixels.new_tensor((0.2989, 0.5870, 0.1140)).view(1, 3, 1, 1)
+        pair_count = copies // 2
+        axes = ("exposure", "contrast", "saturation", "gamma")
+        for pair_index in range(pair_count):
+            axis = axes[pair_index % len(axes)]
+            for direction in (1.0, -1.0):
+                factor = math.exp(direction * self.guide_aug_strength)
+                if axis == "exposure":
+                    augmented = pixels * factor
+                elif axis == "contrast":
+                    center = pixels.mean(dim=(2, 3), keepdim=True)
+                    augmented = center + factor * (pixels - center)
+                elif axis == "saturation":
+                    gray = (pixels * gray_weights).sum(dim=1, keepdim=True)
+                    augmented = gray + factor * (pixels - gray)
+                else:
+                    augmented = pixels.clamp_min(1e-6).pow(factor)
+                augmented = augmented.clamp(0.0, 1.0)
+                yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+        if copies % 2:
+            yield pixels
+
     def _natural_spectrum_transport_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
         """Transfer normalized natural-image amplitudes while preserving phase and DC."""
         batch = pixels.size(0)
@@ -857,6 +893,11 @@ class LMDSSAttacker:
                 continue
             if method == "multiscale_adjoint_ensemble":
                 yield from self._iter_multiscale_adjoint_pixels(
+                    pixels, guide_pixel_map, self.guide_aug_copies
+                )
+                continue
+            if method == "orthogonal_photometric_ensemble":
+                yield from self._iter_orthogonal_photometric_pixels(
                     pixels, guide_pixel_map, self.guide_aug_copies
                 )
                 continue

@@ -102,6 +102,18 @@ class AntitheticTransportTests(unittest.TestCase):
         self.assertIsNotNone(pixels.grad)
         self.assertTrue(torch.isfinite(pixels.grad).all())
 
+    def test_orthogonal_photometric_ensemble_is_paired_and_differentiable(self):
+        attacker = make_attacker(copies=9, method="orthogonal_photometric_ensemble")
+        pixels = (torch.rand(2, 3, 16, 16) * 0.6 + 0.2).requires_grad_(True)
+        views = list(attacker._iter_forward_pixels(pixels, None))
+        self.assertEqual(len(views), 9)
+        torch.testing.assert_close(views[-1], pixels)
+        for pair_index in range(4):
+            positive, negative = views[2 * pair_index:2 * pair_index + 2]
+            self.assertGreater(float((positive - negative).abs().mean().detach()), 0.0)
+        sum(view.mean() for view in views).backward()
+        self.assertTrue(torch.isfinite(pixels.grad).all())
+
 
 if __name__ == "__main__":
     unittest.main()
