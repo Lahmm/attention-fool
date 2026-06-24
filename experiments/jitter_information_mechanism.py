@@ -51,6 +51,15 @@ DEFAULT_TARGETS = (
     "inception_v3",
     "resnet101",
 )
+MAX_NUMPY_SEED = 2**32 - 1
+
+
+def derive_seed(*values: int) -> int:
+    """Combine integer coordinates into a deterministic NumPy-compatible seed."""
+    seed = 0
+    for value in values:
+        seed = (seed * 1_000_003 + int(value)) % MAX_NUMPY_SEED
+    return seed
 
 
 def release_cuda() -> None:
@@ -283,7 +292,7 @@ def run(args) -> None:
         guide = attacker._build_guide_pixel_map(images, pixels.size(-1))
         raw_means, dim_variants = {}, {}
         for method_index, method in enumerate(METHODS):
-            base_seed = args.seed * 1_000_003 + batch_index * 10_007 + method_index * 101
+            base_seed = derive_seed(args.seed, batch_index * 10_007, method_index * 101)
             raw, raw_terms = gradient_ensemble(attacker, pixels, labels, guide, method, base_seed, dim=False)
             raw_repeat, _ = gradient_ensemble(attacker, pixels, labels, guide, method, base_seed + 1, dim=False)
             dim_grad, _ = gradient_ensemble(attacker, pixels, labels, guide, method, base_seed, dim=True)
