@@ -731,10 +731,20 @@ class LMDSSAttacker:
         pair_count = copies // 2
         kernel_sizes = (3, 5, 7, 9)
         for pair_index in range(pair_count):
+            cpu_rng_state = torch.random.get_rng_state()
+            cuda_rng_state = torch.cuda.get_rng_state(pixels.device) if pixels.is_cuda else None
             response = self._random_zero_dc_filter_response(pixels, kernel_sizes[pair_index % 4])
-            for direction in (1.0, -1.0):
-                augmented = (pixels + direction * self.guide_aug_strength * response).clamp(0.0, 1.0)
-                yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+            augmented = (pixels + self.guide_aug_strength * response).clamp(0.0, 1.0)
+            yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+
+            # Recompute after differentiating the positive view. This keeps
+            # antithetic values exact without sharing a sequential loss graph.
+            torch.random.set_rng_state(cpu_rng_state)
+            if cuda_rng_state is not None:
+                torch.cuda.set_rng_state(cuda_rng_state, pixels.device)
+            response = self._random_zero_dc_filter_response(pixels, kernel_sizes[pair_index % 4])
+            augmented = (pixels - self.guide_aug_strength * response).clamp(0.0, 1.0)
+            yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
         if copies % 2:
             yield pixels
 

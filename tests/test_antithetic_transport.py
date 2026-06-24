@@ -72,6 +72,11 @@ class AntitheticTransportTests(unittest.TestCase):
         sum(view.mean() for view in views).backward()
         self.assertTrue(torch.isfinite(pixels.grad).all())
 
+        probe = (torch.rand(2, 3, 16, 16) * 0.4 + 0.3).requires_grad_(True)
+        gradient, terms = attacker._attack_grad_terms(probe, torch.tensor([0, 1]), None)
+        self.assertEqual(len(terms), 9)
+        self.assertTrue(torch.isfinite(gradient).all())
+
     def test_natural_spectrum_transport_preserves_dc_and_backward_path(self):
         torch.manual_seed(11)
         attacker = make_attacker(copies=1, method="natural_spectrum_transport")
