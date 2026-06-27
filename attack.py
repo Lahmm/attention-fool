@@ -1063,8 +1063,7 @@ class LMDSSAttacker:
                 term_grads = tuple(self._smooth_grad(term) for term in term_grads)
             grad = self._apply_lowmid_dss_filter(grad, term_grads)
             grad = self._tune_lowmid_gradient(grad)
-            if self.attack_loss == "feature":
-                grad = self._normalize_grad(grad)
+            grad = self._normalize_grad(grad)
 
             if self.use_momentum:
                 momentum = self.decay * momentum + grad

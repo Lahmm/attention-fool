@@ -1,7 +1,6 @@
 import argparse
 import shutil
 from pathlib import Path
-from typing import List
 
 import torch
 from tqdm import tqdm
@@ -10,10 +9,8 @@ from attack import LMDSSAttacker
 from nets import ViTWithHook, build_vit_model
 from utils import (
     DEVICE,
-    evaluate_clean_dataset,
     load_data,
     save_adversarial_images,
-    save_clean_images,
 )
 
 IMAGE_DIR = "data/clean_resized_images"
@@ -139,52 +136,36 @@ def clear_directory_contents(directory: Path) -> None:
             shutil.rmtree(child)
 
 
-def attack_correctly_classified_samples(
+def attack_all_samples(
     dataloader,
-    model: ViTWithHook,
     attacker: LMDSSAttacker,
-    correct_mask: List[bool],
     output_dir: str | None,
     max_attacked_samples: int | None,
 ) -> None:
-    num_candidates = sum(correct_mask)
-    if num_candidates == 0:
-        print("No correctly classified samples are available for attack.")
-        return
-
-    effective_total = num_candidates if max_attacked_samples is None else min(num_candidates, max_attacked_samples)
-    progress = tqdm(total=effective_total, desc="Attacking correctly classified samples")
+    total_samples = len(dataloader.dataset)
+    effective_total = total_samples if max_attacked_samples is None else min(total_samples, max_attacked_samples)
+    progress = tqdm(total=effective_total, desc="Attacking samples")
     attacked = 0
-    success_count = 0
     saved_images = 0
 
     for _batch_idx, (images, labels, indices) in enumerate(dataloader):
         if max_attacked_samples is not None and attacked >= max_attacked_samples:
             break
 
-        batch_indices = indices.tolist()
-        mask_list = [correct_mask[idx] for idx in batch_indices]
-        if not any(mask_list):
-            continue
+        batch_size_actual = images.size(0)
+        remaining = None if max_attacked_samples is None else max_attacked_samples - attacked
+        if remaining is not None and remaining <= 0:
+            break
 
-        batch_mask = torch.tensor(mask_list, dtype=torch.bool)
+        if remaining is not None and batch_size_actual > remaining:
+            images = images[:remaining]
+            labels = labels[:remaining]
+            indices = indices[:remaining]
+            batch_size_actual = remaining
 
-        if max_attacked_samples is not None:
-            remaining = max_attacked_samples - attacked
-            if remaining <= 0:
-                break
-
-            num_correct_in_batch = int(batch_mask.sum().item())
-            if num_correct_in_batch > remaining:
-                true_indices = batch_mask.nonzero(as_tuple=False).view(-1)
-                keep_true_indices = true_indices[:remaining]
-                new_mask = torch.zeros_like(batch_mask)
-                new_mask[keep_true_indices] = True
-                batch_mask = new_mask
-
-        images_to_attack = images[batch_mask].to(DEVICE, non_blocking=True)
-        labels_to_attack = labels[batch_mask].to(DEVICE, non_blocking=True)
-        selected_dataset_indices = indices[batch_mask].tolist()
+        images_to_attack = images.to(DEVICE, non_blocking=True)
+        labels_to_attack = labels.to(DEVICE, non_blocking=True)
+        selected_dataset_indices = indices.tolist()
         filenames = [
             str(dataloader.dataset.samples[dataset_idx]["image_name"])
             for dataset_idx in selected_dataset_indices
@@ -195,15 +176,7 @@ def attack_correctly_classified_samples(
 
         x_adv = attacker.attack_batch(images_to_attack, labels_to_attack)
 
-        with torch.inference_mode():
-            logits_adv = model(x_adv, return_attn=False)
-            preds_adv = logits_adv.argmax(dim=1)
-
-        successes = (preds_adv != labels_to_attack).sum().item()
-        attacked_batch = labels_to_attack.size(0)
-
-        attacked += attacked_batch
-        success_count += successes
+        attacked += batch_size_actual
 
         saved = save_adversarial_images(
             images=x_adv,
@@ -214,19 +187,16 @@ def attack_correctly_classified_samples(
         )
         saved_images += len(saved)
 
-        progress.update(attacked_batch)
-        success_rate = success_count / attacked if attacked > 0 else 0.0
-        progress.set_postfix(success=f"{success_rate:.4f}", attacked=attacked)
+        progress.update(batch_size_actual)
+        progress.set_postfix(attacked=attacked)
 
     progress.close()
 
     if attacked == 0:
-        print("No attack was run because no selected correctly classified samples were available.")
+        print("No samples were attacked.")
         return
 
-    success_rate = success_count / attacked
-    print(f"Successfully attacked {success_count} / {attacked} correctly classified images.")
-    print(f"Attack success rate: {success_rate:.4f}")
+    print(f"Attacked {attacked} samples.")
     print(f"Saved {saved_images} adversarial samples to: {output_dir}")
 
 
@@ -376,28 +346,15 @@ def main(
         attack_loss=attack_loss,
         feature_layer=feature_layer,
     )
-    _clean_acc, correct_mask = evaluate_clean_dataset(
-        dataloader=dataloader,
-        model=model,
-    )
-
     if mode == "clean":
-        save_clean_images(
-            dataloader=dataloader,
-            correct_mask=correct_mask,
-            output_dir=str(resolved_output_dir),
-            max_samples=max_attacked_samples,
-        )
-        return
+        raise NotImplementedError("clean mode is not supported in this branch.")
 
     clear_directory_contents(resolved_output_dir)
     print(f"Cleared adversarial output directory: {resolved_output_dir}")
 
-    attack_correctly_classified_samples(
+    attack_all_samples(
         dataloader=dataloader,
-        model=model,
         attacker=attacker,
-        correct_mask=correct_mask,
         output_dir=str(resolved_output_dir),
         max_attacked_samples=max_attacked_samples,
     )
