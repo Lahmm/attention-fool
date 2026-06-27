@@ -204,15 +204,25 @@ def build_transfer_samples(
 def pre_cache_tensors(
     samples: List[Tuple[Path, int]],
     transform,
+    num_workers: int,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Pre-transform all images to tensors in RAM to eliminate per-model disk I/O."""
+    """Pre-transform all images to tensors in RAM using parallel DataLoader workers."""
+    dataset = TransferImageDataset(samples=samples, transform=transform)
+    loader = DataLoader(
+        dataset,
+        batch_size=64,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=False,
+        persistent_workers=False,
+        prefetch_factor=min(2, num_workers) if num_workers > 0 else None,
+    )
     images_list = []
     labels_list = []
-    for path, label in tqdm(samples, desc="pre-cache", leave=False):
-        img = Image.open(path).convert("RGB")
-        images_list.append(transform(img))
-        labels_list.append(label)
-    return torch.stack(images_list), torch.tensor(labels_list)
+    for imgs, lbls in tqdm(loader, desc="pre-cache", leave=False):
+        images_list.append(imgs)
+        labels_list.append(lbls)
+    return torch.cat(images_list), torch.cat(labels_list)
 
 
 def build_dataloader(
@@ -240,21 +250,16 @@ def build_cached_dataloader(
     images: torch.Tensor,
     labels: torch.Tensor,
     batch_size: int,
-    num_workers: int,
-    prefetch_factor: int,
 ) -> DataLoader:
-    """Pre-cached tensor loading (fast path, eliminates per-model disk I/O)."""
+    """Pre-cached tensor loading — zero workers, tensor slicing is instant."""
     dataset = TensorDataset(images, labels)
-    kwargs = {
-        "batch_size": batch_size,
-        "shuffle": False,
-        "num_workers": num_workers,
-        "pin_memory": (DEVICE.type == "cuda"),
-        "persistent_workers": num_workers > 0,
-    }
-    if num_workers > 0:
-        kwargs["prefetch_factor"] = prefetch_factor
-    return DataLoader(dataset, **kwargs)
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=(DEVICE.type == "cuda"),
+    )
 
 
 def configure_eval_runtime(use_tf32: bool) -> None:
@@ -292,13 +297,11 @@ def evaluate(
         return 0, 0, skipped
 
     if pre_cache:
-        images_cached, labels_cached = pre_cache_tensors(samples, transform)
+        images_cached, labels_cached = pre_cache_tensors(samples, transform, num_workers=num_workers)
         dataloader = build_cached_dataloader(
             images=images_cached,
             labels=labels_cached,
             batch_size=batch_size,
-            num_workers=num_workers,
-            prefetch_factor=prefetch_factor,
         )
     else:
         dataloader = build_dataloader(
