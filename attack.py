@@ -236,6 +236,7 @@ class LMDSSAttacker:
             "orthogonal_photometric_ensemble",
             "orthogonal_spherical_smoothing",
             "antithetic_jitter_cubature",
+            "feature_trajectory_dropout",
         )
         if not self.guide_aug_methods:
             raise ValueError("guide_aug_methods must contain at least one method.")
@@ -976,6 +977,62 @@ class LMDSSAttacker:
             for _copy_idx in range(self.guide_aug_copies):
                 yield self._guide_augmented_pixels(pixels, guide_pixel_map, method)
 
+
+    def _iter_feature_trajectory_dropout_pixels(
+        self,
+        pixels: torch.Tensor,
+        guide_pixel_map: torch.Tensor | None,
+        pilot_grad: torch.Tensor,
+        copies: int,
+    ):
+        """Yield feature-trajectory views under paired dropout corruption.
+
+        A pilot feature-loss gradient estimates the local transferable attack
+        direction. The EOT views integrate along that sign trajectory while
+        applying paired dropout/blur corruption at each point, favoring
+        gradients that remain stable under structured evidence removal instead
+        of photometric jitter.
+        """
+        direction = pilot_grad.detach().sign()
+        corruption_strength = min(1.0, self.guide_aug_strength * 1.25)
+        for index in range(copies):
+            radius = self.step_size * float(index + 1)
+            lookahead = torch.clamp(pixels + radius * direction, 0.0, 1.0)
+            if index % 2 == 1:
+                noise = 1.0 - torch.rand_like(lookahead)
+            else:
+                noise = torch.rand_like(lookahead)
+            blurred = F.avg_pool2d(lookahead, kernel_size=5, stride=1, padding=2)
+            corrupt = 0.5 * noise + 0.5 * blurred
+            augmented = torch.clamp(
+                lookahead * (1.0 - corruption_strength) + corrupt * corruption_strength,
+                0.0,
+                1.0,
+            )
+            yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+
+    def _attack_loss_for_pixels(
+        self,
+        forward_pixels: torch.Tensor,
+        labels: torch.Tensor,
+        clean_feature_target: torch.Tensor | None,
+    ) -> torch.Tensor:
+        if self.dim_adjoint_echo:
+            forward_pixels = self._dim_adjoint_echo_pixels(forward_pixels)
+        model_pixels = self._input_diversity(forward_pixels)
+        if self.attack_loss == "logits":
+            logits_adv = self.model(
+                self._normalize(model_pixels),
+                return_attn=False,
+            )
+            return F.cross_entropy(logits_adv, labels)
+
+        if clean_feature_target is None:
+            raise RuntimeError("clean_feature_target is required for feature loss.")
+        adv_features = self._extract_layer_patch_features(model_pixels)
+        cosine = F.cosine_similarity(adv_features, clean_feature_target, dim=-1)
+        return 1.0 - cosine.mean()
+
     def _iter_attack_losses(
         self,
         pixels: torch.Tensor,
@@ -983,23 +1040,23 @@ class LMDSSAttacker:
         guide_pixel_map: torch.Tensor | None,
         clean_feature_target: torch.Tensor | None = None,
     ):
-        for forward_pixels in self._iter_forward_pixels(pixels, guide_pixel_map):
-            if self.dim_adjoint_echo:
-                forward_pixels = self._dim_adjoint_echo_pixels(forward_pixels)
-            model_pixels = self._input_diversity(forward_pixels)
-            if self.attack_loss == "logits":
-                logits_adv = self.model(
-                    self._normalize(model_pixels),
-                    return_attn=False,
-                )
-                yield F.cross_entropy(logits_adv, labels)
-                continue
+        if self.guide_aug and "feature_trajectory_dropout" in self.guide_aug_methods:
+            pilot_loss = self._attack_loss_for_pixels(pixels, labels, clean_feature_target)
+            pilot_grad = torch.autograd.grad(pilot_loss, pixels, retain_graph=False)[0].detach()
+            for method in self.guide_aug_methods:
+                if method == "feature_trajectory_dropout":
+                    for forward_pixels in self._iter_feature_trajectory_dropout_pixels(
+                        pixels, guide_pixel_map, pilot_grad, self.guide_aug_copies
+                    ):
+                        yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
+                else:
+                    for _copy_idx in range(self.guide_aug_copies):
+                        forward_pixels = self._guide_augmented_pixels(pixels, guide_pixel_map, method)
+                        yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
+            return
 
-            if clean_feature_target is None:
-                raise RuntimeError("clean_feature_target is required for feature loss.")
-            adv_features = self._extract_layer_patch_features(model_pixels)
-            cosine = F.cosine_similarity(adv_features, clean_feature_target, dim=-1)
-            yield 1.0 - cosine.mean()
+        for forward_pixels in self._iter_forward_pixels(pixels, guide_pixel_map):
+            yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
 
     def _extract_layer_patch_features(self, pixels: torch.Tensor) -> torch.Tensor:
         outputs = self.model(

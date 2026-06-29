@@ -55,6 +55,27 @@ class FeatureAttackTests(unittest.TestCase):
         adversarial = attacker.attack_batch(images, torch.tensor([0]))
         self.assertEqual(adversarial.shape, images.shape)
 
+
+    def test_feature_trajectory_dropout_generates_nine_feature_terms(self):
+        torch.manual_seed(23)
+        attacker = make_attacker(
+            attack_loss="feature",
+            feature_layer=1,
+            guide_aug=True,
+            guide_aug_area="all",
+            guide_aug_methods=("feature_trajectory_dropout",),
+            guide_aug_copies=9,
+            guide_aug_strength=0.2,
+        )
+        pixels = torch.rand(2, 3, 16, 16, requires_grad=True)
+        labels = torch.tensor([1, 2])
+        with torch.no_grad():
+            target = attacker._extract_layer_patch_features(pixels).detach()
+        gradient, terms = attacker._attack_grad_terms(pixels, labels, None, target)
+        self.assertEqual(len(terms), 9)
+        self.assertTrue(torch.isfinite(gradient).all())
+        self.assertGreater(float(gradient.flatten(1).norm(dim=1).min().detach()), 0.0)
+
     def test_feature_layer_range_is_validated_on_forward(self):
         attacker = make_attacker(attack_loss="feature", feature_layer=2)
         images = torch.rand(1, 3, 16, 16) * 2.0 - 1.0
