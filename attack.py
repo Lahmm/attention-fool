@@ -235,6 +235,7 @@ class LMDSSAttacker:
             "multiscale_adjoint_ensemble",
             "orthogonal_photometric_ensemble",
             "orthogonal_spherical_smoothing",
+            "antithetic_jitter_cubature",
         )
         if not self.guide_aug_methods:
             raise ValueError("guide_aug_methods must contain at least one method.")
@@ -834,6 +835,33 @@ class LMDSSAttacker:
         if copies % 2:
             yield pixels
 
+    def _iter_antithetic_jitter_cubature_pixels(
+        self,
+        pixels: torch.Tensor,
+        guide_pixel_map: torch.Tensor | None,
+        copies: int,
+    ):
+        """Yield paired brightness/noise jitter views plus identity.
+
+        Standard jitter uses independent brightness and Gaussian-noise samples,
+        so its 9-view EOT gradient carries O(1/sqrt(n)) first-order sampling
+        error. This method keeps the same perturbation family and strength but
+        evaluates +/- pairs. The pair mean cancels odd first-order terms, while
+        the pair curvature still smooths the feature loss over photometric and
+        pixel-noise directions.
+        """
+        pair_count = copies // 2
+        for _pair_index in range(pair_count):
+            brightness = (
+                torch.rand(pixels.size(0), 1, 1, 1, device=pixels.device, dtype=pixels.dtype) * 2.0 - 1.0
+            ) * self.guide_aug_strength
+            noise = torch.randn_like(pixels) * (self.guide_aug_strength / 2.0)
+            for sign in (1.0, -1.0):
+                augmented = torch.clamp(pixels * (1.0 + sign * brightness) + sign * noise, 0.0, 1.0)
+                yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+        if copies % 2:
+            yield pixels
+
     def _natural_spectrum_transport_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
         """Transfer normalized natural-image amplitudes while preserving phase and DC."""
         batch = pixels.size(0)
@@ -937,6 +965,11 @@ class LMDSSAttacker:
                 continue
             if method == "orthogonal_spherical_smoothing":
                 yield from self._iter_orthogonal_spherical_pixels(
+                    pixels, guide_pixel_map, self.guide_aug_copies
+                )
+                continue
+            if method == "antithetic_jitter_cubature":
+                yield from self._iter_antithetic_jitter_cubature_pixels(
                     pixels, guide_pixel_map, self.guide_aug_copies
                 )
                 continue

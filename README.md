@@ -120,7 +120,7 @@ python main.py --mode attack --max-attacked-samples 500 --layers=-6,-5,-4,-3,-2,
 --ti-sigma 3
 ```
 
-`--guide-aug-area` 可选 `foreground`、`background`、`all`；`all` 不使用 attention guide map。`--guide-aug-method` 可传 `dropout,jitter,freq,dim_resonance,white_noise` 中的一个或多个。普通增强会先生成并按 guide 区域混合；`--dim-adjoint-echo` 是独立开关，会把 echo 作为串行梯度调制器应用在普通增强之后、DIM 之前。
+`--guide-aug-area` 可选 `foreground`、`background`、`all`；`all` 不使用 attention guide map。`--guide-aug-method` 可传 `dropout,jitter,freq,dim_resonance,white_noise,antithetic_jitter_cubature` 中的一个或多个。普通增强会先生成并按 guide 区域混合；`antithetic_jitter_cubature` 使用 jitter 同分布的亮度/噪声正负配对加 clean 视图，在 9-copy EOT 预算下替换 jitter；`--dim-adjoint-echo` 是独立开关，会把 echo 作为串行梯度调制器应用在普通增强之后、DIM 之前。
 
 ## DIM Resonance 长跑评估
 

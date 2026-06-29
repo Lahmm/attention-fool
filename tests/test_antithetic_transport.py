@@ -134,5 +134,21 @@ class AntitheticTransportTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(pixels.grad).all())
 
 
+    def test_antithetic_jitter_cubature_pairs_brightness_noise_views(self):
+        torch.manual_seed(29)
+        attacker = make_attacker(copies=9, method="antithetic_jitter_cubature")
+        attacker.guide_aug_strength = 0.02
+        pixels = torch.full((2, 3, 16, 16), 0.5, requires_grad=True)
+        views = list(attacker._iter_forward_pixels(pixels, None))
+        self.assertEqual(len(views), 9)
+        torch.testing.assert_close(views[-1], pixels)
+        for pair_index in range(4):
+            positive, negative = views[2 * pair_index:2 * pair_index + 2]
+            torch.testing.assert_close((positive + negative) / 2.0, pixels, atol=1e-6, rtol=1e-6)
+            self.assertGreater(float((positive - negative).flatten(1).norm(dim=1).min().detach()), 0.0)
+        sum(view.mean() for view in views).backward()
+        self.assertTrue(torch.isfinite(pixels.grad).all())
+
+
 if __name__ == "__main__":
     unittest.main()
