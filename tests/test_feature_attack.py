@@ -42,6 +42,35 @@ class TinyMapModel(nn.Module):
         return features.flatten(2).transpose(1, 2)
 
 
+class TinyStageModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.head = nn.Linear(3, 4)
+
+    def forward(self, x, return_attn=False, return_tokens=False, return_stage_tokens=False):
+        del return_attn
+        patches = F.avg_pool2d(x, kernel_size=4, stride=4).flatten(2).transpose(1, 2)
+        cls = patches.mean(dim=1, keepdim=True)
+        tokens = torch.cat((cls, patches), dim=1)
+        block_tokens = [tokens, torch.tanh(tokens)]
+        stage_tokens = [x, F.avg_pool2d(x, kernel_size=2, stride=2)]
+        logits = self.head(block_tokens[-1][:, 0])
+        outputs = [logits]
+        if return_tokens:
+            outputs.append(block_tokens)
+        if return_stage_tokens:
+            outputs.append(stage_tokens)
+        return tuple(outputs) if len(outputs) > 1 else logits
+
+    @staticmethod
+    def prepare_feature_tokens(features):
+        if features.ndim == 4:
+            return features.flatten(2).transpose(1, 2)
+        if features.ndim == 3 and features.size(1) > 1:
+            return features[:, 1:, :]
+        return features
+
+
 def make_attacker(**kwargs):
     return LMDSSAttacker(
         TinyTokenModel(),
@@ -106,8 +135,38 @@ class FeatureAttackTests(unittest.TestCase):
         adversarial = attacker.attack_batch(images, torch.tensor([1, 2]))
         self.assertEqual(adversarial.shape, images.shape)
 
+    def test_stage_feature_scope_uses_stage_outputs(self):
+        attacker = LMDSSAttacker(
+            TinyStageModel(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            attack_loss="feature",
+            feature_layer=-1,
+            feature_scope="stage",
+            device=torch.device("cpu"),
+        )
+        images = torch.rand(2, 3, 16, 16) * 2.0 - 1.0
+        adversarial = attacker.attack_batch(images, torch.tensor([1, 2]))
+        self.assertEqual(adversarial.shape, images.shape)
+
     def test_feature_layer_range_is_validated_on_forward(self):
         attacker = make_attacker(attack_loss="feature", feature_layer=2)
+        images = torch.rand(1, 3, 16, 16) * 2.0 - 1.0
+        with self.assertRaisesRegex(ValueError, "out of range"):
+            attacker.attack_batch(images, torch.tensor([0]))
+
+    def test_stage_feature_layer_range_is_validated_on_forward(self):
+        attacker = LMDSSAttacker(
+            TinyStageModel(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            attack_loss="feature",
+            feature_layer=2,
+            feature_scope="stage",
+            device=torch.device("cpu"),
+        )
         images = torch.rand(1, 3, 16, 16) * 2.0 - 1.0
         with self.assertRaisesRegex(ValueError, "out of range"):
             attacker.attack_batch(images, torch.tensor([0]))
@@ -116,12 +175,17 @@ class FeatureAttackTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             make_attacker(attack_loss="unknown")
 
+    def test_constructor_rejects_unknown_feature_scope(self):
+        with self.assertRaises(ValueError):
+            make_attacker(attack_loss="feature", feature_scope="unknown")
+
     def test_cli_exposes_feature_attack_options(self):
-        argv = ["main.py", "--attack-loss", "feature", "--feature-layer", "-2"]
+        argv = ["main.py", "--attack-loss", "feature", "--feature-layer", "-2", "--feature-scope", "stage"]
         with mock.patch.object(sys, "argv", argv):
             args = main.parse_args()
         self.assertEqual(args.attack_loss, "feature")
         self.assertEqual(args.feature_layer, -2)
+        self.assertEqual(args.feature_scope, "stage")
         self.assertEqual(args.whitebox_model, main.DEFAULT_MODEL_NAME)
 
     def test_create_attacker_forwards_feature_options(self):
@@ -133,9 +197,11 @@ class FeatureAttackTests(unittest.TestCase):
             ti_sigma=0,
             attack_loss="feature",
             feature_layer=1,
+            feature_scope="stage",
         )
         self.assertEqual(attacker.attack_loss, "feature")
         self.assertEqual(attacker.feature_layer, 1)
+        self.assertEqual(attacker.feature_scope, "stage")
 
 
 if __name__ == "__main__":

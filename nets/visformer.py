@@ -16,6 +16,17 @@ class VisformerSmallWithHook(WhiteBoxWithHook):
         modules.extend(sequential_modules(getattr(self.model, "stage3", None)))
         return modules
 
+    def _stage_modules(self):
+        return [
+            stage
+            for stage in (
+                getattr(self.model, "stage1", None),
+                getattr(self.model, "stage2", None),
+                getattr(self.model, "stage3", None),
+            )
+            if stage is not None
+        ]
+
 
 def build_visformer_small_model(
     num_classes: int,

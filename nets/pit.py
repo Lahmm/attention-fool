@@ -12,6 +12,9 @@ class PiTB224WithHook(OptionalClsTokenMixin, WhiteBoxWithHook):
     def _feature_modules(self):
         return nested_stage_blocks(getattr(self.model, "transformers", ()))
 
+    def _stage_modules(self):
+        return list(getattr(self.model, "transformers", ()))
+
 
 def build_pit_b_224_model(
     num_classes: int,

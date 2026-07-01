@@ -119,6 +119,7 @@ class LMDSSAttacker:
         lowmid_dss_agreement_threshold: float = 0.67,
         attack_loss: str = "logits",
         feature_layer: int = -2,
+        feature_scope: str = "block",
         device: torch.device | None = None,
     ) -> None:
         if epsilon < 0:
@@ -150,6 +151,8 @@ class LMDSSAttacker:
 
         if attack_loss not in ("logits", "feature"):
             raise ValueError(f"attack_loss must be 'logits' or 'feature', got {attack_loss!r}.")
+        if feature_scope not in ("block", "stage"):
+            raise ValueError(f"feature_scope must be 'block' or 'stage', got {feature_scope!r}.")
 
         self.model = model
         self.model.eval()
@@ -187,6 +190,7 @@ class LMDSSAttacker:
         self.lowmid_dss_agreement_threshold = float(lowmid_dss_agreement_threshold)
         self.attack_loss = attack_loss
         self.feature_layer = int(feature_layer)
+        self.feature_scope = feature_scope
         self.guide_aug = bool(guide_aug)
         self.guide_aug_methods = tuple(str(method).strip() for method in guide_aug_methods if str(method).strip())
         valid_guide_aug_methods = (
@@ -796,22 +800,31 @@ class LMDSSAttacker:
             yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
 
     def _extract_layer_patch_features(self, pixels: torch.Tensor) -> torch.Tensor:
-        outputs = self.model(
-            self._normalize(pixels),
-            return_attn=False,
-            return_tokens=True,
-        )
-        if not isinstance(outputs, tuple) or len(outputs) != 2:
-            raise TypeError(
-                "Feature loss requires a model that returns "
-                "(logits, block_tokens) with return_tokens=True."
+        if self.feature_scope == "stage":
+            outputs = self.model(
+                self._normalize(pixels),
+                return_attn=False,
+                return_stage_tokens=True,
             )
-        _logits, block_tokens = outputs
-        num_layers = len(block_tokens)
+            token_name = "stage outputs"
+            type_hint = "(logits, stage_tokens) with return_stage_tokens=True"
+        else:
+            outputs = self.model(
+                self._normalize(pixels),
+                return_attn=False,
+                return_tokens=True,
+            )
+            token_name = "feature layers"
+            type_hint = "(logits, block_tokens) with return_tokens=True"
+
+        if not isinstance(outputs, tuple) or len(outputs) != 2:
+            raise TypeError(f"Feature loss requires a model that returns {type_hint}.")
+        _logits, feature_outputs = outputs
+        num_layers = len(feature_outputs)
         layer_idx = self.feature_layer if self.feature_layer >= 0 else num_layers + self.feature_layer
         if layer_idx < 0 or layer_idx >= num_layers:
-            raise ValueError(f"feature_layer {self.feature_layer} is out of range for {num_layers} feature layers.")
-        features = block_tokens[layer_idx]
+            raise ValueError(f"feature_layer {self.feature_layer} is out of range for {num_layers} {token_name}.")
+        features = feature_outputs[layer_idx]
         preparer = getattr(self.model, "prepare_feature_tokens", None)
         if preparer is not None:
             return preparer(features)

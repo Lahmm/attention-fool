@@ -43,6 +43,7 @@ def create_attacker(
     lowmid_dss_agreement_threshold: float = 0.67,
     attack_loss: str = "logits",
     feature_layer: int = -2,
+    feature_scope: str = "block",
 ) -> LMDSSAttacker:
     return LMDSSAttacker(
         model=model,
@@ -69,6 +70,7 @@ def create_attacker(
         lowmid_dss_agreement_threshold=lowmid_dss_agreement_threshold,
         attack_loss=attack_loss,
         feature_layer=feature_layer,
+        feature_scope=feature_scope,
         device=DEVICE,
     )
 
@@ -208,6 +210,7 @@ def parse_args():
     parser.add_argument("--lowmid-dss-agreement-threshold", type=float, default=0.67, help="Reserved agreement threshold for LMDSS compatibility.")
     parser.add_argument("--attack-loss", choices=["logits", "feature"], default="logits", help="Attack final logits with CE or one feature layer with cosine distance.")
     parser.add_argument("--feature-layer", type=int, default=-2, help="Feature layer index used by --attack-loss feature. Negative indices count from the end.")
+    parser.add_argument("--feature-scope", choices=["block", "stage"], default="block", help="Feature output sequence used by --attack-loss feature: block layers or stage outputs.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode, use --output-dir outputs/attack/lmdss.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
@@ -249,6 +252,7 @@ def main(
     lowmid_dss_agreement_threshold: float = 0.67,
     attack_loss: str = "logits",
     feature_layer: int = -2,
+    feature_scope: str = "block",
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -295,6 +299,7 @@ def main(
         lowmid_dss_agreement_threshold=lowmid_dss_agreement_threshold,
         attack_loss=attack_loss,
         feature_layer=feature_layer,
+        feature_scope=feature_scope,
     )
     if mode == "clean":
         raise NotImplementedError("clean mode is not supported in this branch.")
@@ -338,6 +343,7 @@ if __name__ == "__main__":
         lowmid_dss_agreement_threshold=args.lowmid_dss_agreement_threshold,
         attack_loss=args.attack_loss,
         feature_layer=args.feature_layer,
+        feature_scope=args.feature_scope,
         output_dir=args.output_dir,
         mode=args.mode,
         image_dir=args.image_dir,

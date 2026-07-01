@@ -38,11 +38,14 @@ class WhiteBoxWithHook(nn.Module):
         self.feature_modules: list[nn.Module] = list(self._feature_modules())
         if not self.feature_modules:
             raise ValueError(f"No compatible feature layers found for {self.model_name}.")
+        self.stage_modules: list[nn.Module] = list(self._stage_modules())
 
         self.feature_tokens: List[Optional[torch.Tensor]] = []
+        self.stage_tokens: List[Optional[torch.Tensor]] = []
         self.attn_logits: List[Optional[torch.Tensor]] = []
         self.values: List[Optional[torch.Tensor]] = []
         self._capture_tokens = False
+        self._capture_stage_tokens = False
         self._capture_attn = False
         self._capture_values = False
         self._hook_handles: list[torch.utils.hooks.RemovableHandle] = []
@@ -50,6 +53,7 @@ class WhiteBoxWithHook(nn.Module):
 
         self._reset_caches()
         self._register_feature_hooks()
+        self._register_stage_hooks()
         self._register_qkv_hooks()
         self.to(self.device)
 
@@ -57,11 +61,19 @@ class WhiteBoxWithHook(nn.Module):
     def num_blocks(self) -> int:
         return len(self.feature_modules)
 
+    @property
+    def num_stages(self) -> int:
+        return len(self.stage_modules)
+
     def _feature_modules(self) -> Iterable[nn.Module]:
         raise NotImplementedError
 
+    def _stage_modules(self) -> Iterable[nn.Module]:
+        return ()
+
     def _reset_caches(self) -> None:
         self.feature_tokens = [None] * len(self.feature_modules)
+        self.stage_tokens = [None] * len(self.stage_modules)
         self.attn_logits = [None] * len(self._qkv_meta)
         self.values = [None] * len(self._qkv_meta)
 
@@ -70,6 +82,10 @@ class WhiteBoxWithHook(nn.Module):
             handle = module.register_forward_hook(self._make_feature_hook(layer_idx))
             self._hook_handles.append(handle)
 
+    def _register_stage_hooks(self) -> None:
+        for stage_idx, module in enumerate(self.stage_modules):
+            handle = module.register_forward_hook(self._make_stage_hook(stage_idx))
+            self._hook_handles.append(handle)
 
     def _register_qkv_hooks(self) -> None:
         module_dict = dict(self.model.named_modules())
@@ -122,6 +138,14 @@ class WhiteBoxWithHook(nn.Module):
 
         return hook
 
+    def _make_stage_hook(self, stage_idx: int):
+        def hook(_module: nn.Module, _inputs, output):
+            if not self._capture_stage_tokens:
+                return
+            self.stage_tokens[stage_idx] = self._extract_tensor_output(output)
+
+        return hook
+
     @staticmethod
     def _extract_tensor_output(output) -> torch.Tensor | None:
         if isinstance(output, torch.Tensor):
@@ -151,18 +175,21 @@ class WhiteBoxWithHook(nn.Module):
         return_attn: bool = False,
         return_values: bool = False,
         return_tokens: bool = False,
+        return_stage_tokens: bool = False,
     ):
         x = x.to(self.device)
         self._reset_caches()
         self._capture_attn = return_attn
         self._capture_values = return_values
         self._capture_tokens = return_tokens
+        self._capture_stage_tokens = return_stage_tokens
 
         logits = self.model(x)
 
         self._capture_attn = False
         self._capture_values = False
         self._capture_tokens = False
+        self._capture_stage_tokens = False
         outputs: list[object] = [logits]
         if return_attn:
             outputs.append(self._finalize_cache(self.attn_logits, "attn logits") if self._qkv_meta else [])
@@ -170,6 +197,8 @@ class WhiteBoxWithHook(nn.Module):
             outputs.append(self._finalize_cache(self.values, "value tensors") if self._qkv_meta else [])
         if return_tokens:
             outputs.append(self._finalize_cache(self.feature_tokens, "feature layer outputs"))
+        if return_stage_tokens:
+            outputs.append(self._finalize_cache(self.stage_tokens, "stage outputs"))
 
         if len(outputs) == 1:
             return logits
