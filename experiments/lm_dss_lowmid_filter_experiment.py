@@ -152,12 +152,7 @@ def make_diagnostic_attacker(num_classes: int, branch_name: str):
         "dim": True,
         "mi": True,
         "mi_decay": 1.0,
-        "attention_guide_models": guides,
-        "attention_guide_type": "qk_cls",
-        "attention_guide_build_method": "patch",
-        "attention_guide_patch_size": 16,
         "guide_aug": True,
-        "guide_aug_area": "background",
         "guide_aug_methods": tuple(GUIDE_METHODS.split(",")),
         "guide_aug_copies": 3,
         "guide_aug_strength": 0.2,
@@ -177,7 +172,7 @@ def make_diagnostic_attacker(num_classes: int, branch_name: str):
 def trace_source_diagnostics(attacker, images, labels, branch_name: str) -> list[dict[str, object]]:
     images, labels = images.to(attacker.device), labels.to(attacker.device)
     clean = attacker._denormalize(images).detach()
-    guide = attacker._build_guide_pixel_map(images, clean.size(-1))
+    guide = None
     adv = clean.clone().detach()
     momentum = torch.zeros_like(clean)
     rows = []
@@ -185,9 +180,9 @@ def trace_source_diagnostics(attacker, images, labels, branch_name: str) -> list
         step = step_idx + 1
         grad_pixels = adv.detach().requires_grad_(True)
         if attacker.lowmid_dss_filter:
-            raw, term_grads = attacker._attack_grad_terms(grad_pixels, labels, guide)
+            raw, term_grads = attacker._attack_grad_terms(grad_pixels, labels)
         else:
-            raw, term_grads = attacker._attack_grad(grad_pixels, labels, guide), None
+            raw, term_grads = attacker._attack_grad(grad_pixels, labels), None
         raw = attacker._smooth_grad(attacker._normalize_guided_grad(raw, guide))
         if term_grads is not None:
             term_grads = tuple(attacker._smooth_grad(attacker._normalize_guided_grad(term, guide)) for term in term_grads)
@@ -269,12 +264,8 @@ def write_report(repo: Path, args, branch_results: dict[str, dict[str, object]],
         "target_models": TARGET_MODELS,
         "config": {
             "dim": True,
-            "guide_aug_area": "background",
             "guide_aug_method": GUIDE_METHODS,
             "guide_aug_copies": 3,
-            "attention_guide_models": GUIDE_MODELS,
-            "attention_guide_type": "qk_cls",
-            "attention_guide_build_method": "patch",
             "layers": "0,1,4,9,11",
             "ti_sigma": 0,
             "mi": True,
@@ -342,22 +333,12 @@ def main() -> None:
                 "--mi-decay",
                 "1.0",
                 "--guide-aug",
-                "--guide-aug-area",
-                "background",
                 "--guide-aug-method",
                 GUIDE_METHODS,
                 "--guide-aug-copies",
                 "3",
                 "--guide-aug-strength",
                 "0.2",
-                "--attention-guide-models",
-                GUIDE_MODELS,
-                "--attention-guide-type",
-                "qk_cls",
-                "--attention-guide-build-method",
-                "patch",
-                "--layers",
-                "0,1,4,9,11",
                 "--batch-size",
                 str(args.batch_size),
                 "--num-workers",

@@ -51,62 +51,50 @@ step_size = epsilon / steps
 
 ## FFT-CC 攻击
 
-`fft-cc` 是全图 L_inf 约束下的 MI-FGSM 风格攻击。它先用 clean tokens 的 channel-wise FFT stability 得到 foreground-like / background-like patch 的软划分，然后在多个 residual-stream 层上缩小两组 patch 与 CLS 的对齐差异。
+`fft-cc` 是全图 L_inf 约束下的 MI-FGSM 风格攻击。它先用 clean tokens 的 channel-wise FFT stability 得到 foreground-like / background-like patch 的软划分，然后缩小两组 patch 与 CLS 的对齐差异。
 
 攻击目标：
 
 ```text
-loss = CE - lambda_contrast * mean_l |fg_align_l - bg_align_l|
-```
-
-默认层是：
-
-```text
---layers=-4,-2,-1
+loss = CE - lambda_contrast * |fg_align - bg_align|
 ```
 
 运行示例：
 
 ```powershell
-python main.py --mode attack --attack-type fft-cc --max-attacked-samples 20 --epsilon 0.062745 --steps 10 --decay 1.0 --layers=-4,-2,-1 --lambda-contrast 1.0 --fft-topk 1 --output-dir outputs/attack/fftcc
+python main.py --mode attack --attack-type fft-cc --max-attacked-samples 20 --epsilon 0.062745 --steps 10 --decay 1.0 --output-dir outputs/attack/fftcc
 ```
 
 参数说明：
 
 ```text
---layers             参与 contrast loss 的 transformer block，支持任意数量，例如 -6,-4,-2,-1
 --lambda-contrast    前后景 patch-CLS 对齐差异塌缩项权重
 --fft-topk           channel-wise FFT stability selection 的 Top-K，默认 1
 ```
 
-PowerShell 中带负数的 `--layers` 建议写成等号形式：
-
-```powershell
---layers=-4,-2,-1
-```
-
 ## Lazy Aggregation 攻击
 
-`lazy-agg` 是单白盒 ViT 非定向迁移攻击。当前实现将攻击拆成前向增强、CE loss 和反向梯度处理三个可组合模块。
+`lazy-agg` 是单白盒模型非定向迁移攻击。当前实现将攻击拆成前向增强、CE/feature loss 和反向梯度处理三个可组合模块。
 
 默认配置：
 
 ```text
-epsilon=16/255, steps=20, layers=-6,-5,-4,-3,-2,-1
+epsilon=16/255, steps=20
 guide_aug=False, dim=False, si=False, eot=False
-mi=True, ni=False, ti_sigma=3.0
+mi=True, ni=False, ti_sigma=0.0
+whitebox_model=vit_base_patch16_224, feature_layer=-2
 ```
 
 最简单的无增强 FGSM 示例：
 
 ```powershell
-python main.py --mode attack --max-attacked-samples 50 --steps 1 --ti-sigma 0 --output-dir outputs/attack/lazyagg/fgsm_plain
+python main.py --mode attack --max-attacked-samples 50 --steps 1 --ti-sigma 0 --output-dir outputs/attack/lmdss
 ```
 
-注意力引导增强示例：
+整图前向增强示例：
 
 ```powershell
-python main.py --mode attack --max-attacked-samples 500 --layers=-6,-5,-4,-3,-2,-1 --guide-aug --guide-aug-area background --guide-aug-method dropout,jitter,freq --guide-aug-copies 3 --attention-guide-type postsoftmax_cls --attention-guide-build-method pixel --output-dir outputs/attack/lmdss/bgaug_s02_lastsix_500
+python main.py --mode attack --max-attacked-samples 500 --whitebox-model vit_base_patch16_224 --guide-aug --guide-aug-method dropout,jitter,freq --guide-aug-copies 3 --guide-aug-strength 0.2 --output-dir outputs/attack/lmdss
 ```
 
 前向增强与反向梯度模块均由独立参数控制：
@@ -120,7 +108,7 @@ python main.py --mode attack --max-attacked-samples 500 --layers=-6,-5,-4,-3,-2,
 --ti-sigma 3
 ```
 
-`--guide-aug-area` 可选 `foreground`、`background`、`all`；`all` 不使用 attention guide map。`--guide-aug-method` 可传 `dropout,jitter,freq,dim_resonance,white_noise,antithetic_jitter_cubature,feature_trajectory_dropout` 中的一个或多个。普通增强会先生成并按 guide 区域混合；`antithetic_jitter_cubature` 使用 jitter 同分布的亮度/噪声正负配对加 clean 视图；`feature_trajectory_dropout` 用 feature-loss pilot 梯度构造 9 个前瞻轨迹视图，并在每个视图上施加配对 dropout/blur 结构遮挡以估计稳定可迁移梯度；`--dim-adjoint-echo` 是独立开关，会把 echo 作为串行梯度调制器应用在普通增强之后、DIM 之前。
+`--guide-aug` 现在只做整图前向增强，不再构建 attention map guide。`--guide-aug-method` 可传 `dropout,jitter,freq,dim_resonance,white_noise,antithetic_jitter_cubature,feature_trajectory_dropout` 中的一个或多个。`antithetic_jitter_cubature` 使用 jitter 同分布的亮度/噪声正负配对加 clean 视图；`feature_trajectory_dropout` 用 feature-loss pilot 梯度构造 9 个前瞻轨迹视图，并在每个视图上施加配对 dropout/blur 结构遮挡以估计稳定可迁移梯度；`--dim-adjoint-echo` 是独立开关，会把 echo 作为串行梯度调制器应用在普通增强之后、DIM 之前。
 
 ## DIM Resonance 长跑评估
 
@@ -133,7 +121,7 @@ bash scripts/run_dim_resonance_effectiveness.sh
 常用快速 smoke：
 
 ```powershell
-ROOT=outputs/attack/lazyagg/dim_resonance_effectiveness_smoke MAX_SAMPLES=2 STEPS=1 TARGET_MODELS=deit_base_patch16_224 GUIDE_MODELS=deit_base_patch16_224 bash scripts/run_dim_resonance_effectiveness.sh
+ROOT=outputs/attack/lazyagg/dim_resonance_effectiveness_smoke MAX_SAMPLES=2 STEPS=1 TARGET_MODELS=deit_base_patch16_224 bash scripts/run_dim_resonance_effectiveness.sh
 ```
 
 汇总脚本会读取 `transfer_eval.py` 写入的 CSV，并生成：

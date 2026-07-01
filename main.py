@@ -6,7 +6,7 @@ import torch
 from tqdm import tqdm
 
 from attack import LMDSSAttacker
-from nets import ViTWithHook, build_vit_model
+from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, WhiteBoxWithHook, build_whitebox_model
 from utils import (
     DEVICE,
     load_data,
@@ -19,24 +19,18 @@ DEFAULT_IMG_SIZE = 224
 
 
 def create_attacker(
-    model: ViTWithHook,
+    model: WhiteBoxWithHook,
     epsilon: float,
     step_size: float | None,
     steps: int,
-    layers: tuple[int, ...],
-    ti_sigma: float = 3.0,
+    ti_sigma: float = 0.0,
     dim: bool = False,
     mi: bool = True,
     mi_decay: float = 1.0,
     ni: bool = False,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
     dim_mode: str = "full-random",
-    attention_guide_models: tuple[ViTWithHook, ...] = (),
-    attention_guide_type: str = "postsoftmax_cls",
-    attention_guide_build_method: str = "pixel",
-    attention_guide_patch_size: int = 16,
     guide_aug: bool = False,
-    guide_aug_area: str = "background",
     guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
     guide_aug_strength: float = 0.2,
@@ -48,14 +42,13 @@ def create_attacker(
     lowmid_dss_consistency: str = "sign",
     lowmid_dss_agreement_threshold: float = 0.67,
     attack_loss: str = "logits",
-    feature_layer: int = 10,
+    feature_layer: int = -2,
 ) -> LMDSSAttacker:
     return LMDSSAttacker(
         model=model,
         epsilon=epsilon,
         step_size=step_size,
         steps=steps,
-        layers=layers,
         ti_sigma=ti_sigma,
         input_diversity=dim,
         dim_resize_range=dim_resize_range,
@@ -63,12 +56,7 @@ def create_attacker(
         use_momentum=mi,
         momentum_decay=mi_decay,
         nesterov=ni,
-        attention_guide_models=attention_guide_models,
-        attention_guide_type=attention_guide_type,
-        attention_guide_build_method=attention_guide_build_method,
-        attention_guide_patch_size=attention_guide_patch_size,
         guide_aug=guide_aug,
-        guide_aug_area=guide_aug_area,
         guide_aug_methods=guide_aug_methods,
         guide_aug_copies=guide_aug_copies,
         guide_aug_strength=guide_aug_strength,
@@ -83,13 +71,6 @@ def create_attacker(
         feature_layer=feature_layer,
         device=DEVICE,
     )
-
-def parse_layers(value: str) -> tuple[int, ...]:
-    layers = tuple(int(item.strip()) for item in value.split(",") if item.strip())
-    if not layers:
-        raise argparse.ArgumentTypeError("layers must contain at least one comma-separated integer.")
-    return layers
-
 
 def parse_float_range(value: str) -> tuple[float, float]:
     parts = tuple(float(item.strip()) for item in value.split(",") if item.strip())
@@ -206,20 +187,15 @@ def parse_args():
     parser.add_argument("--epsilon", type=float, default=16.0 / 255.0, help="L_inf step budget in pixel range [0, 1].")
     parser.add_argument("--step-size", type=float, default=None, help="Step size. Defaults to epsilon / steps.")
     parser.add_argument("--steps", type=int, default=20, help="Number of attack iterations.")
-    parser.add_argument("--layers", type=parse_layers, default=(-6, -5, -4, -3, -2, -1), help='Comma-separated token layers, e.g. "-6,-5,-4,-3,-2,-1".')
-    parser.add_argument("--ti-sigma", type=float, default=3.0, help="TI Gaussian kernel sigma for gradient smoothing. 0=disabled.")
+    parser.add_argument("--whitebox-model", choices=WHITEBOX_MODEL_CHOICES, default=DEFAULT_MODEL_NAME, help="White-box source model used to generate adversarial samples.")
+    parser.add_argument("--ti-sigma", type=float, default=0.0, help="TI Gaussian kernel sigma for gradient smoothing. 0=disabled.")
     parser.add_argument("--mi", dest="mi", action="store_true", help="Enable momentum iterative gradients. Enabled by default.")
     parser.add_argument("--no-mi", dest="mi", action="store_false", help="Disable momentum iterative gradients.")
     parser.add_argument("--mi-decay", type=float, default=1.0, help="Momentum decay factor used when MI is enabled.")
     parser.add_argument("--ni", action="store_true", help="Enable Nesterov lookahead. Requires MI.")
     parser.add_argument("--dim", action="store_true", help="Enable input diversity (DIM).")
     parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0), help='DIM resize scale range, e.g. "0.85,1.0".')
-    parser.add_argument("--attention-guide-models", type=parse_model_names, default=(), help="Comma-separated extra models for clean stable-attention guide maps.")
-    parser.add_argument("--attention-guide-type", type=str, default="postsoftmax_cls", help="Comma-separated guide types: postsoftmax_cls,qk_cls,qk_all_queries. The first entry is used.")
-    parser.add_argument("--attention-guide-build-method", choices=["pixel", "patch"], default="pixel", help="Build guide masks as pixel-level bilinear maps or patch-wise nearest maps.")
-    parser.add_argument("--attention-guide-patch-size", type=int, default=16, help="Rendered guide patch size for --attention-guide-build-method patch. Must divide --img-size.")
-    parser.add_argument("--guide-aug", action="store_true", help="Enable attention-guided forward augmentation.")
-    parser.add_argument("--guide-aug-area", choices=["foreground", "background", "all"], default="background", help="Region affected by guide augmentation. all ignores attention guide maps.")
+    parser.add_argument("--guide-aug", action="store_true", help="Enable whole-image forward augmentation.")
     parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,dim_resonance,lowmid_shift,white_noise,antithetic_transport,natural_spectrum_transport,antithetic_filter_bank,multiscale_adjoint_ensemble,orthogonal_photometric_ensemble,orthogonal_spherical_smoothing,antithetic_jitter_cubature,feature_trajectory_dropout.")
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Random copies per guide augmentation method.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
@@ -230,9 +206,8 @@ def parse_args():
     parser.add_argument("--lowmid-dss-filter", action="store_true", help="Measure low/mid agreement with historical momentum to modulate low/mid rotation.")
     parser.add_argument("--lowmid-dss-consistency", choices=["sign", "cos"], default="sign", help="Consistency rule for --lowmid-dss-filter: per-element sign agreement or per-sample cosine gate.")
     parser.add_argument("--lowmid-dss-agreement-threshold", type=float, default=0.67, help="Reserved agreement threshold for LMDSS compatibility.")
-    parser.add_argument("--attack-loss", choices=["logits", "feature"], default="logits", help="Attack final logits with CE or one block's patch-token features with cosine distance.")
-    parser.add_argument("--feature-layer", type=int, default=10, help="Transformer block index used by --attack-loss feature. Negative indices count from the end.")
-    parser.set_defaults(mi=True, lowmid_grad_preserve_norm=True)
+    parser.add_argument("--attack-loss", choices=["logits", "feature"], default="logits", help="Attack final logits with CE or one feature layer with cosine distance.")
+    parser.add_argument("--feature-layer", type=int, default=-2, help="Feature layer index used by --attack-loss feature. Negative indices count from the end.")
     parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode, use --output-dir outputs/attack/lmdss.")
     parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
     parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
@@ -241,6 +216,8 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=16, help="DataLoader batch size for clean eval and attack batches.")
     parser.add_argument("--num-workers", type=int, default=4, help="DataLoader worker processes for image decode/transform.")
     parser.add_argument("--prefetch-factor", type=int, default=4, help="Batches prefetched per DataLoader worker.")
+    parser.set_defaults(mi=True, lowmid_grad_preserve_norm=True)
+
 
     return parser.parse_args()
 
@@ -250,21 +227,16 @@ def main(
     epsilon: float,
     step_size: float | None,
     steps: int,
-    layers: tuple[int, ...],
     output_dir: str | None,
     mode: str,
-    ti_sigma: float = 3.0,
+    whitebox_model: str = DEFAULT_MODEL_NAME,
+    ti_sigma: float = 0.0,
     mi: bool = True,
     mi_decay: float = 1.0,
     ni: bool = False,
     dim: bool = False,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
-    attention_guide_models_arg: tuple[str, ...] = (),
-    attention_guide_type: str = "postsoftmax_cls",
-    attention_guide_build_method: str = "pixel",
-    attention_guide_patch_size: int = 16,
     guide_aug: bool = False,
-    guide_aug_area: str = "background",
     guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
     guide_aug_strength: float = 0.2,
@@ -276,7 +248,7 @@ def main(
     lowmid_dss_consistency: str = "sign",
     lowmid_dss_agreement_threshold: float = 0.67,
     attack_loss: str = "logits",
-    feature_layer: int = 10,
+    feature_layer: int = -2,
     image_dir: str = IMAGE_DIR,
     annotations_path: str = ANNOTATIONS_PATH,
     img_size: int = DEFAULT_IMG_SIZE,
@@ -284,14 +256,6 @@ def main(
     num_workers: int = 4,
     prefetch_factor: int = 4,
 ) -> None:
-    if attention_guide_patch_size <= 0:
-        raise ValueError(f"attention_guide_patch_size must be positive, got {attention_guide_patch_size}.")
-    if img_size % attention_guide_patch_size != 0:
-        raise ValueError(
-            f"attention_guide_patch_size must divide img_size, got "
-            f"patch_size={attention_guide_patch_size}, img_size={img_size}."
-        )
-
     if mode == "attack":
         resolved_output_dir = validate_attack_output_dir(output_dir=output_dir)
     else:
@@ -305,34 +269,20 @@ def main(
         prefetch_factor=prefetch_factor,
         img_size=img_size,
     )
-    model = build_vit_model(num_classes=num_classes)
-
-    attention_guide_models: tuple[ViTWithHook, ...] = ()
-    needs_attention_guide = guide_aug and guide_aug_area != "all"
-    if needs_attention_guide and attention_guide_models_arg:
-        attention_guide_models = tuple(
-            build_vit_model(num_classes=num_classes, model_name=model_name)
-            for model_name in attention_guide_models_arg
-        )
+    model = build_whitebox_model(num_classes=num_classes, model_name=whitebox_model)
 
     attacker = create_attacker(
         model=model,
         epsilon=epsilon,
         step_size=step_size,
         steps=steps,
-        layers=layers,
         ti_sigma=ti_sigma,
         dim=dim,
         mi=mi,
         mi_decay=mi_decay,
         ni=ni,
         dim_resize_range=dim_resize_range,
-        attention_guide_models=attention_guide_models,
-        attention_guide_type=attention_guide_type,
-        attention_guide_build_method=attention_guide_build_method,
-        attention_guide_patch_size=attention_guide_patch_size,
         guide_aug=guide_aug,
-        guide_aug_area=guide_aug_area,
         guide_aug_methods=guide_aug_methods,
         guide_aug_copies=guide_aug_copies,
         guide_aug_strength=guide_aug_strength,
@@ -368,19 +318,14 @@ if __name__ == "__main__":
         epsilon=args.epsilon,
         step_size=args.step_size,
         steps=args.steps,
-        layers=args.layers,
         ti_sigma=args.ti_sigma,
         mi=args.mi,
         mi_decay=args.mi_decay,
         ni=args.ni,
         dim=args.dim,
         dim_resize_range=args.dim_resize_range,
-        attention_guide_models_arg=args.attention_guide_models,
-        attention_guide_type=args.attention_guide_type,
-        attention_guide_build_method=args.attention_guide_build_method,
-        attention_guide_patch_size=args.attention_guide_patch_size,
+        whitebox_model=args.whitebox_model,
         guide_aug=args.guide_aug,
-        guide_aug_area=args.guide_aug_area,
         guide_aug_methods=args.guide_aug_method,
         guide_aug_copies=args.guide_aug_copies,
         guide_aug_strength=args.guide_aug_strength,

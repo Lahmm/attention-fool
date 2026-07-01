@@ -46,7 +46,7 @@ class ProjectionTests(unittest.TestCase):
     def test_unobserved_runner_matches_current_attack(self):
         torch.manual_seed(7); model = TinyModel()
         attacker = LMDSSAttacker(model, epsilon=0.1, steps=3, ti_sigma=0, input_diversity=True,
-            use_momentum=True, guide_aug=True, guide_aug_area="all", guide_aug_methods=("dropout","jitter","freq"),
+            use_momentum=True, guide_aug=True, guide_aug_methods=("dropout","jitter","freq"),
             guide_aug_copies=2, device=torch.device("cpu"))
         images, labels = torch.randn(2,3,8,8), torch.tensor([1,2])
         torch.manual_seed(123); expected = attacker.attack_batch(images, labels)

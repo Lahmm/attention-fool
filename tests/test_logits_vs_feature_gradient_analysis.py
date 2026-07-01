@@ -71,7 +71,6 @@ def make_attacker(**kwargs):
         epsilon=0.1,
         steps=2,
         ti_sigma=0,
-        layers=(-1,),
         device=torch.device("cpu"),
         **kwargs,
     )
@@ -173,14 +172,13 @@ class LogitsVsFeatureGradientTests(unittest.TestCase):
         attacker = make_attacker(attack_loss="logits")
         # Enable augmentations so gradients vary across seeds
         attacker.guide_aug = True
-        attacker.guide_aug_area = "all"
         attacker.guide_aug_methods = ("dropout",)
         attacker.guide_aug_copies = 1
         attacker.guide_aug_strength = 0.1
         pixels = torch.rand(2, 3, 16, 16)
         labels = torch.tensor([1, 2])
         noise = estimate_gradient_noise(
-            attacker, pixels, labels, None,
+            attacker, pixels, labels,
             attack_loss="logits", feature_layer=10, num_samples=3,
         )
         self.assertIn("gradient_cv", noise)

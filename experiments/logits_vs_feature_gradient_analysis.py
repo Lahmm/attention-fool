@@ -119,7 +119,6 @@ def compute_source_gradient(
     attacker,
     pixels: torch.Tensor,
     labels: torch.Tensor,
-    guide_pixel_map: torch.Tensor | None,
     attack_loss: str = "logits",
     feature_layer: int = 10,
     clean_pixels: torch.Tensor | None = None,
@@ -145,7 +144,7 @@ def compute_source_gradient(
                 clean_feature_target = attacker._extract_layer_patch_features(ref).detach()
         else:
             clean_feature_target = None
-        grad = attacker._attack_grad(probe, labels, guide_pixel_map, clean_feature_target)
+        grad = attacker._attack_grad(probe, labels, clean_feature_target)
         return grad.detach()
 
 
@@ -193,7 +192,6 @@ def estimate_gradient_noise(
     attacker,
     pixels: torch.Tensor,
     labels: torch.Tensor,
-    guide_pixel_map: torch.Tensor | None,
     attack_loss: str,
     feature_layer: int,
     num_samples: int = 5,
@@ -208,7 +206,7 @@ def estimate_gradient_noise(
     for i in range(num_samples):
         seed_all(i * 137 + 42)
         grad = compute_source_gradient(
-            attacker, pixels, labels, guide_pixel_map,
+            attacker, pixels, labels,
             attack_loss=attack_loss, feature_layer=feature_layer,
         )
         grads.append(grad)
@@ -262,7 +260,6 @@ def run_experiment(args):
         source, attacker = build_baseline(num_classes)
         source.eval()
         attacker.steps = max(args.trace_steps)  # ensure enough steps
-        attacker.guide_aug_area = "background"
         attacker.guide_aug_methods = ("dropout", "jitter", "freq")
         attacker.guide_aug_copies = 3
         attacker.guide_aug_strength = 0.2
@@ -282,7 +279,7 @@ def run_experiment(args):
 
             # Build guide map once per batch
             with torch.no_grad():
-                guide = attacker._build_guide_pixel_map(batch_images, batch_clean.size(-1))
+                guide = None
 
             # --- Run a short attack trace to get pixels at each step ---
             traces = []
@@ -301,12 +298,12 @@ def run_experiment(args):
                 # ---------- Compute source gradients for BOTH loss types ----------
                 # Logits-level gradient
                 grad_logits = compute_source_gradient(
-                    attacker, pixels, batch_labels, guide,
+                    attacker, pixels, batch_labels,
                     attack_loss="logits",
                 )
                 # Feature-level gradient (layer 10)
                 grad_feature = compute_source_gradient(
-                    attacker, pixels, batch_labels, guide,
+                    attacker, pixels, batch_labels,
                     attack_loss="feature", feature_layer=args.feature_layer,
                 )
 
@@ -336,7 +333,7 @@ def run_experiment(args):
                     for loss_name in ("logits", "feature"):
                         fl = args.feature_layer if loss_name == "feature" else 10
                         noise = estimate_gradient_noise(
-                            attacker, pixels, batch_labels, guide,
+                            attacker, pixels, batch_labels,
                             attack_loss=loss_name, feature_layer=fl,
                             num_samples=args.noise_samples,
                         )
@@ -359,13 +356,12 @@ def run_experiment(args):
             source2, attacker2 = build_baseline(num_classes)
             source2.eval()
             attacker2.steps = max(args.trace_steps)
-            attacker2.guide_aug_area = "background"
             attacker2.guide_aug_methods = ("dropout", "jitter", "freq")
             attacker2.guide_aug_copies = 3
             attacker2.guide_aug_strength = 0.2
 
             with torch.no_grad():
-                guide2 = attacker2._build_guide_pixel_map(batch_images, batch_clean.size(-1))
+                guide2 = None
 
             traces2 = []
             from gradient_analysis import run_analyzed_attack
@@ -386,13 +382,12 @@ def run_experiment(args):
                 # Need a fresh attacker for gradient computation
                 source3, attacker3 = build_baseline(num_classes)
                 source3.eval()
-                attacker3.guide_aug_area = "background"
                 attacker3.guide_aug_methods = ("dropout", "jitter", "freq")
                 attacker3.guide_aug_copies = 3
                 attacker3.guide_aug_strength = 0.2
 
                 with torch.no_grad():
-                    guide3 = attacker3._build_guide_pixel_map(batch_images, batch_clean.size(-1))
+                    guide3 = None
 
                 grad_logits = compute_source_gradient(
                     attacker3, pixels, batch_labels, guide3,

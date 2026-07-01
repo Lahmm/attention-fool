@@ -35,7 +35,6 @@ def make_attacker(**kwargs):
         epsilon=0.1,
         steps=2,
         ti_sigma=0,
-        layers=(-1,),
         guide_aug=False,
         device=torch.device("cpu"),
         **kwargs,

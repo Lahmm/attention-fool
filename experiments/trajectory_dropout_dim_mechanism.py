@@ -114,16 +114,13 @@ def build_current_attacker(num_classes, feature_layer=10):
         epsilon=16 / 255,
         step_size=None,
         steps=10,
-        layers=(0, 1, 4, 9, 11),
         ti_sigma=0,
         dim=True,
         mi=True,
         mi_decay=1,
         dim_resize_range=(0.85, 1.0),
         dim_mode="full-random",
-        attention_guide_models=(),
         guide_aug=True,
-        guide_aug_area="all",
         guide_aug_methods=("feature_trajectory_dropout",),
         guide_aug_copies=9,
         guide_aug_strength=0.2,
@@ -164,7 +161,6 @@ def _attack_gradient(
         input_diversity=dim,
         dim_mode="full-random",
         guide_aug=trajectory_dropout,
-        guide_aug_area="all",
         guide_aug_methods=("feature_trajectory_dropout",),
         guide_aug_copies=9,
     ):
@@ -245,7 +241,7 @@ def compute_gradient_components(attacker, pixels, labels, dim_samples, seed):
     return grads, terms
 
 
-def _cls_guide_pixel_map(source, attacker, pixels, patch_size):
+def _cls_spatial_map(source, attacker, pixels, patch_size):
     with torch.inference_mode():
         _logits, attn_logits, tokens = source(attacker._normalize(pixels), return_attn=True, return_tokens=True)
         last = attn_logits[-1]
@@ -257,7 +253,7 @@ def _cls_guide_pixel_map(source, attacker, pixels, patch_size):
 
 
 def _feature_masks_for_batch(source, attacker, pixels, args):
-    guide, attn_logits, tokens = _cls_guide_pixel_map(source, attacker, pixels, args.patch_size)
+    guide, attn_logits, tokens = _cls_spatial_map(source, attacker, pixels, args.patch_size)
     probes = []
     with torch.inference_mode():
         base_tokens = tokens[args.feature_layer]
@@ -421,7 +417,6 @@ def run_experiment(args):
             "feature_layer": args.feature_layer,
             "steps": 10,
             "guide_aug_method": "feature_trajectory_dropout",
-            "guide_aug_area": "all",
             "guide_aug_copies": 9,
             "guide_aug_strength": 0.2,
             "dim_resize_range": [0.85, 1.0],

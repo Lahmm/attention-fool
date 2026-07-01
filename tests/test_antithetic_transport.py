@@ -12,15 +12,13 @@ class TinyModel(nn.Module):
         return x.mean(dim=(2, 3))
 
 
-def make_attacker(copies=9, area="all", method="antithetic_transport"):
+def make_attacker(copies=9, method="antithetic_transport"):
     return LMDSSAttacker(
         TinyModel(),
         epsilon=0.1,
         steps=1,
         ti_sigma=0,
-        layers=(-1,),
         guide_aug=True,
-        guide_aug_area=area,
         guide_aug_methods=(method,),
         guide_aug_copies=copies,
         guide_aug_strength=0.2,
@@ -32,7 +30,7 @@ class AntitheticTransportTests(unittest.TestCase):
     def test_emits_exact_budget_and_identity_for_odd_budget(self):
         torch.manual_seed(3)
         pixels = torch.rand(2, 3, 16, 16)
-        views = list(make_attacker(copies=9)._iter_forward_pixels(pixels, None))
+        views = list(make_attacker(copies=9)._iter_forward_pixels(pixels))
         self.assertEqual(len(views), 9)
         torch.testing.assert_close(views[-1], pixels)
         for view in views:
@@ -44,26 +42,17 @@ class AntitheticTransportTests(unittest.TestCase):
         torch.manual_seed(5)
         attacker = make_attacker(copies=2)
         pixels = torch.rand(1, 3, 16, 16, requires_grad=True)
-        positive, negative = list(attacker._iter_forward_pixels(pixels, None))
+        positive, negative = list(attacker._iter_forward_pixels(pixels))
         self.assertGreater(float((positive - negative).abs().mean().detach()), 0.0)
         (positive.mean() + negative.mean()).backward()
         self.assertIsNotNone(pixels.grad)
         self.assertTrue(torch.isfinite(pixels.grad).all())
 
-    def test_background_blending_preserves_fully_guided_pixels(self):
-        torch.manual_seed(7)
-        attacker = make_attacker(copies=2, area="background")
-        pixels = torch.rand(1, 3, 16, 16)
-        guide = torch.ones(1, 1, 16, 16)
-        views = list(attacker._iter_forward_pixels(pixels, guide))
-        for view in views:
-            torch.testing.assert_close(view, pixels)
-
     def test_filter_bank_is_antithetic_and_uses_exact_budget(self):
         torch.manual_seed(13)
         attacker = make_attacker(copies=9, method="antithetic_filter_bank")
         pixels = (torch.rand(2, 3, 16, 16) * 0.4 + 0.3).requires_grad_(True)
-        views = list(attacker._iter_forward_pixels(pixels, None))
+        views = list(attacker._iter_forward_pixels(pixels))
         self.assertEqual(len(views), 9)
         torch.testing.assert_close(views[-1], pixels)
         torch.testing.assert_close(
@@ -73,19 +62,19 @@ class AntitheticTransportTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(pixels.grad).all())
 
         probe = (torch.rand(2, 3, 16, 16) * 0.4 + 0.3).requires_grad_(True)
-        gradient, terms = attacker._attack_grad_terms(probe, torch.tensor([0, 1]), None)
+        gradient, terms = attacker._attack_grad_terms(probe, torch.tensor([0, 1]))
         self.assertEqual(len(terms), 9)
         self.assertTrue(torch.isfinite(gradient).all())
 
     def test_multiscale_adjoint_is_forward_identity_with_distinct_view_gradients(self):
         attacker = make_attacker(copies=9, method="multiscale_adjoint_ensemble")
         pixels = torch.rand(2, 3, 16, 16)
-        views = list(attacker._iter_forward_pixels(pixels, None))
+        views = list(attacker._iter_forward_pixels(pixels))
         self.assertEqual(len(views), 9)
         for view in views:
             torch.testing.assert_close(view, pixels)
         probe = pixels.clone().requires_grad_(True)
-        gradient, terms = attacker._attack_grad_terms(probe, torch.tensor([0, 1]), None)
+        gradient, terms = attacker._attack_grad_terms(probe, torch.tensor([0, 1]))
         self.assertEqual(len(terms), 9)
         self.assertFalse(torch.equal(terms[0], terms[-1]))
 
@@ -93,7 +82,7 @@ class AntitheticTransportTests(unittest.TestCase):
         torch.manual_seed(11)
         attacker = make_attacker(copies=1, method="natural_spectrum_transport")
         pixels = (torch.rand(4, 3, 16, 16) * 0.4 + 0.3).requires_grad_(True)
-        transformed = next(attacker._iter_forward_pixels(pixels, None))
+        transformed = next(attacker._iter_forward_pixels(pixels))
         self.assertGreater(float((transformed - pixels).abs().mean().detach()), 0.0)
         torch.testing.assert_close(
             transformed.mean(dim=(2, 3)), pixels.mean(dim=(2, 3)), atol=1e-5, rtol=1e-5
@@ -105,7 +94,7 @@ class AntitheticTransportTests(unittest.TestCase):
     def test_orthogonal_photometric_ensemble_is_paired_and_differentiable(self):
         attacker = make_attacker(copies=9, method="orthogonal_photometric_ensemble")
         pixels = (torch.rand(2, 3, 16, 16) * 0.6 + 0.2).requires_grad_(True)
-        views = list(attacker._iter_forward_pixels(pixels, None))
+        views = list(attacker._iter_forward_pixels(pixels))
         self.assertEqual(len(views), 9)
         torch.testing.assert_close(views[-1], pixels)
         for pair_index in range(4):
@@ -119,7 +108,7 @@ class AntitheticTransportTests(unittest.TestCase):
         attacker = make_attacker(copies=9, method="orthogonal_spherical_smoothing")
         attacker.guide_aug_strength = 0.02
         pixels = torch.full((2, 3, 16, 16), 0.5, requires_grad=True)
-        views = list(attacker._iter_forward_pixels(pixels, None))
+        views = list(attacker._iter_forward_pixels(pixels))
         self.assertEqual(len(views), 9)
         torch.testing.assert_close(views[-1], pixels)
         directions = []
@@ -139,7 +128,7 @@ class AntitheticTransportTests(unittest.TestCase):
         attacker = make_attacker(copies=9, method="antithetic_jitter_cubature")
         attacker.guide_aug_strength = 0.02
         pixels = torch.full((2, 3, 16, 16), 0.5, requires_grad=True)
-        views = list(attacker._iter_forward_pixels(pixels, None))
+        views = list(attacker._iter_forward_pixels(pixels))
         self.assertEqual(len(views), 9)
         torch.testing.assert_close(views[-1], pixels)
         for pair_index in range(4):

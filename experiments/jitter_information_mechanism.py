@@ -174,7 +174,7 @@ def gradient_ensemble(
         lowmid_dss_filter=False,
     ):
         probe = pixels.detach().requires_grad_(True)
-        return attacker._attack_grad_terms(probe, labels, guide)
+        return attacker._attack_grad_terms(probe, labels)
 
 
 def processed_variants(attacker, gradient: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -289,7 +289,7 @@ def run(args) -> None:
 
     for batch_index, (images, labels, _indices) in enumerate(selected_batches(args, source, loader)):
         pixels = attacker._denormalize(images).detach()
-        guide = attacker._build_guide_pixel_map(images, pixels.size(-1))
+        guide = None
         raw_means, dim_variants = {}, {}
         for method_index, method in enumerate(METHODS):
             base_seed = derive_seed(args.seed, batch_index * 10_007, method_index * 101)
@@ -380,7 +380,7 @@ def parse_args():
     parser.add_argument("--max-samples", type=int, default=16)
     parser.add_argument("--seed", type=int, default=20260623)
     parser.add_argument("--target-models", type=parse_model_names, default=DEFAULT_TARGETS)
-    parser.add_argument("--ti-sigma", type=float, default=3.0)
+    parser.add_argument("--ti-sigma", type=float, default=0.0)
     return parser.parse_args()
 
 

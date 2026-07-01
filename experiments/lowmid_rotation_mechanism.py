@@ -145,17 +145,11 @@ def make_attacker(num_classes: int, *, mi: bool, rotation: bool):
         epsilon=16 / 255,
         step_size=None,
         steps=40,
-        layers=(0, 1, 4, 9, 11),
         ti_sigma=0,
         dim=True,
         mi=mi,
         mi_decay=1.0,
-        attention_guide_models=guides,
-        attention_guide_type="qk_cls",
-        attention_guide_build_method="patch",
-        attention_guide_patch_size=16,
         guide_aug=True,
-        guide_aug_area="background",
         guide_aug_methods=("dropout", "jitter", "freq"),
         guide_aug_copies=3,
         lowmid_grad_tuning=rotation,
@@ -167,15 +161,14 @@ def make_attacker(num_classes: int, *, mi: bool, rotation: bool):
 def trace_attack(attacker: LMDSSAttacker, images: torch.Tensor, labels: torch.Tensor, branch: str, keep_steps: set[int]):
     images, labels = images.to(attacker.device), labels.to(attacker.device)
     clean = attacker._denormalize(images).detach()
-    needs_guide = attacker.guide_aug and attacker.guide_aug_area != "all"
-    guide = attacker._build_guide_pixel_map(images, clean.size(-1)) if needs_guide else None
+    guide = None
     adv = clean.clone().detach()
     momentum = torch.zeros_like(clean)
     rows = []
     for step_idx in range(attacker.steps):
         step = step_idx + 1
         grad_pixels = adv.detach().requires_grad_(True)
-        raw = attacker._attack_grad(grad_pixels, labels, guide)
+        raw = attacker._attack_grad(grad_pixels, labels)
         raw = attacker._smooth_grad(raw)
         rot = attacker._tune_lowmid_gradient(raw)
         previous = momentum

@@ -115,13 +115,13 @@ def quantile_mask(score, q=0.67, high=True):
     return score >= threshold if high else score <= threshold
 
 
-def feature_region_masks(tokens, attn_logits, pixels, guide_pixel_map, patch_size=16, stability=None, q=0.67):
+def feature_region_masks(tokens, attn_logits, pixels, spatial_map, patch_size=16, stability=None, q=0.67):
     patches = _patch_tokens(tokens)
     batch, num_patches, _hidden = patches.shape
     height, width = pixels.shape[-2:]
-    guide_patch = F.avg_pool2d(guide_pixel_map.to(pixels.device, pixels.dtype).clamp(0, 1), kernel_size=patch_size, stride=patch_size).flatten(1)
+    guide_patch = F.avg_pool2d(spatial_map.to(pixels.device, pixels.dtype).clamp(0, 1), kernel_size=patch_size, stride=patch_size).flatten(1)
     if guide_patch.shape != (batch, num_patches):
-        guide_patch = F.interpolate(guide_pixel_map.to(pixels.device, pixels.dtype), size=patch_grid_size(num_patches), mode="bilinear", align_corners=False).flatten(1)
+        guide_patch = F.interpolate(spatial_map.to(pixels.device, pixels.dtype), size=patch_grid_size(num_patches), mode="bilinear", align_corners=False).flatten(1)
 
     cls_attn = cls_patch_attention(attn_logits).to(pixels.device, pixels.dtype)
     norm = patches.norm(dim=-1)
@@ -264,9 +264,9 @@ def _collect_trace(args, source, attacker, seed):
 
 
 def _source_grad(attacker, pixels, labels, guide, *, dim=False, guide_aug=False, methods=("dropout", "jitter", "freq")):
-    with _attacker_options(attacker, input_diversity=dim, guide_aug=guide_aug, guide_aug_methods=methods, guide_aug_area="background"):
+    with _attacker_options(attacker, input_diversity=dim, guide_aug=guide_aug, guide_aug_methods=methods):
         probe = pixels.detach().requires_grad_(True)
-        return attacker._attack_grad(probe, labels, guide).detach()
+        return attacker._attack_grad(probe, labels).detach()
 
 
 def _feature_masks_for_batch(source, attacker, pixels, guide, args):
@@ -301,7 +301,6 @@ def run_experiment(args):
         loader, num_classes = load_data(args.image_dir, args.annotations_path, args.batch_size, args.num_workers, 2, args.img_size)
         source, attacker = build_baseline(num_classes)
         source.eval()
-        attacker.guide_aug_area = "background"
         attacker.guide_aug_methods = ("dropout", "jitter", "freq")
         attacker.guide_aug_copies = 3
         attacker.guide_aug_strength = 0.2
@@ -317,7 +316,7 @@ def run_experiment(args):
             for row in rows:
                 step = row["step"]
                 pixels = row["x_t"].to(DEVICE)
-                guide = row["guide_map"].to(DEVICE) if row["guide_map"] is not None else attacker._build_guide_pixel_map(attacker._normalize(pixels), pixels.size(-1))
+                guide = row["guide_map"].to(DEVICE) if row["guide_map"] is not None else None
                 masks, scores = _feature_masks_for_batch(source, attacker, pixels, guide, args)
                 plain = _source_grad(attacker, pixels, batch_labels, guide, dim=False, guide_aug=False)
                 method_grads = {method: _source_grad(attacker, pixels, batch_labels, guide, dim=False, guide_aug=True, methods=(method,)) for method in args.aug_methods}

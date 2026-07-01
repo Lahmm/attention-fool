@@ -108,17 +108,11 @@ def make_attacker(num_classes: int, *, mi: bool, steps: int = 40):
         epsilon=16 / 255,
         step_size=None,
         steps=steps,
-        layers=(0, 1, 4, 9, 11),
         ti_sigma=0,
         dim=True,
         mi=mi,
         mi_decay=1.0,
-        attention_guide_models=guides,
-        attention_guide_type="qk_cls",
-        attention_guide_build_method="patch",
-        attention_guide_patch_size=16,
         guide_aug=True,
-        guide_aug_area="background",
         guide_aug_methods=("dropout", "jitter", "freq"),
         guide_aug_copies=3,
         guide_aug_strength=0.2,
@@ -157,8 +151,7 @@ def trace_attack(
     keep_steps = set(DEFAULT_TRACE_STEPS if keep_steps is None else keep_steps)
     images, labels = images.to(attacker.device), labels.to(attacker.device)
     clean = attacker._denormalize(images).detach()
-    needs_guide = attacker.guide_aug and attacker.guide_aug_area != "all"
-    guide = attacker._build_guide_pixel_map(images, clean.size(-1)) if needs_guide else None
+    guide = None
     adv = clean.clone().detach()
     accumulator = torch.zeros_like(clean)
     metric_rows: list[dict[str, object]] = []
@@ -169,7 +162,7 @@ def trace_attack(
         step = step_idx + 1
         x_t = adv.detach()
         grad_pixels = x_t.requires_grad_(True)
-        raw_mean, term_grads = attacker._attack_grad_terms(grad_pixels, labels, guide)
+        raw_mean, term_grads = attacker._attack_grad_terms(grad_pixels, labels)
         after_ti, processed_terms, after_filter, after_rotation = _process_grad_terms(attacker, raw_mean, term_grads, guide)
         accumulator_before = accumulator
         accumulator = attacker.decay * accumulator + after_rotation
@@ -223,7 +216,7 @@ def trace_attack(
                     "x_t": x_t.detach().cpu(),
                     "x_next": x_next.detach().cpu(),
                     "delta_t": (x_t - clean).detach().cpu(),
-                    "guide_pixel_map": torch.empty(0) if guide is None else guide.detach().cpu(),
+                    "spatial_map": torch.empty(0) if guide is None else guide.detach().cpu(),
                     "term_grad_raw": torch.stack([term.detach().cpu() for term in term_grads], dim=0),
                     "term_grad_processed": torch.stack([term.detach().cpu() for term in processed_terms], dim=0),
                     "grad_raw_mean": raw_mean.detach().cpu(),

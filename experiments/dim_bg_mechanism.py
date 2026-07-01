@@ -69,7 +69,6 @@ def _collect_samples(args, source, loader):
 
 
 def _configure(attacker, area, variant):
-    attacker.guide_aug_area = area
     attacker.input_diversity = variant != "none"
     if variant != "none": attacker.dim_mode = variant
     attacker.reset_fixed_dim()
@@ -82,11 +81,11 @@ def _source_run(attacker, clean, labels, sizes, gradient_probes):
         end = start + size
         x, y = clean[start:end].to(DEVICE), labels[start:end].to(DEVICE)
         pixels = attacker._denormalize(x).detach()
-        guide = attacker._build_guide_pixel_map(x, pixels.size(-1)) if attacker.guide_aug_area != "all" else None
+        guide = None
         samples = []
         for _ in range(gradient_probes):
             probe = pixels.detach().requires_grad_(True)
-            samples.append(attacker._attack_grad(probe, y, guide).detach())
+            samples.append(attacker._attack_grad(probe, y).detach())
         mean = torch.stack(samples).mean(0)
         coherence.extend(torch.stack([F.cosine_similarity(row.flatten(1), mean.flatten(1)) for row in samples]).mean(0).cpu().tolist())
         for key, values in _band_metrics(mean).items(): band_rows[key].extend(values.tolist())
@@ -151,9 +150,9 @@ def run_ranking(args):
     if _matches_protocol(path, args, run=True): return
     seed_all(args.seeds[0]); loader, num_classes = _loader(args); source, attacker = build_baseline(num_classes)
     clean, _labels, _indices, _sizes = _collect_samples(args, source, loader); pixels = attacker._denormalize(clean.to(DEVICE))
-    guide = attacker._build_guide_pixel_map(clean.to(DEVICE), pixels.size(-1)); rows, norms = [], []
+    guide = None; rows, norms = [], []
     for method in AUGMENTATION_METHODS:
-        delta = (attacker._guide_augmented_pixels(pixels, guide, method) - pixels).detach()
+        delta = (attacker._guide_augmented_pixels(pixels, method) - pixels).detach()
         norms.append(delta.flatten(1).norm(dim=1).cpu())
         rows.append({"method": method, "high_frequency_ratio": float(_band_metrics(delta)["high"].mean())})
         del delta

@@ -30,7 +30,6 @@ def make_attacker(**kwargs):
         epsilon=0.1,
         steps=2,
         ti_sigma=0,
-        layers=(-1,),
         guide_aug=False,
         lowmid_dss_filter=True,
         lowmid_dss_consistency="sign",

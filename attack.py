@@ -89,7 +89,7 @@ class MIFGSMAttacker:
 
 class LMDSSAttacker:
     """
-    LMDSS transfer attack with attention-guided forward augmentations,
+    LMDSS transfer attack with whole-image forward augmentations,
     DIM, TI smoothing, MI/NI updates, and low/mid-frequency DSS tuning.
     """
 
@@ -99,20 +99,14 @@ class LMDSSAttacker:
         epsilon: float = 16.0 / 255.0,
         step_size: float | None = None,
         steps: int = 20,
-        layers: tuple[int, ...] = (-6, -5, -4, -3, -2, -1),
-        ti_sigma: float = 3.0,
+        ti_sigma: float = 0.0,
         input_diversity: bool = False,
         dim_resize_range: tuple[float, float] = (0.85, 1.0),
         dim_mode: str = "full-random",
         use_momentum: bool = True,
         momentum_decay: float = 1.0,
         nesterov: bool = False,
-        attention_guide_models: tuple[torch.nn.Module, ...] | None = None,
-        attention_guide_type: str = "postsoftmax_cls",
-        attention_guide_build_method: str = "pixel",
-        attention_guide_patch_size: int = 16,
         guide_aug: bool = False,
-        guide_aug_area: str = "background",
         guide_aug_methods: tuple[str, ...] = ("dropout",),
         guide_aug_copies: int = 3,
         guide_aug_strength: float = 0.2,
@@ -124,7 +118,7 @@ class LMDSSAttacker:
         lowmid_dss_consistency: str = "sign",
         lowmid_dss_agreement_threshold: float = 0.67,
         attack_loss: str = "logits",
-        feature_layer: int = 10,
+        feature_layer: int = -2,
         device: torch.device | None = None,
     ) -> None:
         if epsilon < 0:
@@ -133,8 +127,6 @@ class LMDSSAttacker:
             raise ValueError(f"steps must be positive, got {steps}.")
         if step_size is not None and step_size <= 0:
             raise ValueError(f"step_size must be positive, got {step_size}.")
-        if not layers:
-            raise ValueError("layers must contain at least one layer index.")
         if ti_sigma < 0:
             raise ValueError(f"ti_sigma must be non-negative, got {ti_sigma}.")
         if nesterov and not use_momentum:
@@ -176,8 +168,6 @@ class LMDSSAttacker:
             dtype=torch.float32,
             device=self.device,
         ).view(1, 3, 1, 1)
-
-        self.layers = tuple(int(layer) for layer in layers)
         self.ti_sigma = float(ti_sigma)
         self.input_diversity = bool(input_diversity)
         self.dim_resize_range = tuple(float(r) for r in dim_resize_range)
@@ -197,30 +187,7 @@ class LMDSSAttacker:
         self.lowmid_dss_agreement_threshold = float(lowmid_dss_agreement_threshold)
         self.attack_loss = attack_loss
         self.feature_layer = int(feature_layer)
-        self.attention_guide_models = tuple(attention_guide_models or ())
-
-        guide_types = tuple(item.strip() for item in attention_guide_type.split(",") if item.strip())
-        valid_guide_types = ("postsoftmax_cls", "qk_cls", "qk_all_queries")
-        if not guide_types:
-            raise ValueError("attention_guide_type must contain at least one guide type.")
-        invalid_guide_types = [item for item in guide_types if item not in valid_guide_types]
-        if invalid_guide_types:
-            raise ValueError(f"attention_guide_type entries must be in {valid_guide_types}, got {invalid_guide_types}.")
-        self.attention_guide_types = guide_types
-
-        valid_build_methods = ("pixel", "patch")
-        if attention_guide_build_method not in valid_build_methods:
-            raise ValueError(f"attention_guide_build_method must be one of {valid_build_methods}, got {attention_guide_build_method!r}.")
-        self.attention_guide_build_method = attention_guide_build_method
-        if attention_guide_patch_size <= 0:
-            raise ValueError(f"attention_guide_patch_size must be positive, got {attention_guide_patch_size}.")
-        self.attention_guide_patch_size = int(attention_guide_patch_size)
-
         self.guide_aug = bool(guide_aug)
-        valid_guide_aug_areas = ("foreground", "background", "all")
-        if guide_aug_area not in valid_guide_aug_areas:
-            raise ValueError(f"guide_aug_area must be one of {valid_guide_aug_areas}, got {guide_aug_area!r}.")
-        self.guide_aug_area = guide_aug_area
         self.guide_aug_methods = tuple(str(method).strip() for method in guide_aug_methods if str(method).strip())
         valid_guide_aug_methods = (
             "dropout",
@@ -414,204 +381,6 @@ class LMDSSAttacker:
             return transformed + (images - transformed).detach()
         return transformed
 
-    @staticmethod
-    def _normalize_weights(weights: torch.Tensor) -> torch.Tensor:
-        min_vals = weights.min(dim=1, keepdim=True).values
-        max_vals = weights.max(dim=1, keepdim=True).values
-        return (weights - min_vals) / (max_vals - min_vals).clamp_min(1e-12)
-
-    @staticmethod
-    def _infer_num_heads_from_attn(attn_module) -> int | None:
-        heads = getattr(attn_module, "num_heads", None)
-        return int(heads) if heads is not None else None
-
-    @staticmethod
-    def _qkv_to_cls_attention_scores(qkv: torch.Tensor, num_heads: int | None, attention_guide_type: str) -> torch.Tensor:
-        if qkv.ndim != 3 or num_heads is None or num_heads <= 0:
-            raise ValueError(f"Unsupported qkv shape/heads: {tuple(qkv.shape)}, {num_heads}.")
-        bsz, num_tokens, hidden = qkv.shape
-        if num_tokens < 2 or hidden % (3 * num_heads) != 0:
-            raise ValueError(f"Unsupported qkv dimensions: {tuple(qkv.shape)} heads={num_heads}.")
-        num_patches = num_tokens - 1
-        grid_size = int(num_patches ** 0.5)
-        if grid_size * grid_size != num_patches:
-            raise ValueError(f"Patch token count {num_patches} is not square.")
-        head_dim = hidden // (3 * num_heads)
-        qkv = qkv.reshape(bsz, num_tokens, 3, num_heads, head_dim).permute(2, 0, 3, 1, 4)
-        q, k = qkv[0], qkv[1]
-        qk = (q @ k.transpose(-2, -1)) * (head_dim ** -0.5)
-        if attention_guide_type == "postsoftmax_cls":
-            return torch.softmax(qk, dim=-1)[:, :, 0, 1:].mean(dim=1)
-        if attention_guide_type == "qk_cls":
-            return qk[:, :, 0, 1:].mean(dim=1)
-        if attention_guide_type == "qk_all_queries":
-            return qk[:, :, :, 1:].mean(dim=(1, 2))
-        raise ValueError(f"Unsupported attention_guide_type: {attention_guide_type}")
-
-    @staticmethod
-    def _build_qkv_from_attn_input(attn_module, attn_input: torch.Tensor) -> torch.Tensor:
-        qkv_layer = getattr(attn_module, "qkv", None)
-        if qkv_layer is None:
-            raise ValueError("Attention module does not expose qkv.")
-        q_bias = getattr(attn_module, "q_bias", None)
-        if q_bias is None:
-            return qkv_layer(attn_input)
-        qkv_bias = torch.cat((attn_module.q_bias, attn_module.k_bias, attn_module.v_bias))
-        if getattr(attn_module, "qkv_bias_separate", False):
-            return qkv_layer(attn_input) + qkv_bias
-        return F.linear(attn_input, weight=qkv_layer.weight, bias=qkv_bias)
-
-    def _resolve_layer_indices(self, num_layers: int) -> list[int]:
-        indices = []
-        for layer in self.layers:
-            idx = layer if layer >= 0 else num_layers + layer
-            if idx < 0 or idx >= num_layers:
-                continue
-            indices.append(idx)
-        if not indices:
-            raise ValueError(
-                f"Layer indices {self.layers} are out of range for {num_layers} compatible attention layers."
-            )
-        return indices
-
-    def _collect_cls_attention_scores(
-        self,
-        source_model,
-        images: torch.Tensor,
-        target_num_patches: int | None = None,
-        attention_guide_type: str | None = None,
-    ) -> torch.Tensor | None:
-        attention_guide_type = self.attention_guide_types[0] if attention_guide_type is None else attention_guide_type
-        module_dict = dict(source_model.model.named_modules())
-        records = []
-        handles = []
-        try:
-            for qkv_name, qkv_module in module_dict.items():
-                if not qkv_name.endswith("attn.qkv"):
-                    continue
-                attn_name = qkv_name.rsplit(".qkv", 1)[0]
-                attn_module = module_dict.get(attn_name)
-                if attn_module is None:
-                    continue
-                record = {"attn": attn_module, "qkv": None, "input": None, "heads": self._infer_num_heads_from_attn(attn_module)}
-                records.append(record)
-
-                def qkv_hook(_module, _inputs, output, rec=record):
-                    rec["qkv"] = output.detach() if isinstance(output, torch.Tensor) else None
-
-                def pre_hook(_module, inputs, rec=record):
-                    if inputs and isinstance(inputs[0], torch.Tensor):
-                        rec["input"] = inputs[0].detach()
-
-                handles.append(qkv_module.register_forward_hook(qkv_hook))
-                handles.append(attn_module.register_forward_pre_hook(pre_hook))
-
-            if not records:
-                return None
-            with torch.no_grad():
-                _ = source_model.model(images)
-
-            scores = []
-            for record in records:
-                try:
-                    qkv = record["qkv"]
-                    if qkv is None and record["input"] is not None:
-                        qkv = self._build_qkv_from_attn_input(record["attn"], record["input"])
-                    if qkv is None:
-                        continue
-                    score = self._qkv_to_cls_attention_scores(qkv, record["heads"], attention_guide_type)
-                    scores.append(self._normalize_weights(score.detach()))
-                except (RuntimeError, ValueError):
-                    continue
-            if not scores:
-                return None
-            scores_by_size: dict[int, list[torch.Tensor]] = {}
-            for score in scores:
-                scores_by_size.setdefault(score.size(1), []).append(score)
-            if target_num_patches is not None:
-                selected = scores_by_size.get(target_num_patches)
-                if not selected:
-                    return None
-            else:
-                target_num_patches = max(
-                    scores_by_size,
-                    key=lambda num_patches: (len(scores_by_size[num_patches]), num_patches),
-                )
-                selected = scores_by_size[target_num_patches]
-            layer_indices = self._resolve_layer_indices(len(selected))
-            return torch.stack([selected[idx] for idx in layer_indices]).mean(dim=0)
-        finally:
-            for handle in handles:
-                handle.remove()
-
-    def _build_stable_attention_token_map(
-        self,
-        images: torch.Tensor,
-    ) -> torch.Tensor:
-        attention_guide_type = self.attention_guide_types[0]
-        primary_score = self._collect_cls_attention_scores(self.model, images, attention_guide_type=attention_guide_type)
-        if primary_score is None:
-            raise ValueError("The white-box model did not produce compatible CLS attention scores.")
-        num_patches = primary_score.size(1)
-        scores = [primary_score]
-        for source_model in self.attention_guide_models:
-            score = self._collect_cls_attention_scores(
-                source_model,
-                images,
-                target_num_patches=num_patches,
-                attention_guide_type=attention_guide_type,
-            )
-            if score is not None:
-                scores.append(score)
-        token_map = self._normalize_weights(torch.stack(scores).mean(dim=0))
-        return token_map.detach()
-
-    def _token_map_to_pixel_map(self, token_map: torch.Tensor, img_size: int) -> torch.Tensor:
-        num_patches = token_map.size(1)
-        grid_size = int(num_patches ** 0.5)
-        if grid_size * grid_size != num_patches:
-            raise ValueError(f"Patch count {num_patches} is not a square.")
-        grid = token_map.view(token_map.size(0), 1, grid_size, grid_size)
-        pixel_map = F.interpolate(grid, size=(img_size, img_size), mode="bilinear", align_corners=False)
-        return self._normalize_pixel_map(pixel_map)
-
-    def _token_map_to_patch_pixel_map(self, token_map: torch.Tensor, img_size: int) -> torch.Tensor:
-        if img_size % self.attention_guide_patch_size != 0:
-            raise ValueError(
-                f"attention_guide_patch_size must divide img_size, got "
-                f"patch_size={self.attention_guide_patch_size}, img_size={img_size}."
-            )
-        num_patches = token_map.size(1)
-        grid_size = int(num_patches ** 0.5)
-        if grid_size * grid_size != num_patches:
-            raise ValueError(f"Patch count {num_patches} is not a square.")
-        grid = token_map.view(token_map.size(0), 1, grid_size, grid_size)
-        target_grid_size = img_size // self.attention_guide_patch_size
-        if target_grid_size != grid_size:
-            grid = F.interpolate(
-                grid,
-                size=(target_grid_size, target_grid_size),
-                mode="bilinear",
-                align_corners=False,
-            )
-        pixel_map = F.interpolate(grid, size=(img_size, img_size), mode="nearest")
-        return self._normalize_pixel_map(pixel_map)
-
-    @staticmethod
-    def _normalize_pixel_map(pixel_map: torch.Tensor) -> torch.Tensor:
-        flat = pixel_map.flatten(1)
-        min_vals = flat.min(dim=1, keepdim=True).values.view(-1, 1, 1, 1)
-        max_vals = flat.max(dim=1, keepdim=True).values.view(-1, 1, 1, 1)
-        return ((pixel_map - min_vals) / (max_vals - min_vals).clamp_min(1e-12)).detach()
-
-    def _build_guide_pixel_map(self, images: torch.Tensor, img_size: int) -> torch.Tensor:
-        guide_token_map = self._build_stable_attention_token_map(images)
-        if self.attention_guide_build_method == "pixel":
-            return self._token_map_to_pixel_map(guide_token_map, img_size)
-        if self.attention_guide_build_method == "patch":
-            return self._token_map_to_patch_pixel_map(guide_token_map, img_size)
-        raise ValueError(f"Unsupported attention_guide_build_method: {self.attention_guide_build_method}")
-
     def _dim_adjoint_restore_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
         _batch, _channels, height, width = pixels.shape
         new_h, new_w, top, left = self._sample_dim_params(pixels)
@@ -682,27 +451,14 @@ class LMDSSAttacker:
             pixels, base + displacement, mode="bilinear", padding_mode="reflection", align_corners=False
         ).clamp(0.0, 1.0)
 
-    def _blend_guide_augmentation(
-        self,
-        pixels: torch.Tensor,
-        augmented: torch.Tensor,
-        guide_pixel_map: torch.Tensor | None,
-    ) -> torch.Tensor:
-        if self.guide_aug_area == "all":
-            return augmented
-        if guide_pixel_map is None:
-            raise ValueError("guide_pixel_map is required unless guide_aug_area='all'.")
-        guide = guide_pixel_map.to(pixels.device, pixels.dtype).clamp(0.0, 1.0)
-        if self.guide_aug_area == "foreground":
-            return torch.clamp(augmented * guide + pixels * (1.0 - guide), 0.0, 1.0)
-        if self.guide_aug_area == "background":
-            return torch.clamp(pixels * guide + augmented * (1.0 - guide), 0.0, 1.0)
-        raise ValueError(f"Unsupported guide augmentation area: {self.guide_aug_area}")
+    @staticmethod
+    def _blend_guide_augmentation(pixels: torch.Tensor, augmented: torch.Tensor) -> torch.Tensor:
+        del pixels
+        return torch.clamp(augmented, 0.0, 1.0)
 
     def _iter_antithetic_transport_pixels(
         self,
         pixels: torch.Tensor,
-        guide_pixel_map: torch.Tensor | None,
         copies: int,
     ):
         """Yield +/- local transports, cancelling first-order sampling error."""
@@ -712,7 +468,7 @@ class LMDSSAttacker:
             field = self._sample_transport_field(pixels, grid_sizes[pair_index % len(grid_sizes)])
             for direction in (1.0, -1.0):
                 augmented = self._transport_pixels(pixels, field, direction)
-                yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+                yield self._blend_guide_augmentation(pixels, augmented)
         if copies % 2:
             yield pixels
 
@@ -731,7 +487,6 @@ class LMDSSAttacker:
     def _iter_antithetic_filter_bank_pixels(
         self,
         pixels: torch.Tensor,
-        guide_pixel_map: torch.Tensor | None,
         copies: int,
     ):
         """Yield paired zero-DC random filters and an identity view."""
@@ -742,7 +497,7 @@ class LMDSSAttacker:
             cuda_rng_state = torch.cuda.get_rng_state(pixels.device) if pixels.is_cuda else None
             response = self._random_zero_dc_filter_response(pixels, kernel_sizes[pair_index % 4])
             augmented = (pixels + self.guide_aug_strength * response).clamp(0.0, 1.0)
-            yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+            yield self._blend_guide_augmentation(pixels, augmented)
 
             # Recompute after differentiating the positive view. This keeps
             # antithetic values exact without sharing a sequential loss graph.
@@ -751,14 +506,13 @@ class LMDSSAttacker:
                 torch.cuda.set_rng_state(cuda_rng_state, pixels.device)
             response = self._random_zero_dc_filter_response(pixels, kernel_sizes[pair_index % 4])
             augmented = (pixels - self.guide_aug_strength * response).clamp(0.0, 1.0)
-            yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+            yield self._blend_guide_augmentation(pixels, augmented)
         if copies % 2:
             yield pixels
 
     def _iter_multiscale_adjoint_pixels(
         self,
         pixels: torch.Tensor,
-        guide_pixel_map: torch.Tensor | None,
         copies: int,
     ):
         """Keep forward pixels fixed while sampling scale-space Jacobians."""
@@ -768,12 +522,11 @@ class LMDSSAttacker:
             filtered = pixels if kernel_size == 1 else F.avg_pool2d(pixels, kernel_size, 1, kernel_size // 2)
             differentiable = pixels + self.guide_aug_strength * filtered
             augmented = differentiable + (pixels - differentiable).detach()
-            yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+            yield self._blend_guide_augmentation(pixels, augmented)
 
     def _iter_orthogonal_photometric_pixels(
         self,
         pixels: torch.Tensor,
-        guide_pixel_map: torch.Tensor | None,
         copies: int,
     ):
         """Yield paired exposure, contrast, saturation, and gamma views.
@@ -801,14 +554,13 @@ class LMDSSAttacker:
                 else:
                     augmented = pixels.clamp_min(1e-6).pow(factor)
                 augmented = augmented.clamp(0.0, 1.0)
-                yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+                yield self._blend_guide_augmentation(pixels, augmented)
         if copies % 2:
             yield pixels
 
     def _iter_orthogonal_spherical_pixels(
         self,
         pixels: torch.Tensor,
-        guide_pixel_map: torch.Tensor | None,
         copies: int,
     ):
         """Yield an antithetic cubature rule on a broadband image sphere.
@@ -832,14 +584,13 @@ class LMDSSAttacker:
         for direction in directions:
             for sign in (1.0, -1.0):
                 augmented = (pixels + sign * (self.guide_aug_strength / 2.0) * direction).clamp(0.0, 1.0)
-                yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+                yield self._blend_guide_augmentation(pixels, augmented)
         if copies % 2:
             yield pixels
 
     def _iter_antithetic_jitter_cubature_pixels(
         self,
         pixels: torch.Tensor,
-        guide_pixel_map: torch.Tensor | None,
         copies: int,
     ):
         """Yield paired brightness/noise jitter views plus identity.
@@ -859,7 +610,7 @@ class LMDSSAttacker:
             noise = torch.randn_like(pixels) * (self.guide_aug_strength / 2.0)
             for sign in (1.0, -1.0):
                 augmented = torch.clamp(pixels * (1.0 + sign * brightness) + sign * noise, 0.0, 1.0)
-                yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+                yield self._blend_guide_augmentation(pixels, augmented)
         if copies % 2:
             yield pixels
 
@@ -919,25 +670,13 @@ class LMDSSAttacker:
     def _guide_augmented_pixels(
         self,
         pixels: torch.Tensor,
-        guide_pixel_map: torch.Tensor | None,
         method: str,
     ) -> torch.Tensor:
-        augmented = self._augment_full_image(pixels, method)
-        if self.guide_aug_area == "all":
-            return augmented
-        if guide_pixel_map is None:
-            raise ValueError("guide_pixel_map is required unless guide_aug_area='all'.")
-        guide = guide_pixel_map.to(pixels.device, pixels.dtype).clamp(0.0, 1.0)
-        if self.guide_aug_area == "foreground":
-            return torch.clamp(augmented * guide + pixels * (1.0 - guide), 0.0, 1.0)
-        if self.guide_aug_area == "background":
-            return torch.clamp(pixels * guide + augmented * (1.0 - guide), 0.0, 1.0)
-        raise ValueError(f"Unsupported guide augmentation area: {self.guide_aug_area}")
+        return self._augment_full_image(pixels, method)
 
     def _iter_forward_pixels(
         self,
         pixels: torch.Tensor,
-        guide_pixel_map: torch.Tensor | None,
     ):
         if not self.guide_aug:
             yield pixels
@@ -946,42 +685,41 @@ class LMDSSAttacker:
         for method in self.guide_aug_methods:
             if method == "antithetic_transport":
                 yield from self._iter_antithetic_transport_pixels(
-                    pixels, guide_pixel_map, self.guide_aug_copies
+                    pixels, self.guide_aug_copies
                 )
                 continue
             if method == "antithetic_filter_bank":
                 yield from self._iter_antithetic_filter_bank_pixels(
-                    pixels, guide_pixel_map, self.guide_aug_copies
+                    pixels, self.guide_aug_copies
                 )
                 continue
             if method == "multiscale_adjoint_ensemble":
                 yield from self._iter_multiscale_adjoint_pixels(
-                    pixels, guide_pixel_map, self.guide_aug_copies
+                    pixels, self.guide_aug_copies
                 )
                 continue
             if method == "orthogonal_photometric_ensemble":
                 yield from self._iter_orthogonal_photometric_pixels(
-                    pixels, guide_pixel_map, self.guide_aug_copies
+                    pixels, self.guide_aug_copies
                 )
                 continue
             if method == "orthogonal_spherical_smoothing":
                 yield from self._iter_orthogonal_spherical_pixels(
-                    pixels, guide_pixel_map, self.guide_aug_copies
+                    pixels, self.guide_aug_copies
                 )
                 continue
             if method == "antithetic_jitter_cubature":
                 yield from self._iter_antithetic_jitter_cubature_pixels(
-                    pixels, guide_pixel_map, self.guide_aug_copies
+                    pixels, self.guide_aug_copies
                 )
                 continue
             for _copy_idx in range(self.guide_aug_copies):
-                yield self._guide_augmented_pixels(pixels, guide_pixel_map, method)
+                yield self._guide_augmented_pixels(pixels, method)
 
 
     def _iter_feature_trajectory_dropout_pixels(
         self,
         pixels: torch.Tensor,
-        guide_pixel_map: torch.Tensor | None,
         pilot_grad: torch.Tensor,
         copies: int,
     ):
@@ -1009,7 +747,7 @@ class LMDSSAttacker:
                 0.0,
                 1.0,
             )
-            yield self._blend_guide_augmentation(pixels, augmented, guide_pixel_map)
+            yield self._blend_guide_augmentation(pixels, augmented)
 
     def _attack_loss_for_pixels(
         self,
@@ -1037,7 +775,6 @@ class LMDSSAttacker:
         self,
         pixels: torch.Tensor,
         labels: torch.Tensor,
-        guide_pixel_map: torch.Tensor | None,
         clean_feature_target: torch.Tensor | None = None,
     ):
         if self.guide_aug and "feature_trajectory_dropout" in self.guide_aug_methods:
@@ -1046,16 +783,16 @@ class LMDSSAttacker:
             for method in self.guide_aug_methods:
                 if method == "feature_trajectory_dropout":
                     for forward_pixels in self._iter_feature_trajectory_dropout_pixels(
-                        pixels, guide_pixel_map, pilot_grad, self.guide_aug_copies
+                        pixels, pilot_grad, self.guide_aug_copies
                     ):
                         yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
                 else:
                     for _copy_idx in range(self.guide_aug_copies):
-                        forward_pixels = self._guide_augmented_pixels(pixels, guide_pixel_map, method)
+                        forward_pixels = self._guide_augmented_pixels(pixels, method)
                         yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
             return
 
-        for forward_pixels in self._iter_forward_pixels(pixels, guide_pixel_map):
+        for forward_pixels in self._iter_forward_pixels(pixels):
             yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
 
     def _extract_layer_patch_features(self, pixels: torch.Tensor) -> torch.Tensor:
@@ -1073,12 +810,15 @@ class LMDSSAttacker:
         num_layers = len(block_tokens)
         layer_idx = self.feature_layer if self.feature_layer >= 0 else num_layers + self.feature_layer
         if layer_idx < 0 or layer_idx >= num_layers:
-            raise ValueError(f"feature_layer {self.feature_layer} is out of range for {num_layers} blocks.")
+            raise ValueError(f"feature_layer {self.feature_layer} is out of range for {num_layers} feature layers.")
         features = block_tokens[layer_idx]
+        preparer = getattr(self.model, "prepare_feature_tokens", None)
+        if preparer is not None:
+            return preparer(features)
         if features.ndim != 3 or features.size(1) < 2:
             raise ValueError(
-                f"Block {layer_idx} must return CLS and patch tokens with shape [B,N,D], "
-                f"got {tuple(features.shape)}."
+                f"Feature layer {layer_idx} must return [B,N,D] tokens or be handled by "
+                f"model.prepare_feature_tokens(), got {tuple(features.shape)}."
             )
         return features[:, 1:, :]
 
@@ -1086,12 +826,11 @@ class LMDSSAttacker:
         self,
         pixels: torch.Tensor,
         labels: torch.Tensor,
-        guide_pixel_map: torch.Tensor | None,
         clean_feature_target: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]]:
         grad_sum = None
         term_grads = []
-        for attack_loss in self._iter_attack_losses(pixels, labels, guide_pixel_map, clean_feature_target):
+        for attack_loss in self._iter_attack_losses(pixels, labels, clean_feature_target):
             grad_term = torch.autograd.grad(attack_loss, pixels, retain_graph=False)[0]
             term_grads.append(grad_term)
             grad_sum = grad_term if grad_sum is None else grad_sum + grad_term
@@ -1103,11 +842,10 @@ class LMDSSAttacker:
         self,
         pixels: torch.Tensor,
         labels: torch.Tensor,
-        guide_pixel_map: torch.Tensor | None,
         clean_feature_target: torch.Tensor | None = None,
     ) -> torch.Tensor:
         grad, _term_grads = self._attack_grad_terms(
-            pixels, labels, guide_pixel_map, clean_feature_target
+            pixels, labels, clean_feature_target
         )
         return grad
 
@@ -1124,9 +862,6 @@ class LMDSSAttacker:
         if self.attack_loss == "feature":
             with torch.no_grad():
                 clean_feature_target = self._extract_layer_patch_features(clean_pixels).detach()
-        guide_pixel_map = None
-        if self.guide_aug and self.guide_aug_area != "all":
-            guide_pixel_map = self._build_guide_pixel_map(images, clean_pixels.size(-1))
 
         adv_pixels = clean_pixels.clone().detach()
         momentum = torch.zeros_like(adv_pixels)
@@ -1143,10 +878,10 @@ class LMDSSAttacker:
             grad_pixels = grad_pixels.detach().requires_grad_(True)
             if self.lowmid_dss_filter:
                 grad, term_grads = self._attack_grad_terms(
-                    grad_pixels, labels, guide_pixel_map, clean_feature_target
+                    grad_pixels, labels, clean_feature_target
                 )
             else:
-                grad = self._attack_grad(grad_pixels, labels, guide_pixel_map, clean_feature_target)
+                grad = self._attack_grad(grad_pixels, labels, clean_feature_target)
                 term_grads = None
             grad = self._smooth_grad(grad)
             if term_grads is not None:

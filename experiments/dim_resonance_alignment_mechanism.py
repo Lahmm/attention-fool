@@ -80,11 +80,10 @@ def gradient_for_variant(attacker, pixels, labels, guide, config) -> torch.Tenso
         input_diversity=config["dim"],
         guide_aug=config["guide_aug"],
         guide_aug_methods=config["methods"],
-        guide_aug_area="background",
         dim_adjoint_echo=config.get("dim_adjoint_echo", False),
     ):
         probe = pixels.detach().requires_grad_(True)
-        return attacker._attack_grad(probe, labels, guide).detach()
+        return attacker._attack_grad(probe, labels).detach()
 
 
 def target_gradient(model, pixels, labels) -> torch.Tensor:
@@ -301,7 +300,7 @@ def run(args) -> None:
     for images, labels, _indices in selected_batches(args, source, loader):
         images = images.to(DEVICE)
         labels = labels.to(DEVICE)
-        guide = attacker._build_guide_pixel_map(attacker._normalize(images), images.size(-1))
+        guide = None
         grads = {name: gradient_for_variant(attacker, images, labels, guide, config) for name, config in VARIANTS.items()}
         dim_grad = grads["dim_only"]
         for name, grad in grads.items():

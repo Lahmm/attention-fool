@@ -25,13 +25,29 @@ class TinyTokenModel(nn.Module):
         return (logits, block_tokens) if return_tokens else logits
 
 
+class TinyMapModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.head = nn.Linear(3, 4)
+
+    def forward(self, x, return_attn=False, return_tokens=False):
+        del return_attn
+        feature0 = x
+        feature1 = F.avg_pool2d(x, kernel_size=2, stride=2)
+        logits = self.head(feature1.mean(dim=(2, 3)))
+        return (logits, [feature0, feature1]) if return_tokens else logits
+
+    @staticmethod
+    def prepare_feature_tokens(features):
+        return features.flatten(2).transpose(1, 2)
+
+
 def make_attacker(**kwargs):
     return LMDSSAttacker(
         TinyTokenModel(),
         epsilon=0.1,
         steps=2,
         ti_sigma=0,
-        layers=(-1,),
         device=torch.device("cpu"),
         **kwargs,
     )
@@ -62,7 +78,6 @@ class FeatureAttackTests(unittest.TestCase):
             attack_loss="feature",
             feature_layer=1,
             guide_aug=True,
-            guide_aug_area="all",
             guide_aug_methods=("feature_trajectory_dropout",),
             guide_aug_copies=9,
             guide_aug_strength=0.2,
@@ -71,10 +86,25 @@ class FeatureAttackTests(unittest.TestCase):
         labels = torch.tensor([1, 2])
         with torch.no_grad():
             target = attacker._extract_layer_patch_features(pixels).detach()
-        gradient, terms = attacker._attack_grad_terms(pixels, labels, None, target)
+        gradient, terms = attacker._attack_grad_terms(pixels, labels, target)
         self.assertEqual(len(terms), 9)
         self.assertTrue(torch.isfinite(gradient).all())
         self.assertGreater(float(gradient.flatten(1).norm(dim=1).min().detach()), 0.0)
+
+
+    def test_feature_attack_supports_4d_feature_maps(self):
+        attacker = LMDSSAttacker(
+            TinyMapModel(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            attack_loss="feature",
+            feature_layer=-2,
+            device=torch.device("cpu"),
+        )
+        images = torch.rand(2, 3, 16, 16) * 2.0 - 1.0
+        adversarial = attacker.attack_batch(images, torch.tensor([1, 2]))
+        self.assertEqual(adversarial.shape, images.shape)
 
     def test_feature_layer_range_is_validated_on_forward(self):
         attacker = make_attacker(attack_loss="feature", feature_layer=2)
@@ -92,6 +122,7 @@ class FeatureAttackTests(unittest.TestCase):
             args = main.parse_args()
         self.assertEqual(args.attack_loss, "feature")
         self.assertEqual(args.feature_layer, -2)
+        self.assertEqual(args.whitebox_model, main.DEFAULT_MODEL_NAME)
 
     def test_create_attacker_forwards_feature_options(self):
         attacker = main.create_attacker(
@@ -99,7 +130,6 @@ class FeatureAttackTests(unittest.TestCase):
             epsilon=0.1,
             step_size=None,
             steps=2,
-            layers=(-1,),
             ti_sigma=0,
             attack_loss="feature",
             feature_layer=1,

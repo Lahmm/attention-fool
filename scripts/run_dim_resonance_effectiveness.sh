@@ -9,12 +9,7 @@ BATCH_SIZE="${BATCH_SIZE:-16}"
 EVAL_BATCH_SIZE="${EVAL_BATCH_SIZE:-128}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
 EVAL_WORKERS="${EVAL_WORKERS:-8}"
-GUIDE_MODELS="${GUIDE_MODELS:-deit_base_patch16_224,pit_s_224,cait_s24_224}"
 TARGET_MODELS="${TARGET_MODELS:-levit_256,pit_b_224,deit_base_patch16_224,tnt_s_patch16_224,convit_base,visformer_small,cait_s24_224,inception_v3,inception_v4,inception_resnet_v2,resnet101,inception_v3_adv_3,inception_v3_adv_4,inception_resnet_v2_adv}"
-LAYERS="${LAYERS:-0,1,4,9,11}"
-GUIDE_TYPE="${GUIDE_TYPE:-qk_cls}"
-GUIDE_BUILD="${GUIDE_BUILD:-patch}"
-GUIDE_AREA="${GUIDE_AREA:-background}"
 GUIDE_STRENGTH="${GUIDE_STRENGTH:-0.2}"
 GUIDE_COPIES="${GUIDE_COPIES:-3}"
 
@@ -53,16 +48,11 @@ attack_and_eval() {
       --dim
       --mi
       --mi-decay 1.0
-      --attention-guide-models "$GUIDE_MODELS"
-      --attention-guide-type "$GUIDE_TYPE"
-      --attention-guide-build-method "$GUIDE_BUILD"
-      --layers="$LAYERS"
       --output-dir "$out_dir"
     )
     if [[ "$methods" != "none" ]]; then
       cmd+=(
         --guide-aug
-        --guide-aug-area "$GUIDE_AREA"
         --guide-aug-method "$methods"
         --guide-aug-copies "$GUIDE_COPIES"
         --guide-aug-strength "$GUIDE_STRENGTH"
@@ -85,8 +75,7 @@ attack_and_eval() {
     --exp-name "dim_resonance_${name}"
 }
 
-# Same DIM/MI/no-normalize-grad/patch-qk/fpridx-background protocol as the
-# current strongest family; only the guide augmentation method changes.
+# Same DIM/MI protocol; only the whole-image guide augmentation method changes.
 attack_and_eval "reference_djf" "dropout,jitter,freq"
 attack_and_eval "dim_resonance_only" "dim_resonance"
 attack_and_eval "dim_resonance_djf" "dropout,jitter,freq,dim_resonance"

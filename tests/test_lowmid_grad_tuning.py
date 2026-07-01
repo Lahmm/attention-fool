@@ -32,7 +32,6 @@ def make_attacker(**kwargs):
         epsilon=0.1,
         steps=2,
         ti_sigma=0,
-        layers=(-1,),
         device=torch.device("cpu"),
         **kwargs,
     )
@@ -224,7 +223,6 @@ class LowMidGradientTuningCLITests(unittest.TestCase):
             epsilon=0.1,
             step_size=None,
             steps=2,
-            layers=(-1,),
             ti_sigma=0,
             lowmid_grad_tuning=True,
             lowmid_grad_rotation_strength=0.25,

@@ -207,7 +207,7 @@ def _dim_samples(attacker, pixels, labels, guide, count):
     with _attacker_options(attacker, input_diversity=True, dim_mode="full-random", guide_aug=False):
         for _ in range(count):
             probe = pixels.detach().requires_grad_(True)
-            samples.append(attacker._attack_grad(probe, labels, guide).detach())
+            samples.append(attacker._attack_grad(probe, labels).detach())
     return samples
 
 
@@ -229,7 +229,6 @@ def run_experiment(args):
         seed_all(seed)
         loader, num_classes = load_data(args.image_dir, args.annotations_path, args.batch_size, args.num_workers, 2, args.img_size)
         source, attacker = build_baseline(num_classes)
-        attacker.guide_aug_area = "background"
         attacker.guide_aug_methods = ("dropout", "jitter", "freq")
         attacker.guide_aug_copies = 3
         attacker.guide_aug_strength = 0.2
@@ -271,7 +270,7 @@ def run_experiment(args):
                         ablated = ablate_image_band(pixels, removed, args.ablation_eta)
                         probe = ablated.detach().requires_grad_(True)
                         with _attacker_options(attacker, input_diversity=False, guide_aug=False):
-                            after_grad = attacker._attack_grad(probe, batch_labels, guide).detach()
+                            after_grad = attacker._attack_grad(probe, batch_labels).detach()
                         delta = band_energy_ratios(after_grad) - before
                         for grad_band in range(fft_band_count()):
                             accum.setdefault(f"step{row['step']}_ablation_delta_removed{removed}_grad{grad_band}", []).extend(delta[:, grad_band].cpu().tolist())

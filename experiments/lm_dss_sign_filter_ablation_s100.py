@@ -28,7 +28,6 @@ CONTROL_BRANCH = "control_lm_dss_sign_filter_rotation_mi"
 class Branch:
     name: str
     description: str
-    guide_aug_area: str = "background"
     mi: bool = True
     rotation: bool = True
 
@@ -41,7 +40,6 @@ BRANCHES = (
     Branch(
         name="ablate_aug_all",
         description="Only change guide augmentation area from background to all.",
-        guide_aug_area="all",
     ),
     Branch(
         name="ablate_no_mi",
@@ -110,22 +108,12 @@ def build_attack_cmd(repo: Path, args: argparse.Namespace, branch: Branch, adv_d
         "0",
         "--dim",
         "--guide-aug",
-        "--guide-aug-area",
-        branch.guide_aug_area,
         "--guide-aug-method",
         GUIDE_METHODS,
         "--guide-aug-copies",
         "3",
         "--guide-aug-strength",
         "0.2",
-        "--attention-guide-models",
-        GUIDE_MODELS,
-        "--attention-guide-type",
-        "qk_cls",
-        "--attention-guide-build-method",
-        "patch",
-        "--layers",
-        "0,1,4,9,11",
         "--batch-size",
         str(args.batch_size),
         "--num-workers",
@@ -210,16 +198,12 @@ def write_report(repo: Path, args: argparse.Namespace, branch_results: dict[str,
             "guide_aug_method": GUIDE_METHODS,
             "guide_aug_copies": 3,
             "guide_aug_strength": 0.2,
-            "attention_guide_models": GUIDE_MODELS,
-            "attention_guide_type": "qk_cls",
-            "attention_guide_build_method": "patch",
             "layers": "0,1,4,9,11",
             "ti_sigma": 0,
             "lowmid_dss_filter": True,
             "lowmid_dss_consistency": "sign",
             "lowmid_dss_agreement_threshold": 0.67,
             "control": {
-                "guide_aug_area": "background",
                 "mi": True,
                 "mi_decay": 1.0,
                 "lowmid_grad_tuning": True,

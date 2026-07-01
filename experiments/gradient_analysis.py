@@ -192,33 +192,32 @@ def _attack_options(attacker, **options):
     finally:
         for name, value in previous.items(): setattr(attacker, name, value)
 
-def gradient_diagnostics(attacker, pixels, labels, guide, random_state):
+def gradient_diagnostics(attacker, pixels, labels, random_state):
     """Compute matched-randomness DIM/BG interaction, method, and leave-one-out gradients."""
     result = {}
     configs = {"plain": (False, False), "dim": (True, False), "bg": (False, True), "dim_bg": (True, True)}
     for name, (dim, bg) in configs.items():
         _set_rng_state(random_state)
         with _attack_options(attacker, input_diversity=dim, guide_aug=bg):
-            result[name] = attacker._attack_grad(pixels, labels, guide).detach().cpu()
+            result[name] = attacker._attack_grad(pixels, labels).detach().cpu()
     result["interaction"] = result["dim_bg"] - result["dim"] - result["bg"] + result["plain"]
     methods = attacker.guide_aug_methods
     for method in methods:
         _set_rng_state(random_state)
         with _attack_options(attacker, guide_aug_methods=(method,)):
-            result[f"method_{method}"] = attacker._attack_grad(pixels, labels, guide).detach().cpu()
+            result[f"method_{method}"] = attacker._attack_grad(pixels, labels).detach().cpu()
         remaining = tuple(item for item in methods if item != method)
         if remaining:
             _set_rng_state(random_state)
             with _attack_options(attacker, guide_aug_methods=remaining):
-                result[f"leave_out_{method}"] = attacker._attack_grad(pixels, labels, guide).detach().cpu()
+                result[f"leave_out_{method}"] = attacker._attack_grad(pixels, labels).detach().cpu()
     return result
 
 def run_analyzed_attack(attacker, images, labels, *, grad_transform=None, mi_switch=None, trace_callback=None, diagnostics=False):
     """Run the existing attack algorithm with optional observation/intervention."""
     images, labels = images.to(attacker.device), labels.to(attacker.device)
     clean = attacker._denormalize(images).detach()
-    needs_guide = attacker.guide_aug and attacker.guide_aug_area != "all"
-    guide = attacker._build_guide_pixel_map(images, clean.size(-1)) if needs_guide else None
+    guide = None
     adv, momentum = clean.clone().detach(), torch.zeros_like(clean)
     switch = mi_switch or MISwitch("always" if attacker.use_momentum else "never")
     for step_idx in range(attacker.steps):
@@ -229,9 +228,9 @@ def run_analyzed_attack(attacker, images, labels, *, grad_transform=None, mi_swi
                 grad_pixels = torch.clamp(grad_pixels, 0.0, 1.0)
         grad_pixels = grad_pixels.detach().requires_grad_(True)
         before_rng = _rng_state()
-        grad = attacker._attack_grad(grad_pixels, labels, guide)
+        grad = attacker._attack_grad(grad_pixels, labels)
         after_rng = _rng_state()
-        diagnostic_grads = gradient_diagnostics(attacker, grad_pixels, labels, guide, before_rng) if diagnostics else None
+        diagnostic_grads = gradient_diagnostics(attacker, grad_pixels, labels, before_rng) if diagnostics else None
         _set_rng_state(after_rng)
         grad = attacker._smooth_grad(grad)
         if grad_transform is not None: grad = grad_transform(grad, guide, step)
