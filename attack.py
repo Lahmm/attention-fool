@@ -117,6 +117,12 @@ class LMDSSAttacker:
         lowmid_dss_filter: bool = False,
         lowmid_dss_consistency: str = "sign",
         lowmid_dss_agreement_threshold: float = 0.67,
+        spatial_sign_reinforcement: bool = False,
+        spatial_sign_reinforcement_sigma: float = 1.0,
+        spatial_sign_reinforcement_strength: float = 0.2,
+        fft_sign_regularization: bool = False,
+        fft_sign_regularization_cutoff: float = 0.25,
+        fft_sign_regularization_strength: float = 0.5,
         attack_loss: str = "logits",
         feature_layer: int = -2,
         feature_scope: str = "block",
@@ -147,6 +153,22 @@ class LMDSSAttacker:
         if not 0.0 <= lowmid_dss_agreement_threshold <= 1.0:
             raise ValueError(
                 f"lowmid_dss_agreement_threshold must be in [0, 1], got {lowmid_dss_agreement_threshold}."
+            )
+        if spatial_sign_reinforcement_sigma <= 0:
+            raise ValueError(
+                f"spatial_sign_reinforcement_sigma must be positive, got {spatial_sign_reinforcement_sigma}."
+            )
+        if spatial_sign_reinforcement_strength < 0:
+            raise ValueError(
+                f"spatial_sign_reinforcement_strength must be non-negative, got {spatial_sign_reinforcement_strength}."
+            )
+        if fft_sign_regularization_cutoff <= 0 or fft_sign_regularization_cutoff > 1.0:
+            raise ValueError(
+                f"fft_sign_regularization_cutoff must be in (0, 1], got {fft_sign_regularization_cutoff}."
+            )
+        if not 0.0 <= fft_sign_regularization_strength <= 1.0:
+            raise ValueError(
+                f"fft_sign_regularization_strength must be in [0, 1], got {fft_sign_regularization_strength}."
             )
 
         if attack_loss not in ("logits", "feature"):
@@ -188,6 +210,12 @@ class LMDSSAttacker:
         self.lowmid_dss_filter = bool(lowmid_dss_filter)
         self.lowmid_dss_consistency = lowmid_dss_consistency
         self.lowmid_dss_agreement_threshold = float(lowmid_dss_agreement_threshold)
+        self.spatial_sign_reinforcement = bool(spatial_sign_reinforcement)
+        self.spatial_sign_reinforcement_sigma = float(spatial_sign_reinforcement_sigma)
+        self.spatial_sign_reinforcement_strength = float(spatial_sign_reinforcement_strength)
+        self.fft_sign_regularization = bool(fft_sign_regularization)
+        self.fft_sign_regularization_cutoff = float(fft_sign_regularization_cutoff)
+        self.fft_sign_regularization_strength = float(fft_sign_regularization_strength)
         self.attack_loss = attack_loss
         self.feature_layer = int(feature_layer)
         self.feature_scope = feature_scope
@@ -198,6 +226,10 @@ class LMDSSAttacker:
             "jitter",
             "freq",
             "dim_resonance",
+            "dim_stable_edge",
+            "dim_stable_edge_mix",
+            "dim_consensus_trajectory",
+            "dim_consensus_evidence_trajectory",
             "lowmid_shift",
             "white_noise",
             "antithetic_transport",
@@ -232,6 +264,57 @@ class LMDSSAttacker:
     def _normalize_grad(grad: torch.Tensor) -> torch.Tensor:
         denom = grad.abs().mean(dim=(1, 2, 3), keepdim=True).clamp_min(1e-12)
         return grad / denom
+
+    def _apply_spatial_sign_reinforcement(
+        self,
+        update: torch.Tensor,
+    ) -> torch.Tensor:
+        if (
+            not self.spatial_sign_reinforcement
+            or self.spatial_sign_reinforcement_strength <= 0
+        ):
+            return update
+        radius = max(1, int(math.ceil(3.0 * self.spatial_sign_reinforcement_sigma)))
+        kernel = self._build_gaussian_kernel(
+            kernel_size=2 * radius + 1,
+            sigma=self.spatial_sign_reinforcement_sigma,
+        ).to(update.device, update.dtype)
+        smooth_update = self._apply_depthwise_kernel(update, kernel)
+        smooth_abs = self._apply_depthwise_kernel(update.abs(), kernel).clamp_min(1e-12)
+        confidence = (smooth_update.abs() / smooth_abs).clamp(0.0, 1.0)
+        reinforce = confidence * smooth_update.sign()
+        return update + self.spatial_sign_reinforcement_strength * reinforce
+
+    def _apply_fft_sign_regularization(
+        self,
+        update: torch.Tensor,
+    ) -> torch.Tensor:
+        """Suppress high-frequency noise in update (momentum) before sign().
+
+        The sign field after sign(momentum) is highly fragmented (only ~41%
+        adjacent pixel agreement) despite the gradient being 96% low-frequency.
+        The nonlinear sign() amplifies small high-frequency fluctuations.
+
+        We low-pass filter the update in the frequency domain to preserve the
+        low/mid-frequency structure while suppressing sign-flipping noise.
+        """
+        if (
+            not self.fft_sign_regularization
+            or self.fft_sign_regularization_strength <= 0
+        ):
+            return update
+        bsz, ch, h, w = update.shape
+        fy = torch.fft.fftfreq(h, device=update.device, dtype=torch.float32).view(h, 1)
+        fx = torch.fft.fftfreq(w, device=update.device, dtype=torch.float32).view(1, w)
+        radius = (fx.square() + fy.square()).sqrt().view(1, 1, h, w)  # [1, 1, H, W]
+        mask = (radius < self.fft_sign_regularization_cutoff).to(torch.float32)
+
+        work = update.float()
+        freq = torch.fft.fft2(work, dim=(-2, -1), norm="ortho")
+        filtered = torch.fft.ifft2(freq * mask, dim=(-2, -1), norm="ortho").real.to(update.dtype)
+
+        strength = self.fft_sign_regularization_strength
+        return (1.0 - strength) * update + strength * filtered
 
     @staticmethod
     def _build_gaussian_kernel(kernel_size: int, sigma: float) -> torch.Tensor:
@@ -417,6 +500,102 @@ class LMDSSAttacker:
         restored = self._dim_adjoint_restore_pixels(pixels)
         augmented = pixels + self.guide_aug_strength * restored
         return (augmented + (pixels - augmented).detach()).to(pixels.dtype)
+
+    @staticmethod
+    def _edge_center_gate(pixels: torch.Tensor) -> torch.Tensor:
+        gray_weights = pixels.new_tensor((0.2989, 0.5870, 0.1140)).view(1, 3, 1, 1)
+        gray = (pixels * gray_weights).sum(dim=1, keepdim=True)
+        kx = pixels.new_tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]).view(1, 1, 3, 3) / 8.0
+        ky = pixels.new_tensor([[-1, -2, -1], [0, 0, 0], [1, 2, 1]]).view(1, 1, 3, 3) / 8.0
+        padded = F.pad(gray, (1, 1, 1, 1), mode="reflect")
+        edge = (F.conv2d(padded, kx).square() + F.conv2d(padded, ky).square()).sqrt()
+        edge = edge / edge.flatten(1).quantile(0.90, dim=1).view(-1, 1, 1, 1).clamp_min(1e-12)
+        edge_gate = (0.35 + 0.65 * edge.clamp(0.0, 1.0)).detach()
+
+        height, width = pixels.shape[-2:]
+        yy = torch.linspace(-1.0, 1.0, height, device=pixels.device, dtype=pixels.dtype).view(height, 1)
+        xx = torch.linspace(-1.0, 1.0, width, device=pixels.device, dtype=pixels.dtype).view(1, width)
+        radius = (xx.square() + yy.square()).sqrt().clamp(0.0, 1.0)
+        center_gate = (0.55 + 0.45 * (1.0 - radius)).view(1, 1, height, width)
+        return edge_gate * center_gate
+
+    def _dim_stable_edge_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        """Forward-identity DIM-adjoint edge/low-mid gradient echo.
+
+        High-transfer AE analysis showed stronger transfer when perturbations
+        shift energy from high frequency into mid frequency and align with
+        image edges while avoiding border-heavy energy. This view keeps the
+        forward image fixed, but its backward Jacobian emphasizes the sampled
+        DIM adjoint residual after low/mid smoothing and edge/center gating.
+        """
+        restored = self._dim_adjoint_restore_pixels(pixels)
+        residual = restored - pixels
+        residual = F.avg_pool2d(residual, kernel_size=5, stride=1, padding=2)
+        residual = residual - residual.mean(dim=(2, 3), keepdim=True)
+        gate = self._edge_center_gate(pixels)
+        direction = residual * gate
+        direction_scale = residual.abs().mean(dim=(1, 2, 3), keepdim=True).detach()
+        current_scale = direction.abs().mean(dim=(1, 2, 3), keepdim=True).detach().clamp_min(1e-12)
+        direction = direction * (direction_scale / current_scale)
+        differentiable = pixels + self.guide_aug_strength * direction
+        return (differentiable + (pixels - differentiable).detach()).to(pixels.dtype)
+
+    def _iter_dim_stable_edge_pixels(self, pixels: torch.Tensor, copies: int):
+        for _copy_idx in range(copies):
+            yield self._blend_guide_augmentation(pixels, self._dim_stable_edge_pixels(pixels))
+
+    def _dim_stable_edge_mix_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        restored = self._dim_adjoint_restore_pixels(pixels)
+        residual = restored - pixels
+        residual = F.avg_pool2d(residual, kernel_size=5, stride=1, padding=2)
+        gate = self._edge_center_gate(pixels)
+        augmented = pixels + self.guide_aug_strength * gate * residual
+        return torch.clamp(augmented, 0.0, 1.0)
+
+    def _iter_dim_stable_edge_mix_pixels(self, pixels: torch.Tensor, copies: int):
+        for _copy_idx in range(copies):
+            yield self._blend_guide_augmentation(pixels, self._dim_stable_edge_mix_pixels(pixels))
+
+    def _iter_dim_consensus_trajectory_pixels(
+        self,
+        pixels: torch.Tensor,
+        consensus_grad: torch.Tensor,
+        copies: int,
+    ):
+        smooth_grad = F.avg_pool2d(consensus_grad.detach(), kernel_size=5, stride=1, padding=2)
+        direction = smooth_grad.sign()
+        for index in range(copies):
+            radius = self.step_size * float(index + 1)
+            augmented = torch.clamp(pixels + radius * direction, 0.0, 1.0)
+            yield self._blend_guide_augmentation(pixels, augmented)
+
+    def _iter_dim_consensus_evidence_trajectory_pixels(
+        self,
+        pixels: torch.Tensor,
+        consensus_grad: torch.Tensor,
+        copies: int,
+    ):
+        smooth_grad = F.avg_pool2d(consensus_grad.detach(), kernel_size=5, stride=1, padding=2)
+        direction = smooth_grad.sign()
+        corruption_strength = min(1.0, self.guide_aug_strength * 1.25)
+        batch, channels, height, width = pixels.shape
+        for index in range(copies):
+            radius = self.step_size * float(index + 1)
+            lookahead = torch.clamp(pixels + radius * direction, 0.0, 1.0)
+            coarse_h = max(4, height // 8)
+            coarse_w = max(4, width // 8)
+            coarse_noise = torch.rand(batch, channels, coarse_h, coarse_w, device=pixels.device, dtype=pixels.dtype)
+            noise = F.interpolate(coarse_noise, size=(height, width), mode="bilinear", align_corners=False)
+            if index % 2 == 1:
+                noise = 1.0 - noise
+            blurred = F.avg_pool2d(lookahead, kernel_size=5, stride=1, padding=2)
+            evidence_mix = 0.5 * noise + 0.5 * blurred
+            augmented = torch.clamp(
+                lookahead * (1.0 - corruption_strength) + evidence_mix * corruption_strength,
+                0.0,
+                1.0,
+            )
+            yield self._blend_guide_augmentation(pixels, augmented)
 
     def _white_noise_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
         noise = torch.randn_like(pixels, dtype=pixels.dtype)
@@ -663,6 +842,10 @@ class LMDSSAttacker:
             return torch.clamp(pixels * (1.0 - strength) + corrupt * strength, 0.0, 1.0)
         if method == "dim_resonance":
             return self._dim_resonance_pixels(pixels)
+        if method == "dim_stable_edge":
+            return self._dim_stable_edge_pixels(pixels)
+        if method == "dim_stable_edge_mix":
+            return self._dim_stable_edge_mix_pixels(pixels)
         if method == "lowmid_shift":
             return self._lowmid_shift_pixels(pixels)
         if method == "white_noise":
@@ -687,6 +870,16 @@ class LMDSSAttacker:
             return
 
         for method in self.guide_aug_methods:
+            if method == "dim_stable_edge":
+                yield from self._iter_dim_stable_edge_pixels(
+                    pixels, self.guide_aug_copies
+                )
+                continue
+            if method == "dim_stable_edge_mix":
+                yield from self._iter_dim_stable_edge_mix_pixels(
+                    pixels, self.guide_aug_copies
+                )
+                continue
             if method == "antithetic_transport":
                 yield from self._iter_antithetic_transport_pixels(
                     pixels, self.guide_aug_copies
@@ -781,13 +974,42 @@ class LMDSSAttacker:
         labels: torch.Tensor,
         clean_feature_target: torch.Tensor | None = None,
     ):
-        if self.guide_aug and "feature_trajectory_dropout" in self.guide_aug_methods:
-            pilot_loss = self._attack_loss_for_pixels(pixels, labels, clean_feature_target)
-            pilot_grad = torch.autograd.grad(pilot_loss, pixels, retain_graph=False)[0].detach()
+        special_methods = {
+            "feature_trajectory_dropout",
+            "dim_consensus_trajectory",
+            "dim_consensus_evidence_trajectory",
+        }
+        if self.guide_aug and any(method in self.guide_aug_methods for method in special_methods):
+            pilot_grad = None
+            consensus_grad = None
+            if "feature_trajectory_dropout" in self.guide_aug_methods:
+                pilot_loss = self._attack_loss_for_pixels(pixels, labels, clean_feature_target)
+                pilot_grad = torch.autograd.grad(pilot_loss, pixels, retain_graph=False)[0].detach()
+            if (
+                "dim_consensus_trajectory" in self.guide_aug_methods
+                or "dim_consensus_evidence_trajectory" in self.guide_aug_methods
+            ):
+                pilot_count = max(1, min(4, self.guide_aug_copies))
+                pilot_grads = []
+                for _pilot_idx in range(pilot_count):
+                    pilot_loss = self._attack_loss_for_pixels(pixels, labels, clean_feature_target)
+                    pilot_grads.append(torch.autograd.grad(pilot_loss, pixels, retain_graph=False)[0].detach())
+                consensus_grad = torch.stack(pilot_grads, dim=0).mean(dim=0)
+
             for method in self.guide_aug_methods:
                 if method == "feature_trajectory_dropout":
                     for forward_pixels in self._iter_feature_trajectory_dropout_pixels(
                         pixels, pilot_grad, self.guide_aug_copies
+                    ):
+                        yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
+                elif method == "dim_consensus_trajectory":
+                    for forward_pixels in self._iter_dim_consensus_trajectory_pixels(
+                        pixels, consensus_grad, self.guide_aug_copies
+                    ):
+                        yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
+                elif method == "dim_consensus_evidence_trajectory":
+                    for forward_pixels in self._iter_dim_consensus_evidence_trajectory_pixels(
+                        pixels, consensus_grad, self.guide_aug_copies
                     ):
                         yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
                 else:
@@ -908,6 +1130,8 @@ class LMDSSAttacker:
                 update = momentum
             else:
                 update = grad
+            update = self._apply_spatial_sign_reinforcement(update)
+            update = self._apply_fft_sign_regularization(update)
 
             with torch.no_grad():
                 adv_pixels = adv_pixels + self.step_size * update.sign()
