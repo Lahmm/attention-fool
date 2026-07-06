@@ -273,6 +273,42 @@ class FeatureAttackTests(unittest.TestCase):
             make_attacker(grad_momentum_conflict_suppression_strength=-0.1)
 
 
+    def test_cross_step_sign_vote_uses_recent_majority_signs(self):
+        attacker = make_attacker(
+            cross_step_sign_vote=True,
+            cross_step_sign_vote_window=3,
+            cross_step_sign_vote_strength=0.6,
+        )
+        history = []
+        positive = torch.ones(1, 1, 1, 1)
+        negative = -torch.ones(1, 1, 1, 1)
+
+        first = attacker._apply_cross_step_sign_vote(positive, history)
+        second = attacker._apply_cross_step_sign_vote(negative, history)
+        third = attacker._apply_cross_step_sign_vote(positive, history)
+        fourth = attacker._apply_cross_step_sign_vote(negative, history)
+
+        self.assertTrue(torch.allclose(first, torch.tensor([[[[1.6]]]])))
+        self.assertTrue(torch.allclose(second, torch.tensor([[[[-1.0]]]])))
+        self.assertTrue(torch.allclose(third, torch.tensor([[[[1.2]]]])))
+        self.assertTrue(torch.allclose(fourth, torch.tensor([[[[-1.2]]]])))
+        self.assertEqual(len(history), 3)
+
+    def test_cross_step_sign_vote_can_be_disabled(self):
+        attacker = make_attacker(cross_step_sign_vote=False)
+        history = []
+        update = torch.randn(1, 1, 2, 2)
+        tuned = attacker._apply_cross_step_sign_vote(update, history)
+        self.assertTrue(torch.equal(tuned, update))
+        self.assertEqual(history, [])
+
+    def test_cross_step_sign_vote_validates_parameters(self):
+        with self.assertRaises(ValueError):
+            make_attacker(cross_step_sign_vote_window=0)
+        with self.assertRaises(ValueError):
+            make_attacker(cross_step_sign_vote_strength=-0.1)
+
+
     def test_feature_attack_supports_4d_feature_maps(self):
         attacker = LMDSSAttacker(
             TinyMapModel(),

@@ -124,6 +124,9 @@ class LMDSSAttacker:
         grad_momentum_agreement_strength: float = 0.2,
         grad_momentum_agreement_sigma: float = 0.0,
         grad_momentum_conflict_suppression_strength: float = 0.0,
+        cross_step_sign_vote: bool = False,
+        cross_step_sign_vote_window: int = 5,
+        cross_step_sign_vote_strength: float = 0.2,
         fft_sign_regularization: bool = False,
         fft_sign_regularization_cutoff: float = 0.25,
         fft_sign_regularization_strength: float = 0.5,
@@ -178,6 +181,14 @@ class LMDSSAttacker:
             raise ValueError(
                 "grad_momentum_conflict_suppression_strength must be non-negative, "
                 f"got {grad_momentum_conflict_suppression_strength}."
+            )
+        if cross_step_sign_vote_window <= 0:
+            raise ValueError(
+                f"cross_step_sign_vote_window must be positive, got {cross_step_sign_vote_window}."
+            )
+        if cross_step_sign_vote_strength < 0:
+            raise ValueError(
+                f"cross_step_sign_vote_strength must be non-negative, got {cross_step_sign_vote_strength}."
             )
         if fft_sign_regularization_cutoff <= 0 or fft_sign_regularization_cutoff > 1.0:
             raise ValueError(
@@ -236,6 +247,9 @@ class LMDSSAttacker:
         self.grad_momentum_conflict_suppression_strength = float(
             grad_momentum_conflict_suppression_strength
         )
+        self.cross_step_sign_vote = bool(cross_step_sign_vote)
+        self.cross_step_sign_vote_window = int(cross_step_sign_vote_window)
+        self.cross_step_sign_vote_strength = float(cross_step_sign_vote_strength)
         self.fft_sign_regularization = bool(fft_sign_regularization)
         self.fft_sign_regularization_cutoff = float(fft_sign_regularization_cutoff)
         self.fft_sign_regularization_strength = float(fft_sign_regularization_strength)
@@ -340,6 +354,20 @@ class LMDSSAttacker:
             + self.grad_momentum_agreement_strength * reinforce
             - self.grad_momentum_conflict_suppression_strength * suppress
         )
+
+    def _apply_cross_step_sign_vote(
+        self,
+        update: torch.Tensor,
+        sign_history: list[torch.Tensor],
+    ) -> torch.Tensor:
+        if not self.cross_step_sign_vote or self.cross_step_sign_vote_strength <= 0:
+            return update
+        sign_history.append(update.sign().detach())
+        if len(sign_history) > self.cross_step_sign_vote_window:
+            del sign_history[:-self.cross_step_sign_vote_window]
+        vote = torch.stack(sign_history, dim=0).to(update.dtype).mean(dim=0)
+        reinforce = vote.abs() * vote.sign()
+        return update + self.cross_step_sign_vote_strength * reinforce
 
     def _apply_fft_sign_regularization(
         self,
@@ -1156,6 +1184,7 @@ class LMDSSAttacker:
 
         adv_pixels = clean_pixels.clone().detach()
         momentum = torch.zeros_like(adv_pixels)
+        sign_history: list[torch.Tensor] = []
 
         for step_idx in range(self.steps):
             grad_pixels = adv_pixels.detach()
@@ -1187,6 +1216,7 @@ class LMDSSAttacker:
             else:
                 update = grad
             update = self._apply_grad_momentum_agreement(update, grad)
+            update = self._apply_cross_step_sign_vote(update, sign_history)
             update = self._apply_spatial_sign_reinforcement(update)
             update = self._apply_fft_sign_regularization(update)
 
