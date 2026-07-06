@@ -120,6 +120,9 @@ class LMDSSAttacker:
         spatial_sign_reinforcement: bool = False,
         spatial_sign_reinforcement_sigma: float = 1.0,
         spatial_sign_reinforcement_strength: float = 0.2,
+        grad_momentum_agreement: bool = False,
+        grad_momentum_agreement_strength: float = 0.2,
+        grad_momentum_conflict_suppression_strength: float = 0.0,
         fft_sign_regularization: bool = False,
         fft_sign_regularization_cutoff: float = 0.25,
         fft_sign_regularization_strength: float = 0.5,
@@ -161,6 +164,15 @@ class LMDSSAttacker:
         if spatial_sign_reinforcement_strength < 0:
             raise ValueError(
                 f"spatial_sign_reinforcement_strength must be non-negative, got {spatial_sign_reinforcement_strength}."
+            )
+        if grad_momentum_agreement_strength < 0:
+            raise ValueError(
+                f"grad_momentum_agreement_strength must be non-negative, got {grad_momentum_agreement_strength}."
+            )
+        if grad_momentum_conflict_suppression_strength < 0:
+            raise ValueError(
+                "grad_momentum_conflict_suppression_strength must be non-negative, "
+                f"got {grad_momentum_conflict_suppression_strength}."
             )
         if fft_sign_regularization_cutoff <= 0 or fft_sign_regularization_cutoff > 1.0:
             raise ValueError(
@@ -213,6 +225,11 @@ class LMDSSAttacker:
         self.spatial_sign_reinforcement = bool(spatial_sign_reinforcement)
         self.spatial_sign_reinforcement_sigma = float(spatial_sign_reinforcement_sigma)
         self.spatial_sign_reinforcement_strength = float(spatial_sign_reinforcement_strength)
+        self.grad_momentum_agreement = bool(grad_momentum_agreement)
+        self.grad_momentum_agreement_strength = float(grad_momentum_agreement_strength)
+        self.grad_momentum_conflict_suppression_strength = float(
+            grad_momentum_conflict_suppression_strength
+        )
         self.fft_sign_regularization = bool(fft_sign_regularization)
         self.fft_sign_regularization_cutoff = float(fft_sign_regularization_cutoff)
         self.fft_sign_regularization_strength = float(fft_sign_regularization_strength)
@@ -284,6 +301,31 @@ class LMDSSAttacker:
         confidence = (smooth_update.abs() / smooth_abs).clamp(0.0, 1.0)
         reinforce = confidence * smooth_update.sign()
         return update + self.spatial_sign_reinforcement_strength * reinforce
+
+    def _apply_grad_momentum_agreement(
+        self,
+        update: torch.Tensor,
+        grad: torch.Tensor,
+    ) -> torch.Tensor:
+        if (
+            not self.grad_momentum_agreement
+            or (
+                self.grad_momentum_agreement_strength <= 0
+                and self.grad_momentum_conflict_suppression_strength <= 0
+            )
+        ):
+            return update
+        update_direction = update.sign()
+        grad_direction = grad.sign()
+        agreement = (update_direction != 0) & update_direction.eq(grad_direction)
+        conflict = (update_direction != 0) & (grad_direction != 0) & update_direction.ne(grad_direction)
+        reinforce = agreement.to(update.dtype) * update_direction
+        suppress = conflict.to(update.dtype) * update_direction
+        return (
+            update
+            + self.grad_momentum_agreement_strength * reinforce
+            - self.grad_momentum_conflict_suppression_strength * suppress
+        )
 
     def _apply_fft_sign_regularization(
         self,
@@ -1130,6 +1172,7 @@ class LMDSSAttacker:
                 update = momentum
             else:
                 update = grad
+            update = self._apply_grad_momentum_agreement(update, grad)
             update = self._apply_spatial_sign_reinforcement(update)
             update = self._apply_fft_sign_regularization(update)
 

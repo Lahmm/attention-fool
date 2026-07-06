@@ -44,6 +44,9 @@ def create_attacker(
     spatial_sign_reinforcement: bool = False,
     spatial_sign_reinforcement_sigma: float = 1.0,
     spatial_sign_reinforcement_strength: float = 0.2,
+    grad_momentum_agreement: bool = False,
+    grad_momentum_agreement_strength: float = 0.2,
+    grad_momentum_conflict_suppression_strength: float = 0.0,
     fft_sign_regularization: bool = False,
     fft_sign_regularization_cutoff: float = 0.25,
     fft_sign_regularization_strength: float = 0.5,
@@ -77,6 +80,9 @@ def create_attacker(
         spatial_sign_reinforcement=spatial_sign_reinforcement,
         spatial_sign_reinforcement_sigma=spatial_sign_reinforcement_sigma,
         spatial_sign_reinforcement_strength=spatial_sign_reinforcement_strength,
+        grad_momentum_agreement=grad_momentum_agreement,
+        grad_momentum_agreement_strength=grad_momentum_agreement_strength,
+        grad_momentum_conflict_suppression_strength=grad_momentum_conflict_suppression_strength,
         fft_sign_regularization=fft_sign_regularization,
         fft_sign_regularization_cutoff=fft_sign_regularization_cutoff,
         fft_sign_regularization_strength=fft_sign_regularization_strength,
@@ -223,6 +229,9 @@ def parse_args():
     parser.add_argument("--spatial-sign-reinforcement", action="store_true", help="Enable pre-sign reinforcement from spatially stable local update signs.")
     parser.add_argument("--spatial-sign-reinforcement-sigma", type=float, default=1.0, help="Gaussian sigma used to estimate local dominant update signs.")
     parser.add_argument("--spatial-sign-reinforcement-strength", type=float, default=0.2, help="Strength added along confident local sign directions before update.sign().")
+    parser.add_argument("--grad-momentum-agreement", action="store_true", help="Enable pre-sign reinforcement where current gradient and update/momentum signs agree.")
+    parser.add_argument("--grad-momentum-agreement-strength", type=float, default=0.2, help="Strength added along update signs that are still supported by the current gradient.")
+    parser.add_argument("--grad-momentum-conflict-suppression-strength", type=float, default=0.0, help="Strength subtracted from update signs that conflict with the current gradient before update.sign().")
     parser.add_argument("--fft-sign-regularization", action="store_true", help="Apply FFT low-pass filtering to update before sign() to suppress high-freq sign-field fragmentation.")
     parser.add_argument("--fft-sign-regularization-cutoff", type=float, default=0.25, help="Frequency cutoff radius for --fft-sign-regularization. Preserves frequencies below this radius.")
     parser.add_argument("--fft-sign-regularization-strength", type=float, default=0.5, help="Interpolation strength (0=keep original, 1=fully filtered) for --fft-sign-regularization.")
@@ -271,6 +280,9 @@ def main(
     spatial_sign_reinforcement: bool = False,
     spatial_sign_reinforcement_sigma: float = 1.0,
     spatial_sign_reinforcement_strength: float = 0.2,
+    grad_momentum_agreement: bool = False,
+    grad_momentum_agreement_strength: float = 0.2,
+    grad_momentum_conflict_suppression_strength: float = 0.0,
     fft_sign_regularization: bool = False,
     fft_sign_regularization_cutoff: float = 0.25,
     fft_sign_regularization_strength: float = 0.5,
@@ -324,6 +336,9 @@ def main(
         spatial_sign_reinforcement=spatial_sign_reinforcement,
         spatial_sign_reinforcement_sigma=spatial_sign_reinforcement_sigma,
         spatial_sign_reinforcement_strength=spatial_sign_reinforcement_strength,
+        grad_momentum_agreement=grad_momentum_agreement,
+        grad_momentum_agreement_strength=grad_momentum_agreement_strength,
+        grad_momentum_conflict_suppression_strength=grad_momentum_conflict_suppression_strength,
         fft_sign_regularization=fft_sign_regularization,
         fft_sign_regularization_cutoff=fft_sign_regularization_cutoff,
         fft_sign_regularization_strength=fft_sign_regularization_strength,
@@ -374,6 +389,9 @@ if __name__ == "__main__":
         spatial_sign_reinforcement=args.spatial_sign_reinforcement,
         spatial_sign_reinforcement_sigma=args.spatial_sign_reinforcement_sigma,
         spatial_sign_reinforcement_strength=args.spatial_sign_reinforcement_strength,
+        grad_momentum_agreement=args.grad_momentum_agreement,
+        grad_momentum_agreement_strength=args.grad_momentum_agreement_strength,
+        grad_momentum_conflict_suppression_strength=args.grad_momentum_conflict_suppression_strength,
         fft_sign_regularization=args.fft_sign_regularization,
         fft_sign_regularization_cutoff=args.fft_sign_regularization_cutoff,
         fft_sign_regularization_strength=args.fft_sign_regularization_strength,

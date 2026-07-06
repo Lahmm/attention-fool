@@ -121,6 +121,138 @@ class FeatureAttackTests(unittest.TestCase):
         self.assertGreater(float(gradient.flatten(1).norm(dim=1).min().detach()), 0.0)
 
 
+    def test_dim_consensus_trajectory_generates_requested_feature_terms(self):
+        torch.manual_seed(41)
+        attacker = make_attacker(
+            attack_loss="feature",
+            feature_layer=1,
+            guide_aug=True,
+            guide_aug_methods=("dim_consensus_trajectory",),
+            guide_aug_copies=5,
+            guide_aug_strength=0.2,
+            input_diversity=True,
+        )
+        pixels = torch.rand(2, 3, 16, 16, requires_grad=True)
+        labels = torch.tensor([1, 2])
+        with torch.no_grad():
+            target = attacker._extract_layer_patch_features(pixels).detach()
+        gradient, terms = attacker._attack_grad_terms(pixels, labels, target)
+        self.assertEqual(len(terms), 5)
+        self.assertTrue(torch.isfinite(gradient).all())
+        self.assertGreater(float(gradient.flatten(1).norm(dim=1).min().detach()), 0.0)
+
+
+    def test_dim_consensus_evidence_trajectory_generates_requested_feature_terms(self):
+        torch.manual_seed(43)
+        attacker = make_attacker(
+            attack_loss="feature",
+            feature_layer=1,
+            guide_aug=True,
+            guide_aug_methods=("dim_consensus_evidence_trajectory",),
+            guide_aug_copies=5,
+            guide_aug_strength=0.2,
+            input_diversity=True,
+        )
+        pixels = torch.rand(2, 3, 16, 16, requires_grad=True)
+        labels = torch.tensor([1, 2])
+        with torch.no_grad():
+            target = attacker._extract_layer_patch_features(pixels).detach()
+        gradient, terms = attacker._attack_grad_terms(pixels, labels, target)
+        self.assertEqual(len(terms), 5)
+        self.assertTrue(torch.isfinite(gradient).all())
+        self.assertGreater(float(gradient.flatten(1).norm(dim=1).min().detach()), 0.0)
+
+
+    def test_spatial_sign_reinforcement_boosts_locally_consistent_update(self):
+        attacker = make_attacker(
+            spatial_sign_reinforcement=True,
+            spatial_sign_reinforcement_sigma=0.5,
+            spatial_sign_reinforcement_strength=0.5,
+        )
+        update = torch.ones(1, 1, 8, 8)
+        tuned = attacker._apply_spatial_sign_reinforcement(update)
+        self.assertEqual(tuned.shape, update.shape)
+        self.assertTrue(torch.all(tuned > update))
+        self.assertAlmostEqual(float(tuned.mean()), 1.5, places=4)
+
+    def test_spatial_sign_reinforcement_is_weaker_on_conflicting_local_signs(self):
+        attacker = make_attacker(
+            spatial_sign_reinforcement=True,
+            spatial_sign_reinforcement_sigma=1.0,
+            spatial_sign_reinforcement_strength=0.5,
+        )
+        uniform = torch.ones(1, 1, 8, 8)
+        checker = torch.ones(1, 1, 8, 8)
+        checker[:, :, ::2, 1::2] = -1.0
+        checker[:, :, 1::2, ::2] = -1.0
+        tuned_uniform = attacker._apply_spatial_sign_reinforcement(uniform)
+        tuned_checker = attacker._apply_spatial_sign_reinforcement(checker)
+        uniform_gain = (tuned_uniform - uniform).abs().mean()
+        checker_gain = (tuned_checker - checker).abs().mean()
+        self.assertLess(float(checker_gain), float(uniform_gain))
+
+    def test_spatial_sign_reinforcement_can_be_disabled(self):
+        attacker = make_attacker(spatial_sign_reinforcement=False)
+        update = torch.randn(1, 1, 4, 4)
+        tuned = attacker._apply_spatial_sign_reinforcement(update)
+        self.assertTrue(torch.equal(tuned, update))
+
+    def test_spatial_sign_reinforcement_validates_parameters(self):
+        with self.assertRaises(ValueError):
+            make_attacker(spatial_sign_reinforcement_sigma=0)
+        with self.assertRaises(ValueError):
+            make_attacker(spatial_sign_reinforcement_strength=-0.1)
+
+
+    def test_grad_momentum_agreement_reinforces_only_currently_supported_update_signs(self):
+        attacker = make_attacker(
+            grad_momentum_agreement=True,
+            grad_momentum_agreement_strength=0.5,
+        )
+        update = torch.tensor([[[[2.0, -2.0, 2.0, -2.0, 0.0]]]])
+        grad = torch.tensor([[[[1.0, -1.0, -1.0, 1.0, 1.0]]]])
+        tuned = attacker._apply_grad_momentum_agreement(update, grad)
+        expected = torch.tensor([[[[2.5, -2.5, 2.0, -2.0, 0.0]]]])
+        self.assertTrue(torch.equal(tuned, expected))
+
+    def test_grad_momentum_agreement_suppresses_conflicting_update_signs(self):
+        attacker = make_attacker(
+            grad_momentum_agreement=True,
+            grad_momentum_agreement_strength=0.5,
+            grad_momentum_conflict_suppression_strength=0.25,
+        )
+        update = torch.tensor([[[[2.0, -2.0, 2.0, -2.0, 0.0]]]])
+        grad = torch.tensor([[[[1.0, -1.0, -1.0, 1.0, 1.0]]]])
+        tuned = attacker._apply_grad_momentum_agreement(update, grad)
+        expected = torch.tensor([[[[2.5, -2.5, 1.75, -1.75, 0.0]]]])
+        self.assertTrue(torch.equal(tuned, expected))
+
+    def test_grad_momentum_conflict_suppression_can_run_without_reinforcement(self):
+        attacker = make_attacker(
+            grad_momentum_agreement=True,
+            grad_momentum_agreement_strength=0.0,
+            grad_momentum_conflict_suppression_strength=0.25,
+        )
+        update = torch.tensor([[[[2.0, -2.0, 2.0, -2.0, 0.0]]]])
+        grad = torch.tensor([[[[1.0, -1.0, -1.0, 1.0, 1.0]]]])
+        tuned = attacker._apply_grad_momentum_agreement(update, grad)
+        expected = torch.tensor([[[[2.0, -2.0, 1.75, -1.75, 0.0]]]])
+        self.assertTrue(torch.equal(tuned, expected))
+
+    def test_grad_momentum_agreement_can_be_disabled(self):
+        attacker = make_attacker(grad_momentum_agreement=False)
+        update = torch.randn(1, 1, 2, 2)
+        grad = torch.randn(1, 1, 2, 2)
+        tuned = attacker._apply_grad_momentum_agreement(update, grad)
+        self.assertTrue(torch.equal(tuned, update))
+
+    def test_grad_momentum_agreement_validates_parameters(self):
+        with self.assertRaises(ValueError):
+            make_attacker(grad_momentum_agreement_strength=-0.1)
+        with self.assertRaises(ValueError):
+            make_attacker(grad_momentum_conflict_suppression_strength=-0.1)
+
+
     def test_feature_attack_supports_4d_feature_maps(self):
         attacker = LMDSSAttacker(
             TinyMapModel(),
