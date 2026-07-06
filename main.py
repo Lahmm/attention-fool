@@ -46,6 +46,7 @@ def create_attacker(
     spatial_sign_reinforcement_strength: float = 0.2,
     grad_momentum_agreement: bool = False,
     grad_momentum_agreement_strength: float = 0.2,
+    grad_momentum_agreement_sigma: float = 0.0,
     grad_momentum_conflict_suppression_strength: float = 0.0,
     fft_sign_regularization: bool = False,
     fft_sign_regularization_cutoff: float = 0.25,
@@ -82,6 +83,7 @@ def create_attacker(
         spatial_sign_reinforcement_strength=spatial_sign_reinforcement_strength,
         grad_momentum_agreement=grad_momentum_agreement,
         grad_momentum_agreement_strength=grad_momentum_agreement_strength,
+        grad_momentum_agreement_sigma=grad_momentum_agreement_sigma,
         grad_momentum_conflict_suppression_strength=grad_momentum_conflict_suppression_strength,
         fft_sign_regularization=fft_sign_regularization,
         fft_sign_regularization_cutoff=fft_sign_regularization_cutoff,
@@ -231,6 +233,7 @@ def parse_args():
     parser.add_argument("--spatial-sign-reinforcement-strength", type=float, default=0.2, help="Strength added along confident local sign directions before update.sign().")
     parser.add_argument("--grad-momentum-agreement", action="store_true", help="Enable pre-sign reinforcement where current gradient and update/momentum signs agree.")
     parser.add_argument("--grad-momentum-agreement-strength", type=float, default=0.2, help="Strength added along update signs that are still supported by the current gradient.")
+    parser.add_argument("--grad-momentum-agreement-sigma", type=float, default=0.0, help="Gaussian sigma for spatially smoothing the grad/momentum agreement mask. 0 disables smoothing.")
     parser.add_argument("--grad-momentum-conflict-suppression-strength", type=float, default=0.0, help="Strength subtracted from update signs that conflict with the current gradient before update.sign().")
     parser.add_argument("--fft-sign-regularization", action="store_true", help="Apply FFT low-pass filtering to update before sign() to suppress high-freq sign-field fragmentation.")
     parser.add_argument("--fft-sign-regularization-cutoff", type=float, default=0.25, help="Frequency cutoff radius for --fft-sign-regularization. Preserves frequencies below this radius.")
@@ -282,6 +285,7 @@ def main(
     spatial_sign_reinforcement_strength: float = 0.2,
     grad_momentum_agreement: bool = False,
     grad_momentum_agreement_strength: float = 0.2,
+    grad_momentum_agreement_sigma: float = 0.0,
     grad_momentum_conflict_suppression_strength: float = 0.0,
     fft_sign_regularization: bool = False,
     fft_sign_regularization_cutoff: float = 0.25,
@@ -338,6 +342,7 @@ def main(
         spatial_sign_reinforcement_strength=spatial_sign_reinforcement_strength,
         grad_momentum_agreement=grad_momentum_agreement,
         grad_momentum_agreement_strength=grad_momentum_agreement_strength,
+        grad_momentum_agreement_sigma=grad_momentum_agreement_sigma,
         grad_momentum_conflict_suppression_strength=grad_momentum_conflict_suppression_strength,
         fft_sign_regularization=fft_sign_regularization,
         fft_sign_regularization_cutoff=fft_sign_regularization_cutoff,
@@ -391,6 +396,7 @@ if __name__ == "__main__":
         spatial_sign_reinforcement_strength=args.spatial_sign_reinforcement_strength,
         grad_momentum_agreement=args.grad_momentum_agreement,
         grad_momentum_agreement_strength=args.grad_momentum_agreement_strength,
+        grad_momentum_agreement_sigma=args.grad_momentum_agreement_sigma,
         grad_momentum_conflict_suppression_strength=args.grad_momentum_conflict_suppression_strength,
         fft_sign_regularization=args.fft_sign_regularization,
         fft_sign_regularization_cutoff=args.fft_sign_regularization_cutoff,

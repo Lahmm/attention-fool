@@ -215,6 +215,24 @@ class FeatureAttackTests(unittest.TestCase):
         expected = torch.tensor([[[[2.5, -2.5, 2.0, -2.0, 0.0]]]])
         self.assertTrue(torch.equal(tuned, expected))
 
+    def test_grad_momentum_agreement_spatial_smoothing_weights_local_agreement(self):
+        attacker = make_attacker(
+            grad_momentum_agreement=True,
+            grad_momentum_agreement_strength=0.5,
+            grad_momentum_agreement_sigma=1.0,
+        )
+        update = torch.ones(1, 1, 8, 8)
+        uniform_grad = torch.ones_like(update)
+        isolated_grad = -torch.ones_like(update)
+        isolated_grad[:, :, 4, 4] = 1.0
+
+        tuned_uniform = attacker._apply_grad_momentum_agreement(update, uniform_grad)
+        tuned_isolated = attacker._apply_grad_momentum_agreement(update, isolated_grad)
+
+        self.assertAlmostEqual(float(tuned_uniform.mean()), 1.5, places=4)
+        self.assertLess(float(tuned_isolated[:, :, 4, 4]), float(tuned_uniform[:, :, 4, 4]))
+        self.assertGreater(float(tuned_isolated[:, :, 4, 5]), 1.0)
+
     def test_grad_momentum_agreement_suppresses_conflicting_update_signs(self):
         attacker = make_attacker(
             grad_momentum_agreement=True,
@@ -249,6 +267,8 @@ class FeatureAttackTests(unittest.TestCase):
     def test_grad_momentum_agreement_validates_parameters(self):
         with self.assertRaises(ValueError):
             make_attacker(grad_momentum_agreement_strength=-0.1)
+        with self.assertRaises(ValueError):
+            make_attacker(grad_momentum_agreement_sigma=-0.1)
         with self.assertRaises(ValueError):
             make_attacker(grad_momentum_conflict_suppression_strength=-0.1)
 

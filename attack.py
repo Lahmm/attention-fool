@@ -122,6 +122,7 @@ class LMDSSAttacker:
         spatial_sign_reinforcement_strength: float = 0.2,
         grad_momentum_agreement: bool = False,
         grad_momentum_agreement_strength: float = 0.2,
+        grad_momentum_agreement_sigma: float = 0.0,
         grad_momentum_conflict_suppression_strength: float = 0.0,
         fft_sign_regularization: bool = False,
         fft_sign_regularization_cutoff: float = 0.25,
@@ -168,6 +169,10 @@ class LMDSSAttacker:
         if grad_momentum_agreement_strength < 0:
             raise ValueError(
                 f"grad_momentum_agreement_strength must be non-negative, got {grad_momentum_agreement_strength}."
+            )
+        if grad_momentum_agreement_sigma < 0:
+            raise ValueError(
+                f"grad_momentum_agreement_sigma must be non-negative, got {grad_momentum_agreement_sigma}."
             )
         if grad_momentum_conflict_suppression_strength < 0:
             raise ValueError(
@@ -227,6 +232,7 @@ class LMDSSAttacker:
         self.spatial_sign_reinforcement_strength = float(spatial_sign_reinforcement_strength)
         self.grad_momentum_agreement = bool(grad_momentum_agreement)
         self.grad_momentum_agreement_strength = float(grad_momentum_agreement_strength)
+        self.grad_momentum_agreement_sigma = float(grad_momentum_agreement_sigma)
         self.grad_momentum_conflict_suppression_strength = float(
             grad_momentum_conflict_suppression_strength
         )
@@ -319,7 +325,15 @@ class LMDSSAttacker:
         grad_direction = grad.sign()
         agreement = (update_direction != 0) & update_direction.eq(grad_direction)
         conflict = (update_direction != 0) & (grad_direction != 0) & update_direction.ne(grad_direction)
-        reinforce = agreement.to(update.dtype) * update_direction
+        agreement_weight = agreement.to(update.dtype)
+        if self.grad_momentum_agreement_sigma > 0:
+            radius = max(1, int(math.ceil(3.0 * self.grad_momentum_agreement_sigma)))
+            kernel = self._build_gaussian_kernel(
+                kernel_size=2 * radius + 1,
+                sigma=self.grad_momentum_agreement_sigma,
+            ).to(update.device, update.dtype)
+            agreement_weight = self._apply_depthwise_kernel(agreement_weight, kernel).clamp(0.0, 1.0)
+        reinforce = agreement_weight * update_direction
         suppress = conflict.to(update.dtype) * update_direction
         return (
             update
