@@ -36,6 +36,7 @@ def create_attacker(
     guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
     guide_aug_strength: float = 0.2,
+    patch_dropout_ratio: float = 0.3,
     dim_adjoint_echo: bool = False,
     lowmid_grad_tuning: bool = False,
     lowmid_grad_rotation_strength: float = 0.5,
@@ -81,6 +82,7 @@ def create_attacker(
         guide_aug_methods=guide_aug_methods,
         guide_aug_copies=guide_aug_copies,
         guide_aug_strength=guide_aug_strength,
+        patch_dropout_ratio=patch_dropout_ratio,
         dim_adjoint_echo=dim_adjoint_echo,
         lowmid_grad_tuning=lowmid_grad_tuning,
         lowmid_grad_rotation_strength=lowmid_grad_rotation_strength,
@@ -236,9 +238,10 @@ def parse_args():
     parser.add_argument("--dim-padding-mode", choices=["zero", "detach-blur", "grad-blur"], default="zero", help="DIM padding fill mode. zero keeps standard black padding; detach-blur fills padding with detached blurred pixels; grad-blur fills padding with differentiable blurred pixels.")
     parser.add_argument("--dim-padding-blur-kernel", type=int, default=5, help="Odd blur kernel size for --dim-padding-mode detach-blur.")
     parser.add_argument("--guide-aug", action="store_true", help="Enable whole-image forward augmentation.")
-    parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,dim_resonance,dim_stable_edge,dim_stable_edge_mix,dim_consensus_trajectory,dim_consensus_evidence_trajectory,lowmid_shift,white_noise,antithetic_transport,natural_spectrum_transport,antithetic_filter_bank,multiscale_adjoint_ensemble,orthogonal_photometric_ensemble,orthogonal_spherical_smoothing,antithetic_jitter_cubature,feature_trajectory_dropout.")
+    parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,dim_resonance,dim_stable_edge,dim_stable_edge_mix,dim_consensus_trajectory,dim_consensus_evidence_trajectory,lowmid_shift,white_noise,antithetic_transport,natural_spectrum_transport,antithetic_filter_bank,multiscale_adjoint_ensemble,orthogonal_photometric_ensemble,orthogonal_spherical_smoothing,antithetic_jitter_cubature,feature_trajectory_dropout,patch_dropout.")
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Random copies per guide augmentation method.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
+    parser.add_argument("--patch-dropout-ratio", type=float, default=0.3, help="Fraction of high-score patches to randomly drop per copy (0-1].")
     parser.add_argument("--dim-adjoint-echo", action="store_true", help="Apply DIM-adjoint echo after guide augmentation and before DIM/normalization.")
     parser.add_argument("--lowmid-grad-tuning", action="store_true", help="Enable low/mid frequency gradient tuning after TI smoothing and before momentum.")
     parser.add_argument("--lowmid-grad-rotation-strength", type=float, default=0.5, help="Givens rotation strength toward low/mid-frequency gradient subspace when --lowmid-grad-tuning is enabled.")
@@ -299,6 +302,7 @@ def main(
     guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
     guide_aug_strength: float = 0.2,
+    patch_dropout_ratio: float = 0.3,
     dim_adjoint_echo: bool = False,
     lowmid_grad_tuning: bool = False,
     lowmid_grad_rotation_strength: float = 0.5,
@@ -364,6 +368,7 @@ def main(
         guide_aug_methods=guide_aug_methods,
         guide_aug_copies=guide_aug_copies,
         guide_aug_strength=guide_aug_strength,
+        patch_dropout_ratio=patch_dropout_ratio,
         dim_adjoint_echo=dim_adjoint_echo,
         lowmid_grad_tuning=lowmid_grad_tuning,
         lowmid_grad_rotation_strength=lowmid_grad_rotation_strength,
@@ -426,6 +431,7 @@ if __name__ == "__main__":
         guide_aug_methods=args.guide_aug_method,
         guide_aug_copies=args.guide_aug_copies,
         guide_aug_strength=args.guide_aug_strength,
+        patch_dropout_ratio=args.patch_dropout_ratio,
         dim_adjoint_echo=args.dim_adjoint_echo,
         lowmid_grad_tuning=args.lowmid_grad_tuning,
         lowmid_grad_rotation_strength=args.lowmid_grad_rotation_strength,

@@ -112,6 +112,7 @@ class LMDSSAttacker:
         guide_aug_methods: tuple[str, ...] = ("dropout",),
         guide_aug_copies: int = 3,
         guide_aug_strength: float = 0.2,
+        patch_dropout_ratio: float = 0.3,
         dim_adjoint_echo: bool = False,
         lowmid_grad_tuning: bool = False,
         lowmid_grad_rotation_strength: float = 0.5,
@@ -306,6 +307,7 @@ class LMDSSAttacker:
             "orthogonal_spherical_smoothing",
             "antithetic_jitter_cubature",
             "feature_trajectory_dropout",
+            "patch_dropout",
         )
         if not self.guide_aug_methods:
             raise ValueError("guide_aug_methods must contain at least one method.")
@@ -318,6 +320,10 @@ class LMDSSAttacker:
         self.guide_aug_strength = float(guide_aug_strength)
         if self.guide_aug_strength < 0:
             raise ValueError(f"guide_aug_strength must be non-negative, got {guide_aug_strength}.")
+        self.patch_dropout_ratio = float(patch_dropout_ratio)
+        if not 0.0 < self.patch_dropout_ratio <= 1.0:
+            raise ValueError(f"patch_dropout_ratio must be in (0, 1], got {patch_dropout_ratio}.")
+        self._patch_scores: torch.Tensor | None = None
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
 
     def _denormalize(self, images: torch.Tensor) -> torch.Tensor:
@@ -999,6 +1005,8 @@ class LMDSSAttacker:
             return self._white_noise_pixels(pixels)
         if method == "natural_spectrum_transport":
             return self._natural_spectrum_transport_pixels(pixels)
+        if method == "patch_dropout":
+            return self._patch_dropout_pixels(pixels)
         raise ValueError(f"Unsupported guide augmentation method: {method}")
 
     def _guide_augmented_pixels(
@@ -1204,6 +1212,90 @@ class LMDSSAttacker:
             )
         return features[:, 1:, :]
 
+    def _compute_patch_scores(self, clean_pixels: torch.Tensor) -> None:
+        """Compute CLS-cosine patch importance scores from the feature layer.
+
+        Stores scores in ``self._patch_scores`` as a [B, N_patch] tensor.
+        Only valid when ``self.attack_loss == "feature"``.
+        """
+        if self.attack_loss != "feature" or not self._patch_dropout_active():
+            self._patch_scores = None
+            return
+        normalized = self._normalize(clean_pixels)
+        if self.feature_scope == "stage":
+            outputs = self.model(normalized, return_attn=False, return_stage_tokens=True)
+        else:
+            outputs = self.model(normalized, return_attn=False, return_tokens=True)
+        if not isinstance(outputs, tuple) or len(outputs) != 2:
+            self._patch_scores = None
+            return
+        _logits, feature_outputs = outputs
+        num_layers = len(feature_outputs)
+        layer_idx = self.feature_layer if self.feature_layer >= 0 else num_layers + self.feature_layer
+        if layer_idx < 0 or layer_idx >= num_layers:
+            self._patch_scores = None
+            return
+        features = feature_outputs[layer_idx]  # [B, N_patch+1, D]
+        if features.ndim != 3 or features.size(1) < 2:
+            self._patch_scores = None
+            return
+        cls_token = features[:, 0, :]          # [B, D]
+        patch_tokens = features[:, 1:, :]      # [B, N_patch, D]
+        self._patch_scores = F.cosine_similarity(
+            patch_tokens, cls_token.unsqueeze(1).expand_as(patch_tokens), dim=-1,
+        ).detach()
+
+    def _patch_dropout_active(self) -> bool:
+        return "patch_dropout" in self.guide_aug_methods
+
+    def _patch_dropout_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        """Randomly corrupt high-scoring patch regions per guide augmentation copy.
+
+        Marks patches whose CLS cosine score exceeds the batch-wise median,
+        then randomly selects ``patch_dropout_ratio`` of them and applies
+        dropout-style pixel corruption to the corresponding 16x16 image regions.
+        """
+        if self._patch_scores is None or self.patch_dropout_ratio <= 0:
+            return pixels
+
+        B, C, H, W = pixels.shape
+        N = self._patch_scores.size(1)  # 196 for ViT-B/16
+        gh = int(round(N ** 0.5))
+        if gh * gh != N:
+            return pixels  # non-square grid; fall back to identity
+
+        # Mark high-scoring patches: above batch-wise median
+        median = self._patch_scores.median(dim=1, keepdim=True).values  # [B, 1]
+        high_mask = (self._patch_scores > median).to(torch.float32)     # [B, N]
+
+        # Per batch item: randomly select patch_dropout_ratio of high-score patches
+        drop_mask = torch.zeros_like(high_mask)  # [B, N]
+        for b in range(B):
+            high_idx = high_mask[b].nonzero(as_tuple=True)[0]
+            n_high = high_idx.numel()
+            if n_high == 0:
+                continue
+            n_drop = max(1, int(round(n_high * self.patch_dropout_ratio)))
+            perm = torch.randperm(n_high, device=pixels.device)[:n_drop]
+            drop_mask[b, high_idx[perm]] = 1.0
+
+        # Upsample patch mask [B, N] → pixel mask [B, 1, H, W]
+        pixel_mask = F.interpolate(
+            drop_mask.view(B, 1, gh, gh),
+            size=(H, W),
+            mode="nearest",
+        )  # [B, 1, H, W]
+        pixel_mask = pixel_mask.expand(-1, C, -1, -1)  # [B, C, H, W]
+
+        # Apply dropout-style corruption
+        noise = torch.rand_like(pixels)
+        blurred = F.avg_pool2d(pixels, kernel_size=5, stride=1, padding=2)
+        corrupt = 0.5 * noise + 0.5 * blurred
+        strength = self.guide_aug_strength
+        corrupted = torch.clamp(pixels * (1.0 - strength) + corrupt * strength, 0.0, 1.0)
+
+        return torch.where(pixel_mask > 0.5, corrupted, pixels)
+
     def _attack_grad_terms(
         self,
         pixels: torch.Tensor,
@@ -1241,9 +1333,11 @@ class LMDSSAttacker:
 
         clean_pixels = self._denormalize(images).detach()
         clean_feature_target = None
+        self._patch_scores = None
         if self.attack_loss == "feature":
             with torch.no_grad():
                 clean_feature_target = self._extract_layer_patch_features(clean_pixels).detach()
+                self._compute_patch_scores(clean_pixels)
 
         adv_pixels = clean_pixels.clone().detach()
         momentum = torch.zeros_like(adv_pixels)
