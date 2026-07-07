@@ -423,7 +423,7 @@ def main(
         "ni": ni,
         "dim": dim,
         "dim_resize_range": list(dim_resize_range),
-        "dim_mode": dim_mode,
+        "dim_mode": "full-random",
         "dim_padding_mode": dim_padding_mode,
         "dim_padding_blur_kernel": dim_padding_blur_kernel,
         "guide_aug": guide_aug,
