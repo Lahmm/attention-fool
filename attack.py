@@ -1287,14 +1287,8 @@ class LMDSSAttacker:
         )  # [B, 1, H, W]
         pixel_mask = pixel_mask.expand(-1, C, -1, -1)  # [B, C, H, W]
 
-        # Apply dropout-style corruption
-        noise = torch.rand_like(pixels)
-        blurred = F.avg_pool2d(pixels, kernel_size=5, stride=1, padding=2)
-        corrupt = 0.5 * noise + 0.5 * blurred
-        strength = self.guide_aug_strength
-        corrupted = torch.clamp(pixels * (1.0 - strength) + corrupt * strength, 0.0, 1.0)
-
-        return torch.where(pixel_mask > 0.5, corrupted, pixels)
+        # Zero out selected patch regions
+        return torch.where(pixel_mask > 0.5, torch.zeros_like(pixels), pixels)
 
     def _attack_grad_terms(
         self,
