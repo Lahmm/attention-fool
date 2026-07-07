@@ -243,7 +243,7 @@ class LMDSSAttacker:
         if dim_mode not in valid_dim_modes:
             raise ValueError(f"dim_mode must be one of {valid_dim_modes}, got {dim_mode!r}.")
         self.dim_mode = dim_mode
-        valid_dim_padding_modes = ("zero", "detach-blur")
+        valid_dim_padding_modes = ("zero", "detach-blur", "grad-blur")
         if dim_padding_mode not in valid_dim_padding_modes:
             raise ValueError(
                 f"dim_padding_mode must be one of {valid_dim_padding_modes}, got {dim_padding_mode!r}."
@@ -592,7 +592,9 @@ class LMDSSAttacker:
             F.pad(images, (padding, padding, padding, padding), mode="reflect"),
             kernel_size=kernel_size,
             stride=1,
-        ).detach()
+        )
+        if self.dim_padding_mode == "detach-blur":
+            fill = fill.detach()
         mask = torch.zeros_like(images[:, :1])
         mask[..., top:top + new_h, left:left + new_w] = 1.0
         return zero_padded * mask + fill * (1.0 - mask)

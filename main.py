@@ -233,7 +233,7 @@ def parse_args():
     parser.add_argument("--ni", action="store_true", help="Enable Nesterov lookahead. Requires MI.")
     parser.add_argument("--dim", action="store_true", help="Enable input diversity (DIM).")
     parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0), help='DIM resize scale range, e.g. "0.85,1.0".')
-    parser.add_argument("--dim-padding-mode", choices=["zero", "detach-blur"], default="zero", help="DIM padding fill mode. zero keeps standard black padding; detach-blur fills padding forward values with detached blurred pixels.")
+    parser.add_argument("--dim-padding-mode", choices=["zero", "detach-blur", "grad-blur"], default="zero", help="DIM padding fill mode. zero keeps standard black padding; detach-blur fills padding with detached blurred pixels; grad-blur fills padding with differentiable blurred pixels.")
     parser.add_argument("--dim-padding-blur-kernel", type=int, default=5, help="Odd blur kernel size for --dim-padding-mode detach-blur.")
     parser.add_argument("--guide-aug", action="store_true", help="Enable whole-image forward augmentation.")
     parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,dim_resonance,dim_stable_edge,dim_stable_edge_mix,dim_consensus_trajectory,dim_consensus_evidence_trajectory,lowmid_shift,white_noise,antithetic_transport,natural_spectrum_transport,antithetic_filter_bank,multiscale_adjoint_ensemble,orthogonal_photometric_ensemble,orthogonal_spherical_smoothing,antithetic_jitter_cubature,feature_trajectory_dropout.")
