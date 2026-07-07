@@ -103,6 +103,8 @@ class LMDSSAttacker:
         input_diversity: bool = False,
         dim_resize_range: tuple[float, float] = (0.85, 1.0),
         dim_mode: str = "full-random",
+        dim_padding_mode: str = "zero",
+        dim_padding_blur_kernel: int = 5,
         use_momentum: bool = True,
         momentum_decay: float = 1.0,
         nesterov: bool = False,
@@ -241,6 +243,17 @@ class LMDSSAttacker:
         if dim_mode not in valid_dim_modes:
             raise ValueError(f"dim_mode must be one of {valid_dim_modes}, got {dim_mode!r}.")
         self.dim_mode = dim_mode
+        valid_dim_padding_modes = ("zero", "detach-blur")
+        if dim_padding_mode not in valid_dim_padding_modes:
+            raise ValueError(
+                f"dim_padding_mode must be one of {valid_dim_padding_modes}, got {dim_padding_mode!r}."
+            )
+        if dim_padding_blur_kernel <= 0 or dim_padding_blur_kernel % 2 == 0:
+            raise ValueError(
+                f"dim_padding_blur_kernel must be a positive odd integer, got {dim_padding_blur_kernel}."
+            )
+        self.dim_padding_mode = dim_padding_mode
+        self.dim_padding_blur_kernel = int(dim_padding_blur_kernel)
         self._fixed_dim_params = None
         self.use_momentum = bool(use_momentum)
         self.nesterov = bool(nesterov)
@@ -565,12 +578,24 @@ class LMDSSAttacker:
         left = torch.randint(0, pad_w + 1, (1,), device=images.device).item() if pad_w > 0 else 0
         return new_h, new_w, top, left
 
-    @staticmethod
-    def _apply_dim_transform(images: torch.Tensor, params: tuple[int, int, int, int]) -> torch.Tensor:
+    def _apply_dim_transform(self, images: torch.Tensor, params: tuple[int, int, int, int]) -> torch.Tensor:
         _batch_size, _channels, height, width = images.shape
         new_h, new_w, top, left = params
         resized = F.interpolate(images, size=(new_h, new_w), mode="bilinear", align_corners=False)
-        return F.pad(resized, (left, width - new_w - left, top, height - new_h - top), value=0.0)
+        zero_padded = F.pad(resized, (left, width - new_w - left, top, height - new_h - top), value=0.0)
+        if self.dim_padding_mode == "zero":
+            return zero_padded
+
+        kernel_size = self.dim_padding_blur_kernel
+        padding = kernel_size // 2
+        fill = F.avg_pool2d(
+            F.pad(images, (padding, padding, padding, padding), mode="reflect"),
+            kernel_size=kernel_size,
+            stride=1,
+        ).detach()
+        mask = torch.zeros_like(images[:, :1])
+        mask[..., top:top + new_h, left:left + new_w] = 1.0
+        return zero_padded * mask + fill * (1.0 - mask)
 
     def _input_diversity(self, images: torch.Tensor) -> torch.Tensor:
         if not self.input_diversity:

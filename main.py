@@ -30,6 +30,8 @@ def create_attacker(
     ni: bool = False,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
     dim_mode: str = "full-random",
+    dim_padding_mode: str = "zero",
+    dim_padding_blur_kernel: int = 5,
     guide_aug: bool = False,
     guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
@@ -70,6 +72,8 @@ def create_attacker(
         input_diversity=dim,
         dim_resize_range=dim_resize_range,
         dim_mode=dim_mode,
+        dim_padding_mode=dim_padding_mode,
+        dim_padding_blur_kernel=dim_padding_blur_kernel,
         use_momentum=mi,
         momentum_decay=mi_decay,
         nesterov=ni,
@@ -229,6 +233,8 @@ def parse_args():
     parser.add_argument("--ni", action="store_true", help="Enable Nesterov lookahead. Requires MI.")
     parser.add_argument("--dim", action="store_true", help="Enable input diversity (DIM).")
     parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0), help='DIM resize scale range, e.g. "0.85,1.0".')
+    parser.add_argument("--dim-padding-mode", choices=["zero", "detach-blur"], default="zero", help="DIM padding fill mode. zero keeps standard black padding; detach-blur fills padding forward values with detached blurred pixels.")
+    parser.add_argument("--dim-padding-blur-kernel", type=int, default=5, help="Odd blur kernel size for --dim-padding-mode detach-blur.")
     parser.add_argument("--guide-aug", action="store_true", help="Enable whole-image forward augmentation.")
     parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,dim_resonance,dim_stable_edge,dim_stable_edge_mix,dim_consensus_trajectory,dim_consensus_evidence_trajectory,lowmid_shift,white_noise,antithetic_transport,natural_spectrum_transport,antithetic_filter_bank,multiscale_adjoint_ensemble,orthogonal_photometric_ensemble,orthogonal_spherical_smoothing,antithetic_jitter_cubature,feature_trajectory_dropout.")
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Random copies per guide augmentation method.")
@@ -287,6 +293,8 @@ def main(
     ni: bool = False,
     dim: bool = False,
     dim_resize_range: tuple[float, float] = (0.85, 1.0),
+    dim_padding_mode: str = "zero",
+    dim_padding_blur_kernel: int = 5,
     guide_aug: bool = False,
     guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
@@ -350,6 +358,8 @@ def main(
         mi_decay=mi_decay,
         ni=ni,
         dim_resize_range=dim_resize_range,
+        dim_padding_mode=dim_padding_mode,
+        dim_padding_blur_kernel=dim_padding_blur_kernel,
         guide_aug=guide_aug,
         guide_aug_methods=guide_aug_methods,
         guide_aug_copies=guide_aug_copies,
@@ -409,6 +419,8 @@ if __name__ == "__main__":
         ni=args.ni,
         dim=args.dim,
         dim_resize_range=args.dim_resize_range,
+        dim_padding_mode=args.dim_padding_mode,
+        dim_padding_blur_kernel=args.dim_padding_blur_kernel,
         whitebox_model=args.whitebox_model,
         guide_aug=args.guide_aug,
         guide_aug_methods=args.guide_aug_method,
