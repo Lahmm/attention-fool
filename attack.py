@@ -1218,7 +1218,7 @@ class LMDSSAttacker:
         Stores scores in ``self._patch_scores`` as a [B, N_patch] tensor.
         Called once per step using the current adversarial image.
         """
-        if self.attack_loss != "feature" or not self._patch_dropout_active():
+        if not self._patch_dropout_active():
             self._patch_scores = None
             return
         with torch.no_grad():
