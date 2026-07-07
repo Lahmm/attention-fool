@@ -1,4 +1,5 @@
 import argparse
+import json
 import shutil
 from pathlib import Path
 
@@ -408,6 +409,43 @@ def main(
         output_dir=str(resolved_output_dir),
         max_attacked_samples=max_attacked_samples,
     )
+
+    # Save complete attack parameters for reproducibility and CSV recording
+    attack_params = {
+        "whitebox_model": whitebox_model,
+        "max_attacked_samples": max_attacked_samples,
+        "epsilon": epsilon,
+        "step_size": step_size if step_size is not None else epsilon / steps,
+        "steps": steps,
+        "ti_sigma": ti_sigma,
+        "mi": mi,
+        "mi_decay": mi_decay,
+        "ni": ni,
+        "dim": dim,
+        "dim_resize_range": list(dim_resize_range),
+        "dim_mode": dim_mode,
+        "dim_padding_mode": dim_padding_mode,
+        "dim_padding_blur_kernel": dim_padding_blur_kernel,
+        "guide_aug": guide_aug,
+        "guide_aug_methods": list(guide_aug_methods),
+        "guide_aug_copies": guide_aug_copies,
+        "guide_aug_strength": guide_aug_strength,
+        "patch_dropout_ratio": patch_dropout_ratio,
+        "dim_adjoint_echo": dim_adjoint_echo,
+        "attack_loss": attack_loss,
+        "feature_layer": feature_layer,
+        "feature_scope": feature_scope,
+        "lowmid_grad_tuning": lowmid_grad_tuning,
+        "lowmid_dss_filter": lowmid_dss_filter,
+        "spatial_sign_reinforcement": spatial_sign_reinforcement,
+        "grad_momentum_agreement": grad_momentum_agreement,
+        "cross_step_sign_vote": cross_step_sign_vote,
+        "view_consistent_agreement": view_consistent_agreement,
+        "fft_sign_regularization": fft_sign_regularization,
+    }
+    params_path = resolved_output_dir / "attack_params.json"
+    params_path.write_text(json.dumps(attack_params, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"Saved attack parameters to: {params_path}")
 
 
 if __name__ == "__main__":

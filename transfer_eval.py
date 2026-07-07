@@ -441,6 +441,14 @@ def main(
             "tf32": use_tf32,
             "num_images": len(image_paths),
         }
+        # Include attack parameters if available alongside the images
+        attack_params_path = resolved_image_dir / "attack_params.json"
+        if attack_params_path.exists():
+            try:
+                record_params["attack_params"] = attack_params_path.read_text(encoding="utf-8")
+                attack_params_path.unlink()
+            except (OSError, ValueError):
+                record_params["attack_params"] = ""
         csv_path = record_results(
             repo_path=repo_path,
             exp_name=exp_name or infer_exp_name(image_dir_path),
