@@ -127,6 +127,9 @@ class LMDSSAttacker:
         cross_step_sign_vote: bool = False,
         cross_step_sign_vote_window: int = 5,
         cross_step_sign_vote_strength: float = 0.2,
+        view_consistent_agreement: bool = False,
+        view_consistent_agreement_strength: float = 0.3,
+        view_consistent_agreement_threshold: float = 0.0,
         fft_sign_regularization: bool = False,
         fft_sign_regularization_cutoff: float = 0.25,
         fft_sign_regularization_strength: float = 0.5,
@@ -190,6 +193,16 @@ class LMDSSAttacker:
             raise ValueError(
                 f"cross_step_sign_vote_strength must be non-negative, got {cross_step_sign_vote_strength}."
             )
+        if view_consistent_agreement_strength < 0:
+            raise ValueError(
+                "view_consistent_agreement_strength must be non-negative, "
+                f"got {view_consistent_agreement_strength}."
+            )
+        if not 0.0 <= view_consistent_agreement_threshold <= 1.0:
+            raise ValueError(
+                "view_consistent_agreement_threshold must be in [0, 1], "
+                f"got {view_consistent_agreement_threshold}."
+            )
         if fft_sign_regularization_cutoff <= 0 or fft_sign_regularization_cutoff > 1.0:
             raise ValueError(
                 f"fft_sign_regularization_cutoff must be in (0, 1], got {fft_sign_regularization_cutoff}."
@@ -250,6 +263,9 @@ class LMDSSAttacker:
         self.cross_step_sign_vote = bool(cross_step_sign_vote)
         self.cross_step_sign_vote_window = int(cross_step_sign_vote_window)
         self.cross_step_sign_vote_strength = float(cross_step_sign_vote_strength)
+        self.view_consistent_agreement = bool(view_consistent_agreement)
+        self.view_consistent_agreement_strength = float(view_consistent_agreement_strength)
+        self.view_consistent_agreement_threshold = float(view_consistent_agreement_threshold)
         self.fft_sign_regularization = bool(fft_sign_regularization)
         self.fft_sign_regularization_cutoff = float(fft_sign_regularization_cutoff)
         self.fft_sign_regularization_strength = float(fft_sign_regularization_strength)
@@ -354,6 +370,26 @@ class LMDSSAttacker:
             + self.grad_momentum_agreement_strength * reinforce
             - self.grad_momentum_conflict_suppression_strength * suppress
         )
+
+    def _apply_view_consistent_agreement(
+        self,
+        update: torch.Tensor,
+        term_grads: tuple[torch.Tensor, ...] | None,
+    ) -> torch.Tensor:
+        if (
+            not self.view_consistent_agreement
+            or self.view_consistent_agreement_strength <= 0
+            or not term_grads
+        ):
+            return update
+        update_direction = update.sign()
+        view_signs = torch.stack([term.sign() for term in term_grads], dim=0)
+        support = view_signs.eq(update_direction.unsqueeze(0)).to(update.dtype).mean(dim=0)
+        support = support * update_direction.ne(0).to(update.dtype)
+        if self.view_consistent_agreement_threshold > 0:
+            support = support * (support >= self.view_consistent_agreement_threshold).to(update.dtype)
+        reinforce = support * update_direction
+        return update + self.view_consistent_agreement_strength * reinforce
 
     def _apply_cross_step_sign_vote(
         self,
@@ -1196,7 +1232,7 @@ class LMDSSAttacker:
                     grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
 
             grad_pixels = grad_pixels.detach().requires_grad_(True)
-            if self.lowmid_dss_filter:
+            if self.lowmid_dss_filter or self.view_consistent_agreement:
                 grad, term_grads = self._attack_grad_terms(
                     grad_pixels, labels, clean_feature_target
                 )
@@ -1209,6 +1245,11 @@ class LMDSSAttacker:
             grad = self._apply_lowmid_dss_filter(grad, term_grads)
             grad = self._tune_lowmid_gradient(grad)
             grad = self._normalize_grad(grad)
+            agreement_term_grads = None
+            if term_grads is not None:
+                agreement_term_grads = tuple(
+                    self._normalize_grad(self._tune_lowmid_gradient(term)) for term in term_grads
+                )
 
             if self.use_momentum:
                 momentum = self.decay * momentum + grad
@@ -1216,6 +1257,7 @@ class LMDSSAttacker:
             else:
                 update = grad
             update = self._apply_grad_momentum_agreement(update, grad)
+            update = self._apply_view_consistent_agreement(update, agreement_term_grads)
             update = self._apply_cross_step_sign_vote(update, sign_history)
             update = self._apply_spatial_sign_reinforcement(update)
             update = self._apply_fft_sign_regularization(update)

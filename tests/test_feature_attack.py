@@ -273,6 +273,53 @@ class FeatureAttackTests(unittest.TestCase):
             make_attacker(grad_momentum_conflict_suppression_strength=-0.1)
 
 
+    def test_view_consistent_agreement_reinforces_by_view_support(self):
+        attacker = make_attacker(
+            view_consistent_agreement=True,
+            view_consistent_agreement_strength=0.6,
+        )
+        update = torch.tensor([[[[1.0, 1.0, 1.0, -1.0]]]])
+        term_grads = (
+            torch.tensor([[[[1.0, 1.0, -1.0, -1.0]]]]),
+            torch.tensor([[[[1.0, -1.0, -1.0, -1.0]]]]),
+            torch.tensor([[[[-1.0, -1.0, -1.0, 1.0]]]]),
+        )
+        tuned = attacker._apply_view_consistent_agreement(update, term_grads)
+        expected = torch.tensor([[[[1.4, 1.2, 1.0, -1.4]]]])
+        self.assertTrue(torch.allclose(tuned, expected))
+
+    def test_view_consistent_agreement_threshold_filters_weak_support(self):
+        attacker = make_attacker(
+            view_consistent_agreement=True,
+            view_consistent_agreement_strength=0.6,
+            view_consistent_agreement_threshold=0.5,
+        )
+        update = torch.tensor([[[[1.0, 1.0, 1.0, -1.0]]]])
+        term_grads = (
+            torch.tensor([[[[1.0, 1.0, -1.0, -1.0]]]]),
+            torch.tensor([[[[1.0, -1.0, -1.0, -1.0]]]]),
+            torch.tensor([[[[-1.0, -1.0, -1.0, 1.0]]]]),
+        )
+        tuned = attacker._apply_view_consistent_agreement(update, term_grads)
+        expected = torch.tensor([[[[1.4, 1.0, 1.0, -1.4]]]])
+        self.assertTrue(torch.allclose(tuned, expected))
+
+    def test_view_consistent_agreement_can_be_disabled_or_missing_terms(self):
+        update = torch.randn(1, 1, 2, 2)
+        disabled = make_attacker(view_consistent_agreement=False)
+        enabled = make_attacker(view_consistent_agreement=True)
+        self.assertTrue(torch.equal(disabled._apply_view_consistent_agreement(update, (update,)), update))
+        self.assertTrue(torch.equal(enabled._apply_view_consistent_agreement(update, None), update))
+
+    def test_view_consistent_agreement_validates_parameters(self):
+        with self.assertRaises(ValueError):
+            make_attacker(view_consistent_agreement_strength=-0.1)
+        with self.assertRaises(ValueError):
+            make_attacker(view_consistent_agreement_threshold=-0.1)
+        with self.assertRaises(ValueError):
+            make_attacker(view_consistent_agreement_threshold=1.1)
+
+
     def test_cross_step_sign_vote_uses_recent_majority_signs(self):
         attacker = make_attacker(
             cross_step_sign_vote=True,

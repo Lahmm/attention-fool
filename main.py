@@ -51,6 +51,9 @@ def create_attacker(
     cross_step_sign_vote: bool = False,
     cross_step_sign_vote_window: int = 5,
     cross_step_sign_vote_strength: float = 0.2,
+    view_consistent_agreement: bool = False,
+    view_consistent_agreement_strength: float = 0.3,
+    view_consistent_agreement_threshold: float = 0.0,
     fft_sign_regularization: bool = False,
     fft_sign_regularization_cutoff: float = 0.25,
     fft_sign_regularization_strength: float = 0.5,
@@ -91,6 +94,9 @@ def create_attacker(
         cross_step_sign_vote=cross_step_sign_vote,
         cross_step_sign_vote_window=cross_step_sign_vote_window,
         cross_step_sign_vote_strength=cross_step_sign_vote_strength,
+        view_consistent_agreement=view_consistent_agreement,
+        view_consistent_agreement_strength=view_consistent_agreement_strength,
+        view_consistent_agreement_threshold=view_consistent_agreement_threshold,
         fft_sign_regularization=fft_sign_regularization,
         fft_sign_regularization_cutoff=fft_sign_regularization_cutoff,
         fft_sign_regularization_strength=fft_sign_regularization_strength,
@@ -244,6 +250,9 @@ def parse_args():
     parser.add_argument("--cross-step-sign-vote", action="store_true", help="Enable pre-sign reinforcement from a recent-window majority vote over update signs.")
     parser.add_argument("--cross-step-sign-vote-window", type=int, default=5, help="Number of recent update sign fields used by --cross-step-sign-vote.")
     parser.add_argument("--cross-step-sign-vote-strength", type=float, default=0.2, help="Strength added along cross-step majority-vote sign directions before update.sign().")
+    parser.add_argument("--view-consistent-agreement", action="store_true", help="Enable pre-sign reinforcement where trajectory/view gradients support the current update sign.")
+    parser.add_argument("--view-consistent-agreement-strength", type=float, default=0.3, help="Strength added along update signs proportionally to view-gradient sign support.")
+    parser.add_argument("--view-consistent-agreement-threshold", type=float, default=0.0, help="Minimum view support needed for --view-consistent-agreement. 0 keeps soft support.")
     parser.add_argument("--fft-sign-regularization", action="store_true", help="Apply FFT low-pass filtering to update before sign() to suppress high-freq sign-field fragmentation.")
     parser.add_argument("--fft-sign-regularization-cutoff", type=float, default=0.25, help="Frequency cutoff radius for --fft-sign-regularization. Preserves frequencies below this radius.")
     parser.add_argument("--fft-sign-regularization-strength", type=float, default=0.5, help="Interpolation strength (0=keep original, 1=fully filtered) for --fft-sign-regularization.")
@@ -299,6 +308,9 @@ def main(
     cross_step_sign_vote: bool = False,
     cross_step_sign_vote_window: int = 5,
     cross_step_sign_vote_strength: float = 0.2,
+    view_consistent_agreement: bool = False,
+    view_consistent_agreement_strength: float = 0.3,
+    view_consistent_agreement_threshold: float = 0.0,
     fft_sign_regularization: bool = False,
     fft_sign_regularization_cutoff: float = 0.25,
     fft_sign_regularization_strength: float = 0.5,
@@ -359,6 +371,9 @@ def main(
         cross_step_sign_vote=cross_step_sign_vote,
         cross_step_sign_vote_window=cross_step_sign_vote_window,
         cross_step_sign_vote_strength=cross_step_sign_vote_strength,
+        view_consistent_agreement=view_consistent_agreement,
+        view_consistent_agreement_strength=view_consistent_agreement_strength,
+        view_consistent_agreement_threshold=view_consistent_agreement_threshold,
         fft_sign_regularization=fft_sign_regularization,
         fft_sign_regularization_cutoff=fft_sign_regularization_cutoff,
         fft_sign_regularization_strength=fft_sign_regularization_strength,
@@ -416,6 +431,9 @@ if __name__ == "__main__":
         cross_step_sign_vote=args.cross_step_sign_vote,
         cross_step_sign_vote_window=args.cross_step_sign_vote_window,
         cross_step_sign_vote_strength=args.cross_step_sign_vote_strength,
+        view_consistent_agreement=args.view_consistent_agreement,
+        view_consistent_agreement_strength=args.view_consistent_agreement_strength,
+        view_consistent_agreement_threshold=args.view_consistent_agreement_threshold,
         fft_sign_regularization=args.fft_sign_regularization,
         fft_sign_regularization_cutoff=args.fft_sign_regularization_cutoff,
         fft_sign_regularization_strength=args.fft_sign_regularization_strength,
