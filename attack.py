@@ -1212,38 +1212,39 @@ class LMDSSAttacker:
             )
         return features[:, 1:, :]
 
-    def _compute_patch_scores(self, clean_pixels: torch.Tensor) -> None:
+    def _compute_patch_scores(self, pixels: torch.Tensor) -> None:
         """Compute CLS-cosine patch importance scores from the feature layer.
 
         Stores scores in ``self._patch_scores`` as a [B, N_patch] tensor.
-        Only valid when ``self.attack_loss == "feature"``.
+        Called once per step using the current adversarial image.
         """
         if self.attack_loss != "feature" or not self._patch_dropout_active():
             self._patch_scores = None
             return
-        normalized = self._normalize(clean_pixels)
-        if self.feature_scope == "stage":
-            outputs = self.model(normalized, return_attn=False, return_stage_tokens=True)
-        else:
-            outputs = self.model(normalized, return_attn=False, return_tokens=True)
-        if not isinstance(outputs, tuple) or len(outputs) != 2:
-            self._patch_scores = None
-            return
-        _logits, feature_outputs = outputs
-        num_layers = len(feature_outputs)
-        layer_idx = self.feature_layer if self.feature_layer >= 0 else num_layers + self.feature_layer
-        if layer_idx < 0 or layer_idx >= num_layers:
-            self._patch_scores = None
-            return
-        features = feature_outputs[layer_idx]  # [B, N_patch+1, D]
-        if features.ndim != 3 or features.size(1) < 2:
-            self._patch_scores = None
-            return
-        cls_token = features[:, 0, :]          # [B, D]
-        patch_tokens = features[:, 1:, :]      # [B, N_patch, D]
-        self._patch_scores = F.cosine_similarity(
-            patch_tokens, cls_token.unsqueeze(1).expand_as(patch_tokens), dim=-1,
-        ).detach()
+        with torch.no_grad():
+            normalized = self._normalize(pixels.detach())
+            if self.feature_scope == "stage":
+                outputs = self.model(normalized, return_attn=False, return_stage_tokens=True)
+            else:
+                outputs = self.model(normalized, return_attn=False, return_tokens=True)
+            if not isinstance(outputs, tuple) or len(outputs) != 2:
+                self._patch_scores = None
+                return
+            _logits, feature_outputs = outputs
+            num_layers = len(feature_outputs)
+            layer_idx = self.feature_layer if self.feature_layer >= 0 else num_layers + self.feature_layer
+            if layer_idx < 0 or layer_idx >= num_layers:
+                self._patch_scores = None
+                return
+            features = feature_outputs[layer_idx]  # [B, N_patch+1, D]
+            if features.ndim != 3 or features.size(1) < 2:
+                self._patch_scores = None
+                return
+            cls_token = features[:, 0, :]          # [B, D]
+            patch_tokens = features[:, 1:, :]      # [B, N_patch, D]
+            self._patch_scores = F.cosine_similarity(
+                patch_tokens, cls_token.unsqueeze(1).expand_as(patch_tokens), dim=-1,
+            )
 
     def _patch_dropout_active(self) -> bool:
         return "patch_dropout" in self.guide_aug_methods
@@ -1331,7 +1332,6 @@ class LMDSSAttacker:
         if self.attack_loss == "feature":
             with torch.no_grad():
                 clean_feature_target = self._extract_layer_patch_features(clean_pixels).detach()
-                self._compute_patch_scores(clean_pixels)
 
         adv_pixels = clean_pixels.clone().detach()
         momentum = torch.zeros_like(adv_pixels)
@@ -1346,7 +1346,9 @@ class LMDSSAttacker:
                     delta = torch.clamp(delta, -self.epsilon, self.epsilon)
                     grad_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0)
 
-            grad_pixels = grad_pixels.detach().requires_grad_(True)
+            grad_pixels = grad_pixels.detach()
+            self._compute_patch_scores(grad_pixels)
+            grad_pixels = grad_pixels.requires_grad_(True)
             if self.lowmid_dss_filter or self.view_consistent_agreement:
                 grad, term_grads = self._attack_grad_terms(
                     grad_pixels, labels, clean_feature_target
