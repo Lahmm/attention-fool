@@ -113,6 +113,8 @@ class LMDSSAttacker:
         guide_aug_copies: int = 3,
         guide_aug_strength: float = 0.2,
         patch_dropout_ratio: float = 0.3,
+        patch_dropout_score_mode: str = "high",
+        patch_dropout_fill_mode: str = "zero_noise",
         dim_adjoint_echo: bool = False,
         lowmid_grad_tuning: bool = False,
         lowmid_grad_rotation_strength: float = 0.5,
@@ -323,6 +325,24 @@ class LMDSSAttacker:
         self.patch_dropout_ratio = float(patch_dropout_ratio)
         if not 0.0 < self.patch_dropout_ratio <= 1.0:
             raise ValueError(f"patch_dropout_ratio must be in (0, 1], got {patch_dropout_ratio}.")
+        self.patch_dropout_score_mode = str(patch_dropout_score_mode)
+        if self.patch_dropout_score_mode not in ("high", "low"):
+            raise ValueError(
+                "patch_dropout_score_mode must be 'high' or 'low', "
+                f"got {patch_dropout_score_mode!r}."
+            )
+        self.patch_dropout_fill_mode = str(patch_dropout_fill_mode)
+        valid_patch_dropout_fill_modes = (
+            "zero_noise",
+            "random_high_score_inpaint",
+            "context_high_score_blend",
+            "nearest_high_score_inpaint",
+        )
+        if self.patch_dropout_fill_mode not in valid_patch_dropout_fill_modes:
+            raise ValueError(
+                "patch_dropout_fill_mode must be one of "
+                f"{valid_patch_dropout_fill_modes}, got {patch_dropout_fill_mode!r}."
+            )
         self._patch_scores: torch.Tensor | None = None
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
 
@@ -1250,11 +1270,12 @@ class LMDSSAttacker:
         return "patch_dropout" in self.guide_aug_methods
 
     def _patch_dropout_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
-        """Randomly corrupt high-scoring patch regions per guide augmentation copy.
+        """Randomly corrupt selected patch-score regions per guide augmentation copy.
 
-        Marks patches whose CLS cosine score exceeds the batch-wise median,
-        then randomly selects ``patch_dropout_ratio`` of them and applies
-        dropout-style pixel corruption to the corresponding 16x16 image regions.
+        Marks patches above or below the per-image median CLS cosine score
+        according to ``patch_dropout_score_mode``, then randomly selects
+        ``patch_dropout_ratio`` of them and applies the configured fill mode
+        to the corresponding image regions.
         """
         if self._patch_scores is None or self.patch_dropout_ratio <= 0:
             return pixels
@@ -1265,20 +1286,24 @@ class LMDSSAttacker:
         if gh * gh != N:
             return pixels  # non-square grid; fall back to identity
 
-        # Mark high-scoring patches: above batch-wise median
+        # Mark the configured score subset around the per-image median.
         median = self._patch_scores.median(dim=1, keepdim=True).values  # [B, 1]
-        high_mask = (self._patch_scores > median).to(torch.float32)     # [B, N]
+        if self.patch_dropout_score_mode == "high":
+            candidate_mask = self._patch_scores > median
+        else:
+            candidate_mask = self._patch_scores < median
+        candidate_mask = candidate_mask.to(torch.float32)               # [B, N]
 
-        # Per batch item: randomly select patch_dropout_ratio of high-score patches
-        drop_mask = torch.zeros_like(high_mask)  # [B, N]
+        # Per batch item: randomly select patch_dropout_ratio of candidate patches.
+        drop_mask = torch.zeros_like(candidate_mask)  # [B, N]
         for b in range(B):
-            high_idx = high_mask[b].nonzero(as_tuple=True)[0]
-            n_high = high_idx.numel()
-            if n_high == 0:
+            candidate_idx = candidate_mask[b].nonzero(as_tuple=True)[0]
+            n_candidates = candidate_idx.numel()
+            if n_candidates == 0:
                 continue
-            n_drop = max(1, int(round(n_high * self.patch_dropout_ratio)))
-            perm = torch.randperm(n_high, device=pixels.device)[:n_drop]
-            drop_mask[b, high_idx[perm]] = 1.0
+            n_drop = max(1, int(round(n_candidates * self.patch_dropout_ratio)))
+            perm = torch.randperm(n_candidates, device=pixels.device)[:n_drop]
+            drop_mask[b, candidate_idx[perm]] = 1.0
 
         # Upsample patch mask [B, N] → pixel mask [B, 1, H, W]
         pixel_mask = F.interpolate(
@@ -1288,12 +1313,65 @@ class LMDSSAttacker:
         )  # [B, 1, H, W]
         pixel_mask = pixel_mask.expand(-1, C, -1, -1)  # [B, C, H, W]
 
-        # Zero out selected patch regions, add white noise to the rest
-        noised = torch.clamp(
-            pixels + self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype),
-            0.0, 1.0,
-        )
-        return torch.where(pixel_mask > 0.5, torch.zeros_like(pixels), noised)
+        # Zero out selected patch regions, add noise to the rest.
+        # Noise is injected in the frequency domain (FFT) so that low/mid-
+        # frequency components also carry diversity, not just per-pixel HF.
+        work = pixels.float()
+        freq = torch.fft.rfft2(work, dim=(-2, -1), norm="ortho")
+        freq = freq + self.guide_aug_strength * torch.randn_like(freq, dtype=freq.dtype)
+        noised = torch.fft.irfft2(freq, s=(H, W), dim=(-2, -1), norm="ortho")
+        noised = noised.to(pixels.dtype).clamp(0.0, 1.0)
+        if self.patch_dropout_fill_mode == "zero_noise":
+            return torch.where(pixel_mask > 0.5, torch.zeros_like(pixels), noised)
+
+        local_context = F.avg_pool2d(pixels, kernel_size=5, stride=1, padding=2)
+        fill_pixels = local_context
+        patch_h = H // gh
+        patch_w = W // gh
+        if patch_h * gh == H and patch_w * gh == W:
+            source_patches = (
+                pixels.view(B, C, gh, patch_h, gh, patch_w)
+                .permute(0, 2, 4, 1, 3, 5)
+                .reshape(B, N, C, patch_h, patch_w)
+            )
+            local_patches = (
+                local_context.view(B, C, gh, patch_h, gh, patch_w)
+                .permute(0, 2, 4, 1, 3, 5)
+                .reshape(B, N, C, patch_h, patch_w)
+            )
+            fill_patches = local_patches.clone()
+            high_score_mask = self._patch_scores > median
+            for b in range(B):
+                target_idx = drop_mask[b].nonzero(as_tuple=True)[0]
+                donor_pool = high_score_mask[b].nonzero(as_tuple=True)[0]
+                if target_idx.numel() == 0 or donor_pool.numel() == 0:
+                    continue
+                if self.patch_dropout_fill_mode in ("context_high_score_blend", "random_high_score_inpaint"):
+                    donor_idx = donor_pool[
+                        torch.randint(donor_pool.numel(), (target_idx.numel(),), device=pixels.device)
+                    ]
+                    donor_patches = source_patches[b, donor_idx]
+                    if self.patch_dropout_fill_mode == "context_high_score_blend":
+                        fill_patches[b, target_idx] = 0.5 * local_patches[b, target_idx] + 0.5 * donor_patches
+                    else:
+                        fill_patches[b, target_idx] = donor_patches
+                else:
+                    target_y = target_idx.div(gh, rounding_mode="floor")
+                    target_x = target_idx.remainder(gh)
+                    donor_y = donor_pool.div(gh, rounding_mode="floor")
+                    donor_x = donor_pool.remainder(gh)
+                    distance = (
+                        (target_y[:, None] - donor_y[None, :]).square()
+                        + (target_x[:, None] - donor_x[None, :]).square()
+                    )
+                    nearest = distance.argmin(dim=1)
+                    fill_patches[b, target_idx] = source_patches[b, donor_pool[nearest]]
+            fill_pixels = (
+                fill_patches.view(B, gh, gh, C, patch_h, patch_w)
+                .permute(0, 3, 1, 4, 2, 5)
+                .reshape(B, C, H, W)
+            )
+        return torch.where(pixel_mask > 0.5, fill_pixels.clamp(0.0, 1.0), noised)
 
     def _attack_grad_terms(
         self,
