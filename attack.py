@@ -1288,8 +1288,12 @@ class LMDSSAttacker:
         )  # [B, 1, H, W]
         pixel_mask = pixel_mask.expand(-1, C, -1, -1)  # [B, C, H, W]
 
-        # Zero out selected patch regions
-        return torch.where(pixel_mask > 0.5, torch.zeros_like(pixels), pixels)
+        # Zero out selected patch regions, add white noise to the rest
+        noised = torch.clamp(
+            pixels + self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype),
+            0.0, 1.0,
+        )
+        return torch.where(pixel_mask > 0.5, torch.zeros_like(pixels), noised)
 
     def _attack_grad_terms(
         self,
