@@ -39,8 +39,17 @@ def create_attacker(
     guide_aug_strength: float = 0.2,
     patch_dropout_ratio: float = 0.3,
     patch_dropout_score_mode: str = "high",
+    patch_dropout_sampling_mode: str = "random",
+    patch_dropout_score_quantile_jitter: float = 0.0,
+    patch_dropout_score_noise: float = 0.0,
     patch_dropout_fill_mode: str = "zero_noise",
     patch_dropout_noise_mode: str = "gaussian",
+    token_patch_dropout_layer: int = 0,
+    token_cls_noise: bool = False,
+    token_score_cls_noise: bool = False,
+    token_score_patch_noise: bool = False,
+    token_cls_noise_mode: str = "gaussian",
+    token_cls_noise_strength: float | None = None,
     dim_adjoint_echo: bool = False,
     lowmid_grad_tuning: bool = False,
     lowmid_grad_rotation_strength: float = 0.5,
@@ -89,8 +98,17 @@ def create_attacker(
         guide_aug_strength=guide_aug_strength,
         patch_dropout_ratio=patch_dropout_ratio,
         patch_dropout_score_mode=patch_dropout_score_mode,
+        patch_dropout_sampling_mode=patch_dropout_sampling_mode,
+        patch_dropout_score_quantile_jitter=patch_dropout_score_quantile_jitter,
+        patch_dropout_score_noise=patch_dropout_score_noise,
         patch_dropout_fill_mode=patch_dropout_fill_mode,
         patch_dropout_noise_mode=patch_dropout_noise_mode,
+        token_patch_dropout_layer=token_patch_dropout_layer,
+        token_cls_noise=token_cls_noise,
+        token_score_cls_noise=token_score_cls_noise,
+        token_score_patch_noise=token_score_patch_noise,
+        token_cls_noise_mode=token_cls_noise_mode,
+        token_cls_noise_strength=token_cls_noise_strength,
         dim_adjoint_echo=dim_adjoint_echo,
         lowmid_grad_tuning=lowmid_grad_tuning,
         lowmid_grad_rotation_strength=lowmid_grad_rotation_strength,
@@ -247,13 +265,22 @@ def parse_args():
     parser.add_argument("--dim-padding-mode", choices=["zero", "detach-blur", "grad-blur"], default="zero", help="DIM padding fill mode. zero keeps standard black padding; detach-blur fills padding with detached blurred pixels; grad-blur fills padding with differentiable blurred pixels.")
     parser.add_argument("--dim-padding-blur-kernel", type=int, default=5, help="Odd blur kernel size for --dim-padding-mode detach-blur.")
     parser.add_argument("--guide-aug", action="store_true", help="Enable whole-image forward augmentation.")
-    parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,dim_resonance,dim_stable_edge,dim_stable_edge_mix,dim_consensus_trajectory,dim_consensus_evidence_trajectory,lowmid_shift,white_noise,antithetic_transport,natural_spectrum_transport,antithetic_filter_bank,multiscale_adjoint_ensemble,orthogonal_photometric_ensemble,orthogonal_spherical_smoothing,antithetic_jitter_cubature,feature_trajectory_dropout,patch_dropout.")
+    parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,dim_resonance,dim_stable_edge,dim_stable_edge_mix,dim_consensus_trajectory,dim_consensus_evidence_trajectory,lowmid_shift,white_noise,antithetic_transport,natural_spectrum_transport,antithetic_filter_bank,multiscale_adjoint_ensemble,orthogonal_photometric_ensemble,orthogonal_spherical_smoothing,antithetic_jitter_cubature,feature_trajectory_dropout,patch_dropout,patch_dropout_cls_jitter,patch_token_dropout_mix,token_patch_dropout.")
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Random copies per guide augmentation method.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
     parser.add_argument("--patch-dropout-ratio", type=float, default=0.3, help="Fraction of selected patch-score subset to randomly drop per copy (0-1].")
-    parser.add_argument("--patch-dropout-score-mode", choices=["high", "low"], default="high", help="Patch score subset used by patch_dropout: high drops patches above median, low drops patches below median.")
+    parser.add_argument("--patch-dropout-score-mode", choices=["high", "low", "all"], default="high", help="Patch score subset used by patch_dropout: high drops patches above median, low drops patches below median, all drops uniformly at random.")
+    parser.add_argument("--patch-dropout-sampling-mode", choices=["random", "bernoulli", "extreme", "score_weighted"], default="random", help="How patch_dropout samples from the selected score subset.")
+    parser.add_argument("--patch-dropout-score-quantile-jitter", type=float, default=0.0, help="Randomly jitter the patch score split quantile around 0.5 by this radius.")
+    parser.add_argument("--patch-dropout-score-noise", type=float, default=0.0, help="Std-scaled Gaussian noise added to patch scores before selecting the score subset.")
     parser.add_argument("--patch-dropout-fill-mode", choices=["zero_noise", "random_high_score_inpaint", "context_high_score_blend", "nearest_high_score_inpaint"], default="zero_noise", help="Fill strategy for selected patch_dropout regions.")
     parser.add_argument("--patch-dropout-noise-mode", choices=["gaussian", "antithetic_gaussian", "rademacher_cubature", "patch_cov_gaussian", "score_weighted_gaussian", "inverse_score_weighted_gaussian", "opponent_channel_gaussian", "patch_embed_rowspace", "opponent_smooth_patch", "hybrid_dct_midfreq"], default="gaussian", help="Noise structure for non-selected patch_dropout regions.")
+    parser.add_argument("--token-patch-dropout-layer", type=int, default=0, help="Transformer block count to run before token_patch_dropout injection. 0 injects after patch embedding.")
+    parser.add_argument("--token-cls-noise", action="store_true", help="Add guide-strength Gaussian jitter to the CLS token in token_patch_dropout.")
+    parser.add_argument("--token-score-cls-noise", action="store_true", help="Use the jittered CLS token when scoring patches in token_patch_dropout.")
+    parser.add_argument("--token-score-patch-noise", action="store_true", help="Use noisy patch tokens when scoring patches in token_patch_dropout.")
+    parser.add_argument("--token-cls-noise-mode", choices=["gaussian", "mahalanobis"], default="gaussian", help="Noise distribution for CLS token jitter. mahalanobis uses patch-token empirical covariance.")
+    parser.add_argument("--token-cls-noise-strength", type=float, default=None, help="CLS noise strength override. Defaults to --guide-aug-strength when not set.")
     parser.add_argument("--dim-adjoint-echo", action="store_true", help="Apply DIM-adjoint echo after guide augmentation and before DIM/normalization.")
     parser.add_argument("--lowmid-grad-tuning", action="store_true", help="Enable low/mid frequency gradient tuning after TI smoothing and before momentum.")
     parser.add_argument("--lowmid-grad-rotation-strength", type=float, default=0.5, help="Givens rotation strength toward low/mid-frequency gradient subspace when --lowmid-grad-tuning is enabled.")
@@ -317,8 +344,17 @@ def main(
     guide_aug_strength: float = 0.2,
     patch_dropout_ratio: float = 0.3,
     patch_dropout_score_mode: str = "high",
+    patch_dropout_sampling_mode: str = "random",
+    patch_dropout_score_quantile_jitter: float = 0.0,
+    patch_dropout_score_noise: float = 0.0,
     patch_dropout_fill_mode: str = "zero_noise",
     patch_dropout_noise_mode: str = "gaussian",
+    token_patch_dropout_layer: int = 0,
+    token_cls_noise: bool = False,
+    token_score_cls_noise: bool = False,
+    token_score_patch_noise: bool = False,
+    token_cls_noise_mode: str = "gaussian",
+    token_cls_noise_strength: float | None = None,
     dim_adjoint_echo: bool = False,
     lowmid_grad_tuning: bool = False,
     lowmid_grad_rotation_strength: float = 0.5,
@@ -387,8 +423,17 @@ def main(
         guide_aug_strength=guide_aug_strength,
         patch_dropout_ratio=patch_dropout_ratio,
         patch_dropout_score_mode=patch_dropout_score_mode,
+        patch_dropout_sampling_mode=patch_dropout_sampling_mode,
+        patch_dropout_score_quantile_jitter=patch_dropout_score_quantile_jitter,
+        patch_dropout_score_noise=patch_dropout_score_noise,
         patch_dropout_fill_mode=patch_dropout_fill_mode,
         patch_dropout_noise_mode=patch_dropout_noise_mode,
+        token_patch_dropout_layer=token_patch_dropout_layer,
+        token_cls_noise=token_cls_noise,
+        token_score_cls_noise=token_score_cls_noise,
+        token_score_patch_noise=token_score_patch_noise,
+        token_cls_noise_mode=token_cls_noise_mode,
+        token_cls_noise_strength=token_cls_noise_strength,
         dim_adjoint_echo=dim_adjoint_echo,
         lowmid_grad_tuning=lowmid_grad_tuning,
         lowmid_grad_rotation_strength=lowmid_grad_rotation_strength,
@@ -452,8 +497,15 @@ def main(
         "guide_aug_strength": guide_aug_strength,
         "patch_dropout_ratio": patch_dropout_ratio,
         "patch_dropout_score_mode": patch_dropout_score_mode,
+        "patch_dropout_sampling_mode": patch_dropout_sampling_mode,
+        "patch_dropout_score_quantile_jitter": patch_dropout_score_quantile_jitter,
+        "patch_dropout_score_noise": patch_dropout_score_noise,
         "patch_dropout_fill_mode": patch_dropout_fill_mode,
         "patch_dropout_noise_mode": patch_dropout_noise_mode,
+        "token_patch_dropout_layer": token_patch_dropout_layer,
+        "token_cls_noise": token_cls_noise,
+        "token_score_cls_noise": token_score_cls_noise,
+        "token_score_patch_noise": token_score_patch_noise,
         "dim_adjoint_echo": dim_adjoint_echo,
         "attack_loss": attack_loss,
         "feature_layer": feature_layer,
@@ -494,8 +546,17 @@ if __name__ == "__main__":
         guide_aug_strength=args.guide_aug_strength,
         patch_dropout_ratio=args.patch_dropout_ratio,
         patch_dropout_score_mode=args.patch_dropout_score_mode,
+        patch_dropout_sampling_mode=args.patch_dropout_sampling_mode,
+        patch_dropout_score_quantile_jitter=args.patch_dropout_score_quantile_jitter,
+        patch_dropout_score_noise=args.patch_dropout_score_noise,
         patch_dropout_fill_mode=args.patch_dropout_fill_mode,
         patch_dropout_noise_mode=args.patch_dropout_noise_mode,
+        token_patch_dropout_layer=args.token_patch_dropout_layer,
+        token_cls_noise=args.token_cls_noise,
+        token_score_cls_noise=args.token_score_cls_noise,
+        token_score_patch_noise=args.token_score_patch_noise,
+        token_cls_noise_mode=args.token_cls_noise_mode,
+        token_cls_noise_strength=args.token_cls_noise_strength,
         dim_adjoint_echo=args.dim_adjoint_echo,
         lowmid_grad_tuning=args.lowmid_grad_tuning,
         lowmid_grad_rotation_strength=args.lowmid_grad_rotation_strength,

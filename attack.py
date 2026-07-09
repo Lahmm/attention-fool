@@ -345,9 +345,9 @@ class LMDSSAttacker:
         if not 0.0 <= self.patch_dropout_ratio <= 1.0:
             raise ValueError(f"patch_dropout_ratio must be in [0, 1], got {patch_dropout_ratio}.")
         self.patch_dropout_score_mode = str(patch_dropout_score_mode)
-        if self.patch_dropout_score_mode not in ("high", "low"):
+        if self.patch_dropout_score_mode not in ("high", "low", "all"):
             raise ValueError(
-                "patch_dropout_score_mode must be 'high' or 'low', "
+                "patch_dropout_score_mode must be 'high', 'low', or 'all', "
                 f"got {patch_dropout_score_mode!r}."
             )
         self.patch_dropout_sampling_mode = str(patch_dropout_sampling_mode)
@@ -1388,6 +1388,8 @@ class LMDSSAttacker:
 
         if self.patch_dropout_score_mode == "high":
             return scores > threshold
+        if self.patch_dropout_score_mode == "all":
+            return torch.ones_like(scores, dtype=torch.bool)
         return scores < threshold
 
     def _make_cls_noise(
@@ -1404,24 +1406,6 @@ class LMDSSAttacker:
             return self.token_cls_noise_strength * token_rms * cls_raw.unsqueeze(1)
         return self.token_cls_noise_strength * token_rms * torch.randn_like(patch_tokens[:, :1, :])
 
-    def _get_score_tokens(
-        self,
-        base_model,
-        normalized: torch.Tensor,
-        score_layer_idx: int,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """no_grad: embed + run up to score_layer_idx, return (CLS, patches)."""
-        with torch.no_grad():
-            x = base_model.patch_embed(normalized)
-            x = base_model._pos_embed(x)
-            x = base_model.patch_drop(x)
-            x = base_model.norm_pre(x)
-            if score_layer_idx > 0:
-                x = self._run_vit_blocks(base_model.blocks, x, 0, score_layer_idx)
-            if x.ndim != 3 or x.size(1) < 2:
-                raise ValueError(f"Expected CLS + patch tokens, got {tuple(x.shape)}.")
-            return x[:, :1, :], x[:, 1:, :]
-
     def _attack_loss_for_token_patch_dropout(
         self,
         pixels: torch.Tensor,
@@ -1436,14 +1420,27 @@ class LMDSSAttacker:
 
         forward_pixels = self._dim_adjoint_echo_pixels(pixels) if self.dim_adjoint_echo else pixels
         model_pixels = self._input_diversity(forward_pixels)
-        normalized = self._normalize(model_pixels)
         num_blocks = len(base_model.blocks)
 
-        # ---- Phase 1: deep scoring (no_grad) ----
-        # Use --feature-layer for scoring depth, independent of dropout injection.
+        # Single patch_embed — shared tensor, grad preserved for forward branch.
+        x = base_model.patch_embed(self._normalize(model_pixels))
+        x = base_model._pos_embed(x)
+        x = base_model.patch_drop(x)
+        x = base_model.norm_pre(x)
+        if x.ndim != 3 or x.size(1) < 2:
+            raise ValueError(f"Expected CLS + patch tokens at L=0, got {tuple(x.shape)}.")
+
+        # ---- Scoring branch: deep CLS via detach (decoupled from injection) ----
         score_layer_idx = self.feature_layer if self.feature_layer >= 0 else num_blocks + self.feature_layer
         score_layer_idx = max(0, min(score_layer_idx, num_blocks))
-        cls_score, patch_score = self._get_score_tokens(base_model, normalized, score_layer_idx)
+        if score_layer_idx > 0:
+            with torch.no_grad():
+                x_score = self._run_vit_blocks(base_model.blocks, x, 0, score_layer_idx)
+            cls_score = x_score[:, :1, :]
+            patch_score = x_score[:, 1:, :]
+        else:
+            cls_score = x[:, :1, :].detach()
+            patch_score = x[:, 1:, :].detach()
         score_cls = cls_score
         if self.token_score_cls_noise and self.token_cls_noise_strength > 0:
             score_cls = cls_score + self._make_cls_noise(patch_score)
@@ -1453,14 +1450,7 @@ class LMDSSAttacker:
         candidate_mask = self._patch_score_candidate_mask(scores)
         drop_mask = self._sample_patch_dropout_mask(scores, candidate_mask)
 
-        # ---- Phase 2: forward with dropout injected at L=0 ----
-        x = base_model.patch_embed(normalized)
-        x = base_model._pos_embed(x)
-        x = base_model.patch_drop(x)
-        x = base_model.norm_pre(x)
-        if x.ndim != 3 or x.size(1) < 2:
-            raise ValueError(f"Expected CLS + patch tokens at L=0, got {tuple(x.shape)}.")
-
+        # ---- Forward branch: injection always at L=0, grad flows through x ----
         cls_L0 = x[:, :1, :]
         patch_L0 = x[:, 1:, :]
         jittered_cls = cls_L0
