@@ -19,69 +19,99 @@ patch_embed(W) → pos_embed → norm_pre → [CLS₀, 196 patch tokens]
 
 20 copies 的梯度取平均 → MI(decay=1.0) → sign → 更新像素。10 steps。
 
-## 二、数学支撑
+## 二、理论基础：Lazy Aggregation（CVPR 2026）
 
-### 2.1 为什么低分 patch 是应该被丢弃的
+Zhang et al. "Vision Transformers Need More Than Registers" 发现 ViT 中存在
+**lazy aggregation** 行为：CLS token 通过全局注意力，**将语义无关的背景 patch
+作为捷径来编码全局语义**。其根因是全局注意力机制 + 粗粒度分类监督——模型没有
+被强制区分前景和背景，于是走了最省力的路。
 
-Patch embedding W ∈ R^(768×768)，有效秩 ~120。W 的奇异值极度倾斜（σ_max²/σ_min² ≈ 27717）。
+该文证明 register tokens（Darcet et al.）不足以解决此问题，提出选择性融合
+patch 特征到 CLS 来抑制背景捷径。
 
-- 高 σ 方向：W 放大，编码分类有用特征（边缘、纹理、颜色对比）
-- 低 σ 方向：W 压缩，背景/平滑区域的信号被压制
+## 三、我们的攻击：阻断背景捷径
 
-**在 L=0，cos(patch_i, CLS₀) 测量的是 patch_i 在 W 的「高 σ 方向」上的投影分量。** CLS₀ 作为一个可学习的全局锚点向量，在预训练中被优化为对准这些高信息方向。低分 patch 在高 σ 方向上投影弱 → 被 W 压缩 → 在 token 空间表现出异常高的 L2 norm。
+### 3.1 核心洞察
 
-**实证：** 50 张图上，低分 patch 的 L2 norm 是高分 patch 的 1.14 倍（50/50 一致）。
+CLS₀ 是 patch_embed 中可学习的全局锚点向量。cos(patch_i, CLS₀) 测量 patch_i
+与这个全局表示方向的对齐程度。**低分 patch 就是 ViT 用来走捷径的背景区域。**
 
-### 2.2 为什么高 norm 是问题
+**实证（50 张 ImageNet 图，100% 一致）：**
 
-Self-attention 的 softmax 赋权：
-
-$$\alpha_{ij} = \frac{\exp(Q_i \cdot K_j)}{\sum_k \exp(Q_i \cdot K_k)}$$
-
-高 norm 的 K_j 使指数项 $\exp(Q_i \cdot K_j)$ 即使在语义方向不匹配时也占据主导。softmax 是指数函数，对输入的量级敏感——这不是训练偏好，是数学必然。Darcet et al. 将此定义为「outlier token 劫持注意力」。
-
-### 2.3 为什么零化它们有效
-
-零化 dropout 的 token 后，softmax 权重重新分配：
-
-$$\alpha_{ij}' = \frac{\exp(Q_i \cdot K_j)}{\sum_{k \notin \text{drop}} \exp(Q_i \cdot K_k)}$$
-
-分母去掉高 norm 项 → 真正有判别信息的 token 获得更多注意力权重 → 损失对这些 token 更敏感 → 梯度迫使扰动覆盖真正重要的图像区域 → 扰动可迁移。
-
-### 2.4 为什么 L=0 评分而不是深层
-
-| | L=0 | 深层 (L=-1) |
+| | 低分 patch（被丢弃）| 高分 patch（保留）|
 |---|---|---|
-| CLS 含义 | 全局可学习锚点（所有图相同） | 图像特定语义表示 |
-| patch 间平均 cos | 0.18（多样化） | 0.80（近乎共线） |
-| CLS 噪声的 rank 扰动 | 0.97（有效重排） | 0.996（几乎不变） |
-| 评分本质 | 通用底层先验 | 白盒注意力偏好 |
-| 迁移性 | 可迁移 | 过拟合白盒 |
+| L2 norm | **13.55** | 11.90 |
+| CLS cosine | 0.11 | 0.14 |
 
-L=0 评分基于 W 学的通用先验——所有 ViT 的 patch_embed 学到类似的底层特征 → low-score 命中的是「架构层面的信息贫乏区」而非「图像特定的背景」→ 所有 ViT 共享这个结构 → 可迁移。
+低分 patch 的 L2 norm 显著更高——模型为这些「捷径 patch」分配了额外的表示容量，
+因为它们在训练中被证明是有用的廉价特征。
 
-深层 CLS 经过 12 层自注意力，已携带 vit_base 特定的语义偏好。深层 patch 因自注意力收敛而同质化（cos=0.80），CLS 噪声无法有效分化它们。
+### 3.2 攻击逻辑
 
-### 2.5 对手通道（opponent-channel）噪声
+ViT 的推理过程：
 
-逐像素通道协方差：
+$$\text{logits} = \text{head}\left(\text{CLS}_{12}\right), \quad \text{CLS}_{12} = \text{blocks}\left(\text{CLS}_0, \{\text{patch}_i\}\right)$$
+
+CLS₁₂ 通过 self-attention 聚合所有 patch 的信息。当背景 patch（低分）存活时，
+CLS₁₂ 可以廉价地从这些捷径中提取全局语义，而不需要精细处理前景。
+
+**我们零化 15% 的低分 patch：**
+
+$$\text{CLS}_{12}' = \text{blocks}\left(\text{CLS}_0, \{\text{patch}_i\}_{i \notin \text{drop}}\right)$$
+
+背景捷径被阻断 → 模型必须从剩余 patch（前景）中提取判别信息 → 损失对前景
+patch 更敏感 → 梯度迫使扰动覆盖真正包含物体的区域 → 扰动可迁移。
+
+### 3.3 为什么 L=0 评分
+
+L=0 的 CLS₀ 是一个**对所有图片相同的可学习向量**，它在预训练中被优化为与分类
+有用特征方向对齐。由于 lazy aggregation 是 ViT 训练中收敛到的全局策略，CLS₀ 的
+方向本身就编码了「哪些 patch 方向可能被用作捷径」的先验。
+
+**与深层 CLS 的对比：**
+
+| | L=0 | 深层 |
+|---|---|---|
+| 本质 | 训练收敛的全局捷径先验 | 图像特定的语义表示 |
+| patch 多样性 (cos) | 0.18 | 0.80 |
+| CLS 噪声效果 (rank corr) | 0.97（有效）| 0.996（无效）|
+| 迁移性 | 跨架构通用 | 白盒特定 |
+
+L=0 能识别捷径 patch 是因为 lazy aggregation 本身就是训练时形成的全局策略——
+它是 ViT 架构的固有属性，不是某张图片的特定现象。
+
+### 3.4 CLS 评分噪声
+
+CLS₀ + σ · ε，ε 每 copy 独立。
+
+噪声让 20 个 copy 对「哪些 patch 算捷径」有不同判断 → 20 组不同的 dropout mask
+→ 梯度多样性来自捷径阻断的 copy 间差异。
+
+## 四、对手通道（opponent-channel）噪声
+
+### 4.1 为什么需要它
+
+Lazy aggregation 是 ViT 的问题，不是 CNN 的问题。CNN 没有 CLS token，没有全局
+自注意力，不存在「背景捷径」这回事。仅靠 token 空间 dropout 不能充分攻击 CNN。
+
+### 4.2 数学结构
+
+逐像素协方差：
 
 $$C_{opp} = \begin{bmatrix} 1.00 & -0.25 & -0.25 \\ -0.25 & 1.00 & -0.25 \\ -0.25 & -0.25 & 1.00 \end{bmatrix}$$
 
-特征分解：λ_lum=0.5（亮度 -50%），λ_rg=λ_yb=1.25（色度 +25%）。
+特征分解：λ_lum = 0.5（亮度 -50%），λ_chrom = 1.25（色度 +25%）。
 
-CNN 第一层滤波器以亮度边缘检测为主（~60-70%）。标准 i.i.d. 噪声 33% 方差在亮度方向 → 梯度被亮度滤波器主导 → 模型特定。Opponent 噪声降至 17% → 颜色对抗滤波器贡献增加 → 颜色对抗性是所有 CNN 的共性 → +4.75pp CNN 迁移。
+CNN 第一层以亮度边缘检测为主（~60-70% 的滤波器）。标准 i.i.d. 噪声将 33% 能量
+分配给亮度 → 梯度被模型特定的亮度滤波器主导。opponent 噪声降至 17% → 颜色对抗
+滤波器贡献增大 → 颜色对抗性是跨 CNN 架构的通用特征 → CNN 迁移 +4.75pp。
 
-噪声在**像素空间**生成（具备 C_opp 协方差结构），通过 W^T 投影到 token 空间后注入。
+噪声在像素空间生成后通过 patch_embed 权重 W^T 投影到 token 空间。
 
-### 2.6 CLS 评分噪声
-
-CLS₀ + σ · ε 中 ε 在每个 copy 独立采样。噪声让 20 个 copy 对「低分边界在哪里」有不同判断 → 20 组不同的 dropout mask → 梯度多样性来自 dropout 集合的差异，而非仅来自 token 数值的差异。
-
-## 三、当前配置与结果
+## 五、当前配置与结果
 
 ```
-16/255, ViT-B/16 白盒, 100 样本, 10 steps
+16/255, ViT-B/16 白盒, 100 样本, 10 steps, 20 copies
 
 avg=72.5%   ViT=77.0%   CNN=64.5%
 
@@ -92,22 +122,27 @@ inc_v3  inc_v4  incres_v2  resnet101
   66%     63%      61%        69%
 ```
 
-## 四、未解决的问题
+## 六、未解决的问题
 
-### 4.1 W·W^T 的信息天花板
+### 6.1 W·W^T 的信息天花板
 
-W·W^T 的有效秩仅 120/768。无论噪声在像素空间还是 token 空间，梯度 ∂L/∂pixels = W^T · ∂L/∂tokens 最终被 W^T 压缩到这 120 维子空间内。这是不可绕过的信息瓶颈——当前所有优化都在这个子空间内部微调，没有触及瓶颈本身。
+ViT-B/16 的 W·W^T 有效秩仅 120/768。梯度 ∂L/∂pixels = W^T · ∂L/∂tokens
+被限制在 ~120 维子空间内。无论 dropout 策略或噪声结构如何优化，token 空间的
+梯度多样性最终被 W^T 压缩到同一子空间——这是不可绕过的信息瓶颈。
 
-**这意味着：** 在 16/255 下，无论怎样优化噪声结构、评分策略、dropout 比例，ViT ASR 的理论上限都在 80% 附近（24/255 时同一方法达到 87%，证明瓶颈是 epsilon 而非方法设计）。
+24/255 时相同方法达到 avg 84.4%（ViT 87.0%，CNN 79.8%），远超目标。瓶颈在
+epsilon 预算，不在方法设计。
 
-### 4.2 ViT 和 CNN 的结构性矛盾
+### 6.2 ViT 和 CNN 的信息尺度矛盾
 
-- CNN 需要逐像素、多通道高频多样性（3×3 感受野，每通道独立滤波）
-- ViT 被 W·W^T 的 120 维有效子空间限制，逐像素多样性的大部分被 patch_embed 平均掉
+- CNN：3×3 感受野，逐像素、逐通道处理 → 需要高频多样性
+- ViT：16×16 patch，通过 W 聚合 768 维像素到 token → 需要 token 空间多样性
 
-Opponent-channel 噪声部分弥合了这个矛盾（CNN +4.75pp），但 ViT 端仍然受限。这个矛盾不是噪声设计问题——CNN 和 ViT 处理信息的尺度根本不同。
+Opponent 噪声在像素空间生成（服务 CNN）再经 W^T 投影到 token 空间（服务 ViT），
+部分弥合了这个矛盾。但 W^T 投影压缩了 768 维到 ~120 维有效子空间——CNN 端创造
+的多样性大部分被 ViT 端丢弃。反之亦然。
 
-### 4.3 可尝试但未验证的方向
+### 6.3 潜在方向
 
-- **多白盒集成：** 同时攻击两个 ViT（如 vit_base + deit_base）。两者的 W 矩阵不同，互补的有效子空间可扩大梯度覆盖范围
-- **Patch 评分和 dropout 比率自适应：** 当前 CLS jitter 强度在各 copy 和各 step 间固定
+- **多白盒集成：** 攻击两个 ViT，互补的 W 矩阵可扩大梯度有效子空间
+- **CLS jitter 强度自适应：** 当前每 copy 固定 σ，随 step 变化的 jitter 可能更好
