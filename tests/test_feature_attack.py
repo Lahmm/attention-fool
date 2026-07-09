@@ -25,6 +25,17 @@ class TinyTokenModel(nn.Module):
         return (logits, block_tokens) if return_tokens else logits
 
 
+class TinyPatchEmbedTokenModel(TinyTokenModel):
+    def __init__(self):
+        super().__init__()
+        self.patch_embed = nn.Module()
+        self.patch_embed.proj = nn.Conv2d(3, 2, kernel_size=4, stride=4, bias=False)
+        with torch.no_grad():
+            self.patch_embed.proj.weight.zero_()
+            self.patch_embed.proj.weight[0, 0].fill_(1.0)
+            self.patch_embed.proj.weight[1, 1].fill_(1.0)
+
+
 class TinyMapModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -119,6 +130,282 @@ class FeatureAttackTests(unittest.TestCase):
         self.assertEqual(len(terms), 9)
         self.assertTrue(torch.isfinite(gradient).all())
         self.assertGreater(float(gradient.flatten(1).norm(dim=1).min().detach()), 0.0)
+
+    def test_patch_dropout_score_mode_selects_high_or_low_score_patches(self):
+        pixels = torch.ones(1, 3, 12, 12)
+        scores = torch.arange(9, dtype=torch.float32).view(1, 9)
+
+        high_attacker = make_attacker(
+            guide_aug=True,
+            guide_aug_methods=("patch_dropout",),
+            guide_aug_strength=0.0,
+            patch_dropout_ratio=1.0,
+            patch_dropout_score_mode="high",
+        )
+        high_attacker._patch_scores = scores
+        high_pixels = high_attacker._patch_dropout_pixels(pixels)
+
+        low_attacker = make_attacker(
+            guide_aug=True,
+            guide_aug_methods=("patch_dropout",),
+            guide_aug_strength=0.0,
+            patch_dropout_ratio=1.0,
+            patch_dropout_score_mode="low",
+        )
+        low_attacker._patch_scores = scores
+        low_pixels = low_attacker._patch_dropout_pixels(pixels)
+
+        high_zero_mask = high_pixels[:, :1].eq(0).float()
+        low_zero_mask = low_pixels[:, :1].eq(0).float()
+        expected_high = torch.tensor(
+            [[[[0, 0, 0], [0, 0, 1], [1, 1, 1]]]], dtype=torch.float32
+        )
+        expected_low = torch.tensor(
+            [[[[1, 1, 1], [1, 0, 0], [0, 0, 0]]]], dtype=torch.float32
+        )
+        expected_high = F.interpolate(expected_high, size=(12, 12), mode="nearest")
+        expected_low = F.interpolate(expected_low, size=(12, 12), mode="nearest")
+
+        torch.testing.assert_close(high_zero_mask, expected_high)
+        torch.testing.assert_close(low_zero_mask, expected_low)
+
+    def test_patch_dropout_context_high_score_blend_fills_selected_patches(self):
+        pixels = torch.zeros(1, 3, 12, 12)
+        scores = torch.arange(9, dtype=torch.float32).view(1, 9)
+        for index in range(9):
+            row, col = divmod(index, 3)
+            value = 0.2 if index < 4 else 0.8
+            pixels[:, :, row * 4:(row + 1) * 4, col * 4:(col + 1) * 4] = value
+
+        attacker = make_attacker(
+            guide_aug=True,
+            guide_aug_methods=("patch_dropout",),
+            guide_aug_strength=0.0,
+            patch_dropout_ratio=1.0,
+            patch_dropout_score_mode="low",
+            patch_dropout_fill_mode="context_high_score_blend",
+        )
+        attacker._patch_scores = scores
+        filled = attacker._patch_dropout_pixels(pixels)
+
+        low_region = filled[:, :, :4, :4]
+        high_region = filled[:, :, 8:12, 8:12]
+        self.assertGreater(float(low_region.mean()), 0.2)
+        self.assertLess(float(low_region.mean()), 0.8)
+        torch.testing.assert_close(high_region, pixels[:, :, 8:12, 8:12])
+
+    def test_patch_dropout_random_high_score_inpaint_uses_random_high_score_donor(self):
+        pixels = torch.zeros(1, 3, 12, 12)
+        scores = torch.arange(9, dtype=torch.float32).view(1, 9)
+        for index in range(9):
+            row, col = divmod(index, 3)
+            value = 0.2 if index < 4 else 0.8
+            pixels[:, :, row * 4:(row + 1) * 4, col * 4:(col + 1) * 4] = value
+
+        attacker = make_attacker(
+            guide_aug=True,
+            guide_aug_methods=("patch_dropout",),
+            guide_aug_strength=0.0,
+            patch_dropout_ratio=1.0,
+            patch_dropout_score_mode="low",
+            patch_dropout_fill_mode="random_high_score_inpaint",
+        )
+        attacker._patch_scores = scores
+        filled = attacker._patch_dropout_pixels(pixels)
+
+        low_region = filled[:, :, :4, :4]
+        high_region = filled[:, :, 8:12, 8:12]
+        torch.testing.assert_close(low_region, torch.full_like(low_region, 0.8))
+        torch.testing.assert_close(high_region, pixels[:, :, 8:12, 8:12])
+
+    def test_patch_dropout_nearest_high_score_inpaint_uses_nearest_donor(self):
+        pixels = torch.zeros(1, 3, 12, 12)
+        scores = torch.tensor([[0.0, 1.0, 1.0, 1.0, 9.0, 2.0, 2.0, 2.0, 8.0]])
+        for index in range(9):
+            row, col = divmod(index, 3)
+            pixels[:, :, row * 4:(row + 1) * 4, col * 4:(col + 1) * 4] = float(index) / 10.0
+
+        attacker = make_attacker(
+            guide_aug=True,
+            guide_aug_methods=("patch_dropout",),
+            guide_aug_strength=0.0,
+            patch_dropout_ratio=1.0,
+            patch_dropout_score_mode="low",
+            patch_dropout_fill_mode="nearest_high_score_inpaint",
+        )
+        attacker._patch_scores = scores
+        filled = attacker._patch_dropout_pixels(pixels)
+
+        # Patch 0 is nearer to high-score patch 4 than high-score patch 8.
+        torch.testing.assert_close(filled[:, :, :4, :4], pixels[:, :, 4:8, 4:8])
+        torch.testing.assert_close(filled[:, :, 8:12, 8:12], pixels[:, :, 8:12, 8:12])
+
+    def test_patch_dropout_score_mode_validates_parameters(self):
+        with self.assertRaises(ValueError):
+            make_attacker(
+                guide_aug=True,
+                guide_aug_methods=("patch_dropout",),
+                patch_dropout_score_mode="middle",
+            )
+
+    def test_patch_dropout_fill_mode_validates_parameters(self):
+        with self.assertRaises(ValueError):
+            make_attacker(
+                guide_aug=True,
+                guide_aug_methods=("patch_dropout",),
+                patch_dropout_fill_mode="unknown",
+            )
+
+    def test_patch_dropout_noise_mode_validates_parameters(self):
+        with self.assertRaises(ValueError):
+            make_attacker(
+                guide_aug=True,
+                guide_aug_methods=("patch_dropout",),
+                patch_dropout_noise_mode="unknown",
+            )
+
+    def test_patch_dropout_patch_embed_rowspace_noise_is_patch_structured(self):
+        torch.manual_seed(17)
+        attacker = LMDSSAttacker(
+            TinyPatchEmbedTokenModel(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            device=torch.device("cpu"),
+            guide_aug=True,
+            guide_aug_methods=("patch_dropout",),
+            guide_aug_strength=0.05,
+            patch_dropout_ratio=0.0,
+            patch_dropout_noise_mode="patch_embed_rowspace",
+        )
+        attacker._patch_scores = torch.arange(9, dtype=torch.float32).view(1, 9)
+        pixels = torch.full((1, 3, 12, 12), 0.5)
+
+        noised = attacker._patch_dropout_pixels(pixels)
+        delta = noised - pixels
+
+        self.assertGreater(float(delta.abs().max()), 0.0)
+        first_patch = delta[:, :, :4, :4]
+        torch.testing.assert_close(first_patch, first_patch[:, :, :1, :1].expand_as(first_patch))
+
+    def test_patch_dropout_antithetic_gaussian_pairs_noise(self):
+        torch.manual_seed(19)
+        attacker = make_attacker(
+            guide_aug=True,
+            guide_aug_methods=("patch_dropout",),
+            guide_aug_strength=0.01,
+            patch_dropout_ratio=0.0,
+            patch_dropout_noise_mode="antithetic_gaussian",
+        )
+        attacker._patch_scores = torch.arange(9, dtype=torch.float32).view(1, 9)
+        pixels = torch.full((1, 3, 12, 12), 0.5)
+
+        first = attacker._patch_dropout_pixels(pixels)
+        second = attacker._patch_dropout_pixels(pixels)
+
+        torch.testing.assert_close(first + second, pixels * 2.0, atol=1e-6, rtol=1e-6)
+
+    def test_patch_dropout_rademacher_cubature_has_fixed_pixel_radius(self):
+        torch.manual_seed(29)
+        attacker = make_attacker(
+            guide_aug=True,
+            guide_aug_methods=("patch_dropout",),
+            guide_aug_strength=0.1,
+            patch_dropout_ratio=0.0,
+            patch_dropout_noise_mode="rademacher_cubature",
+        )
+        attacker._patch_scores = torch.arange(9, dtype=torch.float32).view(1, 9)
+        pixels = torch.full((1, 3, 12, 12), 0.5)
+
+        noised = attacker._patch_dropout_pixels(pixels)
+        magnitudes = (noised - pixels).abs()
+
+        torch.testing.assert_close(magnitudes, torch.full_like(magnitudes, 0.1))
+
+    def test_patch_dropout_patch_cov_gaussian_keeps_pixel_and_patch_variation(self):
+        torch.manual_seed(31)
+        attacker = make_attacker(
+            guide_aug=True,
+            guide_aug_methods=("patch_dropout",),
+            guide_aug_strength=0.01,
+            patch_dropout_ratio=0.0,
+            patch_dropout_noise_mode="patch_cov_gaussian",
+        )
+        attacker._patch_scores = torch.arange(9, dtype=torch.float32).view(1, 9)
+        pixels = torch.full((1, 3, 12, 12), 0.5)
+
+        noised = attacker._patch_dropout_pixels(pixels)
+        delta = noised - pixels
+        first_patch = delta[:, :, :4, :4]
+        patch_means = delta.view(1, 3, 3, 4, 3, 4).mean(dim=(3, 5))
+
+        self.assertEqual(noised.shape, pixels.shape)
+        self.assertGreater(float(delta.abs().max()), 0.0)
+        self.assertGreater(float(first_patch.std()), 0.0)
+        self.assertGreater(float(patch_means.std()), 0.0)
+
+    def test_patch_dropout_score_weighted_gaussian_scales_high_score_patches(self):
+        torch.manual_seed(37)
+        attacker = make_attacker(
+            guide_aug=True,
+            guide_aug_methods=("patch_dropout",),
+            guide_aug_strength=0.01,
+            patch_dropout_ratio=0.0,
+            patch_dropout_noise_mode="score_weighted_gaussian",
+        )
+        attacker._patch_scores = torch.arange(9, dtype=torch.float32).view(1, 9)
+        pixels = torch.full((1, 3, 12, 12), 0.5)
+
+        total_low = 0.0
+        total_high = 0.0
+        for _ in range(256):
+            delta = attacker._patch_dropout_pixels(pixels) - pixels
+            patch_energy = delta.square().view(1, 3, 3, 4, 3, 4).mean(dim=(1, 3, 5))
+            total_low += float(patch_energy[0, 0, 0])
+            total_high += float(patch_energy[0, 2, 2])
+
+        self.assertGreater(total_high, total_low)
+
+    def test_patch_dropout_inverse_score_weighted_gaussian_scales_low_score_patches(self):
+        torch.manual_seed(39)
+        attacker = make_attacker(
+            guide_aug=True,
+            guide_aug_methods=("patch_dropout",),
+            guide_aug_strength=0.01,
+            patch_dropout_ratio=0.0,
+            patch_dropout_noise_mode="inverse_score_weighted_gaussian",
+        )
+        attacker._patch_scores = torch.arange(9, dtype=torch.float32).view(1, 9)
+        pixels = torch.full((1, 3, 12, 12), 0.5)
+
+        total_low = 0.0
+        total_high = 0.0
+        for _ in range(256):
+            delta = attacker._patch_dropout_pixels(pixels) - pixels
+            patch_energy = delta.square().view(1, 3, 3, 4, 3, 4).mean(dim=(1, 3, 5))
+            total_low += float(patch_energy[0, 0, 0])
+            total_high += float(patch_energy[0, 2, 2])
+
+        self.assertGreater(total_low, total_high)
+
+    def test_patch_dropout_opponent_channel_gaussian_has_negative_channel_covariance(self):
+        torch.manual_seed(43)
+        attacker = make_attacker(
+            guide_aug=True,
+            guide_aug_methods=("patch_dropout",),
+            guide_aug_strength=0.01,
+            patch_dropout_ratio=0.0,
+            patch_dropout_noise_mode="opponent_channel_gaussian",
+        )
+        pixels = torch.full((4096, 3, 1, 1), 0.5)
+        noise = attacker._patch_dropout_noise(pixels, grid_size=1) / attacker.guide_aug_strength
+        samples = noise.flatten(2).squeeze(-1)
+        covariance = samples.transpose(0, 1).matmul(samples) / samples.size(0)
+
+        torch.testing.assert_close(covariance.diag(), torch.ones(3), atol=0.08, rtol=0.08)
+        self.assertLess(float(covariance[0, 1]), -0.15)
+        self.assertLess(float(covariance[0, 2]), -0.15)
+        self.assertLess(float(covariance[1, 2]), -0.15)
 
 
     def test_dim_consensus_trajectory_generates_requested_feature_terms(self):
@@ -423,6 +710,22 @@ class FeatureAttackTests(unittest.TestCase):
         self.assertEqual(args.feature_scope, "stage")
         self.assertEqual(args.whitebox_model, main.DEFAULT_MODEL_NAME)
 
+    def test_cli_exposes_patch_dropout_score_mode(self):
+        argv = [
+            "main.py",
+            "--patch-dropout-score-mode",
+            "low",
+            "--patch-dropout-fill-mode",
+            "context_high_score_blend",
+            "--patch-dropout-noise-mode",
+            "inverse_score_weighted_gaussian",
+        ]
+        with mock.patch.object(sys, "argv", argv):
+            args = main.parse_args()
+        self.assertEqual(args.patch_dropout_score_mode, "low")
+        self.assertEqual(args.patch_dropout_fill_mode, "context_high_score_blend")
+        self.assertEqual(args.patch_dropout_noise_mode, "inverse_score_weighted_gaussian")
+
     def test_create_attacker_forwards_feature_options(self):
         attacker = main.create_attacker(
             model=TinyTokenModel(),
@@ -437,6 +740,23 @@ class FeatureAttackTests(unittest.TestCase):
         self.assertEqual(attacker.attack_loss, "feature")
         self.assertEqual(attacker.feature_layer, 1)
         self.assertEqual(attacker.feature_scope, "stage")
+
+    def test_create_attacker_forwards_patch_dropout_score_mode(self):
+        attacker = main.create_attacker(
+            model=TinyTokenModel(),
+            epsilon=0.1,
+            step_size=None,
+            steps=2,
+            ti_sigma=0,
+            guide_aug=True,
+            guide_aug_methods=("patch_dropout",),
+            patch_dropout_score_mode="low",
+            patch_dropout_fill_mode="context_high_score_blend",
+            patch_dropout_noise_mode="patch_embed_rowspace",
+        )
+        self.assertEqual(attacker.patch_dropout_score_mode, "low")
+        self.assertEqual(attacker.patch_dropout_fill_mode, "context_high_score_blend")
+        self.assertEqual(attacker.patch_dropout_noise_mode, "patch_embed_rowspace")
 
 
 if __name__ == "__main__":

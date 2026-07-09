@@ -78,6 +78,30 @@ class AntitheticTransportTests(unittest.TestCase):
         self.assertEqual(len(terms), 9)
         self.assertFalse(torch.equal(terms[0], terms[-1]))
 
+    def test_dim_stable_edge_is_forward_identity_with_sampled_dim_gradients(self):
+        torch.manual_seed(31)
+        attacker = make_attacker(copies=5, method="dim_stable_edge")
+        pixels = (torch.rand(2, 3, 16, 16) * 0.6 + 0.2).requires_grad_(True)
+        views = list(attacker._iter_forward_pixels(pixels))
+        self.assertEqual(len(views), 5)
+        for view in views:
+            torch.testing.assert_close(view, pixels)
+        gradient, terms = attacker._attack_grad_terms(pixels, torch.tensor([0, 1]))
+        self.assertEqual(len(terms), 5)
+        self.assertTrue(torch.isfinite(gradient).all())
+        self.assertGreater(float(sum((term - terms[0]).abs().mean() for term in terms[1:]).detach()), 0.0)
+
+    def test_dim_stable_edge_mix_moves_forward_views_and_is_differentiable(self):
+        torch.manual_seed(37)
+        attacker = make_attacker(copies=5, method="dim_stable_edge_mix")
+        pixels = (torch.rand(2, 3, 16, 16) * 0.6 + 0.2).requires_grad_(True)
+        views = list(attacker._iter_forward_pixels(pixels))
+        self.assertEqual(len(views), 5)
+        self.assertGreater(float(sum((view - pixels).abs().mean() for view in views).detach()), 0.0)
+        gradient, terms = attacker._attack_grad_terms(pixels, torch.tensor([0, 1]))
+        self.assertEqual(len(terms), 5)
+        self.assertTrue(torch.isfinite(gradient).all())
+
     def test_natural_spectrum_transport_preserves_dc_and_backward_path(self):
         torch.manual_seed(11)
         attacker = make_attacker(copies=1, method="natural_spectrum_transport")
