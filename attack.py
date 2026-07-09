@@ -115,6 +115,7 @@ class LMDSSAttacker:
         patch_dropout_ratio: float = 0.3,
         patch_dropout_score_mode: str = "high",
         patch_dropout_fill_mode: str = "zero_noise",
+        patch_dropout_noise_mode: str = "gaussian",
         dim_adjoint_echo: bool = False,
         lowmid_grad_tuning: bool = False,
         lowmid_grad_rotation_strength: float = 0.5,
@@ -323,8 +324,8 @@ class LMDSSAttacker:
         if self.guide_aug_strength < 0:
             raise ValueError(f"guide_aug_strength must be non-negative, got {guide_aug_strength}.")
         self.patch_dropout_ratio = float(patch_dropout_ratio)
-        if not 0.0 < self.patch_dropout_ratio <= 1.0:
-            raise ValueError(f"patch_dropout_ratio must be in (0, 1], got {patch_dropout_ratio}.")
+        if not 0.0 <= self.patch_dropout_ratio <= 1.0:
+            raise ValueError(f"patch_dropout_ratio must be in [0, 1], got {patch_dropout_ratio}.")
         self.patch_dropout_score_mode = str(patch_dropout_score_mode)
         if self.patch_dropout_score_mode not in ("high", "low"):
             raise ValueError(
@@ -343,7 +344,26 @@ class LMDSSAttacker:
                 "patch_dropout_fill_mode must be one of "
                 f"{valid_patch_dropout_fill_modes}, got {patch_dropout_fill_mode!r}."
             )
+        self.patch_dropout_noise_mode = str(patch_dropout_noise_mode)
+        valid_patch_dropout_noise_modes = (
+            "gaussian",
+            "antithetic_gaussian",
+            "rademacher_cubature",
+            "patch_cov_gaussian",
+            "score_weighted_gaussian",
+            "inverse_score_weighted_gaussian",
+            "opponent_channel_gaussian",
+            "patch_embed_rowspace",
+            "opponent_smooth_patch",
+            "hybrid_dct_midfreq",
+        )
+        if self.patch_dropout_noise_mode not in valid_patch_dropout_noise_modes:
+            raise ValueError(
+                "patch_dropout_noise_mode must be one of "
+                f"{valid_patch_dropout_noise_modes}, got {patch_dropout_noise_mode!r}."
+            )
         self._patch_scores: torch.Tensor | None = None
+        self._patch_dropout_antithetic_noise: torch.Tensor | None = None
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
 
     def _denormalize(self, images: torch.Tensor) -> torch.Tensor:
@@ -1085,8 +1105,12 @@ class LMDSSAttacker:
                     pixels, self.guide_aug_copies
                 )
                 continue
+            if method == "patch_dropout":
+                self._patch_dropout_antithetic_noise = None
             for _copy_idx in range(self.guide_aug_copies):
                 yield self._guide_augmented_pixels(pixels, method)
+            if method == "patch_dropout":
+                self._patch_dropout_antithetic_noise = None
 
 
     def _iter_feature_trajectory_dropout_pixels(
@@ -1188,9 +1212,13 @@ class LMDSSAttacker:
                     ):
                         yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
                 else:
+                    if method == "patch_dropout":
+                        self._patch_dropout_antithetic_noise = None
                     for _copy_idx in range(self.guide_aug_copies):
                         forward_pixels = self._guide_augmented_pixels(pixels, method)
                         yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
+                    if method == "patch_dropout":
+                        self._patch_dropout_antithetic_noise = None
             return
 
         for forward_pixels in self._iter_forward_pixels(pixels):
@@ -1269,6 +1297,260 @@ class LMDSSAttacker:
     def _patch_dropout_active(self) -> bool:
         return "patch_dropout" in self.guide_aug_methods
 
+    def _patch_embed_projection_weight(self, patch_h: int, patch_w: int) -> torch.Tensor | None:
+        base_model = getattr(self.model, "model", self.model)
+        patch_embed = getattr(base_model, "patch_embed", None)
+        proj = getattr(patch_embed, "proj", None)
+        weight = getattr(proj, "weight", None)
+        if not isinstance(weight, torch.Tensor) or weight.ndim != 4:
+            return None
+        out_channels, in_channels, kernel_h, kernel_w = weight.shape
+        if in_channels != 3 or kernel_h != patch_h or kernel_w != patch_w:
+            return None
+        return weight.detach().to(device=self.device, dtype=torch.float32).reshape(out_channels, -1)
+
+    def _patch_dropout_noise(self, pixels: torch.Tensor, grid_size: int) -> torch.Tensor:
+        if self.patch_dropout_noise_mode == "gaussian":
+            return self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype)
+        if self.patch_dropout_noise_mode == "rademacher_cubature":
+            signs = torch.empty_like(pixels).bernoulli_(0.5).mul_(2.0).sub_(1.0)
+            return self.guide_aug_strength * signs
+        if self.patch_dropout_noise_mode == "opponent_channel_gaussian":
+            if pixels.size(1) != 3:
+                return self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype)
+            coeff = torch.randn_like(pixels, dtype=pixels.dtype)
+            luma = (0.5 ** 0.5) * coeff[:, 0:1]
+            red_green = (1.25 ** 0.5) * coeff[:, 1:2]
+            yellow_blue = (1.25 ** 0.5) * coeff[:, 2:3]
+            inv_sqrt2 = 2.0 ** -0.5
+            inv_sqrt3 = 3.0 ** -0.5
+            inv_sqrt6 = 6.0 ** -0.5
+            noise = torch.cat(
+                (
+                    inv_sqrt3 * luma + inv_sqrt2 * red_green + inv_sqrt6 * yellow_blue,
+                    inv_sqrt3 * luma - inv_sqrt2 * red_green + inv_sqrt6 * yellow_blue,
+                    inv_sqrt3 * luma - 2.0 * inv_sqrt6 * yellow_blue,
+                ),
+                dim=1,
+            )
+            return self.guide_aug_strength * noise
+        if self.patch_dropout_noise_mode == "opponent_smooth_patch":
+            # Opponent-channel noise with cross-patch spatial correlation.
+            # 1. Generate noise at patch-grid resolution (grid×grid)
+            # 2. Gaussian-smooth for cross-patch correlation (σ=1.5 patches)
+            # 3. Bilinear upsample to full resolution
+            # 4. Apply opponent color transform
+            B, C, H, W = pixels.shape
+            if C != 3:
+                return self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype)
+            patch_h = H // grid_size
+            patch_w = W // grid_size
+            if patch_h * grid_size != H or patch_w * grid_size != W:
+                return self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype)
+
+            # Generate independent Gaussian noise per channel at patch-grid resolution
+            z_grid = torch.randn(B, C, grid_size, grid_size, device=pixels.device, dtype=pixels.dtype)
+
+            # Gaussian smoothing for cross-patch correlation (sigma=1.5 at grid scale)
+            kernel_size = 7
+            sigma = 1.5
+            ax = torch.arange(kernel_size, device=pixels.device, dtype=pixels.dtype) - kernel_size // 2
+            gauss_1d = torch.exp(-0.5 * (ax / sigma).square())
+            gauss_1d = gauss_1d / gauss_1d.sum()
+            gauss_2d = gauss_1d[:, None] @ gauss_1d[None, :]
+            kernel = gauss_2d.view(1, 1, kernel_size, kernel_size).expand(C, 1, kernel_size, kernel_size)
+
+            z_smooth = F.conv2d(
+                F.pad(z_grid, (kernel_size // 2,) * 4, mode="reflect"),
+                kernel, groups=C,
+            )
+
+            # Bilinear upsample to full resolution (smooth within-patch variation)
+            noise_pixel = F.interpolate(z_smooth, size=(H, W), mode="bilinear", align_corners=False)
+
+            # Normalize to unit RMS per image
+            noise_pixel = noise_pixel - noise_pixel.mean(dim=(2, 3), keepdim=True)
+            rms = noise_pixel.square().mean(dim=(1, 2, 3), keepdim=True).sqrt().clamp_min(1e-12)
+            noise_pixel = noise_pixel / rms
+
+            # Apply opponent color transform to the pixel-space noise
+            coeff_type = noise_pixel  # [B, 3, H, W] — already unit-RMS per channel
+            luma = (0.5 ** 0.5) * coeff_type[:, 0:1]
+            rg = (1.25 ** 0.5) * coeff_type[:, 1:2]
+            yb = (1.25 ** 0.5) * coeff_type[:, 2:3]
+            inv_sqrt2 = 2.0 ** -0.5
+            inv_sqrt3 = 3.0 ** -0.5
+            inv_sqrt6 = 6.0 ** -0.5
+            noise = torch.cat(
+                (
+                    inv_sqrt3 * luma + inv_sqrt2 * rg + inv_sqrt6 * yb,
+                    inv_sqrt3 * luma - inv_sqrt2 * rg + inv_sqrt6 * yb,
+                    inv_sqrt3 * luma - 2.0 * inv_sqrt6 * yb,
+                ),
+                dim=1,
+            )
+            return self.guide_aug_strength * noise
+        if self.patch_dropout_noise_mode == "hybrid_dct_midfreq":
+            # Hybrid: opponent-channel pixel noise + DCT mid-frequency patch-grid noise.
+            # Alpha=0.7: 70% opponent pixel (CNN benefit), 30% DCT mid-freq (ViT diversity).
+            B, C, H, W = pixels.shape
+            if C != 3:
+                return self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype)
+            patch_h = H // grid_size
+            patch_w = W // grid_size
+            if patch_h * grid_size != H or patch_w * grid_size != W:
+                return self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype)
+
+            alpha = 0.7  # Weight of opponent pixel noise
+
+            # Component 1: Per-pixel opponent-channel noise
+            coeff_pixel = torch.randn_like(pixels, dtype=pixels.dtype)
+            luma_p = (0.5 ** 0.5) * coeff_pixel[:, 0:1]
+            rg_p = (1.25 ** 0.5) * coeff_pixel[:, 1:2]
+            yb_p = (1.25 ** 0.5) * coeff_pixel[:, 2:3]
+            inv_sqrt2 = 2.0 ** -0.5
+            inv_sqrt3 = 3.0 ** -0.5
+            inv_sqrt6 = 6.0 ** -0.5
+            noise_opponent = torch.cat(
+                (
+                    inv_sqrt3 * luma_p + inv_sqrt2 * rg_p + inv_sqrt6 * yb_p,
+                    inv_sqrt3 * luma_p - inv_sqrt2 * rg_p + inv_sqrt6 * yb_p,
+                    inv_sqrt3 * luma_p - 2.0 * inv_sqrt6 * yb_p,
+                ),
+                dim=1,
+            )
+            # Normalize to unit RMS
+            noise_opponent = noise_opponent - noise_opponent.mean(dim=(2, 3), keepdim=True)
+            noise_opponent = noise_opponent / noise_opponent.square().mean(
+                dim=(1, 2, 3), keepdim=True
+            ).sqrt().clamp_min(1e-12)
+
+            # Component 2: DCT mid-frequency at patch-grid resolution
+            # Manual DCT: x[u,v] = sum_i sum_j pixel[i,j] * cos(pi*u*(i+0.5)/N) * cos(pi*v*(j+0.5)/N)
+            # We do inverse: generate random coeffs, then IDCT to get spatial pattern
+            N = grid_size
+            # Precompute DCT basis: basis[u,v,i,j] = cos(pi*u*(i+0.5)/N) * cos(pi*v*(j+0.5)/N)
+            i_idx = torch.arange(N, device=pixels.device, dtype=torch.float64)
+            j_idx = torch.arange(N, device=pixels.device, dtype=torch.float64)
+            u_idx = torch.arange(N, device=pixels.device, dtype=torch.float64)
+            v_idx = torch.arange(N, device=pixels.device, dtype=torch.float64)
+
+            # Basis vectors: cos(pi * u * (i+0.5) / N) — shape [N, N] where entry [u,i]
+            basis_u = torch.cos(torch.pi * u_idx[:, None] * (i_idx[None, :] + 0.5) / N)  # [N, N]
+            basis_v = torch.cos(torch.pi * v_idx[:, None] * (j_idx[None, :] + 0.5) / N)  # [N, N]
+
+            # Generate random DCT coefficients, zero out outside mid-frequency band
+            z_dct = torch.randn(B, C, N, N, device=pixels.device, dtype=torch.float64)
+            # Mid-frequency mask: keep frequencies 2-7
+            freq_u = u_idx[:, None].expand(N, N)  # [N, N]
+            freq_v = v_idx[None, :].expand(N, N)  # [N, N]
+            freq_r = (freq_u ** 2 + freq_v ** 2).sqrt()
+            mid_mask = ((freq_r >= 2) & (freq_r < 7)).to(torch.float64)  # [N, N]
+            z_dct = z_dct * mid_mask[None, None, :, :]
+
+            # IDCT: spatial[i,j] = (2/N) * sum_u sum_v coeff[u,v] * basis[u,i] * basis[v,j]
+            # = (2/N) * basis_u^T @ coeff @ basis_v
+            # With orthonormal normalization: include c(u), c(v) factors
+            c = torch.ones(N, device=pixels.device, dtype=torch.float64)
+            c[0] = 1.0 / (2.0 ** 0.5)
+            norm_factor = (2.0 / N) ** 0.5
+            # Weighted basis: c[u] * cos(...) * sqrt(2/N)
+            weighted_u = basis_u * c[:, None] * norm_factor  # [N, N]
+            weighted_v = basis_v * c[:, None] * norm_factor  # [N, N]
+
+            # IDCT for each batch/channel: spatial = weighted_u^T @ coeff @ weighted_v
+            # batched: [B, C, N, N]
+            z_spatial = torch.einsum("ui,bcuv,vj->bcij", weighted_u.to(dtype=z_dct.dtype), z_dct, weighted_v.to(dtype=z_dct.dtype))
+
+            # Bilinear upsample to full resolution
+            noise_dct = F.interpolate(
+                z_spatial.to(dtype=pixels.dtype), size=(H, W), mode="bilinear", align_corners=False
+            )
+
+            # Normalize
+            noise_dct = noise_dct - noise_dct.mean(dim=(2, 3), keepdim=True)
+            noise_dct = noise_dct / noise_dct.square().mean(
+                dim=(1, 2, 3), keepdim=True
+            ).sqrt().clamp_min(1e-12)
+
+            # Combine
+            noise = (alpha ** 0.5) * noise_opponent + ((1.0 - alpha) ** 0.5) * noise_dct
+            return self.guide_aug_strength * noise
+        if self.patch_dropout_noise_mode == "patch_cov_gaussian":
+            B, C, H, W = pixels.shape
+            patch_h = H // grid_size
+            patch_w = W // grid_size
+            if patch_h * grid_size != H or patch_w * grid_size != W:
+                return self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype)
+            rho = 0.2
+            iid = torch.randn_like(pixels, dtype=pixels.dtype)
+            patch_latent = torch.randn(B, C, grid_size, grid_size, device=pixels.device, dtype=pixels.dtype)
+            patch_noise = F.interpolate(patch_latent, size=(H, W), mode="nearest")
+            noise = ((1.0 - rho) ** 0.5) * iid + (rho ** 0.5) * patch_noise
+            return self.guide_aug_strength * noise
+        if self.patch_dropout_noise_mode == "score_weighted_gaussian":
+            B, C, H, W = pixels.shape
+            if self._patch_scores is None or self._patch_scores.size(1) != grid_size * grid_size:
+                return self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype)
+            scores = self._patch_scores.to(device=pixels.device, dtype=pixels.dtype)
+            centered = scores - scores.mean(dim=1, keepdim=True)
+            scaled = centered / centered.std(dim=1, keepdim=True).clamp_min(1e-6)
+            patch_weights = torch.exp(0.5 * scaled).clamp(0.5, 2.0)
+            patch_weights = patch_weights / patch_weights.square().mean(dim=1, keepdim=True).sqrt().clamp_min(1e-6)
+            weights = F.interpolate(
+                patch_weights.view(B, 1, grid_size, grid_size),
+                size=(H, W),
+                mode="nearest",
+            ).expand(-1, C, -1, -1)
+            return self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype) * weights
+        if self.patch_dropout_noise_mode == "inverse_score_weighted_gaussian":
+            B, C, H, W = pixels.shape
+            if self._patch_scores is None or self._patch_scores.size(1) != grid_size * grid_size:
+                return self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype)
+            scores = self._patch_scores.to(device=pixels.device, dtype=pixels.dtype)
+            centered = scores - scores.mean(dim=1, keepdim=True)
+            scaled = centered / centered.std(dim=1, keepdim=True).clamp_min(1e-6)
+            patch_weights = torch.exp(-0.5 * scaled).clamp(0.5, 2.0)
+            patch_weights = patch_weights / patch_weights.square().mean(dim=1, keepdim=True).sqrt().clamp_min(1e-6)
+            weights = F.interpolate(
+                patch_weights.view(B, 1, grid_size, grid_size),
+                size=(H, W),
+                mode="nearest",
+            ).expand(-1, C, -1, -1)
+            return self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype) * weights
+        if self.patch_dropout_noise_mode == "antithetic_gaussian":
+            if (
+                self._patch_dropout_antithetic_noise is not None
+                and self._patch_dropout_antithetic_noise.shape == pixels.shape
+                and self._patch_dropout_antithetic_noise.device == pixels.device
+                and self._patch_dropout_antithetic_noise.dtype == pixels.dtype
+            ):
+                noise = self._patch_dropout_antithetic_noise
+                self._patch_dropout_antithetic_noise = None
+                return self.guide_aug_strength * noise
+            noise = torch.randn_like(pixels, dtype=pixels.dtype)
+            self._patch_dropout_antithetic_noise = -noise
+            return self.guide_aug_strength * noise
+
+        B, C, H, W = pixels.shape
+        patch_h = H // grid_size
+        patch_w = W // grid_size
+        if patch_h * grid_size != H or patch_w * grid_size != W:
+            return self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype)
+
+        weight = self._patch_embed_projection_weight(patch_h, patch_w)
+        if weight is None:
+            return self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype)
+
+        num_patches = grid_size * grid_size
+        coeff = torch.randn(B, num_patches, weight.size(0), device=pixels.device, dtype=weight.dtype)
+        patch_noise = torch.einsum("bnd,dl->bnl", coeff, weight.to(pixels.device))
+        patch_noise = patch_noise.reshape(B, grid_size, grid_size, C, patch_h, patch_w)
+        noise = patch_noise.permute(0, 3, 1, 4, 2, 5).reshape(B, C, H, W).to(dtype=pixels.dtype)
+        noise = noise - noise.mean(dim=(2, 3), keepdim=True)
+        noise = noise / noise.square().mean(dim=(1, 2, 3), keepdim=True).sqrt().clamp_min(1e-12)
+        return self.guide_aug_strength * noise
+
     def _patch_dropout_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
         """Randomly corrupt selected patch-score regions per guide augmentation copy.
 
@@ -1277,7 +1559,7 @@ class LMDSSAttacker:
         ``patch_dropout_ratio`` of them and applies the configured fill mode
         to the corresponding image regions.
         """
-        if self._patch_scores is None or self.patch_dropout_ratio <= 0:
+        if self._patch_scores is None:
             return pixels
 
         B, C, H, W = pixels.shape
@@ -1295,32 +1577,26 @@ class LMDSSAttacker:
         candidate_mask = candidate_mask.to(torch.float32)               # [B, N]
 
         # Per batch item: randomly select patch_dropout_ratio of candidate patches.
-        drop_mask = torch.zeros_like(candidate_mask)  # [B, N]
-        for b in range(B):
-            candidate_idx = candidate_mask[b].nonzero(as_tuple=True)[0]
-            n_candidates = candidate_idx.numel()
-            if n_candidates == 0:
-                continue
-            n_drop = max(1, int(round(n_candidates * self.patch_dropout_ratio)))
-            perm = torch.randperm(n_candidates, device=pixels.device)[:n_drop]
-            drop_mask[b, candidate_idx[perm]] = 1.0
+        pixel_mask: torch.Tensor | None = None
+        if self.patch_dropout_ratio > 0:
+            drop_mask = torch.zeros_like(candidate_mask)  # [B, N]
+            for b in range(B):
+                candidate_idx = candidate_mask[b].nonzero(as_tuple=True)[0]
+                n_candidates = candidate_idx.numel()
+                if n_candidates == 0:
+                    continue
+                n_drop = max(1, int(round(n_candidates * self.patch_dropout_ratio)))
+                perm = torch.randperm(n_candidates, device=pixels.device)[:n_drop]
+                drop_mask[b, candidate_idx[perm]] = 1.0
+            pixel_mask = F.interpolate(
+                drop_mask.view(B, 1, gh, gh), size=(H, W), mode="nearest",
+            )  # [B, 1, H, W]
+            pixel_mask = pixel_mask.expand(-1, C, -1, -1)  # [B, C, H, W]
 
-        # Upsample patch mask [B, N] → pixel mask [B, 1, H, W]
-        pixel_mask = F.interpolate(
-            drop_mask.view(B, 1, gh, gh),
-            size=(H, W),
-            mode="nearest",
-        )  # [B, 1, H, W]
-        pixel_mask = pixel_mask.expand(-1, C, -1, -1)  # [B, C, H, W]
-
-        # Zero out selected patch regions, add noise to the rest.
-        # Noise is injected in the frequency domain (FFT) so that low/mid-
-        # frequency components also carry diversity, not just per-pixel HF.
-        work = pixels.float()
-        freq = torch.fft.rfft2(work, dim=(-2, -1), norm="ortho")
-        freq = freq + self.guide_aug_strength * torch.randn_like(freq, dtype=freq.dtype)
-        noised = torch.fft.irfft2(freq, s=(H, W), dim=(-2, -1), norm="ortho")
-        noised = noised.to(pixels.dtype).clamp(0.0, 1.0)
+        # Add noise to non-dropped patches; mode controls its spatial/token structure.
+        noised = torch.clamp(pixels + self._patch_dropout_noise(pixels, gh), 0.0, 1.0)
+        if pixel_mask is None:
+            return noised
         if self.patch_dropout_fill_mode == "zero_noise":
             return torch.where(pixel_mask > 0.5, torch.zeros_like(pixels), noised)
 

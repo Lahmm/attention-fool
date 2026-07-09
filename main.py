@@ -38,6 +38,9 @@ def create_attacker(
     guide_aug_copies: int = 3,
     guide_aug_strength: float = 0.2,
     patch_dropout_ratio: float = 0.3,
+    patch_dropout_score_mode: str = "high",
+    patch_dropout_fill_mode: str = "zero_noise",
+    patch_dropout_noise_mode: str = "gaussian",
     dim_adjoint_echo: bool = False,
     lowmid_grad_tuning: bool = False,
     lowmid_grad_rotation_strength: float = 0.5,
@@ -84,6 +87,9 @@ def create_attacker(
         guide_aug_copies=guide_aug_copies,
         guide_aug_strength=guide_aug_strength,
         patch_dropout_ratio=patch_dropout_ratio,
+        patch_dropout_score_mode=patch_dropout_score_mode,
+        patch_dropout_fill_mode=patch_dropout_fill_mode,
+        patch_dropout_noise_mode=patch_dropout_noise_mode,
         dim_adjoint_echo=dim_adjoint_echo,
         lowmid_grad_tuning=lowmid_grad_tuning,
         lowmid_grad_rotation_strength=lowmid_grad_rotation_strength,
@@ -242,7 +248,10 @@ def parse_args():
     parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,dim_resonance,dim_stable_edge,dim_stable_edge_mix,dim_consensus_trajectory,dim_consensus_evidence_trajectory,lowmid_shift,white_noise,antithetic_transport,natural_spectrum_transport,antithetic_filter_bank,multiscale_adjoint_ensemble,orthogonal_photometric_ensemble,orthogonal_spherical_smoothing,antithetic_jitter_cubature,feature_trajectory_dropout,patch_dropout.")
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Random copies per guide augmentation method.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
-    parser.add_argument("--patch-dropout-ratio", type=float, default=0.3, help="Fraction of high-score patches to randomly drop per copy (0-1].")
+    parser.add_argument("--patch-dropout-ratio", type=float, default=0.3, help="Fraction of selected patch-score subset to randomly drop per copy (0-1].")
+    parser.add_argument("--patch-dropout-score-mode", choices=["high", "low"], default="high", help="Patch score subset used by patch_dropout: high drops patches above median, low drops patches below median.")
+    parser.add_argument("--patch-dropout-fill-mode", choices=["zero_noise", "random_high_score_inpaint", "context_high_score_blend", "nearest_high_score_inpaint"], default="zero_noise", help="Fill strategy for selected patch_dropout regions.")
+    parser.add_argument("--patch-dropout-noise-mode", choices=["gaussian", "antithetic_gaussian", "rademacher_cubature", "patch_cov_gaussian", "score_weighted_gaussian", "inverse_score_weighted_gaussian", "opponent_channel_gaussian", "patch_embed_rowspace", "opponent_smooth_patch", "hybrid_dct_midfreq"], default="gaussian", help="Noise structure for non-selected patch_dropout regions.")
     parser.add_argument("--dim-adjoint-echo", action="store_true", help="Apply DIM-adjoint echo after guide augmentation and before DIM/normalization.")
     parser.add_argument("--lowmid-grad-tuning", action="store_true", help="Enable low/mid frequency gradient tuning after TI smoothing and before momentum.")
     parser.add_argument("--lowmid-grad-rotation-strength", type=float, default=0.5, help="Givens rotation strength toward low/mid-frequency gradient subspace when --lowmid-grad-tuning is enabled.")
@@ -304,6 +313,9 @@ def main(
     guide_aug_copies: int = 3,
     guide_aug_strength: float = 0.2,
     patch_dropout_ratio: float = 0.3,
+    patch_dropout_score_mode: str = "high",
+    patch_dropout_fill_mode: str = "zero_noise",
+    patch_dropout_noise_mode: str = "gaussian",
     dim_adjoint_echo: bool = False,
     lowmid_grad_tuning: bool = False,
     lowmid_grad_rotation_strength: float = 0.5,
@@ -370,6 +382,9 @@ def main(
         guide_aug_copies=guide_aug_copies,
         guide_aug_strength=guide_aug_strength,
         patch_dropout_ratio=patch_dropout_ratio,
+        patch_dropout_score_mode=patch_dropout_score_mode,
+        patch_dropout_fill_mode=patch_dropout_fill_mode,
+        patch_dropout_noise_mode=patch_dropout_noise_mode,
         dim_adjoint_echo=dim_adjoint_echo,
         lowmid_grad_tuning=lowmid_grad_tuning,
         lowmid_grad_rotation_strength=lowmid_grad_rotation_strength,
@@ -431,6 +446,9 @@ def main(
         "guide_aug_copies": guide_aug_copies,
         "guide_aug_strength": guide_aug_strength,
         "patch_dropout_ratio": patch_dropout_ratio,
+        "patch_dropout_score_mode": patch_dropout_score_mode,
+        "patch_dropout_fill_mode": patch_dropout_fill_mode,
+        "patch_dropout_noise_mode": patch_dropout_noise_mode,
         "dim_adjoint_echo": dim_adjoint_echo,
         "attack_loss": attack_loss,
         "feature_layer": feature_layer,
@@ -470,6 +488,9 @@ if __name__ == "__main__":
         guide_aug_copies=args.guide_aug_copies,
         guide_aug_strength=args.guide_aug_strength,
         patch_dropout_ratio=args.patch_dropout_ratio,
+        patch_dropout_score_mode=args.patch_dropout_score_mode,
+        patch_dropout_fill_mode=args.patch_dropout_fill_mode,
+        patch_dropout_noise_mode=args.patch_dropout_noise_mode,
         dim_adjoint_echo=args.dim_adjoint_echo,
         lowmid_grad_tuning=args.lowmid_grad_tuning,
         lowmid_grad_rotation_strength=args.lowmid_grad_rotation_strength,
