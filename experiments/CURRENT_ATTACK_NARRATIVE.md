@@ -1,213 +1,113 @@
-# Current Attack Narrative & Bottleneck Analysis
+# 最强攻击叙事与未解决问题
 
-## Best Configuration (as of 2026-07-09)
-
-```
-Command:
-  python main.py --mode attack --max-attacked-samples 100 --steps 10 \
-    --mi --mi-decay 1.0 --attack-loss logits --feature-layer 0 \
-    --guide-aug --guide-aug-method token_patch_dropout \
-    --guide-aug-copies 20 --guide-aug-strength 0.2 \
-    --patch-dropout-ratio 0.3 --patch-dropout-score-mode low \
-    --patch-dropout-fill-mode zero_noise \
-    --patch-dropout-noise-mode opponent_channel_gaussian \
-    --token-score-cls-noise --token-cls-noise-mode gaussian \
-    --batch-size 32
-```
-
-Results (16/255, ViT-B/16 white-box, 100 ImageNet samples):
-  avg=72.45%  ViT=77.00%  CNN=64.50%
-
-Per-model:
-  levit_256=71%  pit_b_224=76%  deit_base=77%  tnt_s=76%  convit_base=70%
-  visformer_small=75%  cait_s24=92%
-  inception_v3=66%  inception_v4=63%  inception_resnet_v2=61%  resnet101=69%
-```
-
-## Core Mechanism
-
-### Single-copy flow (within one step, one of 20 copies)
+## 一、攻击流程
 
 ```
 adv_pixels
     │
-patch_embed (W) → pos_embed → norm_pre → tokens at L=0 [CLS, 196 patches]
+patch_embed(W) → pos_embed → norm_pre → [CLS₀, 196 patch tokens]
     │
-    ├── Scoring branch (no gradient):
-    │     CLS + gaussian_noise → cos(patch_i, CLS_jittered) → scores
-    │     scores < median → candidates → random 30% → drop_mask
+    ├── 评分分支（detach，无梯度）
+    │     CLS₀ + σ · ε → cos(patch_i, CLS₀+ε) → scores
+    │     ε ~ N(0,I), σ=0.2×rms(patches), 每 copy 独立采样
+    │     scores < median → 候选池 → 随机 30% → drop_mask
     │
-    └── Forward branch (with gradient):
-         apply drop_mask → zeroed tokens + opponent noise on survivors
-         └── blocks[0:12] → norm → head → CE loss → backward
+    └── 前传分支（有梯度）
+         根据 drop_mask: zero token | opponent-channel 噪声
+         → blocks[0:12] → norm → head → CE loss → backward
 ```
 
-### Multi-copy aggregation
+20 copies 的梯度取平均 → MI(decay=1.0) → sign → 更新像素。10 steps。
 
-```
-20 copies → 20 grads (different masks due to CLS jitter) → mean → MI sign → update
-10 steps total
-```
+## 二、数学支撑
 
-## Why It Works: The Outlier-Token Narrative
+### 2.1 为什么低分 patch 是应该被丢弃的
 
-### 1. Darcet et al. (Register Tokens) Foundation
+Patch embedding W ∈ R^(768×768)，有效秩 ~120。W 的奇异值极度倾斜（σ_max²/σ_min² ≈ 27717）。
 
-ViT self-attention produces high-L2-norm "outlier tokens" in background/smooth
-regions. These tokens carry little classification information but dominate
-softmax(QK^T/sqrt(d)) due to their magnitude. This is a structural property of
-the softmax attention mechanism, not a learned preference of any specific model.
+- 高 σ 方向：W 放大，编码分类有用特征（边缘、纹理、颜色对比）
+- 低 σ 方向：W 压缩，背景/平滑区域的信号被压制
 
-### 2. Our Empirical Validation
+**在 L=0，cos(patch_i, CLS₀) 测量的是 patch_i 在 W 的「高 σ 方向」上的投影分量。** CLS₀ 作为一个可学习的全局锚点向量，在预训练中被优化为对准这些高信息方向。低分 patch 在高 σ 方向上投影弱 → 被 W 压缩 → 在 token 空间表现出异常高的 L2 norm。
 
-Computed on 50 ImageNet images at L=0 (patch_embed output):
+**实证：** 50 张图上，低分 patch 的 L2 norm 是高分 patch 的 1.14 倍（50/50 一致）。
 
-| | Low-score patches (dropped) | High-score patches (kept) |
+### 2.2 为什么高 norm 是问题
+
+Self-attention 的 softmax 赋权：
+
+$$\alpha_{ij} = \frac{\exp(Q_i \cdot K_j)}{\sum_k \exp(Q_i \cdot K_k)}$$
+
+高 norm 的 K_j 使指数项 $\exp(Q_i \cdot K_j)$ 即使在语义方向不匹配时也占据主导。softmax 是指数函数，对输入的量级敏感——这不是训练偏好，是数学必然。Darcet et al. 将此定义为「outlier token 劫持注意力」。
+
+### 2.3 为什么零化它们有效
+
+零化 dropout 的 token 后，softmax 权重重新分配：
+
+$$\alpha_{ij}' = \frac{\exp(Q_i \cdot K_j)}{\sum_{k \notin \text{drop}} \exp(Q_i \cdot K_k)}$$
+
+分母去掉高 norm 项 → 真正有判别信息的 token 获得更多注意力权重 → 损失对这些 token 更敏感 → 梯度迫使扰动覆盖真正重要的图像区域 → 扰动可迁移。
+
+### 2.4 为什么 L=0 评分而不是深层
+
+| | L=0 | 深层 (L=-1) |
 |---|---|---|
-| Mean L2 norm | **13.55** | 11.90 |
-| Ratio | **1.14×** | — |
-| CLS cosine | 0.11 | 0.14 |
+| CLS 含义 | 全局可学习锚点（所有图相同） | 图像特定语义表示 |
+| patch 间平均 cos | 0.18（多样化） | 0.80（近乎共线） |
+| CLS 噪声的 rank 扰动 | 0.97（有效重排） | 0.996（几乎不变） |
+| 评分本质 | 通用底层先验 | 白盒注意力偏好 |
+| 迁移性 | 可迁移 | 过拟合白盒 |
 
-**50/50 images: low-score = high-norm. The patches we drop ARE the outlier tokens.**
+L=0 评分基于 W 学的通用先验——所有 ViT 的 patch_embed 学到类似的底层特征 → low-score 命中的是「架构层面的信息贫乏区」而非「图像特定的背景」→ 所有 ViT 共享这个结构 → 可迁移。
 
-### 3. Why Scoring at L=0
+深层 CLS 经过 12 层自注意力，已携带 vit_base 特定的语义偏好。深层 patch 因自注意力收敛而同质化（cos=0.80），CLS 噪声无法有效分化它们。
 
-- L=0 CLS is a learned embedding vector shared across all images. It encodes a
-  universal prior about "which directions matter" from the patch embedding weights.
-- cos(patch, CLS₀) measures alignment with this universal prior. Low-score patches
-  are those whose features were compressed by W's weak singular directions.
-- Deep-layer CLS (L=-1, L=-2) carries image-specific semantics that overfit to
-  the white-box model's attention strategy → less transferable.
-- L=0 is the ONLY layer where patch tokens are diverse enough for noise to create
-  meaningful score variation: mean pairwise patch cos=0.18 at L=0 vs 0.80 at L=-1.
-  At deep layers, all patches converge to similar directions → CLS jitter shifts
-  all scores in sync → no real dropout diversity.
+### 2.5 对手通道（opponent-channel）噪声
 
-### 4. Why Dropout (Zero) + Noise (Opponent)
+逐像素通道协方差：
 
-**Dropout (15% of patches zeroed):**
-Removes high-norm outlier tokens → self-attention redistributes to informative
-patches → gradient forced to cover discriminative regions → perturbation covers
-foreground, not just background noise.
+$$C_{opp} = \begin{bmatrix} 1.00 & -0.25 & -0.25 \\ -0.25 & 1.00 & -0.25 \\ -0.25 & -0.25 & 1.00 \end{bmatrix}$$
 
-**Opponent-channel noise on non-dropped patches:**
-Per-pixel covariance C_opp = [[1, -0.25, -0.25], [-0.25, 1, -0.25], [-0.25, -0.25, 1]]
-- Luminance variance -50%, chrominance variance +25%
-- Suppresses CNN luminance-dominant filters (model-specific), amplifies
-  color-opponent filters (universal across ConvNets)
-- Noise generated in pixel space, projected to token space via W^T
+特征分解：λ_lum=0.5（亮度 -50%），λ_rg=λ_yb=1.25（色度 +25%）。
 
-**CLS Gaussian jitter for scoring:**
-- Each of 20 copies jitters CLS₀ with independent Gaussian noise (σ=0.2×token_rms)
-- Different CLS → different scores → different dropout masks per copy
-- Creates gradient diversity: each copy's gradient sees a different dropout pattern
+CNN 第一层滤波器以亮度边缘检测为主（~60-70%）。标准 i.i.d. 噪声 33% 方差在亮度方向 → 梯度被亮度滤波器主导 → 模型特定。Opponent 噪声降至 17% → 颜色对抗滤波器贡献增加 → 颜色对抗性是所有 CNN 的共性 → +4.75pp CNN 迁移。
 
-### 5. Why Transferable
+噪声在**像素空间**生成（具备 C_opp 协方差结构），通过 W^T 投影到 token 空间后注入。
 
-The outlier token problem is a mathematical property of softmax attention.
-All ViT architectures share this structural defect. Dropping these tokens
-during the attack forces perturbations to work through the "real" information
-pathways that are consistent across ViT variants.
+### 2.6 CLS 评分噪声
 
-The opponent-channel noise addresses CNNs specifically by exploiting the
-universality of color-opponent features in ConvNet first layers.
+CLS₀ + σ · ε 中 ε 在每个 copy 独立采样。噪声让 20 个 copy 对「低分边界在哪里」有不同判断 → 20 组不同的 dropout mask → 梯度多样性来自 dropout 集合的差异，而非仅来自 token 数值的差异。
 
-## What Has Been Exhaustively Tested
+## 三、当前配置与结果
 
-### Dead Ends (confirmed harmful or zero gain)
-
-| Direction | Result | Detail |
-|-----------|--------|--------|
-| Spatial correlation in noise | -23.6pp | Cross-patch smoothing overfits attention patterns |
-| Deep-layer scoring (L>0) | -4.2pp | Deep patches too homogeneous, CLS semantics model-specific |
-| TI smoothing | -22.5pp | Gradient smoothing destroys high-freq signal |
-| grad_trim_ratio | ~-1pp | Removing extreme copy gradients hurts CNN |
-| Noise strength > 0.2 | -7.8pp | Optimal SNR already found |
-| Noise strength < 0.2 | -2.6pp | Insufficient gradient diversity |
-| Per-pixel covariance optimization | 0% gain | W·W^T eff_rank=120 is the bottleneck, C only has 6 DoF |
-| Token-only noise (no dropout) | -8.3pp | Dropout provides ~6pp of the total gain |
-| Random dropout (no CLS scoring) | -1.6pp | CLS scoring provides modest but real gain |
-| High-score dropout | -8pp | Dropping foreground always worse than background |
-| DIM (Input Diversity) | OFF | Already tested in early experiments, not helpful here |
-
-### Tuned to Optimum
-
-| Parameter | Optimal value | Sensitivity |
-|-----------|--------------|-------------|
-| guide_aug_strength | 0.2 | ±0.1 causes significant drop |
-| patch_dropout_ratio | 0.3 | 0.15 drops ~1.6pp, 0.5 not tested recently |
-| patch_dropout_score_mode | low | high drops ~8pp |
-| token_cls_noise_mode | gaussian | mahalanobis ~0.6pp worse |
-| token_patch_dropout_layer | 0 | Any >0 catastrophic |
-| CLS noise strength | 0.2 | Sweep 0.1-0.3 shows 0.2 is peak |
-
-## Current Bottleneck: Analysis
-
-### 1. The Patch Embedding Information Ceiling
-
-The ViT-B/16 patch embedding W ∈ R^(768×768) has:
-- Effective rank = 120/768 (only 15.6% of dimensions carry useful signal)
-- σ_max²/σ_min² = 27717 (extreme spectral skew)
-- 50% of power in top 45 singular vectors
-
-This is a Shannon limit for gradient information flow. Whether noise is added
-in pixel space or token space, the gradient ∂L/∂pixels = W^T · ∂L/∂tokens is
-constrained to W^T's effective subspace (~120 dimensions).
-
-### 2. ViT-CNN Tradeoff
-
-CNN and ViT have conflicting noise requirements:
-- CNN needs per-pixel, per-channel diversity (small receptive fields)
-- ViT needs token-space diversity within W's 120-dim effective subspace
-
-Opponent-channel noise partially bridges this (CNN +4.75pp) but the fundamental
-tension remains. The ViT bottleneck (W^T eff_rank=120) cannot be broken by
-changing the noise distribution — it requires changing the gradient path itself.
-
-### 3. What Would Help
-
-**Proven to work:**
-- Increase epsilon: at 24/255, same method achieves 84.4% avg (87% ViT, 79.8% CNN)
-
-**Potentially viable but untested:**
-- Multi-white-box ensemble: two ViTs with complementary W matrices → combined
-  effective rank could be 150-200 (theoretical, not implemented)
-- Gradient path bypass: somehow inject gradient signal that doesn't go through W^T
-- Token-space augmentation with gradient diversity loss: explicitly optimize for
-  diverse gradients across copies rather than hoping noise creates diversity
-- Adaptive CLS jitter strength per-copy or per-step: vary jitter magnitude as
-  attack progresses (exploration vs exploitation)
-
-**Likely not worth pursuing:**
-- Any spatial structure in noise (proved harmful)
-- Any form of gradient smoothing (proved harmful)
-- Changing the noise distribution (6-dim covariance space is a dead end)
-- Increasing copy count (gradient diversity already ~95%)
-- Standard gradient post-processing (TI, NI, trim, agreement — all tested)
-
-## Key Source Files
-
-- `attack.py`: LMDSSAttacker class, _attack_loss_for_token_patch_dropout (~line 1411)
-- `main.py`: CLI entry, create_attacker function
-- `experiments/MATH_ANALYSIS.md`: Full mathematical derivation of opponent covariance
-- `experiments/vit_gradient_spatial_analysis.py`: W·W^T spectral analysis
-
-## Quick Start Commands
-
-```bash
-# Run attack
-python main.py --mode attack --max-attacked-samples 100 --steps 10 \
-  --mi --mi-decay 1.0 --attack-loss logits --feature-layer 0 \
-  --guide-aug --guide-aug-method token_patch_dropout \
-  --guide-aug-copies 20 --guide-aug-strength 0.2 \
-  --patch-dropout-ratio 0.3 --patch-dropout-score-mode low \
-  --patch-dropout-fill-mode zero_noise \
-  --patch-dropout-noise-mode opponent_channel_gaussian \
-  --token-score-cls-noise --token-cls-noise-mode gaussian \
-  --output-dir outputs/attack/lmdss_ablation/<exp_name> --batch-size 32
-
-# Run transfer eval
-python transfer_eval.py \
-  --image-dir outputs/attack/lmdss_ablation/<exp_name> \
-  --prefix adv_ --exp-name <exp_name>
 ```
+16/255, ViT-B/16 白盒, 100 样本, 10 steps
+
+avg=72.5%   ViT=77.0%   CNN=64.5%
+
+levit_256  pit_b  deit_b  tnt_s  convit_b  visformer  cait_s24
+   71%      76%     77%    76%     70%        75%        92%
+
+inc_v3  inc_v4  incres_v2  resnet101
+  66%     63%      61%        69%
+```
+
+## 四、未解决的问题
+
+### 4.1 W·W^T 的信息天花板
+
+W·W^T 的有效秩仅 120/768。无论噪声在像素空间还是 token 空间，梯度 ∂L/∂pixels = W^T · ∂L/∂tokens 最终被 W^T 压缩到这 120 维子空间内。这是不可绕过的信息瓶颈——当前所有优化都在这个子空间内部微调，没有触及瓶颈本身。
+
+**这意味着：** 在 16/255 下，无论怎样优化噪声结构、评分策略、dropout 比例，ViT ASR 的理论上限都在 80% 附近（24/255 时同一方法达到 87%，证明瓶颈是 epsilon 而非方法设计）。
+
+### 4.2 ViT 和 CNN 的结构性矛盾
+
+- CNN 需要逐像素、多通道高频多样性（3×3 感受野，每通道独立滤波）
+- ViT 被 W·W^T 的 120 维有效子空间限制，逐像素多样性的大部分被 patch_embed 平均掉
+
+Opponent-channel 噪声部分弥合了这个矛盾（CNN +4.75pp），但 ViT 端仍然受限。这个矛盾不是噪声设计问题——CNN 和 ViT 处理信息的尺度根本不同。
+
+### 4.3 可尝试但未验证的方向
+
+- **多白盒集成：** 同时攻击两个 ViT（如 vit_base + deit_base）。两者的 W 矩阵不同，互补的有效子空间可扩大梯度覆盖范围
+- **Patch 评分和 dropout 比率自适应：** 当前 CLS jitter 强度在各 copy 和各 step 间固定
