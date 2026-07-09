@@ -114,8 +114,17 @@ class LMDSSAttacker:
         guide_aug_strength: float = 0.2,
         patch_dropout_ratio: float = 0.3,
         patch_dropout_score_mode: str = "high",
+        patch_dropout_sampling_mode: str = "random",
+        patch_dropout_score_quantile_jitter: float = 0.0,
+        patch_dropout_score_noise: float = 0.0,
         patch_dropout_fill_mode: str = "zero_noise",
         patch_dropout_noise_mode: str = "gaussian",
+        token_patch_dropout_layer: int = 0,
+        token_cls_noise: bool = False,
+        token_score_cls_noise: bool = False,
+        token_score_patch_noise: bool = False,
+        token_cls_noise_mode: str = "gaussian",
+        token_cls_noise_strength: float | None = None,
         dim_adjoint_echo: bool = False,
         lowmid_grad_tuning: bool = False,
         lowmid_grad_rotation_strength: float = 0.5,
@@ -317,6 +326,9 @@ class LMDSSAttacker:
             "antithetic_jitter_cubature",
             "feature_trajectory_dropout",
             "patch_dropout",
+            "patch_dropout_cls_jitter",
+            "patch_token_dropout_mix",
+            "token_patch_dropout",
         )
         if not self.guide_aug_methods:
             raise ValueError("guide_aug_methods must contain at least one method.")
@@ -338,6 +350,22 @@ class LMDSSAttacker:
                 "patch_dropout_score_mode must be 'high' or 'low', "
                 f"got {patch_dropout_score_mode!r}."
             )
+        self.patch_dropout_sampling_mode = str(patch_dropout_sampling_mode)
+        valid_patch_dropout_sampling_modes = ("random", "bernoulli", "extreme", "score_weighted")
+        if self.patch_dropout_sampling_mode not in valid_patch_dropout_sampling_modes:
+            raise ValueError(
+                "patch_dropout_sampling_mode must be one of "
+                f"{valid_patch_dropout_sampling_modes}, got {patch_dropout_sampling_mode!r}."
+            )
+        self.patch_dropout_score_quantile_jitter = float(patch_dropout_score_quantile_jitter)
+        if not 0.0 <= self.patch_dropout_score_quantile_jitter < 0.5:
+            raise ValueError(
+                "patch_dropout_score_quantile_jitter must be in [0, 0.5), "
+                f"got {patch_dropout_score_quantile_jitter}."
+            )
+        self.patch_dropout_score_noise = float(patch_dropout_score_noise)
+        if self.patch_dropout_score_noise < 0:
+            raise ValueError(f"patch_dropout_score_noise must be non-negative, got {patch_dropout_score_noise}.")
         self.patch_dropout_fill_mode = str(patch_dropout_fill_mode)
         valid_patch_dropout_fill_modes = (
             "zero_noise",
@@ -367,6 +395,25 @@ class LMDSSAttacker:
             raise ValueError(
                 "patch_dropout_noise_mode must be one of "
                 f"{valid_patch_dropout_noise_modes}, got {patch_dropout_noise_mode!r}."
+            )
+        if token_patch_dropout_layer < 0:
+            raise ValueError(f"token_patch_dropout_layer must be non-negative, got {token_patch_dropout_layer}.")
+        self.token_patch_dropout_layer = int(token_patch_dropout_layer)
+        self.token_cls_noise = bool(token_cls_noise)
+        self.token_score_cls_noise = bool(token_score_cls_noise)
+        self.token_score_patch_noise = bool(token_score_patch_noise)
+        self.token_cls_noise_mode = str(token_cls_noise_mode)
+        if self.token_cls_noise_mode not in ("gaussian", "mahalanobis"):
+            raise ValueError(
+                f"token_cls_noise_mode must be 'gaussian' or 'mahalanobis', got {token_cls_noise_mode!r}."
+            )
+        self.token_cls_noise_strength = (
+            float(token_cls_noise_strength) if token_cls_noise_strength is not None
+            else self.guide_aug_strength
+        )
+        if self.token_cls_noise_strength < 0:
+            raise ValueError(
+                f"token_cls_noise_strength must be non-negative, got {token_cls_noise_strength}."
             )
         self._patch_scores: torch.Tensor | None = None
         self._patch_dropout_antithetic_noise: torch.Tensor | None = None
@@ -1173,6 +1220,296 @@ class LMDSSAttacker:
         cosine = F.cosine_similarity(adv_features, clean_feature_target, dim=-1)
         return 1.0 - cosine.mean()
 
+    def _opponent_channel_noise_like(self, pixels: torch.Tensor) -> torch.Tensor:
+        if pixels.size(1) != 3:
+            return torch.randn_like(pixels, dtype=pixels.dtype)
+        coeff = torch.randn_like(pixels, dtype=pixels.dtype)
+        luma = (0.5 ** 0.5) * coeff[:, 0:1]
+        red_green = (1.25 ** 0.5) * coeff[:, 1:2]
+        yellow_blue = (1.25 ** 0.5) * coeff[:, 2:3]
+        inv_sqrt2 = 2.0 ** -0.5
+        inv_sqrt3 = 3.0 ** -0.5
+        inv_sqrt6 = 6.0 ** -0.5
+        return torch.cat(
+            (
+                inv_sqrt3 * luma + inv_sqrt2 * red_green + inv_sqrt6 * yellow_blue,
+                inv_sqrt3 * luma - inv_sqrt2 * red_green + inv_sqrt6 * yellow_blue,
+                inv_sqrt3 * luma - 2.0 * inv_sqrt6 * yellow_blue,
+            ),
+            dim=1,
+        )
+
+    def _token_patch_dropout_noise(
+        self,
+        patch_tokens: torch.Tensor,
+        base_model,
+    ) -> torch.Tensor:
+        token_rms = patch_tokens.detach().square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
+        if self.patch_dropout_noise_mode != "opponent_channel_gaussian":
+            return self.guide_aug_strength * token_rms * torch.randn_like(patch_tokens)
+
+        proj = getattr(getattr(base_model, "patch_embed", None), "proj", None)
+        weight = getattr(proj, "weight", None)
+        if not isinstance(weight, torch.Tensor) or weight.ndim != 4:
+            return self.guide_aug_strength * token_rms * torch.randn_like(patch_tokens)
+        out_channels, in_channels, kernel_h, kernel_w = weight.shape
+        if in_channels != 3 or out_channels != patch_tokens.size(-1):
+            return self.guide_aug_strength * token_rms * torch.randn_like(patch_tokens)
+
+        B, N, D = patch_tokens.shape
+        patch_noise = torch.empty(
+            B * N,
+            in_channels,
+            kernel_h,
+            kernel_w,
+            device=patch_tokens.device,
+            dtype=patch_tokens.dtype,
+        )
+        patch_noise = self._opponent_channel_noise_like(patch_noise)
+        flat_noise = patch_noise.reshape(B * N, -1)
+        flat_weight = weight.detach().to(device=patch_tokens.device, dtype=patch_tokens.dtype).reshape(D, -1)
+        token_noise = flat_noise.matmul(flat_weight.t()).view(B, N, D)
+        noise_rms = token_noise.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
+        token_noise = token_noise * (token_rms / noise_rms)
+        return self.guide_aug_strength * token_noise
+
+    @staticmethod
+    def _run_vit_blocks(blocks, x: torch.Tensor, start: int, end: int) -> torch.Tensor:
+        for idx in range(start, end):
+            x = blocks[idx](x)
+        return x
+
+    def _token_patch_dropout_fill(
+        self,
+        patch_tokens: torch.Tensor,
+        noisy_patches: torch.Tensor,
+        scores: torch.Tensor,
+        drop_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.patch_dropout_fill_mode == "zero_noise":
+            return torch.where(drop_mask.unsqueeze(-1), torch.zeros_like(patch_tokens), noisy_patches)
+
+        fill_tokens = patch_tokens.clone()
+        B, N, _D = patch_tokens.shape
+        median = scores.median(dim=1, keepdim=True).values
+        high_score_mask = scores > median
+        grid_size = int(round(N ** 0.5))
+        has_square_grid = grid_size * grid_size == N
+
+        for b in range(B):
+            target_idx = drop_mask[b].nonzero(as_tuple=True)[0]
+            donor_pool = high_score_mask[b].nonzero(as_tuple=True)[0]
+            if target_idx.numel() == 0 or donor_pool.numel() == 0:
+                continue
+
+            if self.patch_dropout_fill_mode in ("context_high_score_blend", "random_high_score_inpaint"):
+                donor_idx = donor_pool[
+                    torch.randint(donor_pool.numel(), (target_idx.numel(),), device=patch_tokens.device)
+                ]
+                donor_tokens = patch_tokens[b, donor_idx]
+                if self.patch_dropout_fill_mode == "context_high_score_blend":
+                    fill_tokens[b, target_idx] = 0.5 * patch_tokens[b, target_idx] + 0.5 * donor_tokens
+                else:
+                    fill_tokens[b, target_idx] = donor_tokens
+                continue
+
+            if not has_square_grid:
+                donor_idx = donor_pool[
+                    torch.randint(donor_pool.numel(), (target_idx.numel(),), device=patch_tokens.device)
+                ]
+                fill_tokens[b, target_idx] = patch_tokens[b, donor_idx]
+                continue
+
+            target_y = target_idx.div(grid_size, rounding_mode="floor")
+            target_x = target_idx.remainder(grid_size)
+            donor_y = donor_pool.div(grid_size, rounding_mode="floor")
+            donor_x = donor_pool.remainder(grid_size)
+            distance = (
+                (target_y[:, None] - donor_y[None, :]).square()
+                + (target_x[:, None] - donor_x[None, :]).square()
+            )
+            nearest = distance.argmin(dim=1)
+            fill_tokens[b, target_idx] = patch_tokens[b, donor_pool[nearest]]
+
+        return torch.where(drop_mask.unsqueeze(-1), fill_tokens, noisy_patches)
+
+    def _sample_patch_dropout_mask(
+        self,
+        scores: torch.Tensor,
+        candidate_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        drop_mask = torch.zeros_like(candidate_mask, dtype=torch.bool)
+        if self.patch_dropout_ratio <= 0:
+            return drop_mask
+
+        for b in range(scores.size(0)):
+            candidate_idx = candidate_mask[b].nonzero(as_tuple=True)[0]
+            n_candidates = candidate_idx.numel()
+            if n_candidates == 0:
+                continue
+            n_drop = max(1, int(round(n_candidates * self.patch_dropout_ratio)))
+
+            if self.patch_dropout_sampling_mode == "bernoulli":
+                keep = torch.rand(n_candidates, device=scores.device) < self.patch_dropout_ratio
+                if not keep.any():
+                    keep[torch.randint(n_candidates, (1,), device=scores.device)] = True
+                selected = candidate_idx[keep]
+            elif self.patch_dropout_sampling_mode == "random":
+                selected = candidate_idx[torch.randperm(n_candidates, device=scores.device)[:n_drop]]
+            elif self.patch_dropout_sampling_mode == "extreme":
+                candidate_scores = scores[b, candidate_idx]
+                largest = self.patch_dropout_score_mode == "high"
+                order = torch.argsort(candidate_scores, descending=largest)
+                selected = candidate_idx[order[:n_drop]]
+            else:
+                candidate_scores = scores[b, candidate_idx]
+                median = scores[b].median()
+                weights = (candidate_scores - median).abs().clamp_min(1e-6)
+                sample_idx = torch.multinomial(weights, n_drop, replacement=False)
+                selected = candidate_idx[sample_idx]
+
+            drop_mask[b, selected] = True
+        return drop_mask
+
+    def _patch_score_candidate_mask(self, scores: torch.Tensor) -> torch.Tensor:
+        if self.patch_dropout_score_noise > 0:
+            score_std = scores.detach().std(dim=1, keepdim=True).clamp_min(1e-6)
+            scores = scores + self.patch_dropout_score_noise * score_std * torch.randn_like(scores)
+
+        if self.patch_dropout_score_quantile_jitter <= 0:
+            threshold = scores.median(dim=1, keepdim=True).values
+        else:
+            B = scores.size(0)
+            jitter = self.patch_dropout_score_quantile_jitter
+            quantiles = 0.5 + (torch.rand(B, device=scores.device, dtype=scores.dtype) * 2.0 - 1.0) * jitter
+            threshold = torch.stack(
+                [torch.quantile(scores[b], float(quantiles[b].item())) for b in range(B)]
+            ).view(B, 1)
+
+        if self.patch_dropout_score_mode == "high":
+            return scores > threshold
+        return scores < threshold
+
+    def _make_cls_noise(
+        self,
+        patch_tokens: torch.Tensor,
+    ) -> torch.Tensor:
+        """Generate CLS-shaped noise with configured mode and strength."""
+        token_rms = patch_tokens.detach().square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
+        if self.token_cls_noise_mode == "mahalanobis":
+            P = patch_tokens.detach()  # [B, N, D]
+            P_centered = P - P.mean(dim=1, keepdim=True)
+            z = torch.randn(P.size(0), P.size(1), 1, device=P.device, dtype=P.dtype)
+            cls_raw = torch.bmm(P_centered.transpose(1, 2), z).squeeze(-1) / (P.size(1) ** 0.5)
+            return self.token_cls_noise_strength * token_rms * cls_raw.unsqueeze(1)
+        return self.token_cls_noise_strength * token_rms * torch.randn_like(patch_tokens[:, :1, :])
+
+    def _get_score_tokens(
+        self,
+        base_model,
+        normalized: torch.Tensor,
+        score_layer_idx: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """no_grad: embed + run up to score_layer_idx, return (CLS, patches)."""
+        with torch.no_grad():
+            x = base_model.patch_embed(normalized)
+            x = base_model._pos_embed(x)
+            x = base_model.patch_drop(x)
+            x = base_model.norm_pre(x)
+            if score_layer_idx > 0:
+                x = self._run_vit_blocks(base_model.blocks, x, 0, score_layer_idx)
+            if x.ndim != 3 or x.size(1) < 2:
+                raise ValueError(f"Expected CLS + patch tokens, got {tuple(x.shape)}.")
+            return x[:, :1, :], x[:, 1:, :]
+
+    def _attack_loss_for_token_patch_dropout(
+        self,
+        pixels: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.attack_loss != "logits":
+            raise ValueError("token_patch_dropout currently supports logits loss only.")
+        base_model = getattr(self.model, "model", None)
+        required = ("patch_embed", "_pos_embed", "patch_drop", "norm_pre", "blocks", "norm", "forward_head")
+        if base_model is None or any(not hasattr(base_model, name) for name in required):
+            raise ValueError("token_patch_dropout requires a ViT-style timm model with patch token internals.")
+
+        forward_pixels = self._dim_adjoint_echo_pixels(pixels) if self.dim_adjoint_echo else pixels
+        model_pixels = self._input_diversity(forward_pixels)
+        normalized = self._normalize(model_pixels)
+        num_blocks = len(base_model.blocks)
+
+        # ---- Phase 1: deep scoring (no_grad) ----
+        # Use --feature-layer for scoring depth, independent of dropout injection.
+        score_layer_idx = self.feature_layer if self.feature_layer >= 0 else num_blocks + self.feature_layer
+        score_layer_idx = max(0, min(score_layer_idx, num_blocks))
+        cls_score, patch_score = self._get_score_tokens(base_model, normalized, score_layer_idx)
+        score_cls = cls_score
+        if self.token_score_cls_noise and self.token_cls_noise_strength > 0:
+            score_cls = cls_score + self._make_cls_noise(patch_score)
+        if self.token_score_patch_noise and self.guide_aug_strength > 0:
+            patch_score = patch_score + self._token_patch_dropout_noise(patch_score, base_model)
+        scores = F.cosine_similarity(patch_score, score_cls.expand_as(patch_score), dim=-1)
+        candidate_mask = self._patch_score_candidate_mask(scores)
+        drop_mask = self._sample_patch_dropout_mask(scores, candidate_mask)
+
+        # ---- Phase 2: forward with dropout injected at L=0 ----
+        x = base_model.patch_embed(normalized)
+        x = base_model._pos_embed(x)
+        x = base_model.patch_drop(x)
+        x = base_model.norm_pre(x)
+        if x.ndim != 3 or x.size(1) < 2:
+            raise ValueError(f"Expected CLS + patch tokens at L=0, got {tuple(x.shape)}.")
+
+        cls_L0 = x[:, :1, :]
+        patch_L0 = x[:, 1:, :]
+        jittered_cls = cls_L0
+        if self.token_cls_noise and self.token_cls_noise_strength > 0:
+            jittered_cls = cls_L0 + self._make_cls_noise(patch_L0)
+
+        noisy_patches = patch_L0 + self._token_patch_dropout_noise(patch_L0, base_model)
+        patch_tokens = self._token_patch_dropout_fill(patch_L0, noisy_patches, scores, drop_mask)
+
+        x = torch.cat((jittered_cls, patch_tokens), dim=1)
+        x = self._run_vit_blocks(base_model.blocks, x, 0, num_blocks)
+        x = base_model.norm(x)
+        logits = base_model.forward_head(x)
+        return F.cross_entropy(logits, labels)
+
+    def _attack_loss_for_patch_dropout_cls_jitter(
+        self,
+        forward_pixels: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.attack_loss != "logits":
+            raise ValueError("patch_dropout_cls_jitter currently supports logits loss only.")
+        base_model = getattr(self.model, "model", None)
+        required = ("patch_embed", "_pos_embed", "patch_drop", "norm_pre", "blocks", "norm", "forward_head")
+        if base_model is None or any(not hasattr(base_model, name) for name in required):
+            raise ValueError("patch_dropout_cls_jitter requires a ViT-style timm model with patch token internals.")
+
+        if self.dim_adjoint_echo:
+            forward_pixels = self._dim_adjoint_echo_pixels(forward_pixels)
+        model_pixels = self._input_diversity(forward_pixels)
+        x = base_model.patch_embed(self._normalize(model_pixels))
+        x = base_model._pos_embed(x)
+        x = base_model.patch_drop(x)
+        x = base_model.norm_pre(x)
+        if x.ndim != 3 or x.size(1) < 2:
+            raise ValueError(f"Expected CLS + patch tokens with shape [B,N,D], got {tuple(x.shape)}.")
+
+        cls_token = x[:, :1, :]
+        patch_tokens = x[:, 1:, :]
+        if self.guide_aug_strength > 0:
+            token_rms = patch_tokens.detach().square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
+            cls_token = cls_token + self.guide_aug_strength * token_rms * torch.randn_like(cls_token)
+
+        x = torch.cat((cls_token, patch_tokens), dim=1)
+        x = self._run_vit_blocks(base_model.blocks, x, 0, len(base_model.blocks))
+        x = base_model.norm(x)
+        logits = base_model.forward_head(x)
+        return F.cross_entropy(logits, labels)
+
     def _iter_attack_losses(
         self,
         pixels: torch.Tensor,
@@ -1217,6 +1554,80 @@ class LMDSSAttacker:
                         pixels, consensus_grad, self.guide_aug_copies
                     ):
                         yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
+                elif method == "token_patch_dropout":
+                    for _copy_idx in range(self.guide_aug_copies):
+                        yield self._attack_loss_for_token_patch_dropout(pixels, labels)
+                elif method == "patch_dropout_cls_jitter":
+                    self._patch_dropout_antithetic_noise = None
+                    for _copy_idx in range(self.guide_aug_copies):
+                        forward_pixels = self._patch_dropout_pixels(pixels)
+                        yield self._attack_loss_for_patch_dropout_cls_jitter(forward_pixels, labels)
+                    self._patch_dropout_antithetic_noise = None
+                elif method == "patch_token_dropout_mix":
+                    self._patch_dropout_antithetic_noise = None
+                    for copy_idx in range(self.guide_aug_copies):
+                        if copy_idx % 2 == 0:
+                            forward_pixels = self._patch_dropout_pixels(pixels)
+                            yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
+                        else:
+                            yield self._attack_loss_for_token_patch_dropout(pixels, labels)
+                    self._patch_dropout_antithetic_noise = None
+                else:
+                    if method == "patch_dropout":
+                        self._patch_dropout_antithetic_noise = None
+                    for _copy_idx in range(self.guide_aug_copies):
+                        forward_pixels = self._guide_augmented_pixels(pixels, method)
+                        yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
+                    if method == "patch_dropout":
+                        self._patch_dropout_antithetic_noise = None
+            return
+
+        if self.guide_aug and "token_patch_dropout" in self.guide_aug_methods:
+            for method in self.guide_aug_methods:
+                if method == "token_patch_dropout":
+                    for _copy_idx in range(self.guide_aug_copies):
+                        yield self._attack_loss_for_token_patch_dropout(pixels, labels)
+                elif method == "patch_dropout_cls_jitter":
+                    self._patch_dropout_antithetic_noise = None
+                    for _copy_idx in range(self.guide_aug_copies):
+                        forward_pixels = self._patch_dropout_pixels(pixels)
+                        yield self._attack_loss_for_patch_dropout_cls_jitter(forward_pixels, labels)
+                    self._patch_dropout_antithetic_noise = None
+                elif method == "patch_token_dropout_mix":
+                    self._patch_dropout_antithetic_noise = None
+                    for copy_idx in range(self.guide_aug_copies):
+                        if copy_idx % 2 == 0:
+                            forward_pixels = self._patch_dropout_pixels(pixels)
+                            yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
+                        else:
+                            yield self._attack_loss_for_token_patch_dropout(pixels, labels)
+                    self._patch_dropout_antithetic_noise = None
+                else:
+                    for _copy_idx in range(self.guide_aug_copies):
+                        forward_pixels = self._guide_augmented_pixels(pixels, method)
+                        yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
+            return
+
+        if self.guide_aug and any(
+            method in self.guide_aug_methods
+            for method in ("patch_dropout_cls_jitter", "patch_token_dropout_mix")
+        ):
+            for method in self.guide_aug_methods:
+                if method == "patch_dropout_cls_jitter":
+                    self._patch_dropout_antithetic_noise = None
+                    for _copy_idx in range(self.guide_aug_copies):
+                        forward_pixels = self._patch_dropout_pixels(pixels)
+                        yield self._attack_loss_for_patch_dropout_cls_jitter(forward_pixels, labels)
+                    self._patch_dropout_antithetic_noise = None
+                elif method == "patch_token_dropout_mix":
+                    self._patch_dropout_antithetic_noise = None
+                    for copy_idx in range(self.guide_aug_copies):
+                        if copy_idx % 2 == 0:
+                            forward_pixels = self._patch_dropout_pixels(pixels)
+                            yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
+                        else:
+                            yield self._attack_loss_for_token_patch_dropout(pixels, labels)
+                    self._patch_dropout_antithetic_noise = None
                 else:
                     if method == "patch_dropout":
                         self._patch_dropout_antithetic_noise = None
@@ -1322,24 +1733,7 @@ class LMDSSAttacker:
             signs = torch.empty_like(pixels).bernoulli_(0.5).mul_(2.0).sub_(1.0)
             return self.guide_aug_strength * signs
         if self.patch_dropout_noise_mode == "opponent_channel_gaussian":
-            if pixels.size(1) != 3:
-                return self.guide_aug_strength * torch.randn_like(pixels, dtype=pixels.dtype)
-            coeff = torch.randn_like(pixels, dtype=pixels.dtype)
-            luma = (0.5 ** 0.5) * coeff[:, 0:1]
-            red_green = (1.25 ** 0.5) * coeff[:, 1:2]
-            yellow_blue = (1.25 ** 0.5) * coeff[:, 2:3]
-            inv_sqrt2 = 2.0 ** -0.5
-            inv_sqrt3 = 3.0 ** -0.5
-            inv_sqrt6 = 6.0 ** -0.5
-            noise = torch.cat(
-                (
-                    inv_sqrt3 * luma + inv_sqrt2 * red_green + inv_sqrt6 * yellow_blue,
-                    inv_sqrt3 * luma - inv_sqrt2 * red_green + inv_sqrt6 * yellow_blue,
-                    inv_sqrt3 * luma - 2.0 * inv_sqrt6 * yellow_blue,
-                ),
-                dim=1,
-            )
-            return self.guide_aug_strength * noise
+            return self.guide_aug_strength * self._opponent_channel_noise_like(pixels)
         if self.patch_dropout_noise_mode == "opponent_smooth_patch":
             # Opponent-channel noise with cross-patch spatial correlation.
             # 1. Generate noise at patch-grid resolution (grid×grid)
@@ -1574,26 +1968,17 @@ class LMDSSAttacker:
         if gh * gh != N:
             return pixels  # non-square grid; fall back to identity
 
-        # Mark the configured score subset around the per-image median.
-        median = self._patch_scores.median(dim=1, keepdim=True).values  # [B, 1]
-        if self.patch_dropout_score_mode == "high":
-            candidate_mask = self._patch_scores > median
-        else:
-            candidate_mask = self._patch_scores < median
+        # Mark the configured score subset around the per-image median or jittered quantile.
+        candidate_mask = self._patch_score_candidate_mask(self._patch_scores)
         candidate_mask = candidate_mask.to(torch.float32)               # [B, N]
 
         # Per batch item: randomly select patch_dropout_ratio of candidate patches.
         pixel_mask: torch.Tensor | None = None
         if self.patch_dropout_ratio > 0:
-            drop_mask = torch.zeros_like(candidate_mask)  # [B, N]
-            for b in range(B):
-                candidate_idx = candidate_mask[b].nonzero(as_tuple=True)[0]
-                n_candidates = candidate_idx.numel()
-                if n_candidates == 0:
-                    continue
-                n_drop = max(1, int(round(n_candidates * self.patch_dropout_ratio)))
-                perm = torch.randperm(n_candidates, device=pixels.device)[:n_drop]
-                drop_mask[b, candidate_idx[perm]] = 1.0
+            drop_mask = self._sample_patch_dropout_mask(
+                self._patch_scores,
+                candidate_mask.to(torch.bool),
+            ).to(torch.float32)
             pixel_mask = F.interpolate(
                 drop_mask.view(B, 1, gh, gh), size=(H, W), mode="nearest",
             )  # [B, 1, H, W]
@@ -1622,6 +2007,7 @@ class LMDSSAttacker:
                 .reshape(B, N, C, patch_h, patch_w)
             )
             fill_patches = local_patches.clone()
+            median = self._patch_scores.median(dim=1, keepdim=True).values
             high_score_mask = self._patch_scores > median
             for b in range(B):
                 target_idx = drop_mask[b].nonzero(as_tuple=True)[0]
