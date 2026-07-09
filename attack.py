@@ -130,6 +130,7 @@ class LMDSSAttacker:
         grad_momentum_agreement_strength: float = 0.2,
         grad_momentum_agreement_sigma: float = 0.0,
         grad_momentum_conflict_suppression_strength: float = 0.0,
+        grad_trim_ratio: float = 0.0,
         cross_step_sign_vote: bool = False,
         cross_step_sign_vote_window: int = 5,
         cross_step_sign_vote_strength: float = 0.2,
@@ -190,6 +191,10 @@ class LMDSSAttacker:
             raise ValueError(
                 "grad_momentum_conflict_suppression_strength must be non-negative, "
                 f"got {grad_momentum_conflict_suppression_strength}."
+            )
+        if not (0.0 <= grad_trim_ratio < 0.5):
+            raise ValueError(
+                f"grad_trim_ratio must be in [0, 0.5), got {grad_trim_ratio}."
             )
         if cross_step_sign_vote_window <= 0:
             raise ValueError(
@@ -277,6 +282,7 @@ class LMDSSAttacker:
         self.grad_momentum_conflict_suppression_strength = float(
             grad_momentum_conflict_suppression_strength
         )
+        self.grad_trim_ratio = float(grad_trim_ratio)
         self.cross_step_sign_vote = bool(cross_step_sign_vote)
         self.cross_step_sign_vote_window = int(cross_step_sign_vote_window)
         self.cross_step_sign_vote_strength = float(cross_step_sign_vote_strength)
@@ -1663,7 +1669,18 @@ class LMDSSAttacker:
             grad_sum = grad_term if grad_sum is None else grad_sum + grad_term
         if grad_sum is None:
             raise RuntimeError("No attack loss terms were generated.")
-        return grad_sum / float(len(term_grads)), tuple(term_grads)
+        grad = grad_sum / float(len(term_grads))
+        # Gradient trimming: remove extreme copy gradients per-pixel before averaging.
+        # Pixels with high gradient variance across copies reflect model-specific
+        # features → trimming them reduces overfitting to white-box ViT attention.
+        if self.grad_trim_ratio > 0 and len(term_grads) >= 3:
+            stacked = torch.stack(term_grads, dim=0)  # [N, B, C, H, W]
+            n_trim = max(1, int(len(term_grads) * self.grad_trim_ratio))
+            # Sort along copy dimension and trim both tails
+            sorted_grads, _ = stacked.sort(dim=0)
+            trimmed = sorted_grads[n_trim:-n_trim] if n_trim * 2 < len(term_grads) else sorted_grads
+            grad = trimmed.mean(dim=0)
+        return grad, tuple(term_grads)
 
     def _attack_grad(
         self,
