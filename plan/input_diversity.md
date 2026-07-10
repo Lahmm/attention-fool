@@ -208,3 +208,230 @@ peak memory
 - 不允许用“10 groups”掩盖每组 2 个以上的实际 view。
 - 不允许为了提高 ASR 偷增 view 数、白盒模型数量或隐藏额外的 phase forward。
 - 所有新梯度聚合方法先与 plain 20-view mean 比较，再讨论方法收益。
+
+## Agent Implementation Contract
+
+本节是方案一的实现约束。Coding agent 必须按此契约实现，不得用“等价”重构偷偷改变
+view 数或比较预算。
+
+### Scope and files
+
+第一版只修改以下边界：
+
+```text
+main.py       CLI 参数、attack_params 序列化、参数传递
+attack.py     phase view 生成、group/view 调度、梯度日志
+tests/        参数校验、phase shift、view budget 的单元测试
+```
+
+不要修改 transfer model、黑盒模型列表、默认 white-box 模型或现有
+`token_patch_dropout` 的默认语义。旧配置在没有新开关时必须产生相同 forward 数和
+相同 loss 路径。
+
+### New explicit configuration
+
+不要复用 `guide_aug_copies` 表示 group 数。新增显式参数，建议命名为：
+
+```text
+--input-diversity-groups              default=20
+--input-diversity-views-per-group     default=1
+--input-diversity-phase-shift         default="0,0"
+--input-diversity-phase-shift-set     optional, e.g. "4,4;8,8;12,12"
+--input-diversity-pair-aggregation     choices=[mean]  default=mean
+```
+
+当启用方案一时，使用：
+
+```text
+input_diversity_groups = 10
+input_diversity_views_per_group = 2
+total_views = 20
+```
+
+参数校验必须在构造 attacker 前完成：
+
+```python
+if groups <= 0:
+    raise ValueError
+if views_per_group <= 0:
+    raise ValueError
+if groups * views_per_group > 20:
+    raise ValueError("actual input-diversity views must be <= 20")
+if pair_aggregation != "mean":
+    raise NotImplementedError
+```
+
+不允许把 `groups * views_per_group` 只写入日志而不用于实际调度；日志中的
+`total_views` 必须等于实际调用 model forward 的次数。
+
+### Exact group/view lifecycle
+
+每个 attack step、每个 image batch 都按以下顺序执行：
+
+```python
+for group_idx in range(num_groups):
+    phase = choose_one_phase(group_idx)
+    for view_idx in range(views_per_group):
+        view_pixels = make_view(
+            pixels,
+            group_idx=group_idx,
+            view_idx=view_idx,
+            phase=phase if view_idx == 1 else (0, 0),
+        )
+        loss = token_patch_dropout_loss(view_pixels, labels)
+        grad = autograd(loss, pixels)
+        record_view(group_idx, view_idx, grad)
+
+    group_grad = (grad[group_idx, 0] + grad[group_idx, 1]) / 2
+final_grad = mean(group_grad for group_grad in groups)
+```
+
+当 `views_per_group=1` 时，view A 是唯一 view；当 `views_per_group=2` 时，view 0
+必须是原始输入，view 1 必须是一个 phase-shifted 输入。view 0 和 view 1 都必须
+独立执行完整的 `token_patch_dropout_loss`，包括：
+
+```text
+patch embedding
+L12 detached score
+CLS score noise（若启用）
+score mask sampling
+L0 injection
+full 12-block forward
+CE loss
+```
+
+不得复用 view 0 的 L12 token、score、mask 或 logits 给 view 1。不得在 view 0 内部
+额外计算多个 phase token。
+
+### Phase shift implementation
+
+phase shift 必须发生在送入模型前的 pixel tensor 上；不能直接修改模型的
+`patch_embed` 权重，也不能伪造 token tensor 作为第二 view。
+
+要求：
+
+```text
+输入 shape: [B, 3, H, W]
+输出 shape: [B, 3, H, W]
+shift: integer (dx, dy)
+```
+
+边界处理第一版固定为 differentiable reflect padding + crop。禁止 circular wrap，
+因为它会把图像右边缘连接到左边缘，产生非自然内容。实现必须满足：
+
+```python
+shift == (0, 0) -> pixels 等值返回，不复制并改变 dtype/device
+```
+
+正负 shift 的方向必须在单元测试中明确：对一个单点图案检查输出位置；不能只凭
+函数名猜方向。phase shift 只对 view 1 应用，view 0 不得经过隐式 resize/crop。
+
+### Randomness and reproducibility
+
+每个 `(attack_step, batch_index, group_idx, view_idx)` 必须有可追踪的随机状态。至少
+记录：
+
+```text
+base_seed
+group_idx
+view_idx
+phase_shift
+```
+
+如果 phase 从 `phase_shift_set` 随机选取，每个 group 只能选一个 phase；不能为同一
+group 的 view 1 再采样多个 phase。CLS jitter、mask sampling、token noise 仍按每个
+view 独立采样。
+
+调试模式下必须支持固定 seed，使相同输入、相同参数产生相同 view phase、mask 和 loss。
+
+### Mask and noise semantics
+
+方案一不改变当前 token patch dropout 的语义：
+
+```text
+L12 score branch: detached
+score mask: 每个 view 独立生成
+dropped patch: zero_noise fill 时置零
+kept patch: 按现有 patch_dropout_noise_mode 加噪
+```
+
+phase shift 只是改变 view 的输入和其 L12 score；它不是额外的 score noise，也不能
+把 phase residual 藏进 kept-patch token noise。若未来实现 kept-patch phase residual，
+必须作为新的真实 view 计数，除非明确取消第二个 forward 并重新定义预算。
+
+### Gradient aggregation contract
+
+第一版只允许等权聚合：
+
+```python
+group_grad = sum(view_grads) / views_per_group
+final_grad = sum(group_grads) / num_groups
+```
+
+对 `10 × 2` 而言，这与 20 个 view 的等权 mean 数值等价，但必须保留 group/view
+维度的日志，以便计算 within-group A/B gradient cosine。不能在第一版加入 loss weighting、
+gradient clipping、top-k view selection 或 conflict projection；这些属于后续新梯度
+方法，必须使用同一 view budget 单独做 ablation。
+
+MI、gradient normalization、TI、sign update 的执行位置保持现有实现不变：先完成
+全部 20 个 view 的聚合，再进入现有的 normalization/momentum/sign 流程。不得对每个
+group 单独更新像素。
+
+### Logging and metadata
+
+输出的 attack parameter JSON 和 transfer CSV 必须包含：
+
+```text
+input_diversity_enabled
+input_diversity_groups
+input_diversity_views_per_group
+input_diversity_total_views
+input_diversity_phase_shift_set
+input_diversity_pair_aggregation
+actual_forward_view_count
+```
+
+`actual_forward_view_count` 必须由调度器递增，而不是由配置推导后直接填写。攻击结束
+时断言：
+
+```python
+actual_forward_view_count == groups * views_per_group
+actual_forward_view_count <= 20
+```
+
+### Required tests
+
+至少新增以下测试：
+
+1. `20 × 1`、`10 × 2`、`5 × 4` 均通过 budget validation，`11 × 2` 必须失败。
+2. `phase_shift=(0,0)` 输出与输入数值等值，shape/dtype/device 保持一致。
+3. 非零 phase shift 的单点图案位置符合约定，且输出尺寸不变。
+4. `10 × 2` 恰好调用 20 次 view loss/forward；不能调用 21 次或更多。
+5. 每个 group 恰好有一个原始 view 和一个 shifted view。
+6. view 0/view 1 的 score、mask、CLS jitter 随机状态相互独立。
+7. pair mean 后再 group mean 与 20-view plain mean 数值一致（浮点容差内）。
+8. 未启用 input diversity 时，旧 token patch dropout 流程和参数默认值不变。
+
+### Acceptance criteria
+
+方案一只有在以下条件全部满足后才能进入 ASR 长跑：
+
+```text
+代码能通过全部 required tests
+实际 view 数严格为 20
+没有额外 white-box model
+没有隐藏 phase forward
+view 0/view 1 都执行完整 score -> mask -> L0 injection -> full forward
+CSV/JSON 能复现 groups/views/phase/aggregation
+single_view_20 与 phase_pair_10x2 使用完全相同的 epsilon、steps 和 MI
+```
+
+第一轮只比较：
+
+```text
+single_view_20
+phase_pair_10x2
+```
+
+在这两个 branch 的 source loss、ViT/CNN/overall ASR、gradient cosine、effective rank
+和 wall-clock 数据齐全前，不得继续叠加新的 gradient aggregation 方法。
