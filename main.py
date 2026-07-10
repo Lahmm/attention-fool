@@ -36,6 +36,11 @@ def create_attacker(
     guide_aug: bool = False,
     guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
+    input_diversity_groups: int = 20,
+    input_diversity_views_per_group: int = 1,
+    input_diversity_phase_shift: tuple[int, int] = (0, 0),
+    input_diversity_phase_shift_set: tuple[tuple[int, int], ...] | None = None,
+    input_diversity_pair_aggregation: str = "mean",
     guide_aug_strength: float = 0.2,
     patch_dropout_ratio: float = 0.3,
     patch_dropout_score_mode: str = "high",
@@ -96,6 +101,11 @@ def create_attacker(
         guide_aug=guide_aug,
         guide_aug_methods=guide_aug_methods,
         guide_aug_copies=guide_aug_copies,
+        input_diversity_groups=input_diversity_groups,
+        input_diversity_views_per_group=input_diversity_views_per_group,
+        input_diversity_phase_shift=input_diversity_phase_shift,
+        input_diversity_phase_shift_set=input_diversity_phase_shift_set,
+        input_diversity_pair_aggregation=input_diversity_pair_aggregation,
         guide_aug_strength=guide_aug_strength,
         patch_dropout_ratio=patch_dropout_ratio,
         patch_dropout_score_mode=patch_dropout_score_mode,
@@ -153,6 +163,32 @@ def parse_float_range(value: str) -> tuple[float, float]:
 
 def parse_model_names(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def parse_phase_shift(value: str) -> tuple[int, int]:
+    parts = tuple(int(item.strip()) for item in value.split(",") if item.strip())
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError(
+            "phase_shift must contain exactly two comma-separated ints, e.g. '4,4'."
+        )
+    return (parts[0], parts[1])
+
+
+def parse_phase_shift_set(value: str) -> tuple[tuple[int, int], ...]:
+    shifts = []
+    for part in value.split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        dx_dy = tuple(int(x.strip()) for x in part.split(",") if x.strip())
+        if len(dx_dy) != 2:
+            raise argparse.ArgumentTypeError(
+                f"Each phase shift must be exactly two ints, got '{part}'."
+            )
+        shifts.append((dx_dy[0], dx_dy[1]))
+    if not shifts:
+        raise argparse.ArgumentTypeError("phase_shift_set must contain at least one shift.")
+    return tuple(shifts)
 
 
 def expected_attack_output_dir() -> Path:
@@ -269,6 +305,16 @@ def parse_args():
     parser.add_argument("--guide-aug", action="store_true", help="Enable whole-image forward augmentation.")
     parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,dim_resonance,dim_stable_edge,dim_stable_edge_mix,dim_consensus_trajectory,dim_consensus_evidence_trajectory,lowmid_shift,white_noise,antithetic_transport,natural_spectrum_transport,antithetic_filter_bank,multiscale_adjoint_ensemble,orthogonal_photometric_ensemble,orthogonal_spherical_smoothing,antithetic_jitter_cubature,feature_trajectory_dropout,patch_dropout,patch_dropout_cls_jitter,patch_token_dropout_mix,token_patch_dropout.")
     parser.add_argument("--guide-aug-copies", type=int, default=3, help="Random copies per guide augmentation method.")
+    parser.add_argument("--input-diversity-groups", type=int, default=20,
+                        help="Number of groups for input diversity scheduling.")
+    parser.add_argument("--input-diversity-views-per-group", type=int, default=1,
+                        help="Views per group. 1=no pairing, 2=original+shifted pair.")
+    parser.add_argument("--input-diversity-phase-shift", type=parse_phase_shift, default=(0, 0),
+                        help='Phase shift (dx,dy) for view B, e.g. "4,4".')
+    parser.add_argument("--input-diversity-phase-shift-set", type=parse_phase_shift_set, default=None,
+                        help='Semicolon-separated shift set, e.g. "4,4;8,8;12,12".')
+    parser.add_argument("--input-diversity-pair-aggregation", choices=["mean"], default="mean",
+                        help="Pair aggregation method. Only 'mean' supported.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
     parser.add_argument("--patch-dropout-ratio", type=float, default=0.3, help="Fraction of selected patch-score subset to randomly drop per copy (0-1].")
     parser.add_argument("--patch-dropout-score-mode", choices=["high", "low", "all"], default="high", help="Patch score subset used by patch_dropout: high drops patches above median, low drops patches below median, all drops uniformly at random.")
@@ -344,6 +390,11 @@ def main(
     guide_aug: bool = False,
     guide_aug_methods: tuple[str, ...] = ("dropout",),
     guide_aug_copies: int = 3,
+    input_diversity_groups: int = 20,
+    input_diversity_views_per_group: int = 1,
+    input_diversity_phase_shift: tuple[int, int] = (0, 0),
+    input_diversity_phase_shift_set: tuple[tuple[int, int], ...] | None = None,
+    input_diversity_pair_aggregation: str = "mean",
     guide_aug_strength: float = 0.2,
     patch_dropout_ratio: float = 0.3,
     patch_dropout_score_mode: str = "high",
@@ -424,6 +475,11 @@ def main(
         guide_aug=guide_aug,
         guide_aug_methods=guide_aug_methods,
         guide_aug_copies=guide_aug_copies,
+        input_diversity_groups=input_diversity_groups,
+        input_diversity_views_per_group=input_diversity_views_per_group,
+        input_diversity_phase_shift=input_diversity_phase_shift,
+        input_diversity_phase_shift_set=input_diversity_phase_shift_set,
+        input_diversity_pair_aggregation=input_diversity_pair_aggregation,
         guide_aug_strength=guide_aug_strength,
         patch_dropout_ratio=patch_dropout_ratio,
         patch_dropout_score_mode=patch_dropout_score_mode,
@@ -499,6 +555,16 @@ def main(
         "guide_aug": guide_aug,
         "guide_aug_methods": list(guide_aug_methods),
         "guide_aug_copies": guide_aug_copies,
+        "input_diversity_groups": input_diversity_groups,
+        "input_diversity_views_per_group": input_diversity_views_per_group,
+        "input_diversity_total_views": input_diversity_groups * input_diversity_views_per_group,
+        "input_diversity_phase_shift": list(input_diversity_phase_shift),
+        "input_diversity_phase_shift_set": (
+            [list(s) for s in input_diversity_phase_shift_set]
+            if input_diversity_phase_shift_set is not None
+            else None
+        ),
+        "input_diversity_pair_aggregation": input_diversity_pair_aggregation,
         "guide_aug_strength": guide_aug_strength,
         "patch_dropout_ratio": patch_dropout_ratio,
         "patch_dropout_score_mode": patch_dropout_score_mode,
@@ -549,6 +615,11 @@ if __name__ == "__main__":
         guide_aug=args.guide_aug,
         guide_aug_methods=args.guide_aug_method,
         guide_aug_copies=args.guide_aug_copies,
+        input_diversity_groups=args.input_diversity_groups,
+        input_diversity_views_per_group=args.input_diversity_views_per_group,
+        input_diversity_phase_shift=args.input_diversity_phase_shift,
+        input_diversity_phase_shift_set=args.input_diversity_phase_shift_set,
+        input_diversity_pair_aggregation=args.input_diversity_pair_aggregation,
         guide_aug_strength=args.guide_aug_strength,
         patch_dropout_ratio=args.patch_dropout_ratio,
         patch_dropout_score_mode=args.patch_dropout_score_mode,

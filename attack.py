@@ -111,6 +111,11 @@ class LMDSSAttacker:
         guide_aug: bool = False,
         guide_aug_methods: tuple[str, ...] = ("dropout",),
         guide_aug_copies: int = 3,
+        input_diversity_groups: int = 20,
+        input_diversity_views_per_group: int = 1,
+        input_diversity_phase_shift: tuple[int, int] = (0, 0),
+        input_diversity_phase_shift_set: tuple[tuple[int, int], ...] | None = None,
+        input_diversity_pair_aggregation: str = "mean",
         guide_aug_strength: float = 0.2,
         patch_dropout_ratio: float = 0.3,
         patch_dropout_score_mode: str = "high",
@@ -342,6 +347,34 @@ class LMDSSAttacker:
         self.guide_aug_strength = float(guide_aug_strength)
         if self.guide_aug_strength < 0:
             raise ValueError(f"guide_aug_strength must be non-negative, got {guide_aug_strength}.")
+        self.input_diversity_groups = int(input_diversity_groups)
+        if self.input_diversity_groups <= 0:
+            raise ValueError(f"input_diversity_groups must be positive, got {input_diversity_groups}.")
+        self.input_diversity_views_per_group = int(input_diversity_views_per_group)
+        if self.input_diversity_views_per_group <= 0:
+            raise ValueError(f"input_diversity_views_per_group must be positive, got {input_diversity_views_per_group}.")
+        total_views = self.input_diversity_groups * self.input_diversity_views_per_group
+        if total_views > 20:
+            raise ValueError(f"input_diversity total views must be <= 20, got {total_views}.")
+        self.input_diversity_phase_shift = tuple(int(s) for s in input_diversity_phase_shift)
+        if len(self.input_diversity_phase_shift) != 2:
+            raise ValueError(f"input_diversity_phase_shift must be (dx, dy), got {self.input_diversity_phase_shift}.")
+        if input_diversity_phase_shift_set is not None:
+            validated = []
+            for s in input_diversity_phase_shift_set:
+                s_tuple = tuple(int(x) for x in s)
+                if len(s_tuple) != 2:
+                    raise ValueError(f"Each shift in phase_shift_set must be (dx, dy), got {s_tuple}.")
+                validated.append(s_tuple)
+            self.input_diversity_phase_shift_set = tuple(validated)
+        else:
+            self.input_diversity_phase_shift_set = None
+        if input_diversity_pair_aggregation != "mean":
+            raise NotImplementedError(
+                f"pair_aggregation must be 'mean', got {input_diversity_pair_aggregation!r}."
+            )
+        self.input_diversity_pair_aggregation = input_diversity_pair_aggregation
+        self._actual_forward_view_count = 0
         self.patch_dropout_ratio = float(patch_dropout_ratio)
         if not 0.0 <= self.patch_dropout_ratio <= 1.0:
             raise ValueError(f"patch_dropout_ratio must be in [0, 1], got {patch_dropout_ratio}.")
@@ -704,6 +737,46 @@ class LMDSSAttacker:
         mask = torch.zeros_like(images[:, :1])
         mask[..., top:top + new_h, left:left + new_w] = 1.0
         return zero_padded * mask + fill * (1.0 - mask)
+
+    def _apply_phase_shift(
+        self, pixels: torch.Tensor, dx: int, dy: int
+    ) -> torch.Tensor:
+        """Apply spatial phase shift via differentiable reflect padding + crop.
+
+        Args:
+            pixels: [B, 3, H, W] in pixel space [0, 1].
+            dx: horizontal shift in pixels (positive = right).
+            dy: vertical shift in pixels (positive = down).
+
+        Returns:
+            Shifted tensor of same shape. (0, 0) returns input unchanged.
+        """
+        if dx == 0 and dy == 0:
+            return pixels
+        # Positive dx → pad left (reflect fills from left side)
+        # Positive dy → pad top  (reflect fills from top side)
+        pad_left = max(0, dx)
+        pad_right = max(0, -dx)
+        pad_top = max(0, dy)
+        pad_bottom = max(0, -dy)
+        padded = F.pad(
+            pixels,
+            (pad_left, pad_right, pad_top, pad_bottom),
+            mode="reflect",
+        )
+        _, _, H, W = pixels.shape
+        return padded[:, :, :H, :W]
+
+    def _pick_input_diversity_phase(self, group_idx: int) -> tuple[int, int]:
+        """Select the phase shift for a given group.
+
+        If phase_shift_set is provided, randomly pick one shift per group.
+        Otherwise use the single phase_shift value.
+        """
+        if self.input_diversity_phase_shift_set is not None:
+            idx = torch.randint(0, len(self.input_diversity_phase_shift_set), (1,)).item()
+            return self.input_diversity_phase_shift_set[idx]
+        return self.input_diversity_phase_shift
 
     def _input_diversity(self, images: torch.Tensor) -> torch.Tensor:
         if not self.input_diversity:
@@ -1557,8 +1630,16 @@ class LMDSSAttacker:
                     ):
                         yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
                 elif method == "token_patch_dropout":
-                    for _copy_idx in range(self.guide_aug_copies):
-                        yield self._attack_loss_for_token_patch_dropout(pixels, labels)
+                    for group_idx in range(self.input_diversity_groups):
+                        phase = self._pick_input_diversity_phase(group_idx)
+                        for view_idx in range(self.input_diversity_views_per_group):
+                            view_pixels = (
+                                self._apply_phase_shift(pixels, *phase)
+                                if view_idx == 1
+                                else pixels
+                            )
+                            self._actual_forward_view_count += 1
+                            yield self._attack_loss_for_token_patch_dropout(view_pixels, labels)
                 elif method == "patch_dropout_cls_jitter":
                     self._patch_dropout_antithetic_noise = None
                     for _copy_idx in range(self.guide_aug_copies):
@@ -1587,8 +1668,16 @@ class LMDSSAttacker:
         if self.guide_aug and "token_patch_dropout" in self.guide_aug_methods:
             for method in self.guide_aug_methods:
                 if method == "token_patch_dropout":
-                    for _copy_idx in range(self.guide_aug_copies):
-                        yield self._attack_loss_for_token_patch_dropout(pixels, labels)
+                    for group_idx in range(self.input_diversity_groups):
+                        phase = self._pick_input_diversity_phase(group_idx)
+                        for view_idx in range(self.input_diversity_views_per_group):
+                            view_pixels = (
+                                self._apply_phase_shift(pixels, *phase)
+                                if view_idx == 1
+                                else pixels
+                            )
+                            self._actual_forward_view_count += 1
+                            yield self._attack_loss_for_token_patch_dropout(view_pixels, labels)
                 elif method == "patch_dropout_cls_jitter":
                     self._patch_dropout_antithetic_noise = None
                     for _copy_idx in range(self.guide_aug_copies):
@@ -2101,6 +2190,7 @@ class LMDSSAttacker:
         sign_history: list[torch.Tensor] = []
 
         for step_idx in range(self.steps):
+            self._actual_forward_view_count = 0
             grad_pixels = adv_pixels.detach()
             if self.nesterov and step_idx > 0:
                 with torch.no_grad():
@@ -2119,6 +2209,11 @@ class LMDSSAttacker:
             else:
                 grad = self._attack_grad(grad_pixels, labels, clean_feature_target)
                 term_grads = None
+            if "token_patch_dropout" in self.guide_aug_methods:
+                expected_views = self.input_diversity_groups * self.input_diversity_views_per_group
+                assert self._actual_forward_view_count == expected_views, (
+                    f"View count mismatch: {self._actual_forward_view_count} != {expected_views}"
+                )
             grad = self._smooth_grad(grad)
             if term_grads is not None:
                 term_grads = tuple(self._smooth_grad(term) for term in term_grads)

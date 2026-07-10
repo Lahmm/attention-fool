@@ -36,6 +36,64 @@ class TinyPatchEmbedTokenModel(TinyTokenModel):
             self.patch_embed.proj.weight[1, 1].fill_(1.0)
 
 
+class TinyPatchEmbed(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.proj = nn.Conv2d(3, 3, kernel_size=4, stride=4, bias=False)
+
+    def forward(self, x):
+        return self.proj(x).flatten(2).transpose(1, 2)
+
+
+class TinyTokenMixBlock(nn.Module):
+    calls = 0
+
+    def forward(self, x):
+        type(self).calls += 1
+        cls = x[:, :1] + x[:, 1:].mean(dim=1, keepdim=True)
+        return torch.cat((cls, x[:, 1:]), dim=1)
+
+
+class TinyTimmViTBackbone(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.patch_embed = TinyPatchEmbed()
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, 3))
+        self.pos_embed = nn.Parameter(torch.zeros(1, 10, 3))
+        self.patch_drop = nn.Identity()
+        self.norm_pre = nn.Identity()
+        self.blocks = nn.ModuleList([TinyTokenMixBlock(), TinyTokenMixBlock(), TinyTokenMixBlock()])
+        self.norm = nn.Identity()
+        self.head = nn.Linear(3, 4)
+
+    def _pos_embed(self, x):
+        cls = self.cls_token.expand(x.size(0), -1, -1)
+        return torch.cat((cls, x), dim=1) + self.pos_embed[:, : x.size(1) + 1]
+
+    def forward_head(self, x, pre_logits=False):
+        out = x[:, 0]
+        return out if pre_logits else self.head(out)
+
+
+class TinyTimmViTWrapper(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.model = TinyTimmViTBackbone()
+
+    def forward(self, x, return_attn=False, return_tokens=False):
+        del return_attn
+        TinyTokenMixBlock.calls = 0
+        tokens = self.model.patch_embed(x)
+        tokens = self.model._pos_embed(tokens)
+        tokens = self.model.patch_drop(tokens)
+        tokens = self.model.norm_pre(tokens)
+        for block in self.model.blocks:
+            tokens = block(tokens)
+        tokens = self.model.norm(tokens)
+        logits = self.model.forward_head(tokens)
+        return (logits, [tokens]) if return_tokens else logits
+
+
 class TinyMapModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -407,6 +465,358 @@ class FeatureAttackTests(unittest.TestCase):
         self.assertLess(float(covariance[0, 2]), -0.15)
         self.assertLess(float(covariance[1, 2]), -0.15)
 
+    def test_token_patch_dropout_loss_backpropagates_to_pixels(self):
+        torch.manual_seed(47)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            device=torch.device("cpu"),
+            guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            guide_aug_copies=2,
+            guide_aug_strength=0.1,
+            patch_dropout_ratio=0.5,
+            patch_dropout_score_mode="low",
+        )
+        pixels = torch.rand(2, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([1, 2])
+
+        loss = attacker._attack_loss_for_token_patch_dropout(pixels, labels)
+        grad = torch.autograd.grad(loss, pixels)[0]
+
+        self.assertTrue(torch.isfinite(loss))
+        self.assertTrue(torch.isfinite(grad).all())
+        self.assertGreater(float(grad.abs().sum()), 0.0)
+
+    def test_token_patch_dropout_opponent_noise_projects_through_patch_embed(self):
+        torch.manual_seed(53)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            device=torch.device("cpu"),
+            guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            guide_aug_strength=0.1,
+            patch_dropout_noise_mode="opponent_channel_gaussian",
+        )
+        patch_tokens = torch.ones(2, 9, 3)
+
+        noise = attacker._token_patch_dropout_noise(patch_tokens, attacker.model.model)
+
+        self.assertEqual(noise.shape, patch_tokens.shape)
+        self.assertTrue(torch.isfinite(noise).all())
+        self.assertGreater(float(noise.abs().sum()), 0.0)
+        torch.testing.assert_close(
+            noise.square().mean(dim=(1, 2)).sqrt(),
+            torch.full((2,), 0.1),
+            atol=0.03,
+            rtol=0.3,
+        )
+
+    def test_token_patch_dropout_layer_runs_prefix_and_suffix_blocks(self):
+        torch.manual_seed(59)
+        TinyTokenMixBlock.calls = 0
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            device=torch.device("cpu"),
+            guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            guide_aug_strength=0.1,
+            patch_dropout_ratio=0.5,
+            patch_dropout_score_mode="low",
+            token_patch_dropout_layer=2,
+        )
+        pixels = torch.rand(2, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([1, 2])
+
+        loss = attacker._attack_loss_for_token_patch_dropout(pixels, labels)
+        grad = torch.autograd.grad(loss, pixels)[0]
+
+        self.assertTrue(torch.isfinite(grad).all())
+        self.assertEqual(TinyTokenMixBlock.calls, 3)
+
+    def test_token_patch_dropout_context_fill_preserves_undropped_noise(self):
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            device=torch.device("cpu"),
+            guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            patch_dropout_fill_mode="context_high_score_blend",
+        )
+        patch_tokens = torch.tensor(
+            [[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [9.0, 9.0]]]
+        )
+        noisy_patches = patch_tokens + 10.0
+        scores = torch.tensor([[0.0, 0.0, 0.0, 3.0]])
+        drop_mask = torch.tensor([[True, False, False, False]])
+
+        filled = attacker._token_patch_dropout_fill(patch_tokens, noisy_patches, scores, drop_mask)
+
+        torch.testing.assert_close(filled[0, 0], torch.tensor([5.0, 5.0]))
+        torch.testing.assert_close(filled[0, 1:], noisy_patches[0, 1:])
+
+    def test_token_patch_dropout_cls_noise_backpropagates_to_pixels(self):
+        torch.manual_seed(71)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            device=torch.device("cpu"),
+            guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            guide_aug_strength=0.1,
+            patch_dropout_ratio=0.5,
+            patch_dropout_score_mode="low",
+            token_cls_noise=True,
+        )
+        pixels = torch.rand(2, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([1, 2])
+
+        loss = attacker._attack_loss_for_token_patch_dropout(pixels, labels)
+        grad = torch.autograd.grad(loss, pixels)[0]
+
+        self.assertTrue(torch.isfinite(loss))
+        self.assertTrue(torch.isfinite(grad).all())
+        self.assertGreater(float(grad.abs().sum()), 0.0)
+
+    def test_token_patch_dropout_score_cls_noise_backpropagates_to_pixels(self):
+        torch.manual_seed(79)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            device=torch.device("cpu"),
+            guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            guide_aug_strength=0.1,
+            patch_dropout_ratio=0.5,
+            patch_dropout_score_mode="low",
+            token_cls_noise=True,
+            token_score_cls_noise=True,
+        )
+        pixels = torch.rand(2, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([1, 2])
+
+        loss = attacker._attack_loss_for_token_patch_dropout(pixels, labels)
+        grad = torch.autograd.grad(loss, pixels)[0]
+
+        self.assertTrue(torch.isfinite(loss))
+        self.assertTrue(torch.isfinite(grad).all())
+        self.assertGreater(float(grad.abs().sum()), 0.0)
+
+    def test_token_patch_dropout_score_only_cls_noise_backpropagates_to_pixels(self):
+        torch.manual_seed(83)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            device=torch.device("cpu"),
+            guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            guide_aug_strength=0.1,
+            patch_dropout_ratio=0.5,
+            patch_dropout_score_mode="low",
+            token_score_cls_noise=True,
+        )
+        pixels = torch.rand(2, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([1, 2])
+
+        loss = attacker._attack_loss_for_token_patch_dropout(pixels, labels)
+        grad = torch.autograd.grad(loss, pixels)[0]
+
+        self.assertTrue(torch.isfinite(loss))
+        self.assertTrue(torch.isfinite(grad).all())
+        self.assertGreater(float(grad.abs().sum()), 0.0)
+
+    def test_token_patch_dropout_score_patch_noise_backpropagates_to_pixels(self):
+        torch.manual_seed(97)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            device=torch.device("cpu"),
+            guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            guide_aug_strength=0.1,
+            patch_dropout_ratio=0.5,
+            patch_dropout_score_mode="low",
+            patch_dropout_noise_mode="opponent_channel_gaussian",
+            token_score_cls_noise=True,
+            token_score_patch_noise=True,
+        )
+        pixels = torch.rand(2, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([1, 2])
+
+        loss = attacker._attack_loss_for_token_patch_dropout(pixels, labels)
+        grad = torch.autograd.grad(loss, pixels)[0]
+
+        self.assertTrue(torch.isfinite(loss))
+        self.assertTrue(torch.isfinite(grad).all())
+        self.assertGreater(float(grad.abs().sum()), 0.0)
+
+    def test_patch_dropout_cls_jitter_loss_backpropagates_to_pixels(self):
+        torch.manual_seed(73)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            device=torch.device("cpu"),
+            guide_aug=True,
+            guide_aug_methods=("patch_dropout_cls_jitter",),
+            guide_aug_strength=0.1,
+            patch_dropout_ratio=0.5,
+            patch_dropout_score_mode="low",
+        )
+        pixels = torch.rand(2, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([1, 2])
+        attacker._compute_patch_scores(pixels.detach())
+        forward_pixels = attacker._patch_dropout_pixels(pixels)
+
+        loss = attacker._attack_loss_for_patch_dropout_cls_jitter(forward_pixels, labels)
+        grad = torch.autograd.grad(loss, pixels)[0]
+
+        self.assertTrue(torch.isfinite(loss))
+        self.assertTrue(torch.isfinite(grad).all())
+        self.assertGreater(float(grad.abs().sum()), 0.0)
+
+    def test_patch_token_dropout_mix_generates_requested_terms(self):
+        torch.manual_seed(89)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            device=torch.device("cpu"),
+            guide_aug=True,
+            guide_aug_methods=("patch_token_dropout_mix",),
+            guide_aug_copies=4,
+            guide_aug_strength=0.1,
+            patch_dropout_ratio=0.5,
+            patch_dropout_score_mode="low",
+            patch_dropout_noise_mode="opponent_channel_gaussian",
+            token_score_cls_noise=True,
+        )
+        pixels = torch.rand(2, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([1, 2])
+        attacker._compute_patch_scores(pixels.detach())
+
+        losses = tuple(attacker._iter_attack_losses(pixels, labels))
+        grad = torch.autograd.grad(sum(losses), pixels)[0]
+
+        self.assertEqual(len(losses), 4)
+        self.assertTrue(torch.isfinite(grad).all())
+        self.assertGreater(float(grad.abs().sum()), 0.0)
+
+    def test_patch_dropout_extreme_sampling_selects_lowest_low_scores(self):
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            device=torch.device("cpu"),
+            patch_dropout_ratio=0.5,
+            patch_dropout_score_mode="low",
+            patch_dropout_sampling_mode="extreme",
+        )
+        scores = torch.tensor([[0.10, 0.20, 0.30, 0.80, 0.90]])
+        candidate_mask = scores < scores.median(dim=1, keepdim=True).values
+
+        drop_mask = attacker._sample_patch_dropout_mask(scores, candidate_mask)
+
+        self.assertEqual(drop_mask.tolist(), [[True, False, False, False, False]])
+
+    def test_patch_dropout_score_weighted_sampling_keeps_candidate_subset(self):
+        torch.manual_seed(61)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            device=torch.device("cpu"),
+            patch_dropout_ratio=1.0,
+            patch_dropout_score_mode="low",
+            patch_dropout_sampling_mode="score_weighted",
+        )
+        scores = torch.tensor([[0.10, 0.20, 0.30, 0.80, 0.90]])
+        candidate_mask = scores < scores.median(dim=1, keepdim=True).values
+
+        drop_mask = attacker._sample_patch_dropout_mask(scores, candidate_mask)
+
+        self.assertTrue(torch.equal(drop_mask, candidate_mask))
+
+    def test_patch_score_candidate_mask_defaults_to_median_split(self):
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            device=torch.device("cpu"),
+            patch_dropout_score_mode="low",
+        )
+        scores = torch.tensor([[0.10, 0.20, 0.30, 0.80, 0.90]])
+
+        candidate_mask = attacker._patch_score_candidate_mask(scores)
+
+        self.assertEqual(candidate_mask.tolist(), [[True, True, False, False, False]])
+
+    def test_patch_score_quantile_jitter_validates_parameters(self):
+        with self.assertRaises(ValueError):
+            LMDSSAttacker(
+                TinyTimmViTWrapper(),
+                epsilon=0.1,
+                steps=2,
+                ti_sigma=0,
+                device=torch.device("cpu"),
+                patch_dropout_score_quantile_jitter=0.5,
+            )
+
+    def test_patch_score_noise_validates_parameters(self):
+        with self.assertRaises(ValueError):
+            LMDSSAttacker(
+                TinyTimmViTWrapper(),
+                epsilon=0.1,
+                steps=2,
+                ti_sigma=0,
+                device=torch.device("cpu"),
+                patch_dropout_score_noise=-0.1,
+            )
+
+    def test_patch_dropout_bernoulli_sampling_keeps_candidate_subset(self):
+        torch.manual_seed(67)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(),
+            epsilon=0.1,
+            steps=2,
+            ti_sigma=0,
+            device=torch.device("cpu"),
+            patch_dropout_ratio=0.0,
+            patch_dropout_score_mode="low",
+            patch_dropout_sampling_mode="bernoulli",
+        )
+        scores = torch.tensor([[0.10, 0.20, 0.30, 0.80, 0.90]])
+        candidate_mask = scores < scores.median(dim=1, keepdim=True).values
+        attacker.patch_dropout_ratio = 1e-12
+
+        drop_mask = attacker._sample_patch_dropout_mask(scores, candidate_mask)
+
+        self.assertEqual(int(drop_mask.sum()), 1)
+        self.assertFalse(bool((drop_mask & ~candidate_mask).any()))
+
 
     def test_dim_consensus_trajectory_generates_requested_feature_terms(self):
         torch.manual_seed(41)
@@ -715,16 +1125,52 @@ class FeatureAttackTests(unittest.TestCase):
             "main.py",
             "--patch-dropout-score-mode",
             "low",
+            "--patch-dropout-sampling-mode",
+            "extreme",
+            "--patch-dropout-score-quantile-jitter",
+            "0.1",
+            "--patch-dropout-score-noise",
+            "0.2",
             "--patch-dropout-fill-mode",
             "context_high_score_blend",
             "--patch-dropout-noise-mode",
             "inverse_score_weighted_gaussian",
+            "--token-patch-dropout-layer",
+            "2",
+            "--token-cls-noise",
+            "--token-score-cls-noise",
+            "--token-score-patch-noise",
         ]
         with mock.patch.object(sys, "argv", argv):
             args = main.parse_args()
         self.assertEqual(args.patch_dropout_score_mode, "low")
+        self.assertEqual(args.patch_dropout_sampling_mode, "extreme")
+        self.assertEqual(args.patch_dropout_score_quantile_jitter, 0.1)
+        self.assertEqual(args.patch_dropout_score_noise, 0.2)
         self.assertEqual(args.patch_dropout_fill_mode, "context_high_score_blend")
         self.assertEqual(args.patch_dropout_noise_mode, "inverse_score_weighted_gaussian")
+        self.assertEqual(args.token_patch_dropout_layer, 2)
+        self.assertTrue(args.token_cls_noise)
+        self.assertTrue(args.token_score_cls_noise)
+        self.assertTrue(args.token_score_patch_noise)
+
+    def test_cli_exposes_token_patch_dropout_method(self):
+        argv = ["main.py", "--guide-aug-method", "token_patch_dropout"]
+        with mock.patch.object(sys, "argv", argv):
+            args = main.parse_args()
+        self.assertEqual(args.guide_aug_method, ("token_patch_dropout",))
+
+    def test_cli_exposes_patch_dropout_cls_jitter_method(self):
+        argv = ["main.py", "--guide-aug-method", "patch_dropout_cls_jitter"]
+        with mock.patch.object(sys, "argv", argv):
+            args = main.parse_args()
+        self.assertEqual(args.guide_aug_method, ("patch_dropout_cls_jitter",))
+
+    def test_cli_exposes_patch_token_dropout_mix_method(self):
+        argv = ["main.py", "--guide-aug-method", "patch_token_dropout_mix"]
+        with mock.patch.object(sys, "argv", argv):
+            args = main.parse_args()
+        self.assertEqual(args.guide_aug_method, ("patch_token_dropout_mix",))
 
     def test_create_attacker_forwards_feature_options(self):
         attacker = main.create_attacker(
@@ -751,12 +1197,143 @@ class FeatureAttackTests(unittest.TestCase):
             guide_aug=True,
             guide_aug_methods=("patch_dropout",),
             patch_dropout_score_mode="low",
+            patch_dropout_sampling_mode="score_weighted",
+            patch_dropout_score_quantile_jitter=0.1,
+            patch_dropout_score_noise=0.2,
             patch_dropout_fill_mode="context_high_score_blend",
             patch_dropout_noise_mode="patch_embed_rowspace",
+            token_patch_dropout_layer=2,
+            token_cls_noise=True,
+            token_score_cls_noise=True,
+            token_score_patch_noise=True,
         )
         self.assertEqual(attacker.patch_dropout_score_mode, "low")
+        self.assertEqual(attacker.patch_dropout_sampling_mode, "score_weighted")
+        self.assertEqual(attacker.patch_dropout_score_quantile_jitter, 0.1)
+        self.assertEqual(attacker.patch_dropout_score_noise, 0.2)
         self.assertEqual(attacker.patch_dropout_fill_mode, "context_high_score_blend")
         self.assertEqual(attacker.patch_dropout_noise_mode, "patch_embed_rowspace")
+        self.assertEqual(attacker.token_patch_dropout_layer, 2)
+        self.assertTrue(attacker.token_cls_noise)
+        self.assertTrue(attacker.token_score_cls_noise)
+        self.assertTrue(attacker.token_score_patch_noise)
+
+    # --- input diversity (方案一) tests ---
+
+    def test_input_diversity_budget_validation(self):
+        base_kwargs = dict(
+            epsilon=0.1, steps=2, ti_sigma=0, device=torch.device("cpu"),
+            guide_aug=True, guide_aug_methods=("token_patch_dropout",),
+        )
+        LMDSSAttacker(TinyTimmViTWrapper(), **base_kwargs,
+                      input_diversity_groups=20, input_diversity_views_per_group=1)
+        LMDSSAttacker(TinyTimmViTWrapper(), **base_kwargs,
+                      input_diversity_groups=10, input_diversity_views_per_group=2)
+        LMDSSAttacker(TinyTimmViTWrapper(), **base_kwargs,
+                      input_diversity_groups=5, input_diversity_views_per_group=4)
+        with self.assertRaises(ValueError):
+            LMDSSAttacker(TinyTimmViTWrapper(), **base_kwargs,
+                          input_diversity_groups=11, input_diversity_views_per_group=2)
+
+    def test_input_diversity_zero_shift_is_identity(self):
+        attacker = LMDSSAttacker(TinyTimmViTWrapper(), epsilon=0.1, steps=2,
+                                 ti_sigma=0, device=torch.device("cpu"))
+        pixels = torch.rand(2, 3, 12, 12)
+        shifted = attacker._apply_phase_shift(pixels, 0, 0)
+        self.assertTrue(torch.equal(shifted, pixels))
+
+    def test_input_diversity_phase_shift_moves_content(self):
+        attacker = LMDSSAttacker(TinyTimmViTWrapper(), epsilon=0.1, steps=2,
+                                 ti_sigma=0, device=torch.device("cpu"))
+        pixels = torch.zeros(1, 3, 12, 12)
+        pixels[:, :, 0, 0] = 1.0
+        shifted = attacker._apply_phase_shift(pixels, 4, 4)
+        self.assertEqual(shifted.shape, (1, 3, 12, 12))
+        self.assertGreater(float(shifted[:, :, 4, 4].max()), 0.9)
+
+    def test_input_diversity_10x2_produces_20_views(self):
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(), epsilon=0.1, steps=2, ti_sigma=0,
+            device=torch.device("cpu"), guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            input_diversity_groups=10, input_diversity_views_per_group=2,
+            input_diversity_phase_shift=(2, 2),
+        )
+        pixels = torch.rand(1, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([0])
+        losses = list(attacker._iter_attack_losses(pixels, labels))
+        self.assertEqual(len(losses), 20)
+
+    def test_input_diversity_group_has_two_different_views(self):
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(), epsilon=0.1, steps=2, ti_sigma=0,
+            device=torch.device("cpu"), guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            input_diversity_groups=10, input_diversity_views_per_group=2,
+            input_diversity_phase_shift=(4, 4),
+        )
+        pixels = torch.rand(1, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([0])
+        losses = list(attacker._iter_attack_losses(pixels, labels))
+        grads = [torch.autograd.grad(loss, pixels, retain_graph=True)[0].clone()
+                 for loss in losses]
+        v0, v1 = grads[0], grads[1]
+        self.assertFalse(torch.allclose(v0, v1, atol=1e-6),
+                         msg="View 0 and View 1 gradients are identical despite phase shift")
+
+    def test_input_diversity_independent_randomness_per_view(self):
+        torch.manual_seed(42)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(), epsilon=0.1, steps=2, ti_sigma=0,
+            device=torch.device("cpu"), guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            patch_dropout_ratio=0.5, input_diversity_groups=10,
+            input_diversity_views_per_group=2, input_diversity_phase_shift=(0, 0),
+        )
+        pixels = torch.rand(1, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([0])
+        losses = list(attacker._iter_attack_losses(pixels, labels))
+        loss_vals = [float(loss.detach()) for loss in losses]
+        self.assertGreater(len(set(round(v, 6) for v in loss_vals)), 1,
+                           msg="All 20 views produced identical loss despite independent randomness")
+
+    def test_input_diversity_nested_mean_equals_flat_mean(self):
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(), epsilon=0.1, steps=2, ti_sigma=0,
+            device=torch.device("cpu"), guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            input_diversity_groups=10, input_diversity_views_per_group=2,
+            input_diversity_phase_shift=(0, 0),
+        )
+        pixels = torch.rand(1, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([0])
+        losses = list(attacker._iter_attack_losses(pixels, labels))
+        grads = tuple(torch.autograd.grad(loss, pixels, retain_graph=True)[0] for loss in losses)
+        flat_mean = torch.stack(grads, dim=0).mean(dim=0)
+        group_means = [(grads[g * 2] + grads[g * 2 + 1]) / 2.0 for g in range(10)]
+        nested_mean = torch.stack(group_means, dim=0).mean(dim=0)
+        self.assertTrue(torch.allclose(flat_mean, nested_mean, atol=1e-6, rtol=1e-6))
+
+    def test_cli_exposes_input_diversity_args(self):
+        from main import parse_args
+        import sys
+        old_argv = sys.argv[:]
+        try:
+            sys.argv = [
+                "main.py", "--input-diversity-groups", "10",
+                "--input-diversity-views-per-group", "2",
+                "--input-diversity-phase-shift", "4,4",
+                "--input-diversity-phase-shift-set", "4,4;8,8",
+                "--input-diversity-pair-aggregation", "mean",
+            ]
+            args = parse_args()
+            self.assertEqual(args.input_diversity_groups, 10)
+            self.assertEqual(args.input_diversity_views_per_group, 2)
+            self.assertEqual(args.input_diversity_phase_shift, (4, 4))
+            self.assertEqual(args.input_diversity_phase_shift_set, ((4, 4), (8, 8)))
+            self.assertEqual(args.input_diversity_pair_aggregation, "mean")
+        finally:
+            sys.argv = old_argv
 
 
 if __name__ == "__main__":
