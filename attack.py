@@ -116,6 +116,11 @@ class LMDSSAttacker:
         input_diversity_phase_shift: tuple[int, int] = (0, 0),
         input_diversity_phase_shift_set: tuple[tuple[int, int], ...] | None = None,
         input_diversity_pair_aggregation: str = "mean",
+        input_diversity_lambda_difference: float = 0.0,
+        cross_patch_transport_mode: str = "none",
+        cross_patch_transport_alpha: float = 0.0,
+        kept_token_rotation_mode: str = "none",
+        kept_token_rotation_alpha: float = 0.0,
         guide_aug_strength: float = 0.2,
         patch_dropout_ratio: float = 0.3,
         patch_dropout_score_mode: str = "high",
@@ -369,11 +374,40 @@ class LMDSSAttacker:
             self.input_diversity_phase_shift_set = tuple(validated)
         else:
             self.input_diversity_phase_shift_set = None
-        if input_diversity_pair_aggregation != "mean":
+        if input_diversity_pair_aggregation not in ("mean", "difference_mix"):
             raise NotImplementedError(
-                f"pair_aggregation must be 'mean', got {input_diversity_pair_aggregation!r}."
+                f"pair_aggregation must be 'mean' or 'difference_mix', got {input_diversity_pair_aggregation!r}."
             )
         self.input_diversity_pair_aggregation = input_diversity_pair_aggregation
+        self.input_diversity_lambda_difference = float(input_diversity_lambda_difference)
+        if self.input_diversity_lambda_difference < 0:
+            raise ValueError(
+                f"input_diversity_lambda_difference must be non-negative, got {input_diversity_lambda_difference}."
+            )
+        valid_transport_modes = ("none", "rotate180", "mirror_x", "checkerboard")
+        if cross_patch_transport_mode not in valid_transport_modes:
+            raise ValueError(
+                f"cross_patch_transport_mode must be one of {valid_transport_modes}, "
+                f"got {cross_patch_transport_mode!r}."
+            )
+        self.cross_patch_transport_mode = cross_patch_transport_mode
+        self.cross_patch_transport_alpha = float(cross_patch_transport_alpha)
+        if self.cross_patch_transport_alpha < 0:
+            raise ValueError(
+                f"cross_patch_transport_alpha must be non-negative, got {cross_patch_transport_alpha}."
+            )
+        valid_rotation_modes = ("none", "pair_swap", "hadamard_block")
+        if kept_token_rotation_mode not in valid_rotation_modes:
+            raise ValueError(
+                f"kept_token_rotation_mode must be one of {valid_rotation_modes}, "
+                f"got {kept_token_rotation_mode!r}."
+            )
+        self.kept_token_rotation_mode = kept_token_rotation_mode
+        self.kept_token_rotation_alpha = float(kept_token_rotation_alpha)
+        if self.kept_token_rotation_alpha < 0:
+            raise ValueError(
+                f"kept_token_rotation_alpha must be non-negative, got {kept_token_rotation_alpha}."
+            )
         self._actual_forward_view_count = 0
         self.patch_dropout_ratio = float(patch_dropout_ratio)
         if not 0.0 <= self.patch_dropout_ratio <= 1.0:
@@ -777,6 +811,156 @@ class LMDSSAttacker:
             idx = torch.randint(0, len(self.input_diversity_phase_shift_set), (1,)).item()
             return self.input_diversity_phase_shift_set[idx]
         return self.input_diversity_phase_shift
+
+    # --- 方案二: Cross-Patch Counterfactual Transport ---
+
+    def _build_cross_patch_permutation(self, num_patches: int) -> torch.Tensor:
+        """Build permutation indices for cross-patch transport.
+
+        Args:
+            num_patches: total number of patch tokens (gh * gw).
+
+        Returns:
+            LongTensor of shape [num_patches] with permutation indices.
+        """
+        gh = int(num_patches ** 0.5)
+        if gh * gh != num_patches:
+            raise ValueError(
+                f"cross_patch_transport requires a square patch grid, "
+                f"got {num_patches} patches (gh={gh})."
+            )
+        idx_2d = torch.arange(num_patches).reshape(gh, gh)
+        if self.cross_patch_transport_mode == "rotate180":
+            perm_2d = torch.flip(idx_2d, [0, 1])  # 180° rotation
+        elif self.cross_patch_transport_mode == "mirror_x":
+            perm_2d = torch.flip(idx_2d, [1])  # mirror along x-axis
+        elif self.cross_patch_transport_mode == "checkerboard":
+            perm_2d = idx_2d.clone()
+            for r in range(gh):
+                row = perm_2d[r]
+                # Swap adjacent pairs
+                for c in range(0, gh - 1, 2):
+                    row[c], row[c + 1] = row[c + 1].clone(), row[c].clone()
+        else:
+            return torch.arange(num_patches)  # identity
+        return perm_2d.reshape(-1)
+
+    def _apply_cross_patch_transport(
+        self,
+        patch_tokens: torch.Tensor,
+        drop_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Apply cross-patch counterfactual transport to kept patch tokens.
+
+        Args:
+            patch_tokens: [B, N, D] L0 patch tokens (before dropout fill).
+            drop_mask: [B, N] boolean mask, True = dropped.
+
+        Returns:
+            Transported tokens of shape [B, N, D]. Dropped positions unchanged.
+        """
+        if self.cross_patch_transport_mode == "none" or self.cross_patch_transport_alpha <= 0:
+            return patch_tokens
+
+        B, N, D = patch_tokens.shape
+        pi = self._build_cross_patch_permutation(N).to(patch_tokens.device)
+        kept_mask = ~drop_mask  # [B, N]
+
+        # Transport residual: z[pi(i)] - z[i]
+        transport_residual = patch_tokens[:, pi, :] - patch_tokens  # [B, N, D]
+
+        # RMS matching on kept patches only
+        if kept_mask.any():
+            kept_flat = patch_tokens[kept_mask]
+            residual_flat = transport_residual[kept_mask]
+            base_rms = torch.sqrt(torch.mean(kept_flat ** 2, dim=-1) + 1e-12)  # [K]
+            residual_rms = torch.sqrt(torch.mean(residual_flat ** 2, dim=-1) + 1e-12)  # [K]
+            scale = base_rms / residual_rms.clamp_min(1e-12)
+            # Apply per-token scaling
+            rms_matched = torch.zeros_like(transport_residual)
+            rms_matched[kept_mask] = residual_flat * scale.unsqueeze(-1)
+        else:
+            rms_matched = transport_residual
+
+        alpha = self.cross_patch_transport_alpha
+        transported = patch_tokens + alpha * rms_matched
+
+        # Only apply to kept patches
+        result = patch_tokens.clone()
+        result[kept_mask] = transported[kept_mask]
+        return result
+
+    # --- 方案四: Kept-Token Orthogonal Residual ---
+
+    def _build_kept_token_rotation_matrix(self, dim: int) -> torch.Tensor:
+        """Build a fixed orthogonal rotation matrix.
+
+        Args:
+            dim: token dimension.
+
+        Returns:
+            Orthogonal matrix [D, D]. Returns identity when dim is odd or mode is unsupported.
+        """
+        if dim % 2 != 0:
+            return torch.eye(dim)  # Graceful fallback for odd dims
+        if self.kept_token_rotation_mode == "pair_swap":
+            R = torch.eye(dim)
+            for i in range(0, dim, 2):
+                R[i, i] = 0.0
+                R[i, i + 1] = 1.0
+                R[i + 1, i] = -1.0
+                R[i + 1, i + 1] = 0.0
+            return R
+        elif self.kept_token_rotation_mode == "hadamard_block":
+            R = torch.eye(dim)
+            inv_sqrt2 = 1.0 / (2.0 ** 0.5)
+            for i in range(0, dim, 2):
+                R[i, i] = inv_sqrt2
+                R[i, i + 1] = inv_sqrt2
+                R[i + 1, i] = inv_sqrt2
+                R[i + 1, i + 1] = -inv_sqrt2
+            return R
+        return torch.eye(dim)
+
+    def _apply_kept_token_rotation(
+        self,
+        patch_tokens: torch.Tensor,
+        drop_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Apply orthogonal channel residual rotation to kept patch tokens.
+
+        Args:
+            patch_tokens: [B, N, D] L0 patch tokens (before dropout fill).
+            drop_mask: [B, N] boolean mask, True = dropped.
+
+        Returns:
+            Rotated tokens of shape [B, N, D]. Dropped positions unchanged.
+        """
+        if self.kept_token_rotation_mode == "none" or self.kept_token_rotation_alpha <= 0:
+            return patch_tokens
+
+        B, N, D = patch_tokens.shape
+        kept_mask = ~drop_mask  # [B, N]
+
+        if not kept_mask.any():
+            return patch_tokens
+
+        R = self._build_kept_token_rotation_matrix(D).to(patch_tokens.device)
+
+        # Per-image channel mean of kept patches
+        kept_tokens = patch_tokens[kept_mask]  # [K, D]
+        mu_kept = kept_tokens.mean(dim=0, keepdim=True)  # [1, D]
+
+        # Center, rotate, add residual
+        centered = patch_tokens - mu_kept  # [B, N, D]
+        rotation_residual = centered @ (R.T - torch.eye(D, device=patch_tokens.device))
+        alpha = self.kept_token_rotation_alpha
+        rotated = patch_tokens + alpha * rotation_residual
+
+        # Only apply to kept patches
+        result = patch_tokens.clone()
+        result[kept_mask] = rotated[kept_mask]
+        return result
 
     def _input_diversity(self, images: torch.Tensor) -> torch.Tensor:
         if not self.input_diversity:
@@ -1542,7 +1726,12 @@ class LMDSSAttacker:
         if self.token_cls_noise and self.token_cls_noise_strength > 0:
             jittered_cls = cls_L0 + self._make_cls_noise(patch_L0)
 
-        noisy_patches = patch_L0 + self._token_patch_dropout_noise(patch_L0, base_model)
+        # 方案二: Cross-patch counterfactual transport (applied before noise)
+        transported_patches = self._apply_cross_patch_transport(patch_L0, drop_mask)
+        # 方案四: Kept-token orthogonal residual rotation (applied before noise)
+        rotated_patches = self._apply_kept_token_rotation(transported_patches, drop_mask)
+
+        noisy_patches = rotated_patches + self._token_patch_dropout_noise(patch_L0, base_model)
         patch_tokens = self._token_patch_dropout_fill(patch_L0, noisy_patches, scores, drop_mask)
 
         x = torch.cat((jittered_cls, patch_tokens), dim=1)
@@ -2146,7 +2335,32 @@ class LMDSSAttacker:
             grad_sum = grad_term if grad_sum is None else grad_sum + grad_term
         if grad_sum is None:
             raise RuntimeError("No attack loss terms were generated.")
-        grad = grad_sum / float(len(term_grads))
+        # 方案三: Pair-Difference Gradient aggregation
+        if (
+            self.input_diversity_pair_aggregation == "difference_mix"
+            and self.input_diversity_views_per_group == 2
+            and self.input_diversity_lambda_difference > 0
+            and len(term_grads) >= 2
+            and len(term_grads) % 2 == 0
+        ):
+            num_groups = len(term_grads) // 2
+            group_grads = []
+            for g in range(num_groups):
+                g_a = term_grads[g * 2]
+                g_b = term_grads[g * 2 + 1]
+                g_plus = (g_a + g_b) / 2.0
+                g_minus = g_a - g_b
+                # Per-image L2 normalization of g_minus
+                g_minus_norm = torch.norm(
+                    g_minus.reshape(g_minus.size(0), -1), p=2, dim=1, keepdim=True
+                ).reshape(-1, 1, 1, 1)
+                g_minus_normalized = g_minus / (g_minus_norm + 1e-12)
+                group_grads.append(
+                    g_plus + self.input_diversity_lambda_difference * g_minus_normalized
+                )
+            grad = torch.stack(group_grads, dim=0).mean(dim=0)
+        else:
+            grad = grad_sum / float(len(term_grads))
         # Gradient trimming: remove extreme copy gradients per-pixel before averaging.
         # Pixels with high gradient variance across copies reflect model-specific
         # features → trimming them reduces overfitting to white-box ViT attention.

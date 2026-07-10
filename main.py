@@ -41,6 +41,11 @@ def create_attacker(
     input_diversity_phase_shift: tuple[int, int] = (0, 0),
     input_diversity_phase_shift_set: tuple[tuple[int, int], ...] | None = None,
     input_diversity_pair_aggregation: str = "mean",
+    input_diversity_lambda_difference: float = 0.0,
+    cross_patch_transport_mode: str = "none",
+    cross_patch_transport_alpha: float = 0.0,
+    kept_token_rotation_mode: str = "none",
+    kept_token_rotation_alpha: float = 0.0,
     guide_aug_strength: float = 0.2,
     patch_dropout_ratio: float = 0.3,
     patch_dropout_score_mode: str = "high",
@@ -106,6 +111,11 @@ def create_attacker(
         input_diversity_phase_shift=input_diversity_phase_shift,
         input_diversity_phase_shift_set=input_diversity_phase_shift_set,
         input_diversity_pair_aggregation=input_diversity_pair_aggregation,
+        input_diversity_lambda_difference=input_diversity_lambda_difference,
+        cross_patch_transport_mode=cross_patch_transport_mode,
+        cross_patch_transport_alpha=cross_patch_transport_alpha,
+        kept_token_rotation_mode=kept_token_rotation_mode,
+        kept_token_rotation_alpha=kept_token_rotation_alpha,
         guide_aug_strength=guide_aug_strength,
         patch_dropout_ratio=patch_dropout_ratio,
         patch_dropout_score_mode=patch_dropout_score_mode,
@@ -313,8 +323,18 @@ def parse_args():
                         help='Phase shift (dx,dy) for view B, e.g. "4,4".')
     parser.add_argument("--input-diversity-phase-shift-set", type=parse_phase_shift_set, default=None,
                         help='Semicolon-separated shift set, e.g. "4,4;8,8;12,12".')
-    parser.add_argument("--input-diversity-pair-aggregation", choices=["mean"], default="mean",
-                        help="Pair aggregation method. Only 'mean' supported.")
+    parser.add_argument("--input-diversity-pair-aggregation", choices=["mean", "difference_mix"], default="mean",
+                        help="Pair aggregation method. 'mean' for plain pair mean, 'difference_mix' for pair-difference gradient (方案三).")
+    parser.add_argument("--input-diversity-lambda-difference", type=float, default=0.0,
+                        help="Lambda weight for pair-difference gradient (方案三). 0 = plain pair mean.")
+    parser.add_argument("--cross-patch-transport-mode", choices=["none", "rotate180", "mirror_x", "checkerboard"], default="none",
+                        help="Cross-patch counterfactual transport mode (方案二).")
+    parser.add_argument("--cross-patch-transport-alpha", type=float, default=0.0,
+                        help="Alpha strength for cross-patch transport (方案二).")
+    parser.add_argument("--kept-token-rotation-mode", choices=["none", "pair_swap", "hadamard_block"], default="none",
+                        help="Kept-token orthogonal channel residual rotation mode (方案四).")
+    parser.add_argument("--kept-token-rotation-alpha", type=float, default=0.0,
+                        help="Alpha strength for kept-token rotation (方案四).")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
     parser.add_argument("--patch-dropout-ratio", type=float, default=0.3, help="Fraction of selected patch-score subset to randomly drop per copy (0-1].")
     parser.add_argument("--patch-dropout-score-mode", choices=["high", "low", "all"], default="high", help="Patch score subset used by patch_dropout: high drops patches above median, low drops patches below median, all drops uniformly at random.")
@@ -395,6 +415,11 @@ def main(
     input_diversity_phase_shift: tuple[int, int] = (0, 0),
     input_diversity_phase_shift_set: tuple[tuple[int, int], ...] | None = None,
     input_diversity_pair_aggregation: str = "mean",
+    input_diversity_lambda_difference: float = 0.0,
+    cross_patch_transport_mode: str = "none",
+    cross_patch_transport_alpha: float = 0.0,
+    kept_token_rotation_mode: str = "none",
+    kept_token_rotation_alpha: float = 0.0,
     guide_aug_strength: float = 0.2,
     patch_dropout_ratio: float = 0.3,
     patch_dropout_score_mode: str = "high",
@@ -480,6 +505,11 @@ def main(
         input_diversity_phase_shift=input_diversity_phase_shift,
         input_diversity_phase_shift_set=input_diversity_phase_shift_set,
         input_diversity_pair_aggregation=input_diversity_pair_aggregation,
+        input_diversity_lambda_difference=input_diversity_lambda_difference,
+        cross_patch_transport_mode=cross_patch_transport_mode,
+        cross_patch_transport_alpha=cross_patch_transport_alpha,
+        kept_token_rotation_mode=kept_token_rotation_mode,
+        kept_token_rotation_alpha=kept_token_rotation_alpha,
         guide_aug_strength=guide_aug_strength,
         patch_dropout_ratio=patch_dropout_ratio,
         patch_dropout_score_mode=patch_dropout_score_mode,
@@ -565,6 +595,11 @@ def main(
             else None
         ),
         "input_diversity_pair_aggregation": input_diversity_pair_aggregation,
+        "input_diversity_lambda_difference": input_diversity_lambda_difference,
+        "cross_patch_transport_mode": cross_patch_transport_mode,
+        "cross_patch_transport_alpha": cross_patch_transport_alpha,
+        "kept_token_rotation_mode": kept_token_rotation_mode,
+        "kept_token_rotation_alpha": kept_token_rotation_alpha,
         "guide_aug_strength": guide_aug_strength,
         "patch_dropout_ratio": patch_dropout_ratio,
         "patch_dropout_score_mode": patch_dropout_score_mode,
@@ -620,6 +655,11 @@ if __name__ == "__main__":
         input_diversity_phase_shift=args.input_diversity_phase_shift,
         input_diversity_phase_shift_set=args.input_diversity_phase_shift_set,
         input_diversity_pair_aggregation=args.input_diversity_pair_aggregation,
+        input_diversity_lambda_difference=args.input_diversity_lambda_difference,
+        cross_patch_transport_mode=args.cross_patch_transport_mode,
+        cross_patch_transport_alpha=args.cross_patch_transport_alpha,
+        kept_token_rotation_mode=args.kept_token_rotation_mode,
+        kept_token_rotation_alpha=args.kept_token_rotation_alpha,
         guide_aug_strength=args.guide_aug_strength,
         patch_dropout_ratio=args.patch_dropout_ratio,
         patch_dropout_score_mode=args.patch_dropout_score_mode,

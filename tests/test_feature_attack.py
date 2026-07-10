@@ -1335,6 +1335,244 @@ class FeatureAttackTests(unittest.TestCase):
         finally:
             sys.argv = old_argv
 
+    # --- 方案二: Cross-Patch Counterfactual Transport ---
+
+    def test_cross_patch_permutation_rotate180(self):
+        attacker = LMDSSAttacker(TinyTimmViTWrapper(), epsilon=0.1, steps=2,
+                                 ti_sigma=0, device=torch.device("cpu"),
+                                 cross_patch_transport_mode="rotate180")
+        perm = attacker._build_cross_patch_permutation(9)  # 3x3 grid
+        self.assertEqual(perm[0].item(), 8)
+        self.assertEqual(perm[8].item(), 0)
+        self.assertEqual(perm[4].item(), 4)
+
+    def test_cross_patch_permutation_mirror_x(self):
+        attacker = LMDSSAttacker(TinyTimmViTWrapper(), epsilon=0.1, steps=2,
+                                 ti_sigma=0, device=torch.device("cpu"),
+                                 cross_patch_transport_mode="mirror_x")
+        perm = attacker._build_cross_patch_permutation(9)
+        self.assertEqual(perm[0].item(), 2)
+        self.assertEqual(perm[4].item(), 4)
+        self.assertEqual(perm[2].item(), 0)
+
+    def test_cross_patch_transport_alpha_zero_is_identity(self):
+        attacker = LMDSSAttacker(TinyTimmViTWrapper(), epsilon=0.1, steps=2,
+                                 ti_sigma=0, device=torch.device("cpu"),
+                                 cross_patch_transport_mode="rotate180",
+                                 cross_patch_transport_alpha=0.0)
+        patch_tokens = torch.rand(1, 9, 3)
+        drop_mask = torch.zeros(1, 9, dtype=torch.bool)
+        result = attacker._apply_cross_patch_transport(patch_tokens, drop_mask)
+        self.assertTrue(torch.allclose(result, patch_tokens, atol=1e-6))
+
+    def test_cross_patch_transport_modifies_kept_not_dropped(self):
+        attacker = LMDSSAttacker(TinyTimmViTWrapper(), epsilon=0.1, steps=2,
+                                 ti_sigma=0, device=torch.device("cpu"),
+                                 cross_patch_transport_mode="rotate180",
+                                 cross_patch_transport_alpha=0.2)
+        patch_tokens = torch.rand(1, 9, 3)
+        drop_mask = torch.tensor([[True, True, True, True, True, True, True, True, False]])
+        result = attacker._apply_cross_patch_transport(patch_tokens, drop_mask)
+        self.assertTrue(torch.equal(result[0, :8], patch_tokens[0, :8]))
+        self.assertFalse(torch.allclose(result[0, 8:], patch_tokens[0, 8:], atol=1e-6))
+
+    def test_cross_patch_transport_in_pipeline(self):
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(), epsilon=0.1, steps=2, ti_sigma=0,
+            device=torch.device("cpu"), guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            input_diversity_groups=1, input_diversity_views_per_group=1,
+            cross_patch_transport_mode="rotate180",
+            cross_patch_transport_alpha=0.2,
+        )
+        pixels = torch.rand(1, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([0])
+        losses = list(attacker._iter_attack_losses(pixels, labels))
+        self.assertEqual(len(losses), 1)
+        self.assertTrue(torch.isfinite(losses[0]))
+
+    # --- 方案四: Kept-Token Orthogonal Residual ---
+
+    def test_pair_swap_rotation_matrix_is_orthogonal(self):
+        attacker = LMDSSAttacker(TinyTimmViTWrapper(), epsilon=0.1, steps=2,
+                                 ti_sigma=0, device=torch.device("cpu"),
+                                 kept_token_rotation_mode="pair_swap")
+        R = attacker._build_kept_token_rotation_matrix(6)
+        self.assertTrue(torch.allclose(R @ R.T, torch.eye(6), atol=1e-6))
+
+    def test_hadamard_rotation_matrix_is_orthogonal(self):
+        attacker = LMDSSAttacker(TinyTimmViTWrapper(), epsilon=0.1, steps=2,
+                                 ti_sigma=0, device=torch.device("cpu"),
+                                 kept_token_rotation_mode="hadamard_block")
+        R = attacker._build_kept_token_rotation_matrix(4)
+        self.assertTrue(torch.allclose(R @ R.T, torch.eye(4), atol=1e-6))
+
+    def test_kept_token_rotation_alpha_zero_is_identity(self):
+        attacker = LMDSSAttacker(TinyTimmViTWrapper(), epsilon=0.1, steps=2,
+                                 ti_sigma=0, device=torch.device("cpu"),
+                                 kept_token_rotation_mode="pair_swap",
+                                 kept_token_rotation_alpha=0.0)
+        patch_tokens = torch.rand(1, 9, 6)
+        drop_mask = torch.zeros(1, 9, dtype=torch.bool)
+        result = attacker._apply_kept_token_rotation(patch_tokens, drop_mask)
+        self.assertTrue(torch.allclose(result, patch_tokens, atol=1e-6))
+
+    def test_kept_token_rotation_modifies_kept_not_dropped(self):
+        attacker = LMDSSAttacker(TinyTimmViTWrapper(), epsilon=0.1, steps=2,
+                                 ti_sigma=0, device=torch.device("cpu"),
+                                 kept_token_rotation_mode="pair_swap",
+                                 kept_token_rotation_alpha=0.5)
+        patch_tokens = torch.rand(1, 9, 6)
+        # Keep 3 patches so centering doesn't zero out the residual
+        drop_mask = torch.tensor([[True, True, True, True, True, True, False, False, False]])
+        result = attacker._apply_kept_token_rotation(patch_tokens, drop_mask)
+        # Dropped patches unchanged
+        self.assertTrue(torch.equal(result[0, :6], patch_tokens[0, :6]))
+        # Kept patches modified
+        self.assertFalse(torch.allclose(result[0, 6:], patch_tokens[0, 6:], atol=1e-6))
+
+    def test_kept_token_rotation_in_pipeline(self):
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(), epsilon=0.1, steps=2, ti_sigma=0,
+            device=torch.device("cpu"), guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            input_diversity_groups=1, input_diversity_views_per_group=1,
+            kept_token_rotation_mode="pair_swap",
+            kept_token_rotation_alpha=0.1,
+        )
+        pixels = torch.rand(1, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([0])
+        losses = list(attacker._iter_attack_losses(pixels, labels))
+        self.assertEqual(len(losses), 1)
+        self.assertTrue(torch.isfinite(losses[0]))
+
+    # --- 方案三: Pair-Difference Gradient ---
+
+    def test_pair_difference_lambda_zero_equals_plain_mean(self):
+        torch.manual_seed(42)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(), epsilon=0.1, steps=2, ti_sigma=0,
+            device=torch.device("cpu"), guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            input_diversity_groups=2, input_diversity_views_per_group=2,
+            input_diversity_phase_shift=(0, 0),
+            input_diversity_pair_aggregation="difference_mix",
+            input_diversity_lambda_difference=0.0,
+        )
+        pixels = torch.rand(1, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([0])
+        grad, term_grads = attacker._attack_grad_terms(pixels, labels)
+        flat_mean = torch.stack(term_grads, dim=0).mean(dim=0)
+        self.assertTrue(torch.allclose(grad, flat_mean, atol=1e-6, rtol=1e-6))
+
+    def test_pair_difference_with_lambda_modifies_gradient(self):
+        torch.manual_seed(42)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(), epsilon=0.1, steps=2, ti_sigma=0,
+            device=torch.device("cpu"), guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            input_diversity_groups=2, input_diversity_views_per_group=2,
+            input_diversity_phase_shift=(0, 0),
+            input_diversity_pair_aggregation="difference_mix",
+            input_diversity_lambda_difference=0.2,
+        )
+        pixels = torch.rand(1, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([0])
+        grad, term_grads = attacker._attack_grad_terms(pixels, labels)
+        flat_mean = torch.stack(term_grads, dim=0).mean(dim=0)
+        self.assertFalse(torch.allclose(grad, flat_mean, atol=1e-6))
+
+    def test_pair_difference_views_per_group_1_skips(self):
+        torch.manual_seed(42)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(), epsilon=0.1, steps=2, ti_sigma=0,
+            device=torch.device("cpu"), guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            input_diversity_groups=4, input_diversity_views_per_group=1,
+            input_diversity_pair_aggregation="difference_mix",
+            input_diversity_lambda_difference=0.2,
+        )
+        pixels = torch.rand(1, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([0])
+        grad, term_grads = attacker._attack_grad_terms(pixels, labels)
+        flat_mean = torch.stack(term_grads, dim=0).mean(dim=0)
+        self.assertTrue(torch.allclose(grad, flat_mean, atol=1e-6, rtol=1e-6))
+
+    # --- Combination tests ---
+
+    def test_transport_plus_rotation_combined(self):
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(), epsilon=0.1, steps=2, ti_sigma=0,
+            device=torch.device("cpu"), guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            cross_patch_transport_mode="rotate180",
+            cross_patch_transport_alpha=0.1,
+            kept_token_rotation_mode="pair_swap",
+            kept_token_rotation_alpha=0.1,
+        )
+        pixels = torch.rand(1, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([0])
+        losses = list(attacker._iter_attack_losses(pixels, labels))
+        self.assertEqual(len(losses), 20)
+        for loss in losses:
+            self.assertTrue(torch.isfinite(loss))
+
+    def test_phase_shift_plus_transport_combined(self):
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(), epsilon=0.1, steps=2, ti_sigma=0,
+            device=torch.device("cpu"), guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            input_diversity_groups=5, input_diversity_views_per_group=2,
+            input_diversity_phase_shift=(2, 2),
+            cross_patch_transport_mode="mirror_x",
+            cross_patch_transport_alpha=0.1,
+        )
+        pixels = torch.rand(1, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([0])
+        losses = list(attacker._iter_attack_losses(pixels, labels))
+        self.assertEqual(len(losses), 10)
+        for loss in losses:
+            self.assertTrue(torch.isfinite(loss))
+
+    def test_phase_shift_plus_pair_difference_combined(self):
+        torch.manual_seed(42)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(), epsilon=0.1, steps=2, ti_sigma=0,
+            device=torch.device("cpu"), guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            input_diversity_groups=3, input_diversity_views_per_group=2,
+            input_diversity_phase_shift=(2, 2),
+            input_diversity_pair_aggregation="difference_mix",
+            input_diversity_lambda_difference=0.1,
+        )
+        pixels = torch.rand(1, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([0])
+        grad, term_grads = attacker._attack_grad_terms(pixels, labels)
+        self.assertTrue(torch.isfinite(grad).all())
+        self.assertEqual(len(term_grads), 6)
+
+    def test_all_three_combined(self):
+        torch.manual_seed(42)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(), epsilon=0.1, steps=2, ti_sigma=0,
+            device=torch.device("cpu"), guide_aug=True,
+            guide_aug_methods=("token_patch_dropout",),
+            input_diversity_groups=3, input_diversity_views_per_group=2,
+            input_diversity_phase_shift=(2, 2),
+            input_diversity_pair_aggregation="difference_mix",
+            input_diversity_lambda_difference=0.1,
+            cross_patch_transport_mode="rotate180",
+            cross_patch_transport_alpha=0.1,
+        )
+        pixels = torch.rand(1, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([0])
+        losses = list(attacker._iter_attack_losses(pixels, labels))
+        self.assertEqual(len(losses), 6)
+        grads = [torch.autograd.grad(loss, pixels, retain_graph=True)[0].clone()
+                 for loss in losses]
+        for g in grads:
+            self.assertTrue(torch.isfinite(g).all())
+
 
 if __name__ == "__main__":
     unittest.main()
