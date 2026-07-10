@@ -48,6 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=20260710)
     parser.add_argument("--output-dir", default="outputs/attack/gradient_direction_study")
     parser.add_argument("--bootstrap-count", type=int, default=5000)
+    parser.add_argument("--reuse-existing", action="store_true")
     return parser.parse_args()
 
 
@@ -181,7 +182,7 @@ def evaluate_per_sample(image_dir: Path) -> tuple[dict[str, dict[str, float]], d
     annotations = load_annotations(Path("data/image_name_to_class_id_and_name.json"))
     image_paths = collect_images(image_dir, "adv_")
     outcomes: dict[str, dict[str, float]] = {
-        extract_original_name(path.name, "adv_"): {} for path in image_paths
+        Path(extract_original_name(path.name, "adv_")).stem: {} for path in image_paths
     }
     aggregate: dict[str, float] = {}
 
@@ -198,7 +199,7 @@ def evaluate_per_sample(image_dir: Path) -> tuple[dict[str, dict[str, float]], d
                 predictions = model(images.to(DEVICE)).argmax(dim=1).cpu()
                 success.extend(predictions.ne(labels).float().tolist())
         for path, value in zip(image_paths, success):
-            sample_id = extract_original_name(path.name, "adv_")
+            sample_id = Path(extract_original_name(path.name, "adv_")).stem
             outcomes[sample_id][model_name] = float(value)
         aggregate[model_name] = sum(success) / len(success)
         print(f"eval model={model_name} ASR={aggregate[model_name]:.4f}")
@@ -232,7 +233,7 @@ def merge_outcomes(
     merged = []
     for record in records:
         sample_id = str(record["sample_id"])
-        model_outcomes = outcomes[sample_id]
+        model_outcomes = outcomes[Path(sample_id).stem]
         row = dict(record)
         row["split"] = "discovery" if sample_id in discovery_ids else "validation"
         for model_name, value in model_outcomes.items():
@@ -292,15 +293,23 @@ def save_json(path: Path, value: object) -> None:
 
 def run_observation(args: argparse.Namespace, root: Path) -> dict[str, object]:
     baseline_dir = root / f"baseline_seed{args.seed}"
-    records, manifest = run_attack(
-        output_dir=baseline_dir,
-        num_samples=args.num_samples,
-        batch_size=args.batch_size,
-        seed=args.seed,
-        probe_name=None,
-        baseline_sign_dir=None,
-        expected_manifest=None,
-    )
+    if args.reuse_existing and (baseline_dir / "replay_manifest.json").is_file():
+        records = load_existing_records(baseline_dir)
+        manifest = json.loads((baseline_dir / "replay_manifest.json").read_text(encoding="utf-8"))
+        if len(records) != args.num_samples:
+            raise RuntimeError(
+                f"existing baseline has {len(records)} records, expected {args.num_samples}"
+            )
+    else:
+        records, manifest = run_attack(
+            output_dir=baseline_dir,
+            num_samples=args.num_samples,
+            batch_size=args.batch_size,
+            seed=args.seed,
+            probe_name=None,
+            baseline_sign_dir=None,
+            expected_manifest=None,
+        )
     outcomes, aggregate = evaluate_per_sample(baseline_dir)
     merged = merge_outcomes(records, outcomes)
     save_json(root / "baseline_outcomes.json", outcomes)
@@ -311,6 +320,25 @@ def run_observation(args: argparse.Namespace, root: Path) -> dict[str, object]:
     analysis = analyze_features(merged, root / "feature_analysis.json")
     save_json(root / "study_config.json", vars(args))
     return {"manifest": manifest, "analysis": analysis, "outcomes": outcomes, "aggregate": aggregate}
+
+
+def load_existing_records(output_dir: Path) -> list[dict[str, object]]:
+    by_sample: dict[str, dict[str, list[float]]] = {}
+    for path in sorted(output_dir.glob("batch_*/gradient_per_sample_step.jsonl")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            row = json.loads(line)
+            sample_id = str(row["sample_id"])
+            features = by_sample.setdefault(sample_id, {})
+            for key, value in row.items():
+                if isinstance(value, (int, float)) and key != "step":
+                    features.setdefault(key, []).append(float(value))
+    return [
+        {
+            "sample_id": sample_id,
+            **{key: sum(values) / len(values) for key, values in features.items()},
+        }
+        for sample_id, features in by_sample.items()
+    ]
 
 
 def run_probes(args: argparse.Namespace, root: Path) -> dict[str, object]:
