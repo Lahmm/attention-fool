@@ -1752,10 +1752,16 @@ class LMDSSAttacker:
         for group_idx in range(self.input_diversity_groups):
             drop_mask = self._compute_original_l12_drop_mask(pixels)
             image_mask = self._patch_drop_mask_to_image(drop_mask, pixels.size(-2), pixels.size(-1))
-            dropped_pixels = pixels * (1.0 - image_mask.to(dtype=pixels.dtype, device=pixels.device))
             phase = self._pick_input_diversity_phase(group_idx)
-            view_pixels = (dropped_pixels, self._apply_phase_shift(dropped_pixels, *phase))
-            for current_pixels in view_pixels:
+            image_keep = 1.0 - image_mask.to(dtype=pixels.dtype, device=pixels.device)
+            for view_idx in range(2):
+                # Rebuild this branch's graph so autograd can consume A and B independently.
+                dropped_pixels = pixels * image_keep
+                current_pixels = (
+                    self._apply_phase_shift(dropped_pixels, *phase)
+                    if view_idx == 1
+                    else dropped_pixels
+                )
                 self._actual_forward_view_count += 1
                 yield current_pixels
 
