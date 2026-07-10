@@ -148,6 +148,9 @@ def parse_args() -> argparse.Namespace:
         default="mean",
     )
     parser.add_argument("--gradient-consensus-lambda", type=float, default=0.2)
+    parser.add_argument("--gradient-smooth-sigma", type=float, default=0.0)
+    parser.add_argument("--gradient-divisive-sigma", type=float, default=0.0)
+    parser.add_argument("--gradient-clip-percentile", type=float, default=0.0)
     parser.add_argument("--image-dir", default=IMAGE_DIR)
     parser.add_argument("--annotations-path", default=ANNOTATIONS_PATH)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -207,6 +210,9 @@ def main(args: argparse.Namespace) -> None:
         feature_layer=args.feature_layer,
         gradient_postprocess=args.gradient_postprocess,
         gradient_consensus_lambda=args.gradient_consensus_lambda,
+        gradient_smooth_sigma=args.gradient_smooth_sigma,
+        gradient_divisive_sigma=args.gradient_divisive_sigma,
+        gradient_clip_percentile=args.gradient_clip_percentile,
         device=DEVICE,
     )
 
@@ -260,6 +266,9 @@ def main(args: argparse.Namespace) -> None:
         "feature_layer": args.feature_layer,
         "gradient_postprocess": args.gradient_postprocess,
         "gradient_consensus_lambda": args.gradient_consensus_lambda,
+        "gradient_smooth_sigma": args.gradient_smooth_sigma,
+        "gradient_divisive_sigma": args.gradient_divisive_sigma,
+        "gradient_clip_percentile": args.gradient_clip_percentile,
     }
     (output_dir / "attack_params.json").write_text(
         json.dumps(params, indent=2, ensure_ascii=False),

@@ -106,7 +106,8 @@ class GradientPostprocessTests(unittest.TestCase):
         self.assertEqual(args.gradient_postprocess, "mean")
         self.assertEqual(args.gradient_consensus_lambda, 0.2)
         self.assertIsNone(args.seed)
-        self.assertEqual(
-            set(GRADIENT_POSTPROCESS_MODES),
-            {"mean", "view_l2_mean", "sign_consensus", "sign_consensus_transport"},
+        self.assertTrue(
+            {"mean", "view_l2_mean", "sign_consensus", "sign_consensus_transport"}.issubset(
+                GRADIENT_POSTPROCESS_MODES
+            )
         )

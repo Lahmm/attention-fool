@@ -19,6 +19,10 @@ GRADIENT_POSTPROCESS_MODES = (
     "view_l2_mean",
     "sign_consensus",
     "sign_consensus_transport",
+    "vwm",
+    "group_l2_mean",
+    "group_sign_mean",
+    "trim_opposing",
 )
 
 
@@ -65,6 +69,9 @@ class PatchScoreAttacker:
         feature_layer: int = 12,
         gradient_postprocess: str = "mean",
         gradient_consensus_lambda: float = 0.2,
+        gradient_smooth_sigma: float = 0.0,
+        gradient_divisive_sigma: float = 0.0,
+        gradient_clip_percentile: float = 0.0,
         device: torch.device | None = None,
     ) -> None:
         if epsilon < 0:
@@ -123,6 +130,12 @@ class PatchScoreAttacker:
             )
         if not 0.0 <= gradient_consensus_lambda <= 1.0:
             raise ValueError("gradient_consensus_lambda must be in [0, 1].")
+        if gradient_smooth_sigma < 0:
+            raise ValueError("gradient_smooth_sigma must be non-negative.")
+        if gradient_divisive_sigma < 0:
+            raise ValueError("gradient_divisive_sigma must be non-negative.")
+        if not 0.0 <= gradient_clip_percentile <= 0.5:
+            raise ValueError("gradient_clip_percentile must be in [0, 0.5].")
 
         self.model = model
         self.model.eval()
@@ -167,6 +180,9 @@ class PatchScoreAttacker:
         self.feature_layer = int(feature_layer)
         self.gradient_postprocess = gradient_postprocess
         self.gradient_consensus_lambda = float(gradient_consensus_lambda)
+        self.gradient_smooth_sigma = float(gradient_smooth_sigma)
+        self.gradient_divisive_sigma = float(gradient_divisive_sigma)
+        self.gradient_clip_percentile = float(gradient_clip_percentile)
         self.pixel_mean = torch.tensor(IMAGENET_MEAN, device=self.device).view(1, 3, 1, 1)
         self.pixel_std = torch.tensor(IMAGENET_STD, device=self.device).view(1, 3, 1, 1)
         self._patch_scores: torch.Tensor | None = None
@@ -178,6 +194,11 @@ class PatchScoreAttacker:
             "mi_cumulative_cosine": [],
         }
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
+        self._spatial_kernel = (
+            self._build_ti_kernel(self.gradient_smooth_sigma)
+            if self.gradient_smooth_sigma > 0
+            else None
+        )
 
         if self.attack_method == "original_score_postdrop_phase_pair":
             if self.input_diversity:
@@ -243,6 +264,66 @@ class PatchScoreAttacker:
         sign_consensus = torch.sign(torch.sign(normalized).mean(dim=0))
         if gradient_postprocess == "sign_consensus":
             return sign_consensus
+        if gradient_postprocess == "sign_consensus_transport":
+            return (1.0 - gradient_consensus_lambda) * mean_gradient + gradient_consensus_lambda * sign_consensus
+
+        # Variance-weighted mean: weight each coordinate inversely by
+        # its coefficient of variation across views.  Coordinates where
+        # views agree (low σ/|μ|) get higher weight than coordinates
+        # where views disagree (high σ/|μ|).
+        if gradient_postprocess == "vwm":
+            view_std = view_gradients.std(dim=0)  # [B, C, H, W]
+            mean_abs = mean_gradient.abs().clamp_min(1e-12)
+            cv = view_std / mean_abs  # coefficient of variation per coordinate
+            weights = 1.0 / (1.0 + cv)  # [B, C, H, W]
+            return (mean_gradient * weights) / weights.mean().clamp_min(1e-12)
+
+        # Group-L2-mean: normalize each group's contribution independently
+        # before cross-group averaging.  Each group (2 views sharing a
+        # dropout mask) gets equal weight, preventing any single mask
+        # scenario from dominating the ensemble.
+        if gradient_postprocess == "group_l2_mean":
+            V = view_gradients.size(0)
+            if V % 2 != 0:
+                raise ValueError("group_l2_mean requires an even number of views.")
+            num_groups = V // 2
+            grouped = view_gradients.view(num_groups, 2, *view_gradients.shape[1:])
+            group_means = grouped.mean(dim=1)  # [G, B, C, H, W]
+            group_norms = group_means.flatten(2).norm(p=2, dim=2, keepdim=True)  # [G, B, 1]
+            normalized_groups = group_means / group_norms.clamp_min(1e-12).view(
+                num_groups, -1, 1, 1, 1
+            )
+            return normalized_groups.mean(dim=0)  # [B, C, H, W]
+
+        # Group-sign-mean: take sign of each group's mean, then average.
+        # Within-group opposition causes the mean to be small, but its SIGN
+        # captures the net direction.  Averaging per-group signs gives each
+        # dropout mask scenario equal directional weight.
+        if gradient_postprocess == "group_sign_mean":
+            V = view_gradients.size(0)
+            num_groups = V // 2
+            grouped = view_gradients.view(num_groups, 2, *view_gradients.shape[1:])
+            group_signs = grouped.mean(dim=1).sign()  # [G, B, C, H, W]
+            return group_signs.float().mean(dim=0)  # [B, C, H, W]
+
+        # Trim-opposing: exclude groups where the two views most strongly
+        # oppose each other.  gradient_consensus_lambda controls the fraction
+        # of groups to trim (e.g., 0.2 = trim bottom 20% = 2/10 groups).
+        if gradient_postprocess == "trim_opposing":
+            V = view_gradients.size(0)
+            num_groups = V // 2
+            grouped = view_gradients.view(num_groups, 2, *view_gradients.shape[1:])
+            # Per-group cosine between the two views
+            g_flat = grouped.flatten(3)  # [G, 2, B, D]
+            g_flat = g_flat / g_flat.norm(p=2, dim=3, keepdim=True).clamp_min(1e-12)
+            group_cos = (g_flat[:, 0] * g_flat[:, 1]).sum(dim=2)  # [G, B]
+            mean_group_cos = group_cos.mean(dim=1)  # [G]
+            trim_count = max(1, int(num_groups * gradient_consensus_lambda))
+            _, trim_indices = torch.topk(mean_group_cos, trim_count, largest=False)
+            keep_mask = torch.ones(num_groups, device=view_gradients.device, dtype=torch.bool)
+            keep_mask[trim_indices] = False
+            group_means = grouped.mean(dim=1)  # [G, B, C, H, W]
+            return group_means[keep_mask].mean(dim=0)  # [B, C, H, W]
 
         return (1.0 - gradient_consensus_lambda) * mean_gradient + gradient_consensus_lambda * sign_consensus
 
@@ -693,22 +774,91 @@ class PatchScoreAttacker:
         self._actual_forward_view_count += 1
         yield self._attack_loss_for_pixels(pixels, labels)
 
-    def _attack_grad(self, pixels: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    def _attack_grad(
+        self,
+        pixels: torch.Tensor,
+        labels: torch.Tensor,
+        observer: "GradientObserver | None" = None,
+    ) -> torch.Tensor:
         gradients = []
         for loss in self._iter_attack_losses(pixels, labels):
             gradients.append(torch.autograd.grad(loss, pixels, retain_graph=False)[0])
         if not gradients:
             raise RuntimeError("no attack losses were generated.")
         view_gradients = torch.stack(gradients, dim=0)
+        if observer is not None:
+            observer.record_raw_views(view_gradients)
         aggregated = self._aggregate_gradients(
             view_gradients,
             gradient_postprocess=self.gradient_postprocess,
             gradient_consensus_lambda=self.gradient_consensus_lambda,
         )
+        if observer is not None:
+            observer.record_aggregated(aggregated)
         self._record_gradient_diagnostics(view_gradients, aggregated)
         return aggregated
 
-    def attack_batch(self, images: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    def _apply_divisive_normalization(self, grad: torch.Tensor) -> torch.Tensor:
+        """Local divisive normalization: suppress peaks, amplify diffuse signal.
+
+        grad_out = grad / (1 + blur(|grad|, sigma))
+        where blur is a 2D Gaussian with per-channel groups.
+
+        This reduces spatial concentration (spatial Gini) and extreme values
+        (kurtosis), both of which correlate with poor transferability.
+        """
+        sigma = self.gradient_divisive_sigma
+        if sigma <= 0:
+            return grad
+        # Build Gaussian kernel (same as TI kernel)
+        radius = int(3 * sigma)
+        axis = torch.arange(-radius, radius + 1, dtype=torch.float32, device=grad.device)
+        gauss_1d = torch.exp(-0.5 * (axis / sigma).square())
+        gauss_1d = gauss_1d / gauss_1d.sum()
+        kernel_2d = (gauss_1d[:, None] @ gauss_1d[None, :]).view(1, 1, 2 * radius + 1, 2 * radius + 1)
+        kernel = kernel_2d.to(grad.device, grad.dtype).repeat(grad.size(1), 1, 1, 1)
+        padding = radius
+        abs_grad = grad.abs()
+        padded_abs = F.pad(abs_grad, (padding, padding, padding, padding), mode="reflect")
+        local_scale = F.conv2d(padded_abs, kernel, groups=grad.size(1))
+        return grad / (1.0 + local_scale)
+
+    def _apply_percentile_clip(self, grad: torch.Tensor) -> torch.Tensor:
+        """Soft-clip extreme gradient values to reduce kurtosis.
+
+        Values beyond the given percentile are smoothly squashed toward the
+        threshold, reducing the impact of outlier gradient coordinates.
+        """
+        pct = self.gradient_clip_percentile
+        if pct <= 0:
+            return grad
+        flat = grad.flatten(1)  # [B, D]
+        lower = flat.kthvalue(max(1, int(flat.size(1) * pct)), dim=1, keepdim=True).values
+        upper = flat.kthvalue(min(flat.size(1), int(flat.size(1) * (1.0 - pct))), dim=1, keepdim=True).values
+        # Soft clip: tanh-like squashing beyond thresholds
+        # For values > upper: upper + (val - upper) / (1 + (val - upper) / scale)
+        # For values < lower: lower - (lower - val) / (1 + (lower - val) / scale)
+        scale = (upper - lower).clamp_min(1e-8) * 0.5
+        upper_mask = flat > upper
+        lower_mask = flat < lower
+        flat = torch.where(
+            upper_mask,
+            upper + (flat - upper) / (1.0 + (flat - upper).abs() / scale),
+            flat,
+        )
+        flat = torch.where(
+            lower_mask,
+            lower - (lower - flat) / (1.0 + (lower - flat).abs() / scale),
+            flat,
+        )
+        return flat.view_as(grad)
+
+    def attack_batch(
+        self,
+        images: torch.Tensor,
+        labels: torch.Tensor,
+        observer: "GradientObserver | None" = None,
+    ) -> torch.Tensor:
         images = images.to(self.device)
         labels = labels.to(self.device)
         clean_pixels = self._denormalize(images).detach()
@@ -725,7 +875,18 @@ class PatchScoreAttacker:
 
             self._compute_generic_patch_scores(grad_pixels)
             grad_pixels = grad_pixels.detach().requires_grad_(True)
-            gradient = self._smooth_grad(self._attack_grad(grad_pixels, labels))
+            gradient = self._smooth_grad(self._attack_grad(grad_pixels, labels, observer=observer))
+            if self._spatial_kernel is not None:
+                ti_saved = self._ti_kernel
+                self._ti_kernel = self._spatial_kernel
+                gradient = self._smooth_grad(gradient)
+                self._ti_kernel = ti_saved
+
+            # Gradient post-processing: divisive normalization reduces spatial
+            # concentration; percentile clipping reduces kurtosis.  Both are
+            # motivated by per-sample correlation with transfer success.
+            gradient = self._apply_divisive_normalization(gradient)
+            gradient = self._apply_percentile_clip(gradient)
 
             expected_views = (
                 self.guide_aug_copies
@@ -740,6 +901,8 @@ class PatchScoreAttacker:
                 )
 
             gradient = self._normalize_grad(gradient)
+            if observer is not None:
+                observer.record_normalized(gradient)
             if self.use_momentum:
                 momentum = self.decay * momentum + gradient
                 update = momentum
@@ -753,8 +916,15 @@ class PatchScoreAttacker:
                     else 1.0
                 )
 
+            if observer is not None:
+                observer.record_momentum(momentum)
+                observer.record_sign_update(update.sign())
+
             adv_pixels = adv_pixels + self.step_size * update.sign()
             delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
             adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0).detach()
+
+            if observer is not None:
+                observer.close_step()
 
         return self._normalize(adv_pixels)
