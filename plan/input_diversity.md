@@ -21,6 +21,22 @@ total_views <= 20
 
 ## 方案一：10 Groups × 2 Views
 
+### Implementation Status
+
+方案一目前**尚未实现**，当前代码仍使用原有的 `guide_aug_copies` 单 view 调度。
+本节是待实现的工程方案；后续 coding agent 必须先完成方案一，再运行方案二、三、四
+的对照实验。方案一不能只作为文档中的理论 baseline，必须有真实的：
+
+```text
+10 groups
+每组 2 个独立 model views
+实际 forward 总数 = 20
+pair mean -> group mean -> 现有 MI/sign update
+```
+
+方案一的实现完成前，任何方案二/三/四的 ASR 结果都不能宣称是在完整 input-diversity
+预算协议下取得的改进。
+
 ### 目标
 
 在不超过 20 个实际增强 view 的前提下，同时获得：
@@ -437,6 +453,10 @@ phase_pair_10x2
 和 wall-clock 数据齐全前，不得继续叠加新的 gradient aggregation 方法。
 
 ## 方案二、三、四：实现与优先级
+
+方案一、方案二、方案三和方案四均属于**待实现方案**。其中方案一是必须先完成的
+固定 20-view 双 view 基线；方案二、三、四必须在方案一完成并通过验收后再实现或
+进行 ASR 比较。
 
 以下方案都必须复用当前主线的 score/mask 流程，不得改变 score 或 mask 的定义。
 
