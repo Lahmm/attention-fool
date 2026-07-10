@@ -12,6 +12,11 @@ original L12 score/mask
 → MI-FGSM update
 ```
 
+梯度后处理默认是 `mean`，保持上述主线行为。可选模式为
+`view_l2_mean`、`sign_consensus` 和 `sign_consensus_transport`；transport 的权重由
+`--gradient-consensus-lambda` 控制，默认 `0.2`。100 样本完整消融结果见
+`experiments/gradient_postprocess_ablation_s100.md`。
+
 仓库仅保留以下攻击能力：
 
 - 当前 `original_score_postdrop_phase_pair` 主线；
