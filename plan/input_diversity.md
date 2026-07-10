@@ -435,3 +435,333 @@ phase_pair_10x2
 
 在这两个 branch 的 source loss、ViT/CNN/overall ASR、gradient cosine、effective rank
 和 wall-clock 数据齐全前，不得继续叠加新的 gradient aggregation 方法。
+
+## 方案二、三、四：实现与优先级
+
+以下方案都必须复用当前主线的 score/mask 流程，不得改变 score 或 mask 的定义。
+
+```text
+L12 detached CLS/patch feature
+  -> 可选 CLS score jitter
+  -> cosine Patch Score
+  -> 当前 median candidate policy
+  -> 当前 random mask sampling
+  -> 得到 drop_mask
+  -> 仅对 kept patch（drop_mask=False）做新注入
+  -> dropped patch 保持 zero
+  -> full 12-block forward
+```
+
+硬约束：
+
+- 不修改 `feature_layer=12`、cosine score、median threshold、high/low candidate
+  定义、`patch_dropout_ratio` 或 mask sampling 逻辑。
+- 所有新 noise/residual/rotation 只能写入 `drop_mask == False` 的 patch。
+- `drop_mask == True` 的 patch 在 `zero_noise` 主线中必须严格为零，不能加噪、回填或
+  接收 donor token。
+- 方案二和方案四使用 `20 groups × 1 view = 20 views`。
+- 方案三使用 `10 groups × 2 views = 20 views`。
+- 不允许在单个 view 内计算多个隐藏 phase、多个 donor forward 或额外 white-box。
+
+### 方案二：Cross-Patch Counterfactual Transport
+
+#### 目标
+
+在不增加 view 数的情况下，把 kept patch 的 token residual 从其它空间位置搬运过来，
+改变 ViT 的 patch-content / spatial-position / CLS-routing 对应关系。它不是 iid
+Gaussian noise，也不改变 score/mask 产生过程。
+
+#### 配置
+
+```text
+groups = 20
+views_per_group = 1
+total_views = 20
+transport_mode ∈ {rotate180, mirror_x, checkerboard}
+transport_alpha ∈ {0.10, 0.20, 0.30, 0.50}
+transport_scope = kept_only
+```
+
+第一版固定一个 permutation `pi`，不能对同一个 view 计算多个 permutation。推荐先做
+`rotate180`，即对 14×14 patch grid 做 180° index rotation。
+
+#### Token 计算
+
+评分和 mask 完成后，令 `z` 为 L0 patch tokens，`K = ~drop_mask`：
+
+```python
+transport_residual = z[:, pi, :] - z
+transported = z + alpha * transport_residual
+patch_tokens = torch.where(
+    K.unsqueeze(-1),
+    transported,
+    torch.zeros_like(z),
+)
+```
+
+注意：上式中的 `z[:, pi, :]` 来自同一个 L0 forward 的 token tensor，不是另一个
+model view。它不会增加 view 数。只有 `K` 位置可以得到 transported token；dropped
+位置必须是 zero。
+
+建议对 residual 做 per-image RMS matching，避免仅因为幅度变大而取得虚假收益：
+
+```python
+residual_rms = rms(transport_residual[K])
+base_rms = rms(z[K])
+transport_residual = transport_residual * (base_rms / residual_rms.clamp_min(eps))
+```
+
+RMS matching 只用于 kept patch；不得用 dropped patch 统计量。
+
+#### 预期机制
+
+```text
+kept token i receives residual from pi(i)
+  -> Q/K/V sees altered content-position correspondence
+  -> CLS attention routing changes
+  -> pixel gradient includes cross-patch dependency
+```
+
+它不保证扩大单个 patch 的 `W^T` 行空间，但可以改变 ViT 的全局 token routing，且不
+牺牲 20-view 的 mask diversity。
+
+#### 必须对照
+
+```text
+baseline: kept patch + current opponent-channel noise
+transport: kept patch + cross-patch residual transport
+hybrid: kept patch + transport + current opponent-channel noise
+```
+
+`hybrid` 仍只能对 kept patch 加 opponent noise；不得给 dropped patch 加任何 noise。
+
+### 方案三：Pair-Difference Gradient
+
+#### 目标
+
+方案三不新增 token noise，而是重新利用方案一的两个真实 view 的梯度差异，提取
+phase-sensitive gradient。score 和 mask 在两个 view 中仍各自按当前原流程计算。
+
+#### 配置
+
+```text
+groups = 10
+views_per_group = 2
+total_views = 20
+view A = original input phase
+view B = one shifted input phase
+pair_aggregation = difference_mix
+lambda_difference ∈ {0.05, 0.10, 0.20}
+```
+
+每个 view 都独立完成：
+
+```text
+L12 score -> CLS jitter -> current mask -> kept-only noise -> full forward -> gradient
+```
+
+不允许复用 A 的 score、mask 或 token noise 给 B。
+
+#### 梯度计算
+
+对 group `j` 的两个 view 得到 `g_A,j` 和 `g_B,j`。先计算：
+
+```math
+g^+_j = \frac{g_{A,j}+g_{B,j}}{2},
+\qquad
+g^-_j = g_{A,j}-g_{B,j}.
+```
+
+对 `g^-` 做 per-image L2 normalization 后混合：
+
+```math
+g_j = g^+_j
+    + \lambda\frac{g^-_j}{\|g^-_j\|_2+\epsilon}.
+```
+
+最终只对 10 个 `g_j` 做 group mean，然后进入现有 MI/normalization/sign 更新。不得
+对每个 group 单独更新像素。
+
+#### 对照顺序
+
+```text
+10×2 plain pair mean
+10×2 pair-difference, lambda=0.05
+10×2 pair-difference, lambda=0.10
+10×2 pair-difference, lambda=0.20
+```
+
+`lambda=0` 必须与方案一的 plain pair mean 数值一致（浮点误差范围内）。
+
+#### 预期机制
+
+```text
+g+ : 两个 embedding view 的共同 transfer direction
+g- : 对 embedding phase 敏感的差异 direction
+g  : 稳定方向 + 受控 phase-sensitive direction
+```
+
+这是 gradient aggregation 变体，不增加 view 数，也不应与 adaptive schedule、TI
+smoothing 或额外 forward 混合测试。
+
+### 方案四：Kept-Token Orthogonal Residual
+
+#### 目标
+
+对 kept patch 做固定 channel-space orthogonal residual rotation，改变 ViT 的 token
+channel direction，同时保持 token residual 的幅度可控。它不修改 score/mask，也不增加
+view 数。
+
+#### 配置
+
+```text
+groups = 20
+views_per_group = 1
+total_views = 20
+rotation_mode ∈ {pair_swap, hadamard_block}
+rotation_alpha ∈ {0.05, 0.10, 0.20, 0.30}
+rotation_scope = kept_only
+```
+
+推荐先实现 `pair_swap`：在固定 channel pairs `(0,1), (2,3), ...` 上做交换，并对
+交换后的 residual 使用固定符号 pattern。第二版再实现 block-Hadamard rotation。
+
+#### Token 计算
+
+令 `z_K` 为 kept patch token，`mu_K` 为 kept patch 的 per-image channel mean，`R` 为
+固定正交矩阵：
+
+```python
+centered = z - mu_kept
+rotation_residual = centered @ (R.T - I)
+rotated = z + alpha * rotation_residual
+patch_tokens = torch.where(
+    kept_mask.unsqueeze(-1),
+    rotated,
+    torch.zeros_like(z),
+)
+```
+
+`mu_kept` 只能由 kept patch 计算；当 kept patch 数不足时必须回退为原始 token，不得
+用 dropped patch 填充统计量。`R` 在一个实验分支中固定，不能每个 hidden sub-view
+重新采样。
+
+#### 噪声边界
+
+方案四的 `rotation_residual` 只能添加到 kept patch：
+
+```text
+kept patch: z + alpha * rotation_residual
+dropped patch: exactly zero
+```
+
+如果与 opponent noise 做 hybrid，顺序固定为：
+
+```text
+z_kept = z + alpha * rotation_residual
+z_kept = z_kept + opponent_noise
+z_dropped = 0
+```
+
+不得对完整 patch tensor 先加 rotation/noise，再通过后处理把 dropped patch 清零而不
+记录该中间注入；实现上应直接使用 kept mask，保证实验日志和 autograd 路径清晰。
+
+#### 预期机制
+
+```text
+fixed orthogonal channel residual
+  -> 改变 Q/K/V 投影看到的 channel direction
+  -> 改变 ViT attention routing
+  -> 产生不同但不完全随机的 kept-token gradient
+```
+
+该方案不声称突破 `W^T` rank ceiling；它的价值是低成本地改变 ViT-specific token
+geometry，同时保持 20 个独立 mask sample。
+
+## 三个方案的优先级
+
+最终优先级按“只看 ASR、严格 20-view budget、单白盒”确定：
+
+### P0：方案二 Cross-Patch Counterfactual Transport
+
+理由：
+
+- 保留 `20 groups × 1 view` 的完整 mask/CLS-jitter diversity；
+- 不增加真实 view 数；
+- 直接干预 ViT 的跨 patch routing；
+- 不需要修改 score/mask 主线；
+- `rotate180` 版本实现和调试成本低。
+
+首轮只跑：
+
+```text
+alpha = 0.10, 0.20, 0.30
+mode = rotate180
+```
+
+### P1：方案四 Kept-Token Orthogonal Residual
+
+理由：
+
+- 同样保持 `20 groups × 1 view`；
+- 不牺牲 mask diversity；
+- 实现成本低，适合快速筛选；
+- 直接改变 ViT token channel geometry。
+
+首轮只跑：
+
+```text
+rotation_mode = pair_swap
+alpha = 0.05, 0.10, 0.20
+```
+
+它不如方案二直接改变空间 routing，因此排在 P0，但不应被跳过。
+
+### P2：方案三 Pair-Difference Gradient
+
+理由：
+
+- 能利用方案一的第二 view，而不是简单 pair mean；
+- 是新的梯度聚合方法，不增加 view 数；
+- 但它把独立 mask sample 从 20 降为 10，方差风险更高；
+- 需要先有方案一的 `10×2 plain pair mean` 作为稳定基线。
+
+首轮只跑：
+
+```text
+lambda = 0.05, 0.10
+```
+
+## 统一实验顺序与验收
+
+所有方案严格按以下顺序执行：
+
+```text
+1. 复现当前 baseline，确认 actual_forward_view_count=20
+2. 运行方案二，不叠加方案三/四
+3. 运行方案四，不叠加方案二/三
+4. 运行方案一 plain pair mean
+5. 运行方案三 pair-difference
+6. 只对单项最优方案做 hybrid ablation
+```
+
+每个 branch 必须报告：
+
+```text
+overall / ViT / CNN ASR
+source CE
+per-view gradient cosine
+within-group gradient cosine（方案三必须）
+gradient effective rank
+mask Jaccard / flip rate
+actual_forward_view_count
+wall-clock / peak memory
+```
+
+在所有方案中，score 和 mask 的实现必须保持完全一致；唯一允许改变的是：
+
+```text
+方案二：kept-only cross-patch residual
+方案三：view grouping 和 gradient aggregation
+方案四：kept-only channel rotation residual
+```
