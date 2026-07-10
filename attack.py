@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
 
 from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
+
+if TYPE_CHECKING:
+    from gradient_replay import GradientReplay
+    from gradient_study import GradientProbe
 
 
 ATTACK_METHODS = (
@@ -186,6 +191,7 @@ class PatchScoreAttacker:
         self.pixel_mean = torch.tensor(IMAGENET_MEAN, device=self.device).view(1, 3, 1, 1)
         self.pixel_std = torch.tensor(IMAGENET_STD, device=self.device).view(1, 3, 1, 1)
         self._patch_scores: torch.Tensor | None = None
+        self._gradient_replay: GradientReplay | None = None
         self._actual_forward_view_count = 0
         self._gradient_diagnostics = {
             "view_cosine_to_final": [],
@@ -400,6 +406,11 @@ class PatchScoreAttacker:
         left = int(torch.randint(pad_w + 1, (), device=pixels.device)) if pad_w else 0
         return F.pad(resized, (left, pad_w - left, top, pad_h - top), value=0.0)
 
+    def _randn_like(self, tensor: torch.Tensor, event: str) -> torch.Tensor:
+        if self._gradient_replay is not None:
+            return self._gradient_replay.randn_like(tensor, event)
+        return torch.randn_like(tensor)
+
     @staticmethod
     def _apply_phase_shift(pixels: torch.Tensor, dx: int, dy: int) -> torch.Tensor:
         if dx == 0 and dy == 0:
@@ -422,6 +433,38 @@ class PatchScoreAttacker:
             return self.input_diversity_phase_shift
         index = int(torch.randint(len(self.input_diversity_phase_shift_set), (1,)).item())
         return self.input_diversity_phase_shift_set[index]
+
+    def _pick_input_diversity_phases(self, batch_size: int, device: torch.device) -> list[tuple[int, int]]:
+        if self._gradient_replay is None:
+            phase = self._pick_input_diversity_phase()
+            return [phase] * batch_size
+        if self.input_diversity_phase_shift_set is None:
+            phases = [self.input_diversity_phase_shift] * batch_size
+        else:
+            phases = [
+                self.input_diversity_phase_shift_set[
+                    self._gradient_replay.randint(
+                        len(self.input_diversity_phase_shift_set),
+                        "phase",
+                        index,
+                        device=device,
+                    )
+                ]
+                for index in range(batch_size)
+            ]
+        for index, phase in enumerate(phases):
+            self._gradient_replay.record_phase(index, phase)
+        return phases
+
+    def _apply_samplewise_phase_shifts(
+        self,
+        tensor: torch.Tensor,
+        phases: list[tuple[int, int]],
+    ) -> torch.Tensor:
+        return torch.cat(
+            [self._apply_phase_shift(tensor[index : index + 1], *phase) for index, phase in enumerate(phases)],
+            dim=0,
+        )
 
     @staticmethod
     def _run_vit_blocks(blocks, tokens: torch.Tensor, start: int, end: int) -> torch.Tensor:
@@ -450,23 +493,18 @@ class PatchScoreAttacker:
         token_rms = patch_tokens.detach().square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
         if self.token_cls_noise_mode == "mahalanobis":
             centered = patch_tokens.detach() - patch_tokens.detach().mean(dim=1, keepdim=True)
-            coefficients = torch.randn(
-                patch_tokens.size(0),
-                patch_tokens.size(1),
-                1,
-                device=patch_tokens.device,
-                dtype=patch_tokens.dtype,
-            )
+            coefficients = self._randn_like(patch_tokens[:, :, :1], "cls_mahalanobis")
             raw = torch.bmm(centered.transpose(1, 2), coefficients).squeeze(-1)
             raw = raw / patch_tokens.size(1) ** 0.5
             return self.token_cls_noise_strength * token_rms * raw.unsqueeze(1)
-        return self.token_cls_noise_strength * token_rms * torch.randn_like(patch_tokens[:, :1])
+        return self.token_cls_noise_strength * token_rms * self._randn_like(
+            patch_tokens[:, :1], "cls_gaussian"
+        )
 
-    @staticmethod
-    def _opponent_channel_noise_like(pixels: torch.Tensor) -> torch.Tensor:
+    def _opponent_channel_noise_like(self, pixels: torch.Tensor, event: str = "opponent_pixel") -> torch.Tensor:
         if pixels.size(1) != 3:
-            return torch.randn_like(pixels)
-        coefficients = torch.randn_like(pixels)
+            return self._randn_like(pixels, event)
+        coefficients = self._randn_like(pixels, event)
         luma = 0.5**0.5 * coefficients[:, 0:1]
         red_green = 1.25**0.5 * coefficients[:, 1:2]
         yellow_blue = 1.25**0.5 * coefficients[:, 2:3]
@@ -482,30 +520,56 @@ class PatchScoreAttacker:
     def _pixel_noise_like(self, pixels: torch.Tensor) -> torch.Tensor:
         if self.patch_dropout_noise_mode == "opponent_channel_gaussian":
             return self.guide_aug_strength * self._opponent_channel_noise_like(pixels)
-        return self.guide_aug_strength * torch.randn_like(pixels)
+        return self.guide_aug_strength * self._randn_like(pixels, "pixel_gaussian")
 
     def _token_patch_dropout_noise(self, patch_tokens: torch.Tensor, base_model) -> torch.Tensor:
         token_rms = patch_tokens.detach().square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
         if self.patch_dropout_noise_mode != "opponent_channel_gaussian":
-            return self.guide_aug_strength * token_rms * torch.randn_like(patch_tokens)
+            return self.guide_aug_strength * token_rms * self._randn_like(
+                patch_tokens, "token_gaussian"
+            )
 
         weight = getattr(getattr(getattr(base_model, "patch_embed", None), "proj", None), "weight", None)
         if not isinstance(weight, torch.Tensor) or weight.ndim != 4:
-            return self.guide_aug_strength * token_rms * torch.randn_like(patch_tokens)
+            return self.guide_aug_strength * token_rms * self._randn_like(
+                patch_tokens, "token_gaussian_no_projection"
+            )
         out_channels, in_channels, kernel_h, kernel_w = weight.shape
         if in_channels != 3 or out_channels != patch_tokens.size(-1):
-            return self.guide_aug_strength * token_rms * torch.randn_like(patch_tokens)
+            return self.guide_aug_strength * token_rms * self._randn_like(
+                patch_tokens, "token_gaussian_shape_mismatch"
+            )
 
         batch, count, dimension = patch_tokens.shape
-        pixel_noise = torch.empty(
+        coefficients = self._randn_like(
+            torch.empty(
+                batch,
+                count,
+                3,
+                kernel_h,
+                kernel_w,
+                device=patch_tokens.device,
+                dtype=patch_tokens.dtype,
+            ),
+            "token_opponent",
+        )
+        luma = 0.5**0.5 * coefficients[:, :, 0:1]
+        red_green = 1.25**0.5 * coefficients[:, :, 1:2]
+        yellow_blue = 1.25**0.5 * coefficients[:, :, 2:3]
+        pixel_noise = torch.cat(
+            (
+                3**-0.5 * luma + 2**-0.5 * red_green + 6**-0.5 * yellow_blue,
+                3**-0.5 * luma - 2**-0.5 * red_green + 6**-0.5 * yellow_blue,
+                3**-0.5 * luma - 2 * 6**-0.5 * yellow_blue,
+            ),
+            dim=2,
+        ).view(
             batch * count,
             3,
             kernel_h,
             kernel_w,
-            device=patch_tokens.device,
-            dtype=patch_tokens.dtype,
         )
-        pixel_noise = self._opponent_channel_noise_like(pixel_noise).flatten(1)
+        pixel_noise = pixel_noise.flatten(1)
         projection = weight.detach().to(patch_tokens).reshape(dimension, -1)
         token_noise = pixel_noise.matmul(projection.t()).view(batch, count, dimension)
         noise_rms = token_noise.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
@@ -515,12 +579,25 @@ class PatchScoreAttacker:
         working_scores = scores
         if self.patch_dropout_score_noise > 0:
             score_std = scores.detach().std(dim=1, keepdim=True).clamp_min(1e-6)
-            working_scores = scores + self.patch_dropout_score_noise * score_std * torch.randn_like(scores)
+            working_scores = scores + self.patch_dropout_score_noise * score_std * self._randn_like(
+                scores, "score_noise"
+            )
         if self.patch_dropout_score_quantile_jitter == 0:
             threshold = working_scores.median(dim=1, keepdim=True).values
         else:
             jitter = self.patch_dropout_score_quantile_jitter
-            quantiles = 0.5 + (torch.rand(scores.size(0), device=scores.device) * 2 - 1) * jitter
+            if self._gradient_replay is None:
+                quantile_random = torch.rand(scores.size(0), device=scores.device)
+            else:
+                quantile_random = torch.stack(
+                    [
+                        self._gradient_replay.rand_scalar(
+                            "score_quantile", index, device=scores.device
+                        )
+                        for index in range(scores.size(0))
+                    ]
+                )
+            quantiles = 0.5 + (quantile_random * 2 - 1) * jitter
             threshold = torch.stack(
                 [torch.quantile(working_scores[index], quantiles[index]) for index in range(scores.size(0))]
             ).unsqueeze(1)
@@ -544,9 +621,23 @@ class PatchScoreAttacker:
                 continue
             count = max(1, int(round(candidates.numel() * self.patch_dropout_ratio)))
             if self.patch_dropout_sampling_mode == "bernoulli":
-                selected_mask = torch.rand(candidates.numel(), device=scores.device) < self.patch_dropout_ratio
+                if self._gradient_replay is None:
+                    random_values = torch.rand(candidates.numel(), device=scores.device)
+                else:
+                    generator = self._gradient_replay._generator(
+                        scores.device,
+                        self._gradient_replay._seed("dropout_bernoulli", self._gradient_replay.sample_ids[batch_index]),
+                    )
+                    random_values = torch.rand(candidates.numel(), device=scores.device, generator=generator)
+                selected_mask = random_values < self.patch_dropout_ratio
                 if not selected_mask.any():
-                    selected_mask[torch.randint(candidates.numel(), (1,), device=scores.device)] = True
+                    if self._gradient_replay is None:
+                        forced_index = int(torch.randint(candidates.numel(), (1,), device=scores.device))
+                    else:
+                        forced_index = self._gradient_replay.randint(
+                            candidates.numel(), "dropout_bernoulli_force", batch_index, device=scores.device
+                        )
+                    selected_mask[forced_index] = True
                 selected = candidates[selected_mask]
             elif self.patch_dropout_sampling_mode == "extreme":
                 order = torch.argsort(
@@ -557,9 +648,21 @@ class PatchScoreAttacker:
             elif self.patch_dropout_sampling_mode == "score_weighted":
                 median = scores[batch_index].median()
                 weights = (scores[batch_index, candidates] - median).abs().clamp_min(1e-6)
-                selected = candidates[torch.multinomial(weights, count, replacement=False)]
+                if self._gradient_replay is None:
+                    sampled = torch.multinomial(weights, count, replacement=False)
+                else:
+                    sampled = self._gradient_replay.multinomial(
+                        weights, count, "dropout_weighted", batch_index
+                    )
+                selected = candidates[sampled]
             else:
-                selected = candidates[torch.randperm(candidates.numel(), device=scores.device)[:count]]
+                if self._gradient_replay is None:
+                    order = torch.randperm(candidates.numel(), device=scores.device)
+                else:
+                    order = self._gradient_replay.randperm(
+                        candidates.numel(), "dropout_random", batch_index, device=scores.device
+                    )
+                selected = candidates[order[:count]]
             drop_mask[batch_index, selected] = True
         return drop_mask
 
@@ -572,7 +675,7 @@ class PatchScoreAttacker:
         score_cls = cls_token
         score_patches = patch_tokens
         if self.token_score_cls_mode == "gaussian":
-            score_cls = torch.randn_like(cls_token)
+            score_cls = self._randn_like(cls_token, "score_cls_gaussian")
             score_cls = score_cls / score_cls.norm(dim=-1, keepdim=True).clamp_min(1e-6)
             score_cls = score_cls * cls_token.norm(dim=-1, keepdim=True)
         if self.token_score_cls_noise and self.token_cls_noise_strength > 0:
@@ -659,19 +762,25 @@ class PatchScoreAttacker:
         self,
         pixels: torch.Tensor,
     ) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
-        for _group_index in range(self.input_diversity_groups):
+        for group_index in range(self.input_diversity_groups):
+            if self._gradient_replay is not None:
+                self._gradient_replay.set_context(group=group_index, view=-1)
             drop_mask = self._compute_original_l12_drop_mask(pixels)
             image_mask = self._patch_drop_mask_to_image(drop_mask, pixels.size(-2), pixels.size(-1))
             image_mask = image_mask.to(device=pixels.device, dtype=pixels.dtype)
             dropped_pixels = pixels * (1.0 - image_mask)
-            phase = self._pick_input_diversity_phase()
+            phases = self._pick_input_diversity_phases(pixels.size(0), pixels.device)
+            if self._gradient_replay is not None:
+                self._gradient_replay.set_context(view=0)
             self._actual_forward_view_count += 1
             yield dropped_pixels, drop_mask
             # Rebuild the shared-mask pixel branch after view A autograd frees its graph.
             dropped_pixels = pixels * (1.0 - image_mask)
-            shifted_pixels = self._apply_phase_shift(dropped_pixels, *phase)
-            shifted_mask = self._apply_phase_shift(image_mask, *phase)
+            shifted_pixels = self._apply_samplewise_phase_shifts(dropped_pixels, phases)
+            shifted_mask = self._apply_samplewise_phase_shifts(image_mask, phases)
             shifted_drop_mask = self._image_mask_to_patch_drop_mask(shifted_mask, drop_mask.size(1))
+            if self._gradient_replay is not None:
+                self._gradient_replay.set_context(view=1)
             self._actual_forward_view_count += 1
             yield shifted_pixels, shifted_drop_mask
 
@@ -779,6 +888,9 @@ class PatchScoreAttacker:
         pixels: torch.Tensor,
         labels: torch.Tensor,
         observer: "GradientObserver | None" = None,
+        probe: "GradientProbe | None" = None,
+        sample_ids: list[str] | None = None,
+        step_index: int = 0,
     ) -> torch.Tensor:
         gradients = []
         for loss in self._iter_attack_losses(pixels, labels):
@@ -788,11 +900,18 @@ class PatchScoreAttacker:
         view_gradients = torch.stack(gradients, dim=0)
         if observer is not None:
             observer.record_raw_views(view_gradients)
-        aggregated = self._aggregate_gradients(
-            view_gradients,
-            gradient_postprocess=self.gradient_postprocess,
-            gradient_consensus_lambda=self.gradient_consensus_lambda,
-        )
+        if probe is None:
+            aggregated = self._aggregate_gradients(
+                view_gradients,
+                gradient_postprocess=self.gradient_postprocess,
+                gradient_consensus_lambda=self.gradient_consensus_lambda,
+            )
+        else:
+            if sample_ids is None:
+                raise ValueError("sample_ids are required for gradient probes.")
+            aggregated = probe.apply(view_gradients, sample_ids, step_index)
+            if observer is not None:
+                observer.record_probe(view_gradients.mean(dim=0), aggregated, probe.name)
         if observer is not None:
             observer.record_aggregated(aggregated)
         self._record_gradient_diagnostics(view_gradients, aggregated)
@@ -858,7 +977,15 @@ class PatchScoreAttacker:
         images: torch.Tensor,
         labels: torch.Tensor,
         observer: "GradientObserver | None" = None,
+        replay: "GradientReplay | None" = None,
+        sample_ids: list[str] | None = None,
+        probe: "GradientProbe | None" = None,
     ) -> torch.Tensor:
+        if replay is not None:
+            if sample_ids is None or len(sample_ids) != images.size(0):
+                raise ValueError("sample_ids must match the batch when replay is enabled.")
+            replay.begin_batch(sample_ids)
+        self._gradient_replay = replay
         images = images.to(self.device)
         labels = labels.to(self.device)
         clean_pixels = self._denormalize(images).detach()
@@ -866,6 +993,8 @@ class PatchScoreAttacker:
         momentum = torch.zeros_like(adv_pixels)
 
         for step_index in range(self.steps):
+            if replay is not None:
+                replay.set_context(step=step_index, group=-1, view=-1)
             self._actual_forward_view_count = 0
             grad_pixels = adv_pixels.detach()
             if self.nesterov and step_index > 0:
@@ -875,7 +1004,16 @@ class PatchScoreAttacker:
 
             self._compute_generic_patch_scores(grad_pixels)
             grad_pixels = grad_pixels.detach().requires_grad_(True)
-            gradient = self._smooth_grad(self._attack_grad(grad_pixels, labels, observer=observer))
+            gradient = self._smooth_grad(
+                self._attack_grad(
+                    grad_pixels,
+                    labels,
+                    observer=observer,
+                    probe=probe,
+                    sample_ids=sample_ids,
+                    step_index=step_index,
+                )
+            )
             if self._spatial_kernel is not None:
                 ti_saved = self._ti_kernel
                 self._ti_kernel = self._spatial_kernel
@@ -903,6 +1041,7 @@ class PatchScoreAttacker:
             gradient = self._normalize_grad(gradient)
             if observer is not None:
                 observer.record_normalized(gradient)
+                observer.record_pre_momentum(momentum, gradient)
             if self.use_momentum:
                 momentum = self.decay * momentum + gradient
                 update = momentum
@@ -927,4 +1066,5 @@ class PatchScoreAttacker:
             if observer is not None:
                 observer.close_step()
 
+        self._gradient_replay = None
         return self._normalize(adv_pixels)
