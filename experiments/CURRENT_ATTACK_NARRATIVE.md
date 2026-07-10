@@ -10,35 +10,35 @@
 
 攻击不是显式的前景分割，也不声称每个 high-score patch 都是背景。我们利用 ViT
 全局 CLS 路由的结构性偏置，在测试时对 CLS 最强关联的 patch 进行随机干预；再对
-多种 token 路由下的梯度做 EOT/MI 聚合，优化跨路由仍然稳定的像素扰动。
+多种 token 路由和 patch-grid phase 下的梯度做 EOT/MI 聚合，优化跨路由仍然稳定的
+像素扰动。
 
-当前最有文献关联性的主线使用 **L12 Patch Score**。在 12-layer ViT-B/16 中，
-评分分支运行完整 encoder，评分结果 detached；mask 随后回写到 L0 token，再重新
-运行完整网络得到攻击 loss。
+当前主线是**方案一：10 groups × 2 views = 20 actual views**。每个 group 使用一个
+原始 view 和一个 shifted/phase view；两个 view 各自独立运行完整的 L12 score、CLS
+jitter、high-score mask、L0 injection 和 12-layer forward，两个梯度先 pair mean，
+10 个 group 再做最终 mean。方案一不是未来候选，而是当前默认攻击协议。
 
 ## 1. 攻击流程
 
 ```text
 adv_pixels
     │
-    ├── patch_embed + pos_embed + norm_pre
-    │       → x_L0 = [CLS_L0, patch_L0[1:196]]
+    ├── group 1..10
+    │     │
+    │     ├── view A: 原始 pixels
+    │     │      → patch_embed + pos_embed + norm_pre
+    │     │      → L12 score + CLS jitter + high-score mask
+    │     │      → L0 injection + full forward → g_A
+    │     │
+    │     └── view B: differentiable phase-shifted pixels
+    │            → patch_embed + pos_embed + norm_pre
+    │            → L12 score + CLS jitter + high-score mask
+    │            → L0 injection + full forward → g_B
     │
-    ├── 评分分支（detach，无梯度）
-    │       x_L12 = blocks[0:12](x_L0)
-    │       CLS_L12, patch_L12 = x_L12[:, 0], x_L12[:, 1:]
-    │       CLS_score = CLS_L12 + σ·ε  （主配置；每 copy 独立）
-    │       score_i = cos(patch_L12[i], CLS_score)
-    │       high-score candidate: score_i > median(score)
-    │       随机从候选池删除约 30% ≈ 全部 patch 的 15%
-    │
-    └── 前向分支（有梯度）
-            将 score mask 回写到 x_L0
-            被选 token: zero
-            其余 patch: opponent-channel token noise
-            → blocks[0:12] → norm → head → CE loss
+    └── g_group = (g_A + g_B) / 2
 
-20 copies 的梯度取平均 → MI(decay=1.0) → sign → 更新像素。
+10 个 group gradient 的 mean → MI(decay=1.0) → sign → 更新像素。
+实际 model views/forwards = 10 × 2 = 20。
 默认 10 steps，L_inf budget=16/255。
 ```
 
@@ -49,8 +49,24 @@ adv_pixels
 - 评分分支 detached；CLS jitter 不直接进入最终 forward 的 CLS。
 - `token_score_patch_noise=False` 时，评分 patch 不加噪；前向未删除 patch 仍可加入
   `opponent_channel_gaussian`。
+- 方案一的 view B 只使用一个 phase shift；同一个 view 内不展开额外 phase。总实际
+  view 数严格为 20，不能按 group 数少报。
 - `high/low` 是相对于当前图像 score median 的候选方向，不等同于 foreground/background
   标签。
+
+### 1.1 Phase-pair 的作用
+
+view A 与 view B 看到的是同一张图像的不同 patch-grid 对齐：
+
+```math
+g_A \sim W^T\frac{\partial L_A}{\partial z_A},
+\qquad
+g_B \sim T_s^T W^T\frac{\partial L_B}{\partial z_B}.
+```
+
+相同的 ViT patch embedding 在不同输入 phase 下会把不同邻域组合成 patch。pair mean
+因此在固定 20-view 预算内同时保留原始/shifted 的 score-mask sample 和两种
+patch-grid 对应的像素梯度路径。它不在一个 view 内展开多个 phase，也不增加 EOT 数量。
 
 ## 2. 与现有文献的关系
 
@@ -140,6 +156,7 @@ opponent-channel noise；overall 为 7 个 ViT 与 4 个标准 CNN 的平均 ASR
 
 | 评分配置 | Overall | ViT | CNN |
 |---|---:|---:|---:|
+| **方案一：L12 high + phase pair 10×2** | **77.64%** | **80.86%** | **72.00%** |
 | L0 learned CLS, low | 70.73% | 75.29% | 62.75% |
 | L0 Gaussian CLS, low | 69.64% | 74.14% | 61.75% |
 | L0 random 15% | 68.91% | 73.57% | 60.75% |
@@ -148,13 +165,44 @@ opponent-channel noise；overall 为 7 个 ViT 与 4 个标准 CNN 的平均 ASR
 | 真正 L12, high，无 score noise | 68.45% | 73.29% | 60.00% |
 | 真正 L12, low，无 score noise | 67.55% | 71.71% | 60.25% |
 
+方案一逐模型结果：
+
+| 模型 | ASR |
+|---|---:|
+| LeViT-256 | 76% |
+| PiT-B | 82% |
+| DeiT-B | 82% |
+| TNT-S | 81% |
+| ConViT-B | 79% |
+| Visformer-S | 79% |
+| CaiT-S/24 | 87% |
+| Inception-v3 | 71% |
+| Inception-v4 | 71% |
+| Inception-ResNet-v2 | 73% |
+| ResNet-101 | 73% |
+
+相对于真正 L12-high + CLS jitter 的 70.00% 基线，方案一提升：
+
+```text
+Overall: +7.64pp
+ViT:     +6.57pp
+CNN:     +9.50pp
+```
+
+逐模型增益为：LeViT `+10pp`、PiT-B `+11pp`、DeiT-B `+10pp`、TNT-S `+10pp`、
+ConViT-B `+11pp`、Visformer-S `+11pp`、CaiT-S/24 `-1pp`、Inception-v3 `+11pp`、
+Inception-v4 `+6pp`、Inception-ResNet-v2 `+14pp`、ResNet-101 `+14pp`。
+
 结论边界：
 
-- L12-high + jitter 是当前与文献最一致的主线配置，ASR 约 70%。
+- 方案一是当前最高 ASR 和默认主线；它相对单 phase L12-high 的提升来自 phase-pair
+  输入路径与 routing/mask diversity 的组合，不能归因于 score mask 单独变化。
 - 无 jitter 时 high/low 仅差 0.91pp；不能声称纯 Patch Score 本身造成主要增益。
 - L0 learned 比 Gaussian CLS 高约 1.09pp，说明 learned direction 有弱但可测的作用，
   但不能把 L0 CLS 宣称为已验证的背景语义先验。
-- 100 张图的差异尚未做 bootstrap/paired significance，不报告“显著优于”。
+- CaiT-S/24 是唯一未提升的标准 ViT（88%→87%），可能已接近该预算下的 ASR 上限，
+  但需要更多样本和 paired bootstrap 才能下结论。
+- 100 张图的差异尚未做 paired bootstrap/significance，不报告“显著优于”。
 
 ## 7. 必须保留的消融和诊断
 
@@ -177,12 +225,13 @@ opponent-channel noise；overall 为 7 个 ViT 与 4 个标准 CNN 的平均 ASR
 
 ### 8.1 Data augmentation
 
-- 自适应 CLS jitter：随 attack step、score margin 或 mask flip rate 调整强度；
-- score-temperature / quantile jitter：直接控制候选边界附近的 token 翻转率；
-- antithetic score views：对同一 CLS jitter 使用正负配对，降低 EOT 方差；
-- token-space 与 image-space augmentation 的分层组合，避免所有增强都被 patch embedding
-  的相同低秩子空间吞掉；
-- 以梯度 cosine、mask Jaccard 和 transfer proxy 作为增强选择指标，而不是只看 source CE。
+- 以方案一 `10 groups × 2 views` 作为固定预算 baseline；任何新增强必须保持实际
+  view 数 `<=20`。
+- 在 phase-pair 内比较固定 shift、shift set 和 pair composition，但不在单个 view 内
+  展开隐藏 phase。
+- kept-patch 的新噪声只能写入 `drop_mask=False`；dropped patch 保持 zero。
+- 不把 adaptive schedule、平滑或额外 hidden forward 当作默认方向；先测试结构化
+  phase/Jacobian 变化是否带来可复现的 transfer 增益。
 
 ### 8.2 新梯度方法（不增加 white-box 数量）
 
@@ -198,6 +247,7 @@ opponent-channel noise；overall 为 7 个 ViT 与 4 个标准 CNN 的平均 ASR
 - **cross-step routing memory**：记录历史 mask/gradient agreement，抑制只在当前 step
   偶然出现的方向。
 
-每个新方法必须与普通 EOT mean + MI 对比，并报告 source loss、copy gradient cosine、
-mask diversity、ViT ASR、CNN ASR 和 overall ASR。下一阶段的成功标准是：在单一 ViT-B/16
-white-box 下，提升 transfer ASR，而不是通过增加 white-box 模型数量获得收益。
+每个新方法必须与方案一的 pair mean + MI 对比，并报告 source loss、per-view/group
+gradient cosine、mask diversity、gradient effective rank、ViT ASR、CNN ASR 和
+overall ASR。下一阶段的成功标准是：在单一 ViT-B/16 white-box 下，超过方案一的
+`77.64%` overall ASR，而不是通过增加 white-box 模型数量或实际 view 数获得收益。
