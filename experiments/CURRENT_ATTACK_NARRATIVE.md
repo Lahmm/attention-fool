@@ -1,148 +1,203 @@
-# 最强攻击叙事与未解决问题
+# Patch-Score–Conditioned Stochastic Token Masking
 
-## 一、攻击流程
+## 0. 主线定调
 
-```
+本项目的主攻击定义为：
+
+> **Patch-Score–Conditioned Stochastic Token Masking for Transferable ViT Attacks**
+>
+> 基于深层 CLS–patch 相似度的随机 token 路由干预攻击。
+
+攻击不是显式的前景分割，也不声称每个 high-score patch 都是背景。我们利用 ViT
+全局 CLS 路由的结构性偏置，在测试时对 CLS 最强关联的 patch 进行随机干预；再对
+多种 token 路由下的梯度做 EOT/MI 聚合，优化跨路由仍然稳定的像素扰动。
+
+当前最有文献关联性的主线使用 **L12 Patch Score**。在 12-layer ViT-B/16 中，
+评分分支运行完整 encoder，评分结果 detached；mask 随后回写到 L0 token，再重新
+运行完整网络得到攻击 loss。
+
+## 1. 攻击流程
+
+```text
 adv_pixels
     │
-patch_embed(W) → pos_embed → norm_pre → [CLS₀, 196 patch tokens]
+    ├── patch_embed + pos_embed + norm_pre
+    │       → x_L0 = [CLS_L0, patch_L0[1:196]]
     │
     ├── 评分分支（detach，无梯度）
-    │     CLS₀ + σ · ε → cos(patch_i, CLS₀+ε) → scores
-    │     ε ~ N(0,I), σ=0.2×rms(patches), 每 copy 独立采样
-    │     scores < median → 候选池 → 随机 30% → drop_mask
+    │       x_L12 = blocks[0:12](x_L0)
+    │       CLS_L12, patch_L12 = x_L12[:, 0], x_L12[:, 1:]
+    │       CLS_score = CLS_L12 + σ·ε  （主配置；每 copy 独立）
+    │       score_i = cos(patch_L12[i], CLS_score)
+    │       high-score candidate: score_i > median(score)
+    │       随机从候选池删除约 30% ≈ 全部 patch 的 15%
     │
-    └── 前传分支（有梯度）
-         根据 drop_mask: zero token | opponent-channel 噪声
-         → blocks[0:12] → norm → head → CE loss → backward
+    └── 前向分支（有梯度）
+            将 score mask 回写到 x_L0
+            被选 token: zero
+            其余 patch: opponent-channel token noise
+            → blocks[0:12] → norm → head → CE loss
+
+20 copies 的梯度取平均 → MI(decay=1.0) → sign → 更新像素。
+默认 10 steps，L_inf budget=16/255。
 ```
 
-20 copies 的梯度取平均 → MI(decay=1.0) → sign → 更新像素。10 steps。
+重要实现边界：
 
-## 二、理论基础：Lazy Aggregation（CVPR 2026）
+- L12 只用于产生评分和 mask，不在 L12 hidden state 中删除 token。
+- 所有 mask 最终作用于 L0，前向分支重新运行完整 12 层网络。
+- 评分分支 detached；CLS jitter 不直接进入最终 forward 的 CLS。
+- `token_score_patch_noise=False` 时，评分 patch 不加噪；前向未删除 patch 仍可加入
+  `opponent_channel_gaussian`。
+- `high/low` 是相对于当前图像 score median 的候选方向，不等同于 foreground/background
+  标签。
 
-Zhang et al. "Vision Transformers Need More Than Registers" 发现 ViT 中存在
-**lazy aggregation** 行为：CLS token 通过全局注意力，**将语义无关的背景 patch
-作为捷径来编码全局语义**。其根因是全局注意力机制 + 粗粒度分类监督——模型没有
-被强制区分前景和背景，于是走了最省力的路。
+## 2. 与现有文献的关系
 
-该文证明 register tokens（Darcet et al.）不足以解决此问题，提出选择性融合
-patch 特征到 CLS 来抑制背景捷径。
+Shi, Yu and Yang, *Vision Transformers Need More Than Registers*（CVPR 2026）提出
+Patch Score，即 patch 与 CLS 全局表示的相似度，并将 ViT 的背景主导路由解释为
+lazy aggregation：在全局注意力和粗粒度语义监督下，背景 patch 可能吸收并承载全局
+语义捷径。
 
-## 三、我们的攻击：阻断背景捷径
+论文给本项目提供的是**问题动机和可观测量**，不是攻击因果的直接证明：
 
-### 3.1 核心洞察
+1. 深层 CLS–patch 相似度可以诊断 ViT 的全局 token routing；
+2. high-score 区域与背景主导现象相关，且限制全局依赖或选择性聚合会改变该现象；
+3. 我们把这个诊断量转化为测试时的 token-routing intervention，而不是训练
+   selective aggregation。
 
-CLS₀ 是 patch_embed 中可学习的全局锚点向量。cos(patch_i, CLS₀) 测量 patch_i
-与这个全局表示方向的对齐程度。**低分 patch 就是 ViT 用来走捷径的背景区域。**
+本项目的对应假设是：
 
-**实证（50 张 ImageNet 图，100% 一致）：**
-
-| | 低分 patch（被丢弃）| 高分 patch（保留）|
-|---|---|---|
-| L2 norm | **13.55** | 11.90 |
-| CLS cosine | 0.11 | 0.14 |
-
-低分 patch 的 L2 norm 显著更高——模型为这些「捷径 patch」分配了额外的表示容量，
-因为它们在训练中被证明是有用的廉价特征。
-
-### 3.2 攻击逻辑
-
-ViT 的推理过程：
-
-$$\text{logits} = \text{head}\left(\text{CLS}_{12}\right), \quad \text{CLS}_{12} = \text{blocks}\left(\text{CLS}_0, \{\text{patch}_i\}\right)$$
-
-CLS₁₂ 通过 self-attention 聚合所有 patch 的信息。当背景 patch（低分）存活时，
-CLS₁₂ 可以廉价地从这些捷径中提取全局语义，而不需要精细处理前景。
-
-**我们零化 15% 的低分 patch：**
-
-$$\text{CLS}_{12}' = \text{blocks}\left(\text{CLS}_0, \{\text{patch}_i\}_{i \notin \text{drop}}\right)$$
-
-背景捷径被阻断 → 模型必须从剩余 patch（前景）中提取判别信息 → 损失对前景
-patch 更敏感 → 梯度迫使扰动覆盖真正包含物体的区域 → 扰动可迁移。
-
-### 3.3 为什么 L=0 评分
-
-L=0 的 CLS₀ 是一个**对所有图片相同的可学习向量**，它在预训练中被优化为与分类
-有用特征方向对齐。由于 lazy aggregation 是 ViT 训练中收敛到的全局策略，CLS₀ 的
-方向本身就编码了「哪些 patch 方向可能被用作捷径」的先验。
-
-**与深层 CLS 的对比：**
-
-| | L=0 | 深层 |
-|---|---|---|
-| 本质 | 训练收敛的全局捷径先验 | 图像特定的语义表示 |
-| patch 多样性 (cos) | 0.18 | 0.80 |
-| CLS 噪声效果 (rank corr) | 0.97（有效）| 0.996（无效）|
-| 迁移性 | 跨架构通用 | 白盒特定 |
-
-L=0 能识别捷径 patch 是因为 lazy aggregation 本身就是训练时形成的全局策略——
-它是 ViT 架构的固有属性，不是某张图片的特定现象。
-
-### 3.4 CLS 评分噪声
-
-CLS₀ + σ · ε，ε 每 copy 独立。
-
-噪声让 20 个 copy 对「哪些 patch 算捷径」有不同判断 → 20 组不同的 dropout mask
-→ 梯度多样性来自捷径阻断的 copy 间差异。
-
-## 四、对手通道（opponent-channel）噪声
-
-### 4.1 为什么需要它
-
-Lazy aggregation 是 ViT 的问题，不是 CNN 的问题。CNN 没有 CLS token，没有全局
-自注意力，不存在「背景捷径」这回事。仅靠 token 空间 dropout 不能充分攻击 CNN。
-
-### 4.2 数学结构
-
-逐像素协方差：
-
-$$C_{opp} = \begin{bmatrix} 1.00 & -0.25 & -0.25 \\ -0.25 & 1.00 & -0.25 \\ -0.25 & -0.25 & 1.00 \end{bmatrix}$$
-
-特征分解：λ_lum = 0.5（亮度 -50%），λ_chrom = 1.25（色度 +25%）。
-
-CNN 第一层以亮度边缘检测为主（~60-70% 的滤波器）。标准 i.i.d. 噪声将 33% 能量
-分配给亮度 → 梯度被模型特定的亮度滤波器主导。opponent 噪声降至 17% → 颜色对抗
-滤波器贡献增大 → 颜色对抗性是跨 CNN 架构的通用特征 → CNN 迁移 +4.75pp。
-
-噪声在像素空间生成后通过 patch_embed 权重 W^T 投影到 token 空间。
-
-## 五、当前配置与结果
-
-```
-16/255, ViT-B/16 白盒, 100 样本, 10 steps, 20 copies
-
-avg=72.5%   ViT=77.0%   CNN=64.5%
-
-levit_256  pit_b  deit_b  tnt_s  convit_b  visformer  cait_s24
-   71%      76%     77%    76%     70%        75%        92%
-
-inc_v3  inc_v4  incres_v2  resnet101
-  66%     63%      61%        69%
+```text
+深层 CLS 路由偏置
+    + CLS jitter 导致的 score ranking 变化
+    + 随机 token masking
+    + 多 copy 梯度聚合
+    → 更丰富且更不依赖单一源模型路由的攻击梯度
 ```
 
-## 六、未解决的问题
+因此主张应写成“Patch-Score-conditioned stochastic routing intervention”，不应
+写成“我们准确识别并删除了背景区域”。只有在 bbox/Point-in-Box/AUROC 验证完成后，
+才能进一步讨论 score 与语义前景的对应关系。
 
-### 6.1 W·W^T 的信息天花板
+## 3. 为什么使用 L12 评分
 
-ViT-B/16 的 W·W^T 有效秩仅 120/768。梯度 ∂L/∂pixels = W^T · ∂L/∂tokens
-被限制在 ~120 维子空间内。无论 dropout 策略或噪声结构如何优化，token 空间的
-梯度多样性最终被 W^T 压缩到同一子空间——这是不可绕过的信息瓶颈。
+L0 score 使用尚未经过 self-attention 的输入 token 几何；L12 score 则是图像相关的
+深层 CLS–patch 关系，与论文的 Patch Score 定义更接近。L12 评分分支为：
 
-24/255 时相同方法达到 avg 84.4%（ViT 87.0%，CNN 79.8%），远超目标。瓶颈在
-epsilon 预算，不在方法设计。
+```math
+x^{(12)} = B_{12}(x^{(0)}),
+\qquad s_i = \cos\left(x^{(12)}_{patch,i},
+                         x^{(12)}_{CLS}+\sigma\epsilon\right).
+```
 
-### 6.2 ViT 和 CNN 的信息尺度矛盾
+L12 score 不意味着在 L12 删除 patch。我们采用 detached deep-score / early-injection
+设计：深层关系负责决定 mask，L0 注入负责让干预影响整个后续计算图并保留像素梯度。
 
-- CNN：3×3 感受野，逐像素、逐通道处理 → 需要高频多样性
-- ViT：16×16 patch，通过 W 聚合 768 维像素到 token → 需要 token 空间多样性
+## 4. CLS jitter 的作用
 
-Opponent 噪声在像素空间生成（服务 CNN）再经 W^T 投影到 token 空间（服务 ViT），
-部分弥合了这个矛盾。但 W^T 投影压缩了 768 维到 ~120 维有效子空间——CNN 端创造
-的多样性大部分被 ViT 端丢弃。反之亦然。
+CLS jitter 只存在于评分分支，但它会经过离散 mask 影响前向梯度：
 
-### 6.3 潜在方向
+```text
+CLS jitter
+  → cosine score 改变
+  → patch 是否跨越 median 改变
+  → high/low candidate set 改变
+  → L0 drop mask 改变
+  → forward loss 和 gradient 改变
+```
 
-- **多白盒集成：** 攻击两个 ViT，互补的 W 矩阵可扩大梯度有效子空间
-- **CLS jitter 强度自适应：** 当前每 copy 固定 σ，随 step 变化的 jitter 可能更好
+因此 jitter 的直接作用不是改变 logits，而是增加不同 copy 的 token-routing diversity。
+当前结果显示，无 jitter 时 L12-high/L12-low 差距很小；有 jitter 时差距扩大。这说明
+真正的机制候选是 **Patch Score 与 stochastic mask/EOT 的交互**，而不是纯 Patch Score
+排序本身。
+
+## 5. Opponent-channel noise
+
+token dropout 负责 ViT 路由干预；opponent-channel noise 是独立的跨架构梯度多样化
+模块，不应被描述成“CNN 没有背景捷径”。CNN 同样可能利用背景相关性，只是没有 CLS
+全局 token 路由。
+
+像素通道协方差为：
+
+```math
+C_{opp}=
+\begin{bmatrix}
+1.00&-0.25&-0.25\\
+-0.25&1.00&-0.25\\
+-0.25&-0.25&1.00
+\end{bmatrix}.
+```
+
+其亮度方向方差为 0.5，两个色度方向方差为 1.25。当前证据支持它作为 CNN transfer
+的经验性增强，但“第一层滤波器比例”和“色度特征更通用”等解释仍需独立滤波器统计
+和梯度频谱实验验证。
+
+## 6. 当前结果（100 images）
+
+共同配置：ViT-B/16 white-box、16/255、10 steps、20 copies、约 15% token masking、
+opponent-channel noise；overall 为 7 个 ViT 与 4 个标准 CNN 的平均 ASR。
+
+| 评分配置 | Overall | ViT | CNN |
+|---|---:|---:|---:|
+| L0 learned CLS, low | 70.73% | 75.29% | 62.75% |
+| L0 Gaussian CLS, low | 69.64% | 74.14% | 61.75% |
+| L0 random 15% | 68.91% | 73.57% | 60.75% |
+| 真正 L12, high + CLS jitter | 70.00% | 74.29% | 62.50% |
+| 真正 L12, low + CLS jitter | 64.91% | 69.14% | 57.50% |
+| 真正 L12, high，无 score noise | 68.45% | 73.29% | 60.00% |
+| 真正 L12, low，无 score noise | 67.55% | 71.71% | 60.25% |
+
+结论边界：
+
+- L12-high + jitter 是当前与文献最一致的主线配置，ASR 约 70%。
+- 无 jitter 时 high/low 仅差 0.91pp；不能声称纯 Patch Score 本身造成主要增益。
+- L0 learned 比 Gaussian CLS 高约 1.09pp，说明 learned direction 有弱但可测的作用，
+  但不能把 L0 CLS 宣称为已验证的背景语义先验。
+- 100 张图的差异尚未做 bootstrap/paired significance，不报告“显著优于”。
+
+## 7. 必须保留的消融和诊断
+
+后续论文表格至少保留：
+
+1. L12-high / L12-low / random mask；
+2. CLS jitter on/off；
+3. learned CLS / Gaussian CLS；
+4. token mask、opponent noise、EOT copies 的逐项消融；
+5. mask Jaccard、median crossing rate、copy-to-copy gradient cosine；
+6. 有 bbox 时报告 Point-in-Box/AUROC，验证 score 与语义区域的关系。
+
+最关键的因果诊断是：固定 mask 只改变 score query，或固定 score query 只改变 mask
+抽样；如果 ASR 差异随 mask flip rate 和 gradient cosine 的变化同步，才能把 CLS jitter
+解释为 routing diversity，而不是未控制的随机种子效应。
+
+## 8. 下一阶段：单白盒继续推高 ASR
+
+约束保持不变：不 ensemble 多个 white-box。优化重点是以下两条主线。
+
+### 8.1 Data augmentation
+
+- 自适应 CLS jitter：随 attack step、score margin 或 mask flip rate 调整强度；
+- score-temperature / quantile jitter：直接控制候选边界附近的 token 翻转率；
+- antithetic score views：对同一 CLS jitter 使用正负配对，降低 EOT 方差；
+- token-space 与 image-space augmentation 的分层组合，避免所有增强都被 patch embedding
+  的相同低秩子空间吞掉；
+- 以梯度 cosine、mask Jaccard 和 transfer proxy 作为增强选择指标，而不是只看 source CE。
+
+### 8.2 新梯度方法（不增加 white-box 数量）
+
+目标不是简单增加 copies，而是改变多路由梯度的聚合规则。候选方向：
+
+- **routing-consensus gradient**：按 mask flip/route stability 对 copy 梯度加权；
+- **conflict-aware gradient projection**：保留跨 view 一致方向，投影掉只在单一路由出现
+  的冲突分量；
+- **sign-space robust aggregation**：在 sign 或 quantized gradient 空间做 coordinate-wise
+  median/trimmed vote，避免少数 mask 主导 MI；
+- **two-band gradient transport**：分别聚合 ViT token-有效子空间与 CNN 高频/色度子空间，
+  再做受控旋转，而不是无约束相加；
+- **cross-step routing memory**：记录历史 mask/gradient agreement，抑制只在当前 step
+  偶然出现的方向。
+
+每个新方法必须与普通 EOT mean + MI 对比，并报告 source loss、copy gradient cosine、
+mask diversity、ViT ASR、CNN ASR 和 overall ASR。下一阶段的成功标准是：在单一 ViT-B/16
+white-box 下，提升 transfer ASR，而不是通过增加 white-box 模型数量获得收益。
