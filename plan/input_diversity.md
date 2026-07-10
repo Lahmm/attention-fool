@@ -785,3 +785,187 @@ wall-clock / peak memory
 方案三：view grouping 和 gradient aggregation
 方案四：kept-only channel rotation residual
 ```
+
+## 方案一增量对照：Original-Score / Post-Dropout Phase Shift
+
+### 定义
+
+这是方案一的增量对照，不替换方案一，也不改变方案一的主线定义。新方案检验：
+
+> 如果 score 和 drop mask 始终来自原图，phase shift 只发生在 dropout 之后，
+> 仍然能否获得方案一的 ASR 增益？
+
+流程顺序固定为：
+
+```text
+original pixels
+  -> detached L12 Patch Score
+  -> CLS jitter（如启用）
+  -> original-image high-score mask
+  -> pixel-space patch dropout
+  -> view A: dropped image
+  -> view B: phase_shift(dropped image)
+  -> forward loss / gradient
+```
+
+预算仍然是：
+
+```text
+10 groups × 2 views = 20 actual views
+```
+
+### 与方案一的差别
+
+| 项目 | 方案一主线 | 增量对照 |
+|---|---|---|
+| score 来源 | 每个 view 自己计算 | 始终使用原图计算 |
+| mask 数量 | 20 个 view 各自生成 mask | 每个 group 一个原图 mask，共 10 个 |
+| dropout 位置 | L0 token | pixel-space patch |
+| phase shift 位置 | score/mask 之前 | dropout 之后 |
+| view B 的 score | 重新计算 | 不重新计算 |
+| 文献 Patch Score 对齐 | phase-conditioned | 原图 Patch Score 对齐更严格 |
+
+### 为什么必须使用 pixel-space dropout
+
+“dropout 后再对图像做 shift”要求 dropout 发生在图像空间：
+
+```python
+image_mask = patch_mask_to_image_mask(drop_mask, patch_size=16)
+dropped_pixels = pixels * (1.0 - image_mask)
+view_a = dropped_pixels
+view_b = apply_phase_shift(dropped_pixels, dx, dy)
+```
+
+不能先执行 L0 token zero 再声称对图像做 shift；token 已经经过 patch embedding，无法
+无损还原为可平移的 pixel image。因此该分支与方案一的 L0 token dropout 是不同的
+intervention，必须作为独立实验记录。
+
+### Score 与 mask 约束
+
+每个 group 只在原图上计算一次 score/mask：
+
+```text
+score_image = original pixels
+score_layer = 12
+score_cls = original L12 CLS (+ optional CLS jitter)
+score_patch = original L12 patches
+candidate/mask = current median + current high/low + current random sampling
+```
+
+view A 和 view B 共享该 group 的原图 mask。不得对 shifted image 重新计算 score，
+不得为 view B 重新采样 candidate mask，否则就退化回方案一主线。
+
+### Phase shift 约束
+
+只允许对已经 dropout 的图像执行一次 phase shift：
+
+```text
+view A = dropped_pixels
+view B = differentiable_reflect_shift(dropped_pixels, phase)
+```
+
+phase 从现有集合中每个 group 选择一个：
+
+```text
+(4,4), (8,8), (12,12)
+```
+
+同一个 view 内不得展开多个 phase。`view B` 的 mask 也可以同步平移：
+
+```python
+mask_b = apply_phase_shift(image_mask, dx, dy)
+```
+
+如果实现同步 mask，必须保证 view B 的 dropped/kept 判定来自同一个原图 mask 的
+空间变换，而不是重新 score 或重新 sample。
+
+### Kept-patch noise 约束
+
+第一轮建议先关闭 token-level opponent noise，隔离 post-drop phase shift 的效果：
+
+```text
+pixel dropout: enabled
+token opponent noise: disabled
+```
+
+第二轮才加入 opponent noise，并严格限制为 kept patch：
+
+```text
+view A:
+    dropped image regions = zero
+    kept token positions = original token + opponent noise
+
+view B:
+    shifted dropped image regions = zero
+    shifted kept token positions = original token + opponent noise
+```
+
+任何新 noise 只能写入 `drop_mask=False` 的 kept 区域；dropped 区域必须保持 zero。不能
+先对完整 token tensor 加噪、再事后清零 dropped token 后忽略该中间注入。
+
+### 梯度聚合
+
+每个 group 的两个 view 都是独立 forward，但共享原图 score/mask：
+
+```math
+g_{group} = \frac{1}{2}(g_{A}+g_{B}),
+\qquad
+\bar g = \frac{1}{10}\sum_{j=1}^{10}g_{group,j}.
+```
+
+最终继续使用现有 MI、normalization 和 sign update。不得对每个 group 单独更新像素。
+
+### 该对照回答的问题
+
+```text
+方案一：phase shift 是否通过改变 score/mask + forward 同时获益？
+增量对照：固定原图 score/mask 后，phase shift 只改变 dropout 后的 forward，是否仍有效？
+```
+
+结果解释：
+
+- 若增量对照接近方案一，phase/Jacobian 变化可能是主要收益来源；
+- 若增量对照显著低于方案一，方案一的收益很可能依赖 shifted view 重新计算 score/mask
+  后产生的 routing diversity；
+- 若 pixel-space dropout 本身改变结果，必须单独报告 `view A only`，不能把收益全部
+  归因于 phase shift。
+
+### 实验分支与优先级
+
+方案一增量对照的优先级低于当前方案一主线，但高于方案二/三/四的混合实验：
+
+```text
+P0: plan1_phase_pair_10x2_mean（当前主线）
+P0.5: original_score_pixel_drop_then_phase_pair
+P1: 方案二 Cross-Patch Transport
+P2: 方案四 Kept-Token Rotation
+P3: 方案三 Pair-Difference Gradient
+```
+
+第一轮只跑：
+
+```text
+original score + pixel dropout + view A/B pair mean
+token opponent noise = off
+total views = 20
+```
+
+第二轮再比较：
+
+```text
+token opponent noise = on, kept-only
+mask synchronization for view B = on/off
+phase shift = (4,4), (8,8), (12,12)
+```
+
+所有结果必须与方案一使用相同的 epsilon、steps、white-box、L12 score policy 和
+20-view budget，并单独记录：
+
+```text
+dropout_space = pixel
+score_source = original
+phase_order = after_dropout
+mask_shared_within_group = true
+token_noise_scope = kept_only
+actual_forward_view_count = 20
+```
