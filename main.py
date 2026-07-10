@@ -1,720 +1,275 @@
+from __future__ import annotations
+
 import argparse
 import json
 import shutil
 from pathlib import Path
 
-import torch
 from tqdm import tqdm
 
-from attack import LMDSSAttacker
-from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, WhiteBoxWithHook, build_whitebox_model
-from utils import (
-    DEVICE,
-    load_data,
-    save_adversarial_images,
-)
+from attack import ATTACK_METHODS, PatchScoreAttacker
+from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, build_whitebox_model
+from utils import DEVICE, load_data, save_adversarial_images
+
 
 IMAGE_DIR = "data/clean_resized_images"
 ANNOTATIONS_PATH = "data/image_name_to_class_id_and_name.json"
-DEFAULT_IMG_SIZE = 224
 
-
-def create_attacker(
-    model: WhiteBoxWithHook,
-    epsilon: float,
-    step_size: float | None,
-    steps: int,
-    ti_sigma: float = 0.0,
-    dim: bool = False,
-    mi: bool = True,
-    mi_decay: float = 1.0,
-    ni: bool = False,
-    dim_resize_range: tuple[float, float] = (0.85, 1.0),
-    dim_mode: str = "full-random",
-    dim_padding_mode: str = "zero",
-    dim_padding_blur_kernel: int = 5,
-    guide_aug: bool = False,
-    guide_aug_methods: tuple[str, ...] = ("dropout",),
-    guide_aug_copies: int = 3,
-    input_diversity_groups: int = 20,
-    input_diversity_views_per_group: int = 1,
-    input_diversity_phase_shift: tuple[int, int] = (0, 0),
-    input_diversity_phase_shift_set: tuple[tuple[int, int], ...] | None = None,
-    input_diversity_pair_aggregation: str = "mean",
-    input_diversity_lambda_difference: float = 0.0,
-    cross_patch_transport_mode: str = "none",
-    cross_patch_transport_alpha: float = 0.0,
-    kept_token_rotation_mode: str = "none",
-    kept_token_rotation_alpha: float = 0.0,
-    post_dropout_phase_token_noise: bool = False,
-    guide_aug_strength: float = 0.2,
-    patch_dropout_ratio: float = 0.3,
-    patch_dropout_score_mode: str = "high",
-    patch_dropout_sampling_mode: str = "random",
-    patch_dropout_score_quantile_jitter: float = 0.0,
-    patch_dropout_score_noise: float = 0.0,
-    patch_dropout_fill_mode: str = "zero_noise",
-    patch_dropout_noise_mode: str = "gaussian",
-    token_patch_dropout_layer: int = 0,
-    token_cls_noise: bool = False,
-    token_score_cls_noise: bool = False,
-    token_score_cls_mode: str = "learned",
-    token_score_patch_noise: bool = False,
-    token_cls_noise_mode: str = "gaussian",
-    token_cls_noise_strength: float | None = None,
-    dim_adjoint_echo: bool = False,
-    lowmid_grad_tuning: bool = False,
-    lowmid_grad_rotation_strength: float = 0.5,
-    lowmid_grad_preserve_norm: bool = True,
-    lowmid_dss_filter: bool = False,
-    lowmid_dss_consistency: str = "sign",
-    lowmid_dss_agreement_threshold: float = 0.67,
-    spatial_sign_reinforcement: bool = False,
-    spatial_sign_reinforcement_sigma: float = 1.0,
-    spatial_sign_reinforcement_strength: float = 0.2,
-    grad_momentum_agreement: bool = False,
-    grad_momentum_agreement_strength: float = 0.2,
-    grad_momentum_agreement_sigma: float = 0.0,
-    grad_momentum_conflict_suppression_strength: float = 0.0,
-    grad_trim_ratio: float = 0.0,
-    cross_step_sign_vote: bool = False,
-    cross_step_sign_vote_window: int = 5,
-    cross_step_sign_vote_strength: float = 0.2,
-    view_consistent_agreement: bool = False,
-    view_consistent_agreement_strength: float = 0.3,
-    view_consistent_agreement_threshold: float = 0.0,
-    fft_sign_regularization: bool = False,
-    fft_sign_regularization_cutoff: float = 0.25,
-    fft_sign_regularization_strength: float = 0.5,
-    attack_loss: str = "logits",
-    feature_layer: int = -2,
-    feature_scope: str = "block",
-) -> LMDSSAttacker:
-    return LMDSSAttacker(
-        model=model,
-        epsilon=epsilon,
-        step_size=step_size,
-        steps=steps,
-        ti_sigma=ti_sigma,
-        input_diversity=dim,
-        dim_resize_range=dim_resize_range,
-        dim_mode=dim_mode,
-        dim_padding_mode=dim_padding_mode,
-        dim_padding_blur_kernel=dim_padding_blur_kernel,
-        use_momentum=mi,
-        momentum_decay=mi_decay,
-        nesterov=ni,
-        guide_aug=guide_aug,
-        guide_aug_methods=guide_aug_methods,
-        guide_aug_copies=guide_aug_copies,
-        input_diversity_groups=input_diversity_groups,
-        input_diversity_views_per_group=input_diversity_views_per_group,
-        input_diversity_phase_shift=input_diversity_phase_shift,
-        input_diversity_phase_shift_set=input_diversity_phase_shift_set,
-        input_diversity_pair_aggregation=input_diversity_pair_aggregation,
-        input_diversity_lambda_difference=input_diversity_lambda_difference,
-        cross_patch_transport_mode=cross_patch_transport_mode,
-        cross_patch_transport_alpha=cross_patch_transport_alpha,
-        kept_token_rotation_mode=kept_token_rotation_mode,
-        kept_token_rotation_alpha=kept_token_rotation_alpha,
-        post_dropout_phase_token_noise=post_dropout_phase_token_noise,
-        guide_aug_strength=guide_aug_strength,
-        patch_dropout_ratio=patch_dropout_ratio,
-        patch_dropout_score_mode=patch_dropout_score_mode,
-        patch_dropout_sampling_mode=patch_dropout_sampling_mode,
-        patch_dropout_score_quantile_jitter=patch_dropout_score_quantile_jitter,
-        patch_dropout_score_noise=patch_dropout_score_noise,
-        patch_dropout_fill_mode=patch_dropout_fill_mode,
-        patch_dropout_noise_mode=patch_dropout_noise_mode,
-        token_patch_dropout_layer=token_patch_dropout_layer,
-        token_cls_noise=token_cls_noise,
-        token_score_cls_noise=token_score_cls_noise,
-        token_score_cls_mode=token_score_cls_mode,
-        token_score_patch_noise=token_score_patch_noise,
-        token_cls_noise_mode=token_cls_noise_mode,
-        token_cls_noise_strength=token_cls_noise_strength,
-        dim_adjoint_echo=dim_adjoint_echo,
-        lowmid_grad_tuning=lowmid_grad_tuning,
-        lowmid_grad_rotation_strength=lowmid_grad_rotation_strength,
-        lowmid_grad_preserve_norm=lowmid_grad_preserve_norm,
-        lowmid_dss_filter=lowmid_dss_filter,
-        lowmid_dss_consistency=lowmid_dss_consistency,
-        lowmid_dss_agreement_threshold=lowmid_dss_agreement_threshold,
-        spatial_sign_reinforcement=spatial_sign_reinforcement,
-        spatial_sign_reinforcement_sigma=spatial_sign_reinforcement_sigma,
-        spatial_sign_reinforcement_strength=spatial_sign_reinforcement_strength,
-        grad_momentum_agreement=grad_momentum_agreement,
-        grad_momentum_agreement_strength=grad_momentum_agreement_strength,
-        grad_momentum_agreement_sigma=grad_momentum_agreement_sigma,
-        grad_momentum_conflict_suppression_strength=grad_momentum_conflict_suppression_strength,
-        grad_trim_ratio=grad_trim_ratio,
-        cross_step_sign_vote=cross_step_sign_vote,
-        cross_step_sign_vote_window=cross_step_sign_vote_window,
-        cross_step_sign_vote_strength=cross_step_sign_vote_strength,
-        view_consistent_agreement=view_consistent_agreement,
-        view_consistent_agreement_strength=view_consistent_agreement_strength,
-        view_consistent_agreement_threshold=view_consistent_agreement_threshold,
-        fft_sign_regularization=fft_sign_regularization,
-        fft_sign_regularization_cutoff=fft_sign_regularization_cutoff,
-        fft_sign_regularization_strength=fft_sign_regularization_strength,
-        attack_loss=attack_loss,
-        feature_layer=feature_layer,
-        feature_scope=feature_scope,
-        device=DEVICE,
-    )
 
 def parse_float_range(value: str) -> tuple[float, float]:
-    parts = tuple(float(item.strip()) for item in value.split(",") if item.strip())
-    if len(parts) != 2:
-        raise argparse.ArgumentTypeError("range must contain exactly two comma-separated floats, e.g. 0.85,1.0.")
-    lo, hi = parts
-    if not (0.0 < lo <= hi <= 1.0):
-        raise argparse.ArgumentTypeError("range values must satisfy 0 < low <= high <= 1.")
-    return lo, hi
-
-
-def parse_model_names(value: str) -> tuple[str, ...]:
-    return tuple(item.strip() for item in value.split(",") if item.strip())
+    values = tuple(float(item.strip()) for item in value.split(",") if item.strip())
+    if len(values) != 2 or not 0.0 < values[0] <= values[1] <= 1.0:
+        raise argparse.ArgumentTypeError("range must satisfy 0 < low <= high <= 1")
+    return values
 
 
 def parse_phase_shift(value: str) -> tuple[int, int]:
-    parts = tuple(int(item.strip()) for item in value.split(",") if item.strip())
-    if len(parts) != 2:
-        raise argparse.ArgumentTypeError(
-            "phase_shift must contain exactly two comma-separated ints, e.g. '4,4'."
-        )
-    return (parts[0], parts[1])
+    values = tuple(int(item.strip()) for item in value.split(",") if item.strip())
+    if len(values) != 2:
+        raise argparse.ArgumentTypeError("phase shift must be two comma-separated integers")
+    return values
 
 
 def parse_phase_shift_set(value: str) -> tuple[tuple[int, int], ...]:
-    shifts = []
-    for part in value.split(";"):
-        part = part.strip()
-        if not part:
-            continue
-        dx_dy = tuple(int(x.strip()) for x in part.split(",") if x.strip())
-        if len(dx_dy) != 2:
-            raise argparse.ArgumentTypeError(
-                f"Each phase shift must be exactly two ints, got '{part}'."
-            )
-        shifts.append((dx_dy[0], dx_dy[1]))
+    shifts = tuple(parse_phase_shift(item) for item in value.split(";") if item.strip())
     if not shifts:
-        raise argparse.ArgumentTypeError("phase_shift_set must contain at least one shift.")
-    return tuple(shifts)
+        raise argparse.ArgumentTypeError("phase shift set cannot be empty")
+    return shifts
 
 
-def expected_attack_output_dir() -> Path:
-    return Path("outputs") / "attack" / "lmdss"
-
-
-def validate_attack_output_dir(output_dir: str | None) -> Path:
-    expected = expected_attack_output_dir()
-    if output_dir is None:
-        raise ValueError(
-            f"Attack mode requires --output-dir. "
-            f"Use --output-dir {expected.as_posix()}."
-        )
-    provided = Path(output_dir).expanduser()
-    if provided.resolve() != expected.resolve():
-        if str(provided.resolve()).startswith(str(expected.resolve())):
-            return provided
-        raise ValueError(
-            f"Invalid --output-dir: {provided}. "
-            f"Expected exactly: {expected.as_posix()}"
-        )
-    return provided
+def validate_output_dir(output_dir: str) -> Path:
+    repo_root = Path(__file__).resolve().parent
+    attack_root = (repo_root / "outputs" / "attack").resolve()
+    resolved = Path(output_dir).expanduser()
+    if not resolved.is_absolute():
+        resolved = repo_root / resolved
+    resolved = resolved.resolve()
+    try:
+        resolved.relative_to(attack_root)
+    except ValueError as exc:
+        raise ValueError(f"output-dir must be under {attack_root}") from exc
+    if resolved == attack_root:
+        raise ValueError("output-dir must name a subdirectory under outputs/attack")
+    return resolved
 
 
 def clear_directory_contents(directory: Path) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     for child in directory.iterdir():
-        if child.is_symlink() or child.is_file():
-            child.unlink()
-        elif child.is_dir():
+        if child.is_dir() and not child.is_symlink():
             shutil.rmtree(child)
+        else:
+            child.unlink()
 
 
 def attack_all_samples(
     dataloader,
-    attacker: LMDSSAttacker,
-    output_dir: str | None,
+    attacker: PatchScoreAttacker,
+    output_dir: Path,
     max_attacked_samples: int | None,
 ) -> None:
-    total_samples = len(dataloader.dataset)
-    effective_total = total_samples if max_attacked_samples is None else min(total_samples, max_attacked_samples)
-    progress = tqdm(total=effective_total, desc="Attacking samples")
+    total = len(dataloader.dataset)
+    limit = total if max_attacked_samples is None else min(total, max_attacked_samples)
+    progress = tqdm(total=limit, desc="Attacking samples")
     attacked = 0
-    saved_images = 0
+    saved_count = 0
 
-    for _batch_idx, (images, labels, indices) in enumerate(dataloader):
-        if max_attacked_samples is not None and attacked >= max_attacked_samples:
+    for images, labels, indices in dataloader:
+        if attacked >= limit:
             break
-
-        batch_size_actual = images.size(0)
-        remaining = None if max_attacked_samples is None else max_attacked_samples - attacked
-        if remaining is not None and remaining <= 0:
-            break
-
-        if remaining is not None and batch_size_actual > remaining:
-            images = images[:remaining]
-            labels = labels[:remaining]
-            indices = indices[:remaining]
-            batch_size_actual = remaining
-
-        images_to_attack = images.to(DEVICE, non_blocking=True)
-        labels_to_attack = labels.to(DEVICE, non_blocking=True)
-        selected_dataset_indices = indices.tolist()
+        remaining = limit - attacked
+        images = images[:remaining]
+        labels = labels[:remaining]
+        indices = indices[:remaining]
         filenames = [
-            str(dataloader.dataset.samples[dataset_idx]["image_name"])
-            for dataset_idx in selected_dataset_indices
+            str(dataloader.dataset.samples[index]["image_name"])
+            for index in indices.tolist()
         ]
-
-        if images_to_attack.numel() == 0:
-            continue
-
-        x_adv = attacker.attack_batch(images_to_attack, labels_to_attack)
-
-        attacked += batch_size_actual
-
+        adversarial = attacker.attack_batch(images, labels)
         saved = save_adversarial_images(
-            images=x_adv,
-            output_dir=output_dir,
+            images=adversarial,
+            output_dir=str(output_dir),
             prefix="adv",
-            start_index=saved_images,
+            start_index=saved_count,
             filenames=filenames,
         )
-        saved_images += len(saved)
-
-        progress.update(batch_size_actual)
-        progress.set_postfix(attacked=attacked)
+        attacked += images.size(0)
+        saved_count += len(saved)
+        progress.update(images.size(0))
 
     progress.close()
-
-    if attacked == 0:
-        print("No samples were attacked.")
-        return
-
-    print(f"Attacked {attacked} samples.")
-    print(f"Saved {saved_images} adversarial samples to: {output_dir}")
+    print(f"Attacked {attacked} samples and saved {saved_count} images to {output_dir}")
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Generate adversarial samples with the LMDSS attack.")
-    parser.add_argument("--max-attacked-samples", type=int, default=5, help="Maximum number of correctly classified samples to attack.")
-    parser.add_argument("--epsilon", type=float, default=16.0 / 255.0, help="L_inf step budget in pixel range [0, 1].")
-    parser.add_argument("--step-size", type=float, default=None, help="Step size. Defaults to epsilon / steps.")
-    parser.add_argument("--steps", type=int, default=20, help="Number of attack iterations.")
-    parser.add_argument("--whitebox-model", choices=WHITEBOX_MODEL_CHOICES, default=DEFAULT_MODEL_NAME, help="White-box source model used to generate adversarial samples.")
-    parser.add_argument("--ti-sigma", type=float, default=0.0, help="TI Gaussian kernel sigma for gradient smoothing. 0=disabled.")
-    parser.add_argument("--mi", dest="mi", action="store_true", help="Enable momentum iterative gradients. Enabled by default.")
-    parser.add_argument("--no-mi", dest="mi", action="store_false", help="Disable momentum iterative gradients.")
-    parser.add_argument("--mi-decay", type=float, default=1.0, help="Momentum decay factor used when MI is enabled.")
-    parser.add_argument("--ni", action="store_true", help="Enable Nesterov lookahead. Requires MI.")
-    parser.add_argument("--dim", action="store_true", help="Enable input diversity (DIM).")
-    parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0), help='DIM resize scale range, e.g. "0.85,1.0".')
-    parser.add_argument("--dim-padding-mode", choices=["zero", "detach-blur", "grad-blur"], default="zero", help="DIM padding fill mode. zero keeps standard black padding; detach-blur fills padding with detached blurred pixels; grad-blur fills padding with differentiable blurred pixels.")
-    parser.add_argument("--dim-padding-blur-kernel", type=int, default=5, help="Odd blur kernel size for --dim-padding-mode detach-blur.")
-    parser.add_argument("--guide-aug", action="store_true", help="Enable whole-image forward augmentation.")
-    parser.add_argument("--guide-aug-method", type=parse_model_names, default=("dropout",), help="Comma-separated guide augmentation methods: dropout,jitter,freq,dim_resonance,dim_stable_edge,dim_stable_edge_mix,dim_consensus_trajectory,dim_consensus_evidence_trajectory,lowmid_shift,white_noise,antithetic_transport,natural_spectrum_transport,antithetic_filter_bank,multiscale_adjoint_ensemble,orthogonal_photometric_ensemble,orthogonal_spherical_smoothing,antithetic_jitter_cubature,feature_trajectory_dropout,patch_dropout,patch_dropout_cls_jitter,patch_token_dropout_mix,token_patch_dropout,original_score_postdrop_phase_pair.")
-    parser.add_argument("--guide-aug-copies", type=int, default=3, help="Random copies per guide augmentation method.")
-    parser.add_argument("--input-diversity-groups", type=int, default=20,
-                        help="Number of groups for input diversity scheduling.")
-    parser.add_argument("--input-diversity-views-per-group", type=int, default=1,
-                        help="Views per group. 1=no pairing, 2=original+shifted pair.")
-    parser.add_argument("--input-diversity-phase-shift", type=parse_phase_shift, default=(0, 0),
-                        help='Phase shift (dx,dy) for view B, e.g. "4,4".')
-    parser.add_argument("--input-diversity-phase-shift-set", type=parse_phase_shift_set, default=None,
-                        help='Semicolon-separated shift set, e.g. "4,4;8,8;12,12".')
-    parser.add_argument("--input-diversity-pair-aggregation", choices=["mean", "difference_mix"], default="mean",
-                        help="Pair aggregation method. 'mean' for plain pair mean, 'difference_mix' for pair-difference gradient (方案三).")
-    parser.add_argument("--input-diversity-lambda-difference", type=float, default=0.0,
-                        help="Lambda weight for pair-difference gradient (方案三). 0 = plain pair mean.")
-    parser.add_argument("--cross-patch-transport-mode", choices=["none", "rotate180", "mirror_x", "checkerboard"], default="none",
-                        help="Cross-patch counterfactual transport mode (方案二).")
-    parser.add_argument("--cross-patch-transport-alpha", type=float, default=0.0,
-                        help="Alpha strength for cross-patch transport (方案二).")
-    parser.add_argument("--kept-token-rotation-mode", choices=["none", "pair_swap", "hadamard_block"], default="none",
-                        help="Kept-token orthogonal channel residual rotation mode (方案四).")
-    parser.add_argument("--kept-token-rotation-alpha", type=float, default=0.0,
-                        help="Alpha strength for kept-token rotation (方案四).")
-    parser.add_argument("--post-dropout-phase-token-noise", action="store_true",
-                        help="Inject token noise only at kept tokens in original_score_postdrop_phase_pair.")
-    parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
-    parser.add_argument("--patch-dropout-ratio", type=float, default=0.3, help="Fraction of selected patch-score subset to randomly drop per copy (0-1].")
-    parser.add_argument("--patch-dropout-score-mode", choices=["high", "low", "all"], default="high", help="Patch score subset used by patch_dropout: high drops patches above median, low drops patches below median, all drops uniformly at random.")
-    parser.add_argument("--patch-dropout-sampling-mode", choices=["random", "bernoulli", "extreme", "score_weighted"], default="random", help="How patch_dropout samples from the selected score subset.")
-    parser.add_argument("--patch-dropout-score-quantile-jitter", type=float, default=0.0, help="Randomly jitter the patch score split quantile around 0.5 by this radius.")
-    parser.add_argument("--patch-dropout-score-noise", type=float, default=0.0, help="Std-scaled Gaussian noise added to patch scores before selecting the score subset.")
-    parser.add_argument("--patch-dropout-fill-mode", choices=["zero_noise", "random_high_score_inpaint", "context_high_score_blend", "nearest_high_score_inpaint"], default="zero_noise", help="Fill strategy for selected patch_dropout regions.")
-    parser.add_argument("--patch-dropout-noise-mode", choices=["gaussian", "antithetic_gaussian", "rademacher_cubature", "patch_cov_gaussian", "score_weighted_gaussian", "inverse_score_weighted_gaussian", "opponent_channel_gaussian", "patch_embed_rowspace", "opponent_smooth_patch", "hybrid_dct_midfreq"], default="gaussian", help="Noise structure for non-selected patch_dropout regions.")
-    parser.add_argument("--token-patch-dropout-layer", type=int, default=0, help="Transformer block count to run before token_patch_dropout injection. 0 injects after patch embedding.")
-    parser.add_argument("--token-cls-noise", action="store_true", help="Add guide-strength Gaussian jitter to the CLS token in token_patch_dropout.")
-    parser.add_argument("--token-score-cls-noise", action="store_true", help="Use the jittered CLS token when scoring patches in token_patch_dropout.")
-    parser.add_argument("--token-score-cls-mode", choices=["learned", "gaussian"], default="learned", help="CLS direction used only for token_patch_dropout scoring.")
-    parser.add_argument("--token-score-patch-noise", action="store_true", help="Use noisy patch tokens when scoring patches in token_patch_dropout.")
-    parser.add_argument("--token-cls-noise-mode", choices=["gaussian", "mahalanobis"], default="gaussian", help="Noise distribution for CLS token jitter. mahalanobis uses patch-token empirical covariance.")
-    parser.add_argument("--token-cls-noise-strength", type=float, default=None, help="CLS noise strength override. Defaults to --guide-aug-strength when not set.")
-    parser.add_argument("--dim-adjoint-echo", action="store_true", help="Apply DIM-adjoint echo after guide augmentation and before DIM/normalization.")
-    parser.add_argument("--lowmid-grad-tuning", action="store_true", help="Enable low/mid frequency gradient tuning after TI smoothing and before momentum.")
-    parser.add_argument("--lowmid-grad-rotation-strength", type=float, default=0.5, help="Givens rotation strength toward low/mid-frequency gradient subspace when --lowmid-grad-tuning is enabled.")
-    parser.add_argument("--no-lowmid-grad-preserve-norm", dest="lowmid_grad_preserve_norm", action="store_false", help="Do not preserve per-sample gradient L2 norm after low/mid gradient tuning.")
-    parser.add_argument("--lowmid-dss-filter", action="store_true", help="Measure low/mid agreement with historical momentum to modulate low/mid rotation.")
-    parser.add_argument("--lowmid-dss-consistency", choices=["sign", "cos"], default="sign", help="Consistency rule for --lowmid-dss-filter: per-element sign agreement or per-sample cosine gate.")
-    parser.add_argument("--lowmid-dss-agreement-threshold", type=float, default=0.67, help="Reserved agreement threshold for LMDSS compatibility.")
-    parser.add_argument("--spatial-sign-reinforcement", action="store_true", help="Enable pre-sign reinforcement from spatially stable local update signs.")
-    parser.add_argument("--spatial-sign-reinforcement-sigma", type=float, default=1.0, help="Gaussian sigma used to estimate local dominant update signs.")
-    parser.add_argument("--spatial-sign-reinforcement-strength", type=float, default=0.2, help="Strength added along confident local sign directions before update.sign().")
-    parser.add_argument("--grad-momentum-agreement", action="store_true", help="Enable pre-sign reinforcement where current gradient and update/momentum signs agree.")
-    parser.add_argument("--grad-momentum-agreement-strength", type=float, default=0.2, help="Strength added along update signs that are still supported by the current gradient.")
-    parser.add_argument("--grad-momentum-agreement-sigma", type=float, default=0.0, help="Gaussian sigma for spatially smoothing the grad/momentum agreement mask. 0 disables smoothing.")
-    parser.add_argument("--grad-momentum-conflict-suppression-strength", type=float, default=0.0, help="Strength subtracted from update signs that conflict with the current gradient before update.sign().")
-    parser.add_argument("--grad-trim-ratio", type=float, default=0.0, help="Fraction of guide-aug copies trimmed from each tail before averaging (0.1 = trim 10%% each side).")
-    parser.add_argument("--cross-step-sign-vote", action="store_true", help="Enable pre-sign reinforcement from a recent-window majority vote over update signs.")
-    parser.add_argument("--cross-step-sign-vote-window", type=int, default=5, help="Number of recent update sign fields used by --cross-step-sign-vote.")
-    parser.add_argument("--cross-step-sign-vote-strength", type=float, default=0.2, help="Strength added along cross-step majority-vote sign directions before update.sign().")
-    parser.add_argument("--view-consistent-agreement", action="store_true", help="Enable pre-sign reinforcement where trajectory/view gradients support the current update sign.")
-    parser.add_argument("--view-consistent-agreement-strength", type=float, default=0.3, help="Strength added along update signs proportionally to view-gradient sign support.")
-    parser.add_argument("--view-consistent-agreement-threshold", type=float, default=0.0, help="Minimum view support needed for --view-consistent-agreement. 0 keeps soft support.")
-    parser.add_argument("--fft-sign-regularization", action="store_true", help="Apply FFT low-pass filtering to update before sign() to suppress high-freq sign-field fragmentation.")
-    parser.add_argument("--fft-sign-regularization-cutoff", type=float, default=0.25, help="Frequency cutoff radius for --fft-sign-regularization. Preserves frequencies below this radius.")
-    parser.add_argument("--fft-sign-regularization-strength", type=float, default=0.5, help="Interpolation strength (0=keep original, 1=fully filtered) for --fft-sign-regularization.")
-    parser.add_argument("--attack-loss", choices=["logits", "feature"], default="logits", help="Attack final logits with CE or one feature layer with cosine distance.")
-    parser.add_argument("--feature-layer", type=int, default=-2, help="Feature layer index used by --attack-loss feature. Negative indices count from the end.")
-    parser.add_argument("--feature-scope", choices=["block", "stage"], default="block", help="Feature output sequence used by --attack-loss feature: block layers or stage outputs.")
-    parser.add_argument("--output-dir", default=None, help="Output directory. In attack mode, use --output-dir outputs/attack/lmdss.")
-    parser.add_argument("--mode", choices=["attack", "clean"], default="attack", help="attack: generate adversarial samples; clean: save correctly classified clean samples.")
-    parser.add_argument("--image-dir", default=IMAGE_DIR, help="Directory containing input images.")
-    parser.add_argument("--annotations-path", default=ANNOTATIONS_PATH, help="Path to image label annotations.")
-    parser.add_argument("--img-size", type=int, default=DEFAULT_IMG_SIZE, help="Input image size.")
-    parser.add_argument("--batch-size", type=int, default=16, help="DataLoader batch size for clean eval and attack batches.")
-    parser.add_argument("--num-workers", type=int, default=4, help="DataLoader worker processes for image decode/transform.")
-    parser.add_argument("--prefetch-factor", type=int, default=4, help="Batches prefetched per DataLoader worker.")
-    parser.set_defaults(mi=True, lowmid_grad_preserve_norm=True)
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Patch-score routing attack")
+    parser.add_argument("--attack-method", choices=ATTACK_METHODS, default="original_score_postdrop_phase_pair")
+    parser.add_argument("--whitebox-model", choices=WHITEBOX_MODEL_CHOICES, default=DEFAULT_MODEL_NAME)
+    parser.add_argument("--max-attacked-samples", type=int, default=100)
+    parser.add_argument("--epsilon", type=float, default=16.0 / 255.0)
+    parser.add_argument("--step-size", type=float, default=None)
+    parser.add_argument("--steps", type=int, default=10)
 
+    parser.add_argument("--mi", dest="mi", action="store_true")
+    parser.add_argument("--no-mi", dest="mi", action="store_false")
+    parser.set_defaults(mi=True)
+    parser.add_argument("--mi-decay", type=float, default=1.0)
+    parser.add_argument("--ni", action="store_true")
+    parser.add_argument("--ti-sigma", type=float, default=0.0)
+    parser.add_argument("--dim", action="store_true")
+    parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0))
 
+    parser.add_argument("--guide-aug-copies", type=int, default=20)
+    parser.add_argument("--input-diversity-groups", type=int, default=10)
+    parser.add_argument("--input-diversity-views-per-group", type=int, default=2)
+    parser.add_argument("--input-diversity-phase-shift", type=parse_phase_shift, default=(0, 0))
+    parser.add_argument(
+        "--input-diversity-phase-shift-set",
+        type=parse_phase_shift_set,
+        default=((4, 4), (8, 8), (12, 12)),
+    )
+
+    parser.add_argument("--guide-aug-strength", type=float, default=0.2)
+    parser.add_argument("--patch-dropout-ratio", type=float, default=0.3)
+    parser.add_argument("--patch-dropout-score-mode", choices=("high", "low", "all"), default="high")
+    parser.add_argument(
+        "--patch-dropout-sampling-mode",
+        choices=("random", "bernoulli", "extreme", "score_weighted"),
+        default="random",
+    )
+    parser.add_argument("--patch-dropout-score-quantile-jitter", type=float, default=0.0)
+    parser.add_argument("--patch-dropout-score-noise", type=float, default=0.0)
+    parser.add_argument(
+        "--patch-dropout-noise-mode",
+        choices=("gaussian", "opponent_channel_gaussian"),
+        default="opponent_channel_gaussian",
+    )
+
+    parser.add_argument("--token-cls-noise", action="store_true")
+    parser.add_argument("--token-score-cls-noise", dest="token_score_cls_noise", action="store_true")
+    parser.add_argument("--no-token-score-cls-noise", dest="token_score_cls_noise", action="store_false")
+    parser.set_defaults(token_score_cls_noise=True)
+    parser.add_argument("--token-score-cls-mode", choices=("learned", "gaussian"), default="learned")
+    parser.add_argument("--token-score-patch-noise", action="store_true")
+    parser.add_argument("--token-cls-noise-mode", choices=("gaussian", "mahalanobis"), default="gaussian")
+    parser.add_argument("--token-cls-noise-strength", type=float, default=None)
+    parser.add_argument(
+        "--post-dropout-phase-token-noise",
+        dest="post_dropout_phase_token_noise",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--no-post-dropout-phase-token-noise",
+        dest="post_dropout_phase_token_noise",
+        action="store_false",
+    )
+    parser.set_defaults(post_dropout_phase_token_noise=True)
+    parser.add_argument("--feature-layer", type=int, default=12)
+
+    parser.add_argument("--image-dir", default=IMAGE_DIR)
+    parser.add_argument("--annotations-path", default=ANNOTATIONS_PATH)
+    parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--prefetch-factor", type=int, default=4)
+    parser.add_argument("--output-dir", default="outputs/attack/patch_score_routing")
     return parser.parse_args()
 
 
-def main(
-    max_attacked_samples: int,
-    epsilon: float,
-    step_size: float | None,
-    steps: int,
-    output_dir: str | None,
-    mode: str,
-    whitebox_model: str = DEFAULT_MODEL_NAME,
-    ti_sigma: float = 0.0,
-    mi: bool = True,
-    mi_decay: float = 1.0,
-    ni: bool = False,
-    dim: bool = False,
-    dim_resize_range: tuple[float, float] = (0.85, 1.0),
-    dim_padding_mode: str = "zero",
-    dim_padding_blur_kernel: int = 5,
-    guide_aug: bool = False,
-    guide_aug_methods: tuple[str, ...] = ("dropout",),
-    guide_aug_copies: int = 3,
-    input_diversity_groups: int = 20,
-    input_diversity_views_per_group: int = 1,
-    input_diversity_phase_shift: tuple[int, int] = (0, 0),
-    input_diversity_phase_shift_set: tuple[tuple[int, int], ...] | None = None,
-    input_diversity_pair_aggregation: str = "mean",
-    input_diversity_lambda_difference: float = 0.0,
-    cross_patch_transport_mode: str = "none",
-    cross_patch_transport_alpha: float = 0.0,
-    kept_token_rotation_mode: str = "none",
-    kept_token_rotation_alpha: float = 0.0,
-    post_dropout_phase_token_noise: bool = False,
-    guide_aug_strength: float = 0.2,
-    patch_dropout_ratio: float = 0.3,
-    patch_dropout_score_mode: str = "high",
-    patch_dropout_sampling_mode: str = "random",
-    patch_dropout_score_quantile_jitter: float = 0.0,
-    patch_dropout_score_noise: float = 0.0,
-    patch_dropout_fill_mode: str = "zero_noise",
-    patch_dropout_noise_mode: str = "gaussian",
-    token_patch_dropout_layer: int = 0,
-    token_cls_noise: bool = False,
-    token_score_cls_noise: bool = False,
-    token_score_cls_mode: str = "learned",
-    token_score_patch_noise: bool = False,
-    token_cls_noise_mode: str = "gaussian",
-    token_cls_noise_strength: float | None = None,
-    dim_adjoint_echo: bool = False,
-    lowmid_grad_tuning: bool = False,
-    lowmid_grad_rotation_strength: float = 0.5,
-    lowmid_grad_preserve_norm: bool = True,
-    lowmid_dss_filter: bool = False,
-    lowmid_dss_consistency: str = "sign",
-    lowmid_dss_agreement_threshold: float = 0.67,
-    spatial_sign_reinforcement: bool = False,
-    spatial_sign_reinforcement_sigma: float = 1.0,
-    spatial_sign_reinforcement_strength: float = 0.2,
-    grad_momentum_agreement: bool = False,
-    grad_momentum_agreement_strength: float = 0.2,
-    grad_momentum_agreement_sigma: float = 0.0,
-    grad_momentum_conflict_suppression_strength: float = 0.0,
-    grad_trim_ratio: float = 0.0,
-    cross_step_sign_vote: bool = False,
-    cross_step_sign_vote_window: int = 5,
-    cross_step_sign_vote_strength: float = 0.2,
-    view_consistent_agreement: bool = False,
-    view_consistent_agreement_strength: float = 0.3,
-    view_consistent_agreement_threshold: float = 0.0,
-    fft_sign_regularization: bool = False,
-    fft_sign_regularization_cutoff: float = 0.25,
-    fft_sign_regularization_strength: float = 0.5,
-    attack_loss: str = "logits",
-    feature_layer: int = -2,
-    feature_scope: str = "block",
-    image_dir: str = IMAGE_DIR,
-    annotations_path: str = ANNOTATIONS_PATH,
-    img_size: int = DEFAULT_IMG_SIZE,
-    batch_size: int = 16,
-    num_workers: int = 4,
-    prefetch_factor: int = 4,
-) -> None:
-    if mode == "attack":
-        resolved_output_dir = validate_attack_output_dir(output_dir=output_dir)
-    else:
-        resolved_output_dir = Path(output_dir) if output_dir is not None else Path("outputs") / "clean"
-
+def main(args: argparse.Namespace) -> None:
+    output_dir = validate_output_dir(args.output_dir)
     dataloader, num_classes = load_data(
-        image_dir_arg=image_dir,
-        annotations_path_arg=annotations_path,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        prefetch_factor=prefetch_factor,
-        img_size=img_size,
+        image_dir_arg=args.image_dir,
+        annotations_path_arg=args.annotations_path,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        prefetch_factor=args.prefetch_factor,
     )
-    model = build_whitebox_model(num_classes=num_classes, model_name=whitebox_model)
-
-    attacker = create_attacker(
+    model = build_whitebox_model(num_classes=num_classes, model_name=args.whitebox_model)
+    attacker = PatchScoreAttacker(
         model=model,
-        epsilon=epsilon,
-        step_size=step_size,
-        steps=steps,
-        ti_sigma=ti_sigma,
-        dim=dim,
-        mi=mi,
-        mi_decay=mi_decay,
-        ni=ni,
-        dim_resize_range=dim_resize_range,
-        dim_padding_mode=dim_padding_mode,
-        dim_padding_blur_kernel=dim_padding_blur_kernel,
-        guide_aug=guide_aug,
-        guide_aug_methods=guide_aug_methods,
-        guide_aug_copies=guide_aug_copies,
-        input_diversity_groups=input_diversity_groups,
-        input_diversity_views_per_group=input_diversity_views_per_group,
-        input_diversity_phase_shift=input_diversity_phase_shift,
-        input_diversity_phase_shift_set=input_diversity_phase_shift_set,
-        input_diversity_pair_aggregation=input_diversity_pair_aggregation,
-        input_diversity_lambda_difference=input_diversity_lambda_difference,
-        cross_patch_transport_mode=cross_patch_transport_mode,
-        cross_patch_transport_alpha=cross_patch_transport_alpha,
-        kept_token_rotation_mode=kept_token_rotation_mode,
-        kept_token_rotation_alpha=kept_token_rotation_alpha,
-        post_dropout_phase_token_noise=post_dropout_phase_token_noise,
-        guide_aug_strength=guide_aug_strength,
-        patch_dropout_ratio=patch_dropout_ratio,
-        patch_dropout_score_mode=patch_dropout_score_mode,
-        patch_dropout_sampling_mode=patch_dropout_sampling_mode,
-        patch_dropout_score_quantile_jitter=patch_dropout_score_quantile_jitter,
-        patch_dropout_score_noise=patch_dropout_score_noise,
-        patch_dropout_fill_mode=patch_dropout_fill_mode,
-        patch_dropout_noise_mode=patch_dropout_noise_mode,
-        token_patch_dropout_layer=token_patch_dropout_layer,
-        token_cls_noise=token_cls_noise,
-        token_score_cls_noise=token_score_cls_noise,
-        token_score_cls_mode=token_score_cls_mode,
-        token_score_patch_noise=token_score_patch_noise,
-        token_cls_noise_mode=token_cls_noise_mode,
-        token_cls_noise_strength=token_cls_noise_strength,
-        dim_adjoint_echo=dim_adjoint_echo,
-        lowmid_grad_tuning=lowmid_grad_tuning,
-        lowmid_grad_rotation_strength=lowmid_grad_rotation_strength,
-        lowmid_grad_preserve_norm=lowmid_grad_preserve_norm,
-        lowmid_dss_filter=lowmid_dss_filter,
-        lowmid_dss_consistency=lowmid_dss_consistency,
-        lowmid_dss_agreement_threshold=lowmid_dss_agreement_threshold,
-        spatial_sign_reinforcement=spatial_sign_reinforcement,
-        spatial_sign_reinforcement_sigma=spatial_sign_reinforcement_sigma,
-        spatial_sign_reinforcement_strength=spatial_sign_reinforcement_strength,
-        grad_momentum_agreement=grad_momentum_agreement,
-        grad_momentum_agreement_strength=grad_momentum_agreement_strength,
-        grad_momentum_agreement_sigma=grad_momentum_agreement_sigma,
-        grad_momentum_conflict_suppression_strength=grad_momentum_conflict_suppression_strength,
-        grad_trim_ratio=grad_trim_ratio,
-        cross_step_sign_vote=cross_step_sign_vote,
-        cross_step_sign_vote_window=cross_step_sign_vote_window,
-        cross_step_sign_vote_strength=cross_step_sign_vote_strength,
-        view_consistent_agreement=view_consistent_agreement,
-        view_consistent_agreement_strength=view_consistent_agreement_strength,
-        view_consistent_agreement_threshold=view_consistent_agreement_threshold,
-        fft_sign_regularization=fft_sign_regularization,
-        fft_sign_regularization_cutoff=fft_sign_regularization_cutoff,
-        fft_sign_regularization_strength=fft_sign_regularization_strength,
-        attack_loss=attack_loss,
-        feature_layer=feature_layer,
-        feature_scope=feature_scope,
-    )
-    if mode == "clean":
-        raise NotImplementedError("clean mode is not supported in this branch.")
-
-    clear_directory_contents(resolved_output_dir)
-    print(f"Cleared adversarial output directory: {resolved_output_dir}")
-
-    attack_all_samples(
-        dataloader=dataloader,
-        attacker=attacker,
-        output_dir=str(resolved_output_dir),
-        max_attacked_samples=max_attacked_samples,
-    )
-
-    # Save complete attack parameters for reproducibility and CSV recording
-    attack_params = {
-        "whitebox_model": whitebox_model,
-        "max_attacked_samples": max_attacked_samples,
-        "epsilon": epsilon,
-        "step_size": step_size if step_size is not None else epsilon / steps,
-        "steps": steps,
-        "ti_sigma": ti_sigma,
-        "mi": mi,
-        "mi_decay": mi_decay,
-        "ni": ni,
-        "dim": dim,
-        "dim_resize_range": list(dim_resize_range),
-        "dim_mode": "full-random",
-        "dim_padding_mode": dim_padding_mode,
-        "dim_padding_blur_kernel": dim_padding_blur_kernel,
-        "guide_aug": guide_aug,
-        "guide_aug_methods": list(guide_aug_methods),
-        "guide_aug_copies": guide_aug_copies,
-        "input_diversity_groups": input_diversity_groups,
-        "input_diversity_views_per_group": input_diversity_views_per_group,
-        "input_diversity_total_views": input_diversity_groups * input_diversity_views_per_group,
-        "input_diversity_phase_shift": list(input_diversity_phase_shift),
-        "input_diversity_phase_shift_set": (
-            [list(s) for s in input_diversity_phase_shift_set]
-            if input_diversity_phase_shift_set is not None
-            else None
-        ),
-        "input_diversity_pair_aggregation": input_diversity_pair_aggregation,
-        "input_diversity_lambda_difference": input_diversity_lambda_difference,
-        "cross_patch_transport_mode": cross_patch_transport_mode,
-        "cross_patch_transport_alpha": cross_patch_transport_alpha,
-        "kept_token_rotation_mode": kept_token_rotation_mode,
-        "kept_token_rotation_alpha": kept_token_rotation_alpha,
-        "post_dropout_phase_token_noise": post_dropout_phase_token_noise,
-        "guide_aug_strength": guide_aug_strength,
-        "patch_dropout_ratio": patch_dropout_ratio,
-        "patch_dropout_score_mode": patch_dropout_score_mode,
-        "patch_dropout_sampling_mode": patch_dropout_sampling_mode,
-        "patch_dropout_score_quantile_jitter": patch_dropout_score_quantile_jitter,
-        "patch_dropout_score_noise": patch_dropout_score_noise,
-        "patch_dropout_fill_mode": patch_dropout_fill_mode,
-        "patch_dropout_noise_mode": patch_dropout_noise_mode,
-        "token_patch_dropout_layer": token_patch_dropout_layer,
-        "token_cls_noise": token_cls_noise,
-        "token_score_cls_noise": token_score_cls_noise,
-        "token_score_cls_mode": token_score_cls_mode,
-        "token_score_patch_noise": token_score_patch_noise,
-        "dim_adjoint_echo": dim_adjoint_echo,
-        "attack_loss": attack_loss,
-        "feature_layer": feature_layer,
-        "feature_scope": feature_scope,
-        "lowmid_grad_tuning": lowmid_grad_tuning,
-        "lowmid_dss_filter": lowmid_dss_filter,
-        "spatial_sign_reinforcement": spatial_sign_reinforcement,
-        "grad_momentum_agreement": grad_momentum_agreement,
-        "cross_step_sign_vote": cross_step_sign_vote,
-        "view_consistent_agreement": view_consistent_agreement,
-        "fft_sign_regularization": fft_sign_regularization,
-    }
-    params_path = resolved_output_dir / "attack_params.json"
-    params_path.write_text(json.dumps(attack_params, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"Saved attack parameters to: {params_path}")
-
-
-if __name__ == "__main__":
-    print(f"Running on {DEVICE}")
-    args = parse_args()
-    main(
-        max_attacked_samples=args.max_attacked_samples,
         epsilon=args.epsilon,
         step_size=args.step_size,
         steps=args.steps,
+        attack_method=args.attack_method,
+        use_momentum=args.mi,
+        momentum_decay=args.mi_decay,
+        nesterov=args.ni,
         ti_sigma=args.ti_sigma,
-        mi=args.mi,
-        mi_decay=args.mi_decay,
-        ni=args.ni,
-        dim=args.dim,
+        input_diversity=args.dim,
         dim_resize_range=args.dim_resize_range,
-        dim_padding_mode=args.dim_padding_mode,
-        dim_padding_blur_kernel=args.dim_padding_blur_kernel,
-        whitebox_model=args.whitebox_model,
-        guide_aug=args.guide_aug,
-        guide_aug_methods=args.guide_aug_method,
         guide_aug_copies=args.guide_aug_copies,
         input_diversity_groups=args.input_diversity_groups,
         input_diversity_views_per_group=args.input_diversity_views_per_group,
         input_diversity_phase_shift=args.input_diversity_phase_shift,
         input_diversity_phase_shift_set=args.input_diversity_phase_shift_set,
-        input_diversity_pair_aggregation=args.input_diversity_pair_aggregation,
-        input_diversity_lambda_difference=args.input_diversity_lambda_difference,
-        cross_patch_transport_mode=args.cross_patch_transport_mode,
-        cross_patch_transport_alpha=args.cross_patch_transport_alpha,
-        kept_token_rotation_mode=args.kept_token_rotation_mode,
-        kept_token_rotation_alpha=args.kept_token_rotation_alpha,
-        post_dropout_phase_token_noise=args.post_dropout_phase_token_noise,
         guide_aug_strength=args.guide_aug_strength,
         patch_dropout_ratio=args.patch_dropout_ratio,
         patch_dropout_score_mode=args.patch_dropout_score_mode,
         patch_dropout_sampling_mode=args.patch_dropout_sampling_mode,
         patch_dropout_score_quantile_jitter=args.patch_dropout_score_quantile_jitter,
         patch_dropout_score_noise=args.patch_dropout_score_noise,
-        patch_dropout_fill_mode=args.patch_dropout_fill_mode,
         patch_dropout_noise_mode=args.patch_dropout_noise_mode,
-        token_patch_dropout_layer=args.token_patch_dropout_layer,
         token_cls_noise=args.token_cls_noise,
         token_score_cls_noise=args.token_score_cls_noise,
         token_score_cls_mode=args.token_score_cls_mode,
         token_score_patch_noise=args.token_score_patch_noise,
         token_cls_noise_mode=args.token_cls_noise_mode,
         token_cls_noise_strength=args.token_cls_noise_strength,
-        dim_adjoint_echo=args.dim_adjoint_echo,
-        lowmid_grad_tuning=args.lowmid_grad_tuning,
-        lowmid_grad_rotation_strength=args.lowmid_grad_rotation_strength,
-        lowmid_grad_preserve_norm=args.lowmid_grad_preserve_norm,
-        lowmid_dss_filter=args.lowmid_dss_filter,
-        lowmid_dss_consistency=args.lowmid_dss_consistency,
-        lowmid_dss_agreement_threshold=args.lowmid_dss_agreement_threshold,
-        spatial_sign_reinforcement=args.spatial_sign_reinforcement,
-        spatial_sign_reinforcement_sigma=args.spatial_sign_reinforcement_sigma,
-        spatial_sign_reinforcement_strength=args.spatial_sign_reinforcement_strength,
-        grad_momentum_agreement=args.grad_momentum_agreement,
-        grad_momentum_agreement_strength=args.grad_momentum_agreement_strength,
-        grad_momentum_agreement_sigma=args.grad_momentum_agreement_sigma,
-        grad_momentum_conflict_suppression_strength=args.grad_momentum_conflict_suppression_strength,
-        cross_step_sign_vote=args.cross_step_sign_vote,
-        cross_step_sign_vote_window=args.cross_step_sign_vote_window,
-        cross_step_sign_vote_strength=args.cross_step_sign_vote_strength,
-        view_consistent_agreement=args.view_consistent_agreement,
-        view_consistent_agreement_strength=args.view_consistent_agreement_strength,
-        view_consistent_agreement_threshold=args.view_consistent_agreement_threshold,
-        fft_sign_regularization=args.fft_sign_regularization,
-        fft_sign_regularization_cutoff=args.fft_sign_regularization_cutoff,
-        fft_sign_regularization_strength=args.fft_sign_regularization_strength,
-        attack_loss=args.attack_loss,
+        post_dropout_phase_token_noise=args.post_dropout_phase_token_noise,
         feature_layer=args.feature_layer,
-        feature_scope=args.feature_scope,
-        output_dir=args.output_dir,
-        mode=args.mode,
-        image_dir=args.image_dir,
-        annotations_path=args.annotations_path,
-        img_size=args.img_size,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        prefetch_factor=args.prefetch_factor,
+        device=DEVICE,
     )
+
+    clear_directory_contents(output_dir)
+    attack_all_samples(dataloader, attacker, output_dir, args.max_attacked_samples)
+
+    params = {
+        "attack_method": args.attack_method,
+        "whitebox_model": args.whitebox_model,
+        "max_attacked_samples": args.max_attacked_samples,
+        "epsilon": args.epsilon,
+        "step_size": args.step_size if args.step_size is not None else args.epsilon / args.steps,
+        "steps": args.steps,
+        "mi": args.mi,
+        "mi_decay": args.mi_decay,
+        "ni": args.ni,
+        "ti_sigma": args.ti_sigma,
+        "dim": args.dim,
+        "dim_resize_range": list(args.dim_resize_range),
+        "guide_aug_copies": args.guide_aug_copies,
+        "input_diversity_groups": args.input_diversity_groups,
+        "input_diversity_views_per_group": args.input_diversity_views_per_group,
+        "input_diversity_total_views": (
+            args.input_diversity_groups * args.input_diversity_views_per_group
+        ),
+        "input_diversity_phase_shift": list(args.input_diversity_phase_shift),
+        "input_diversity_phase_shift_set": [list(shift) for shift in args.input_diversity_phase_shift_set],
+        "guide_aug_strength": args.guide_aug_strength,
+        "patch_dropout_ratio": args.patch_dropout_ratio,
+        "patch_dropout_score_mode": args.patch_dropout_score_mode,
+        "patch_dropout_sampling_mode": args.patch_dropout_sampling_mode,
+        "patch_dropout_score_quantile_jitter": args.patch_dropout_score_quantile_jitter,
+        "patch_dropout_score_noise": args.patch_dropout_score_noise,
+        "patch_dropout_noise_mode": args.patch_dropout_noise_mode,
+        "token_cls_noise": args.token_cls_noise,
+        "token_score_cls_noise": args.token_score_cls_noise,
+        "token_score_cls_mode": args.token_score_cls_mode,
+        "token_score_patch_noise": args.token_score_patch_noise,
+        "token_cls_noise_mode": args.token_cls_noise_mode,
+        "token_cls_noise_strength": (
+            args.token_cls_noise_strength
+            if args.token_cls_noise_strength is not None
+            else args.guide_aug_strength
+        ),
+        "post_dropout_phase_token_noise": args.post_dropout_phase_token_noise,
+        "feature_layer": args.feature_layer,
+    }
+    (output_dir / "attack_params.json").write_text(
+        json.dumps(params, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+if __name__ == "__main__":
+    print(f"Running on {DEVICE}")
+    main(parse_args())

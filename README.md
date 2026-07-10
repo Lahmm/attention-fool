@@ -1,10 +1,28 @@
-# Attention-fool
+# Patch-Score Routing Attack
 
-本项目用于在 ViT 类视觉模型上生成对抗样本，并评估这些样本在多个黑盒 Transformer 视觉模型上的迁移攻击效果。当前主攻击流程包含基础 MI-FGSM，以及一个基于 FFT stability 的前后景对比塌缩攻击 `fft-cc`。
+本仓库实现单白盒 ViT 的 Patch-Score–Conditioned Stochastic Token Masking 攻击。
+默认配置是当前最强主线：
 
-## 环境安装
+```text
+original L12 score/mask
+→ pixel-space patch dropout
+→ original/post-dropout phase pair
+→ kept-only opponent-channel token noise
+→ 20-view gradient mean
+→ MI-FGSM update
+```
 
-```powershell
+仓库仅保留以下攻击能力：
+
+- 当前 `original_score_postdrop_phase_pair` 主线；
+- 上一代 `token_patch_dropout`；
+- 通用 `patch_dropout`；
+- 基础 MI/NI、DIM 和 TI；
+- `nets/` 中已有的全部白盒模型。
+
+## 安装
+
+```bash
 pip install -r requirements.txt
 ```
 
@@ -15,266 +33,65 @@ data/clean_resized_images
 data/image_name_to_class_id_and_name.json
 ```
 
-## 生成干净样本
-
-只导出被当前白盒模型正确分类的干净样本：
-
-```powershell
-python main.py --mode clean --max-attacked-samples 20 --output-dir outputs/clean
-```
-
-输出文件会保留原始标注文件名，例如：
-
-```text
-clean_ILSVRC2012_val_00000001.JPEG
-```
-
-## 基础 MI-FGSM 攻击
-
-```powershell
-python main.py --mode attack --attack-type mifgsm --max-attacked-samples 20 --epsilon 0.0313725 --steps 10 --decay 1.0 --output-dir outputs/attack/mifgsm
-```
-
-常用攻击强度：
-
-```text
-8/255  = 0.0313725
-16/255 = 0.062745
-32/255 = 0.12549
-```
-
-如果不传 `--step-size`，代码会自动使用：
-
-```text
-step_size = epsilon / steps
-```
-
-## FFT-CC 攻击
-
-`fft-cc` 是全图 L_inf 约束下的 MI-FGSM 风格攻击。它先用 clean tokens 的 channel-wise FFT stability 得到 foreground-like / background-like patch 的软划分，然后缩小两组 patch 与 CLS 的对齐差异。
-
-攻击目标：
-
-```text
-loss = CE - lambda_contrast * |fg_align - bg_align|
-```
-
-运行示例：
-
-```powershell
-python main.py --mode attack --attack-type fft-cc --max-attacked-samples 20 --epsilon 0.062745 --steps 10 --decay 1.0 --output-dir outputs/attack/fftcc
-```
-
-参数说明：
-
-```text
---lambda-contrast    前后景 patch-CLS 对齐差异塌缩项权重
---fft-topk           channel-wise FFT stability selection 的 Top-K，默认 1
-```
-
-## Lazy Aggregation 攻击
-
-`lazy-agg` 是单白盒模型非定向迁移攻击。当前实现将攻击拆成前向增强、CE/feature loss 和反向梯度处理三个可组合模块。
-
-默认配置：
-
-```text
-epsilon=16/255, steps=20
-guide_aug=False, dim=False, si=False, eot=False
-mi=True, ni=False, ti_sigma=0.0
-whitebox_model=vit_base_patch16_224, feature_layer=-2
-```
-
-最简单的无增强 FGSM 示例：
-
-```powershell
-python main.py --mode attack --max-attacked-samples 50 --steps 1 --ti-sigma 0 --output-dir outputs/attack/lmdss
-```
-
-整图前向增强示例：
-
-```powershell
-python main.py --mode attack --max-attacked-samples 500 --whitebox-model vit_base_patch16_224 --guide-aug --guide-aug-method dropout,jitter,freq --guide-aug-copies 3 --guide-aug-strength 0.2 --output-dir outputs/attack/lmdss
-```
-
-前向增强与反向梯度模块均由独立参数控制：
-
-```powershell
---dim
---mi / --no-mi
---mi-decay 1.0
---ni
---ti-sigma 0
---ti-sigma 3
-```
-
-`--guide-aug` 现在只做整图前向增强，不再构建 attention map guide。`--guide-aug-method` 可传 `dropout,jitter,freq,dim_resonance,white_noise,antithetic_jitter_cubature,feature_trajectory_dropout` 中的一个或多个。`antithetic_jitter_cubature` 使用 jitter 同分布的亮度/噪声正负配对加 clean 视图；`feature_trajectory_dropout` 用 feature-loss pilot 梯度构造 9 个前瞻轨迹视图，并在每个视图上施加配对 dropout/blur 结构遮挡以估计稳定可迁移梯度；`--dim-adjoint-echo` 是独立开关，会把 echo 作为串行梯度调制器应用在普通增强之后、DIM 之前。
-
-## DIM Resonance 长跑评估
-
-`dim_resonance` 是基于 DIM adjoint 机制的前向结构增强候选；`--dim-adjoint-echo` 是 forward-identity/backward-modified 的梯度通路调制器。完整 effectiveness 协议固定当前 DIM + MI + background patch/qk 设置，比较 `dropout,jitter,freq`、`dim_resonance`、二者组合、echo 开关候选和普通 DIM-MI：
-
-```powershell
-bash scripts/run_dim_resonance_effectiveness.sh
-```
-
-常用快速 smoke：
-
-```powershell
-ROOT=outputs/attack/lazyagg/dim_resonance_effectiveness_smoke MAX_SAMPLES=2 STEPS=1 TARGET_MODELS=deit_base_patch16_224 bash scripts/run_dim_resonance_effectiveness.sh
-```
-
-汇总脚本会读取 `transfer_eval.py` 写入的 CSV，并生成：
-
-```text
-outputs/analysis/dim_resonance_effectiveness_summary.csv
-outputs/analysis/dim_resonance_effectiveness_summary.md
-```
-
-## 迁移攻击评估
-
-对保存好的对抗样本做多黑盒模型评估：
-
-```powershell
-python transfer_eval.py --image-dir outputs/attack/fftcc --prefix adv_
-```
-
-迁移评估默认会批量推理，建议在 4090 上从下面的配置开始试：
-
-```powershell
-python transfer_eval.py --image-dir outputs/attack/fftcc --prefix adv_ --batch-size 128 --num-workers 8 --prefetch-factor 4
-```
-
-如果显存足够，可以继续提高 `--batch-size`；如果 CPU 图像解码仍然吃紧，可以把 `--num-workers` 调到 12 或 16。`--amp` 会启用 fp16 autocast，速度通常更快，但可能让极少数边界样本的预测发生变化。
-
-默认黑盒模型包括：
-
-```text
-deit_base_patch16_224
-beit_base_patch16_224
-swin_tiny_patch4_window7_224
-pvt_v2_b2
-cait_s24_224
-levit_256
-pit_s_224
-crossvit_15_240
-```
-
-也可以手动指定模型，多个模型用逗号分隔：
-
-```powershell
-python transfer_eval.py --image-dir outputs/attack/fftcc --prefix adv_ --model-name deit_base_patch16_224,swin_tiny_patch4_window7_224,pvt_v2_b2,cait_s24_224
-```
-
-评估结束后会输出每个模型的 `acc`、`ASR`，并额外给出字典形式的攻击成功率：
-
-```text
-ASR by model:
-{'deit_base_patch16_224': 0.75, ...}
-```
-
-迁移评估结束后会自动记录结果。CSV 会写到 `outputs/csv`，文件名由对抗样本目录唯一确定，例如 `outputs_attack_fftcc.csv`。实验名默认使用对抗样本目录名，也可以用 `--exp-name` 指定：
-
-```powershell
-python transfer_eval.py --image-dir outputs/attack/fftcc --prefix adv_ --exp-name fftcc
-```
-
-## 可视化
-
-可视化内容包括：
-
-```text
-Input
-Attention Scores
-A@V Scores
-FFT Stability Selection
-Patch Score Overlay
-Mechanism Overlap
-```
-
-可视化干净样本：
-
-```powershell
-python visualize_attention_patchscores.py --image-dir outputs/clean --pattern "clean_*" --model-name deit_base_patch16_224 --output-dir outputs/vis_clean_deit_base_patch16_224
-```
-
-可视化对抗样本：
-
-```powershell
-python visualize_attention_patchscores.py --image-dir outputs/attack/fftcc --pattern "adv_*" --model-name deit_base_patch16_224 --output-dir outputs/vis_adv_deit_base_patch16_224
-```
-
-常用参数：
-
-```text
---model-name          可视化使用的 timm 模型名
---block-index         可视化的 transformer block，默认 -1
---fft-topk            FFT stability selection 的 Top-K
---overlap-top-ratio   重叠诊断图中 high attention / high patch score / high FFT 的比例
-```
-
-## 模型设置
-
-白盒攻击模型默认在 `nets.py` 中设置：
-
-```python
-DEFAULT_MODEL_NAME = "vit_base_patch16_224"
-```
-
-迁移评估中的黑盒模型由 `transfer_eval.py` 的 `--model-name` 控制，不会使用 `nets.py` 的 hook 包装。
-这是ds
-
-## 梯度迁移性因果分析
-
-独立入口 `causal_analysis.py` 固定使用当前 DIM + low-attention background augmentation 基准，支持逐步追踪、空间频率干预、MI 开关和汇总报告：
-
-```powershell
-python causal_analysis.py trace --max-samples 100 --gradient-decomposition --output-dir outputs/causal/trace_s0
-python causal_analysis.py frequency-intervention --component haar:LLH --region low --intervention drop --evaluate-targets --output-dir outputs/causal/drop_llh
-python causal_analysis.py mi-switch --mi-switch reset --switch-step 10 --evaluate-targets --output-dir outputs/causal/mi_reset_10
-python causal_analysis.py report --input-dir outputs/causal/drop_llh --output-dir outputs/causal/drop_llh
-```
-
-FFT 分量写作 `fft:BAND[:ORIENTATION]`，BAND 为 `0..7`，方向可选 `all/horizontal/vertical/diagonal`；三级 Haar 小波包分量写作 `haar:PATH`。无干预执行器逐像素复现现有攻击路径；FFT 和 Haar 投影有 Parseval 能量守恒及重建测试。
-
-## 跨 ViT 梯度分量发现与因果确认
-
-`cross_vit_components.py` 实现固定的 100 图、seeds `0,1,2`、8 个 ViT/Transformer 目标模型协议。它分析完整攻击在增强平均后、进入 MI 累积前的梯度，并使用两组正交分量：
-
-- `fft:BAND:ORIENTATION`：8 个径向频带乘以 `horizontal/vertical/diagonal`，共 24 个全局分量。
-- `haar:PATH:ROW:COL`：三级 Haar 小波包的 64 条路径乘以 `4x4` 系数区域，共 1024 个局部分量。区域在小波系数域选择，避免直接空间 mask 的频谱泄漏。
-
-完整流程：
-
-```powershell
-python cross_vit_components.py screen --output-dir outputs/cross_vit_components
-python cross_vit_components.py confirm-attacks --output-dir outputs/cross_vit_components --candidate-file outputs/cross_vit_components/selected_candidates.json
-python cross_vit_components.py confirm-evaluate --output-dir outputs/cross_vit_components --candidate-file outputs/cross_vit_components/selected_candidates.json
-python cross_vit_components.py report --output-dir outputs/cross_vit_components --candidate-file outputs/cross_vit_components/selected_candidates.json
-```
-
-也可以直接运行：
-
-```powershell
-bash scripts/run_cross_vit_component_experiment.sh outputs/cross_vit_components
-```
-
-快速协议筛选阶段使用前 15 张图和步骤 `1,10,20,40`，逐目标模型流式计算方向导数、能量归一化方向导数、跨 seed 相干度、目标模型方向一致性和分量能量比例。它从合格 FFT/Haar 分量中确认最高排名的 2 个候选。
-
-确认阶段使用 seeds `0,1` 的 Full 攻击并严格校验图像索引。每个候选运行 `drop` 和 `keep`，最终报告使用后 35 张图做独立确认，对 2 个候选执行 3000 次按 seed、图像、目标模型分层的配对 bootstrap 和 Benjamini-Hochberg FDR。主要产物：
-
-```text
-screening_metrics.npz       # 1048 个候选的紧凑筛选观测
-screening_report.json       # 候选排名、资格条件和筛选显著性
-selected_candidates.json    # 进入因果确认的 2 个候选
-final_report.json           # 后 35 张确认判定和全部 50 张效应量
-```
-## 12 小时内双实验快速协议
-
-严格串行运行 DIM/BG 机制实验与跨 ViT 分量确认：
+## 当前主线
+
+默认参数直接对应 100-image 最强配置：ViT-B/16、`epsilon=16/255`、10 steps、
+10 groups × 2 views、L12 high-score random mask、post-dropout phase pair、kept-only
+opponent-channel noise。
 
 ```bash
-bash scripts/run_dim_bg_then_cross_vit_quick.sh outputs/quick_serial
+python main.py \
+  --max-attacked-samples 100 \
+  --output-dir outputs/attack/patch_score_routing
 ```
 
-协议统一使用 seeds `0,1`。DIM/BG 阶段使用 50 张图、2 次梯度一致性探测，并只运行 6 个核心配置：`background` 下的 `none/full-random/forward-only/full-fixed`，以及 `all` 下的 `none/full-random`，共 12 个 seed-config 运行。它删除人工 `backward-only/backward-fixed` 配置，同时保留前向 DIM、随机平均和背景区域选择的核心对照。DIM/BG 阶段输出 `method_high_frequency_ranking.json` 和 `dim_bg_mechanism_report.json`；跨 ViT 阶段使用 15 张筛选、35 张独立确认、8 个目标模型、top-2 候选和 3000 次 bootstrap，输出 `cross_vit_quick/final_report.json`。总控脚本检查各阶段产物并支持断点续跑，最后生成 `combined_conclusion.md`。RTX 3080 首次完整运行预计约 5.5-11 小时；已完成阶段会按协议校验后跳过。
+主要 phase 参数：
+
+```bash
+--input-diversity-groups 10
+--input-diversity-views-per-group 2
+--input-diversity-phase-shift-set "4,4;8,8;12,12"
+```
+
+## 保留的对照攻击
+
+旧 token dropout（20×1）：
+
+```bash
+python main.py \
+  --attack-method token_patch_dropout \
+  --input-diversity-groups 20 \
+  --input-diversity-views-per-group 1 \
+  --output-dir outputs/attack/token_patch_dropout
+```
+
+通用 pixel patch dropout：
+
+```bash
+python main.py \
+  --attack-method patch_dropout \
+  --guide-aug-copies 20 \
+  --feature-layer -1 \
+  --output-dir outputs/attack/patch_dropout
+```
+
+基础 MI/NI、DIM、TI 可以与 `none`、`patch_dropout` 或 `token_patch_dropout` 组合：
+
+```bash
+python main.py \
+  --attack-method none \
+  --dim --ni --ti-sigma 1.0 \
+  --output-dir outputs/attack/dim_ti_ni
+```
+
+当前 post-dropout phase-pair 主线固定不叠加 DIM。
+
+## 迁移评估
+
+```bash
+python transfer_eval.py \
+  --image-dir outputs/attack/patch_score_routing \
+  --prefix adv_
+```
+
+攻击目录会保存 `attack_params.json`，迁移评估结果记录到 `outputs/csv`。

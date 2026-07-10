@@ -3,12 +3,7 @@ torch==2.1.0
 torchvision>=0.15.0
 timm>=1.0.0
 
-# Data and image processing
-numpy>=1.23.0
+# Data, image processing, and result recording
 Pillow>=9.0.0
 tqdm>=4.64.0
 pandas>=2.0.0
-openpyxl>=3.1.0
-
-# Visualization
-matplotlib>=3.7.0
