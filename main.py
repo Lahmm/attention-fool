@@ -212,6 +212,10 @@ def main(args: argparse.Namespace) -> None:
 
     clear_directory_contents(output_dir)
     attack_all_samples(dataloader, attacker, output_dir, args.max_attacked_samples)
+    (output_dir / "gradient_diagnostics.json").write_text(
+        json.dumps(attacker.gradient_diagnostics_summary(), indent=2),
+        encoding="utf-8",
+    )
 
     params = {
         "attack_method": args.attack_method,

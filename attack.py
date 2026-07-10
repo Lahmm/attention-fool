@@ -171,6 +171,12 @@ class PatchScoreAttacker:
         self.pixel_std = torch.tensor(IMAGENET_STD, device=self.device).view(1, 3, 1, 1)
         self._patch_scores: torch.Tensor | None = None
         self._actual_forward_view_count = 0
+        self._gradient_diagnostics = {
+            "view_cosine_to_final": [],
+            "sign_agreement": [],
+            "effective_rank": [],
+            "mi_cumulative_cosine": [],
+        }
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
 
         if self.attack_method == "original_score_postdrop_phase_pair":
@@ -239,6 +245,49 @@ class PatchScoreAttacker:
             return sign_consensus
 
         return (1.0 - gradient_consensus_lambda) * mean_gradient + gradient_consensus_lambda * sign_consensus
+
+    def _record_gradient_diagnostics(
+        self,
+        view_gradients: torch.Tensor,
+        final_gradient: torch.Tensor,
+    ) -> None:
+        """Record compact, batch-averaged diagnostics without changing gradients."""
+        with torch.no_grad():
+            views = view_gradients.detach().flatten(2).transpose(0, 1)
+            final = final_gradient.detach().flatten(1)
+            view_cosines = F.cosine_similarity(views, final.unsqueeze(1), dim=-1)
+            final_sign = final.sign()
+            view_sign = views.sign()
+            valid = final_sign.ne(0).unsqueeze(1)
+            sign_agreement = (view_sign.eq(final_sign.unsqueeze(1)) & valid).float()
+            sign_denominator = valid.expand_as(sign_agreement).sum().clamp_min(1.0)
+
+            normalized = views / views.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+            gram = torch.bmm(normalized, normalized.transpose(1, 2))
+            eigenvalues = torch.linalg.eigvalsh(gram).clamp_min(0.0)
+            probabilities = eigenvalues / eigenvalues.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+            effective_rank = torch.exp(
+                -(probabilities * probabilities.clamp_min(1e-12).log()).sum(dim=-1)
+            )
+
+            self._gradient_diagnostics["view_cosine_to_final"].append(
+                float(view_cosines.mean().cpu())
+            )
+            self._gradient_diagnostics["sign_agreement"].append(
+                float(sign_agreement.sum().cpu() / sign_denominator.cpu())
+            )
+            self._gradient_diagnostics["effective_rank"].append(
+                float(effective_rank.mean().cpu())
+            )
+
+    def gradient_diagnostics_summary(self) -> dict[str, float | int]:
+        summary: dict[str, float | int] = {
+            "num_gradient_batches": len(self._gradient_diagnostics["effective_rank"]),
+        }
+        for name, values in self._gradient_diagnostics.items():
+            if values:
+                summary[name] = sum(values) / len(values)
+        return summary
 
     @staticmethod
     def _build_ti_kernel(sigma: float) -> torch.Tensor:
@@ -651,11 +700,13 @@ class PatchScoreAttacker:
         if not gradients:
             raise RuntimeError("no attack losses were generated.")
         view_gradients = torch.stack(gradients, dim=0)
-        return self._aggregate_gradients(
+        aggregated = self._aggregate_gradients(
             view_gradients,
             gradient_postprocess=self.gradient_postprocess,
             gradient_consensus_lambda=self.gradient_consensus_lambda,
         )
+        self._record_gradient_diagnostics(view_gradients, aggregated)
+        return aggregated
 
     def attack_batch(self, images: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         images = images.to(self.device)
@@ -694,6 +745,13 @@ class PatchScoreAttacker:
                 update = momentum
             else:
                 update = gradient
+
+            with torch.no_grad():
+                self._gradient_diagnostics["mi_cumulative_cosine"].append(
+                    float(F.cosine_similarity(momentum, gradient, dim=1).mean().cpu())
+                    if self.use_momentum
+                    else 1.0
+                )
 
             adv_pixels = adv_pixels + self.step_size * update.sign()
             delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
