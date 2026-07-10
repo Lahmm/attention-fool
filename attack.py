@@ -121,6 +121,7 @@ class LMDSSAttacker:
         cross_patch_transport_alpha: float = 0.0,
         kept_token_rotation_mode: str = "none",
         kept_token_rotation_alpha: float = 0.0,
+        post_dropout_phase_token_noise: bool = False,
         guide_aug_strength: float = 0.2,
         patch_dropout_ratio: float = 0.3,
         patch_dropout_score_mode: str = "high",
@@ -409,6 +410,7 @@ class LMDSSAttacker:
             raise ValueError(
                 f"kept_token_rotation_alpha must be non-negative, got {kept_token_rotation_alpha}."
             )
+        self.post_dropout_phase_token_noise = bool(post_dropout_phase_token_noise)
         self._actual_forward_view_count = 0
         self.patch_dropout_ratio = float(patch_dropout_ratio)
         if not 0.0 <= self.patch_dropout_ratio <= 1.0:
@@ -1731,6 +1733,62 @@ class LMDSSAttacker:
             .repeat_interleave(patch_w, dim=-1)
         )
 
+    @staticmethod
+    def _image_mask_to_patch_drop_mask(
+        image_mask: torch.Tensor,
+        num_patches: int,
+    ) -> torch.Tensor:
+        """Convert a pixel dropout mask back to token-grid dropped positions."""
+        grid_size = int(round(num_patches ** 0.5))
+        if grid_size * grid_size != num_patches:
+            raise ValueError(f"Expected a square patch grid, got {num_patches} patches.")
+        height, width = image_mask.shape[-2:]
+        if height % grid_size or width % grid_size:
+            raise ValueError(
+                f"Image mask shape {height}x{width} is not divisible by patch grid {grid_size}x{grid_size}."
+            )
+        patch_h, patch_w = height // grid_size, width // grid_size
+        pooled = F.avg_pool2d(image_mask, kernel_size=(patch_h, patch_w), stride=(patch_h, patch_w))
+        return pooled.flatten(1).gt(0.5)
+
+    def _attack_loss_for_original_score_postdrop_phase_view(
+        self,
+        pixels: torch.Tensor,
+        labels: torch.Tensor,
+        drop_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Run a dropped-image view, optionally adding noise only to kept tokens."""
+        if self.attack_loss != "logits":
+            raise ValueError("original_score_postdrop_phase_pair currently supports logits loss only.")
+        base_model = getattr(self.model, "model", None)
+        required = ("patch_embed", "_pos_embed", "patch_drop", "norm_pre", "blocks", "norm", "forward_head")
+        if base_model is None or any(not hasattr(base_model, name) for name in required):
+            raise ValueError("original_score_postdrop_phase_pair requires a ViT-style timm model.")
+
+        x = base_model.patch_embed(self._normalize(pixels))
+        x = base_model._pos_embed(x)
+        x = base_model.patch_drop(x)
+        x = base_model.norm_pre(x)
+        if x.ndim != 3 or x.size(1) != drop_mask.size(1) + 1:
+            raise ValueError(
+                f"Drop mask has {drop_mask.size(1)} patches but token tensor is {tuple(x.shape)}."
+            )
+        cls_token = x[:, :1, :]
+        patch_tokens = x[:, 1:, :]
+        if self.post_dropout_phase_token_noise:
+            token_noise = self._token_patch_dropout_noise(patch_tokens, base_model)
+            kept_mask = ~drop_mask
+            patch_tokens = torch.where(
+                kept_mask.unsqueeze(-1),
+                patch_tokens + token_noise,
+                patch_tokens,
+            )
+        x = torch.cat((cls_token, patch_tokens), dim=1)
+        x = self._run_vit_blocks(base_model.blocks, x, 0, len(base_model.blocks))
+        x = base_model.norm(x)
+        logits = base_model.forward_head(x)
+        return F.cross_entropy(logits, labels)
+
     def _iter_original_score_postdrop_phase_pair(
         self,
         pixels: torch.Tensor,
@@ -1762,8 +1820,16 @@ class LMDSSAttacker:
                     if view_idx == 1
                     else dropped_pixels
                 )
+                current_drop_mask = (
+                    self._image_mask_to_patch_drop_mask(
+                        self._apply_phase_shift(image_mask, *phase),
+                        drop_mask.size(1),
+                    )
+                    if view_idx == 1
+                    else drop_mask
+                )
                 self._actual_forward_view_count += 1
-                yield current_pixels
+                yield current_pixels, current_drop_mask
 
     def _attack_loss_for_token_patch_dropout(
         self,
@@ -1957,8 +2023,12 @@ class LMDSSAttacker:
             return
 
         if self.guide_aug and "original_score_postdrop_phase_pair" in self.guide_aug_methods:
-            for view_pixels in self._iter_original_score_postdrop_phase_pair(pixels, labels):
-                yield self._attack_loss_for_pixels(view_pixels, labels, clean_feature_target)
+            for view_pixels, view_drop_mask in self._iter_original_score_postdrop_phase_pair(pixels, labels):
+                yield self._attack_loss_for_original_score_postdrop_phase_view(
+                    view_pixels,
+                    labels,
+                    view_drop_mask,
+                )
             return
 
         if self.guide_aug and "token_patch_dropout" in self.guide_aug_methods:

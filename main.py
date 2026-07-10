@@ -46,6 +46,7 @@ def create_attacker(
     cross_patch_transport_alpha: float = 0.0,
     kept_token_rotation_mode: str = "none",
     kept_token_rotation_alpha: float = 0.0,
+    post_dropout_phase_token_noise: bool = False,
     guide_aug_strength: float = 0.2,
     patch_dropout_ratio: float = 0.3,
     patch_dropout_score_mode: str = "high",
@@ -116,6 +117,7 @@ def create_attacker(
         cross_patch_transport_alpha=cross_patch_transport_alpha,
         kept_token_rotation_mode=kept_token_rotation_mode,
         kept_token_rotation_alpha=kept_token_rotation_alpha,
+        post_dropout_phase_token_noise=post_dropout_phase_token_noise,
         guide_aug_strength=guide_aug_strength,
         patch_dropout_ratio=patch_dropout_ratio,
         patch_dropout_score_mode=patch_dropout_score_mode,
@@ -335,6 +337,8 @@ def parse_args():
                         help="Kept-token orthogonal channel residual rotation mode (方案四).")
     parser.add_argument("--kept-token-rotation-alpha", type=float, default=0.0,
                         help="Alpha strength for kept-token rotation (方案四).")
+    parser.add_argument("--post-dropout-phase-token-noise", action="store_true",
+                        help="Inject token noise only at kept tokens in original_score_postdrop_phase_pair.")
     parser.add_argument("--guide-aug-strength", type=float, default=0.2, help="Guide augmentation strength.")
     parser.add_argument("--patch-dropout-ratio", type=float, default=0.3, help="Fraction of selected patch-score subset to randomly drop per copy (0-1].")
     parser.add_argument("--patch-dropout-score-mode", choices=["high", "low", "all"], default="high", help="Patch score subset used by patch_dropout: high drops patches above median, low drops patches below median, all drops uniformly at random.")
@@ -420,6 +424,7 @@ def main(
     cross_patch_transport_alpha: float = 0.0,
     kept_token_rotation_mode: str = "none",
     kept_token_rotation_alpha: float = 0.0,
+    post_dropout_phase_token_noise: bool = False,
     guide_aug_strength: float = 0.2,
     patch_dropout_ratio: float = 0.3,
     patch_dropout_score_mode: str = "high",
@@ -510,6 +515,7 @@ def main(
         cross_patch_transport_alpha=cross_patch_transport_alpha,
         kept_token_rotation_mode=kept_token_rotation_mode,
         kept_token_rotation_alpha=kept_token_rotation_alpha,
+        post_dropout_phase_token_noise=post_dropout_phase_token_noise,
         guide_aug_strength=guide_aug_strength,
         patch_dropout_ratio=patch_dropout_ratio,
         patch_dropout_score_mode=patch_dropout_score_mode,
@@ -600,6 +606,7 @@ def main(
         "cross_patch_transport_alpha": cross_patch_transport_alpha,
         "kept_token_rotation_mode": kept_token_rotation_mode,
         "kept_token_rotation_alpha": kept_token_rotation_alpha,
+        "post_dropout_phase_token_noise": post_dropout_phase_token_noise,
         "guide_aug_strength": guide_aug_strength,
         "patch_dropout_ratio": patch_dropout_ratio,
         "patch_dropout_score_mode": patch_dropout_score_mode,
@@ -660,6 +667,7 @@ if __name__ == "__main__":
         cross_patch_transport_alpha=args.cross_patch_transport_alpha,
         kept_token_rotation_mode=args.kept_token_rotation_mode,
         kept_token_rotation_alpha=args.kept_token_rotation_alpha,
+        post_dropout_phase_token_noise=args.post_dropout_phase_token_noise,
         guide_aug_strength=args.guide_aug_strength,
         patch_dropout_ratio=args.patch_dropout_ratio,
         patch_dropout_score_mode=args.patch_dropout_score_mode,
