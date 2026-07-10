@@ -1465,6 +1465,35 @@ class FeatureAttackTests(unittest.TestCase):
         flat_mean = torch.stack(term_grads, dim=0).mean(dim=0)
         self.assertTrue(torch.allclose(grad, flat_mean, atol=1e-6, rtol=1e-6))
 
+    def test_original_score_postdrop_phase_pair_uses_shared_pixel_mask_and_20_view_budget(self):
+        torch.manual_seed(47)
+        attacker = LMDSSAttacker(
+            TinyTimmViTWrapper(), epsilon=0.1, steps=2, ti_sigma=0,
+            device=torch.device("cpu"), guide_aug=True,
+            guide_aug_methods=("original_score_postdrop_phase_pair",),
+            input_diversity_groups=2, input_diversity_views_per_group=2,
+            input_diversity_phase_shift=(2, 2), feature_layer=3,
+            patch_dropout_ratio=0.5, patch_dropout_score_mode="high",
+            token_score_cls_noise=False, patch_dropout_noise_mode="gaussian",
+        )
+        pixels = torch.rand(1, 3, 12, 12, requires_grad=True)
+        labels = torch.tensor([0])
+        losses = list(attacker._iter_attack_losses(pixels, labels))
+        self.assertEqual(len(losses), 4)
+        self.assertEqual(attacker._actual_forward_view_count, 4)
+        gradients = [
+            torch.autograd.grad(loss, pixels, retain_graph=index < len(losses) - 1)[0]
+            for index, loss in enumerate(losses)
+        ]
+        self.assertTrue(all(torch.isfinite(gradient).all() for gradient in gradients))
+        self.assertFalse(torch.allclose(gradients[0], gradients[1]))
+
+    def test_patch_drop_mask_to_image_expands_square_patch_mask(self):
+        drop_mask = torch.tensor([[True, False, False, False]], dtype=torch.bool)
+        image_mask = LMDSSAttacker._patch_drop_mask_to_image(drop_mask, 8, 8)
+        self.assertEqual(tuple(image_mask.shape), (1, 1, 8, 8))
+        self.assertEqual(float(image_mask.sum()), 16.0)
+
     def test_pair_difference_with_lambda_modifies_gradient(self):
         torch.manual_seed(42)
         attacker = LMDSSAttacker(

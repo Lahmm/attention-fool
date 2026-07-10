@@ -340,6 +340,7 @@ class LMDSSAttacker:
             "patch_dropout_cls_jitter",
             "patch_token_dropout_mix",
             "token_patch_dropout",
+            "original_score_postdrop_phase_pair",
         )
         if not self.guide_aug_methods:
             raise ValueError("guide_aug_methods must contain at least one method.")
@@ -1670,6 +1671,94 @@ class LMDSSAttacker:
             return self.token_cls_noise_strength * token_rms * cls_raw.unsqueeze(1)
         return self.token_cls_noise_strength * token_rms * torch.randn_like(patch_tokens[:, :1, :])
 
+    def _compute_original_l12_drop_mask(self, pixels: torch.Tensor) -> torch.Tensor:
+        """Compute one detached L12 score mask from the unshifted original image."""
+        base_model = getattr(self.model, "model", None)
+        required = ("patch_embed", "_pos_embed", "patch_drop", "norm_pre", "blocks")
+        if base_model is None or any(not hasattr(base_model, name) for name in required):
+            raise ValueError("original_score_postdrop_phase_pair requires a ViT-style timm model.")
+
+        num_blocks = len(base_model.blocks)
+        score_layer_idx = self.feature_layer if self.feature_layer >= 0 else num_blocks + self.feature_layer
+        if score_layer_idx != num_blocks:
+            raise ValueError(
+                "original_score_postdrop_phase_pair requires feature_layer to select the final layer "
+                f"({num_blocks}), got {self.feature_layer}."
+            )
+
+        with torch.no_grad():
+            x = base_model.patch_embed(self._normalize(pixels))
+            x = base_model._pos_embed(x)
+            x = base_model.patch_drop(x)
+            x = base_model.norm_pre(x)
+            if x.ndim != 3 or x.size(1) < 2:
+                raise ValueError(f"Expected CLS + patch tokens at L=0, got {tuple(x.shape)}.")
+            x_score = self._run_vit_blocks(base_model.blocks, x, 0, num_blocks)
+            cls_score = x_score[:, :1, :]
+            patch_score = x_score[:, 1:, :]
+            score_cls = cls_score
+            if self.token_score_cls_mode == "gaussian":
+                score_cls = torch.randn_like(cls_score)
+                score_cls = score_cls / score_cls.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+                score_cls = score_cls * cls_score.norm(dim=-1, keepdim=True)
+            if self.token_score_cls_noise and self.token_cls_noise_strength > 0:
+                score_cls = score_cls + self._make_cls_noise(patch_score)
+            if self.token_score_patch_noise and self.guide_aug_strength > 0:
+                patch_score = patch_score + self._token_patch_dropout_noise(patch_score, base_model)
+            scores = F.cosine_similarity(patch_score, score_cls.expand_as(patch_score), dim=-1)
+            candidate_mask = self._patch_score_candidate_mask(scores)
+            return self._sample_patch_dropout_mask(scores, candidate_mask).detach()
+
+    @staticmethod
+    def _patch_drop_mask_to_image(
+        drop_mask: torch.Tensor,
+        height: int,
+        width: int,
+    ) -> torch.Tensor:
+        """Expand a square patch mask into a pixel mask with shape [B,1,H,W]."""
+        num_patches = drop_mask.size(1)
+        grid_size = int(round(num_patches ** 0.5))
+        if grid_size * grid_size != num_patches or height % grid_size or width % grid_size:
+            raise ValueError(
+                "Pixel patch dropout requires a square divisible grid, "
+                f"got patches={num_patches}, image={height}x{width}."
+            )
+        patch_h, patch_w = height // grid_size, width // grid_size
+        return (
+            drop_mask.view(drop_mask.size(0), 1, grid_size, grid_size)
+            .to(dtype=torch.float32)
+            .repeat_interleave(patch_h, dim=-2)
+            .repeat_interleave(patch_w, dim=-1)
+        )
+
+    def _iter_original_score_postdrop_phase_pair(
+        self,
+        pixels: torch.Tensor,
+        labels: torch.Tensor,
+    ):
+        """Yield two forward losses sharing an original-image pixel dropout mask."""
+        del labels
+        if self.input_diversity_views_per_group != 2:
+            raise ValueError(
+                "original_score_postdrop_phase_pair requires input_diversity_views_per_group=2."
+            )
+        if self.input_diversity_groups * self.input_diversity_views_per_group > 20:
+            raise ValueError("original_score_postdrop_phase_pair exceeds the 20-view budget.")
+        if self.input_diversity:
+            raise ValueError(
+                "original_score_postdrop_phase_pair does not support DIM in the first isolated implementation."
+            )
+
+        for group_idx in range(self.input_diversity_groups):
+            drop_mask = self._compute_original_l12_drop_mask(pixels)
+            image_mask = self._patch_drop_mask_to_image(drop_mask, pixels.size(-2), pixels.size(-1))
+            dropped_pixels = pixels * (1.0 - image_mask.to(dtype=pixels.dtype, device=pixels.device))
+            phase = self._pick_input_diversity_phase(group_idx)
+            view_pixels = (dropped_pixels, self._apply_phase_shift(dropped_pixels, *phase))
+            for current_pixels in view_pixels:
+                self._actual_forward_view_count += 1
+                yield current_pixels
+
     def _attack_loss_for_token_patch_dropout(
         self,
         pixels: torch.Tensor,
@@ -1780,6 +1869,13 @@ class LMDSSAttacker:
         labels: torch.Tensor,
         clean_feature_target: torch.Tensor | None = None,
     ):
+        if (
+            "original_score_postdrop_phase_pair" in self.guide_aug_methods
+            and len(self.guide_aug_methods) != 1
+        ):
+            raise ValueError(
+                "original_score_postdrop_phase_pair must be used as the only guide augmentation method."
+            )
         special_methods = {
             "feature_trajectory_dropout",
             "dim_consensus_trajectory",
@@ -1852,6 +1948,11 @@ class LMDSSAttacker:
                         yield self._attack_loss_for_pixels(forward_pixels, labels, clean_feature_target)
                     if method == "patch_dropout":
                         self._patch_dropout_antithetic_noise = None
+            return
+
+        if self.guide_aug and "original_score_postdrop_phase_pair" in self.guide_aug_methods:
+            for view_pixels in self._iter_original_score_postdrop_phase_pair(pixels, labels):
+                yield self._attack_loss_for_pixels(view_pixels, labels, clean_feature_target)
             return
 
         if self.guide_aug and "token_patch_dropout" in self.guide_aug_methods:
