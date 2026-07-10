@@ -122,6 +122,7 @@ class LMDSSAttacker:
         token_patch_dropout_layer: int = 0,
         token_cls_noise: bool = False,
         token_score_cls_noise: bool = False,
+        token_score_cls_mode: str = "learned",
         token_score_patch_noise: bool = False,
         token_cls_noise_mode: str = "gaussian",
         token_cls_noise_strength: float | None = None,
@@ -401,6 +402,12 @@ class LMDSSAttacker:
         self.token_patch_dropout_layer = int(token_patch_dropout_layer)
         self.token_cls_noise = bool(token_cls_noise)
         self.token_score_cls_noise = bool(token_score_cls_noise)
+        self.token_score_cls_mode = str(token_score_cls_mode)
+        if self.token_score_cls_mode not in ("learned", "gaussian"):
+            raise ValueError(
+                "token_score_cls_mode must be 'learned' or 'gaussian', "
+                f"got {token_score_cls_mode!r}."
+            )
         self.token_score_patch_noise = bool(token_score_patch_noise)
         self.token_cls_noise_mode = str(token_cls_noise_mode)
         if self.token_cls_noise_mode not in ("gaussian", "mahalanobis"):
@@ -1442,8 +1449,13 @@ class LMDSSAttacker:
             cls_score = x[:, :1, :].detach()
             patch_score = x[:, 1:, :].detach()
         score_cls = cls_score
+        if self.token_score_cls_mode == "gaussian":
+            # Isolate the learned CLS direction while preserving its per-sample norm.
+            score_cls = torch.randn_like(cls_score)
+            score_cls = score_cls / score_cls.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+            score_cls = score_cls * cls_score.norm(dim=-1, keepdim=True)
         if self.token_score_cls_noise and self.token_cls_noise_strength > 0:
-            score_cls = cls_score + self._make_cls_noise(patch_score)
+            score_cls = score_cls + self._make_cls_noise(patch_score)
         if self.token_score_patch_noise and self.guide_aug_strength > 0:
             patch_score = patch_score + self._token_patch_dropout_noise(patch_score, base_model)
         scores = F.cosine_similarity(patch_score, score_cls.expand_as(patch_score), dim=-1)

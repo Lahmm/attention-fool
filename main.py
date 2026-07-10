@@ -47,6 +47,7 @@ def create_attacker(
     token_patch_dropout_layer: int = 0,
     token_cls_noise: bool = False,
     token_score_cls_noise: bool = False,
+    token_score_cls_mode: str = "learned",
     token_score_patch_noise: bool = False,
     token_cls_noise_mode: str = "gaussian",
     token_cls_noise_strength: float | None = None,
@@ -106,6 +107,7 @@ def create_attacker(
         token_patch_dropout_layer=token_patch_dropout_layer,
         token_cls_noise=token_cls_noise,
         token_score_cls_noise=token_score_cls_noise,
+        token_score_cls_mode=token_score_cls_mode,
         token_score_patch_noise=token_score_patch_noise,
         token_cls_noise_mode=token_cls_noise_mode,
         token_cls_noise_strength=token_cls_noise_strength,
@@ -278,6 +280,7 @@ def parse_args():
     parser.add_argument("--token-patch-dropout-layer", type=int, default=0, help="Transformer block count to run before token_patch_dropout injection. 0 injects after patch embedding.")
     parser.add_argument("--token-cls-noise", action="store_true", help="Add guide-strength Gaussian jitter to the CLS token in token_patch_dropout.")
     parser.add_argument("--token-score-cls-noise", action="store_true", help="Use the jittered CLS token when scoring patches in token_patch_dropout.")
+    parser.add_argument("--token-score-cls-mode", choices=["learned", "gaussian"], default="learned", help="CLS direction used only for token_patch_dropout scoring.")
     parser.add_argument("--token-score-patch-noise", action="store_true", help="Use noisy patch tokens when scoring patches in token_patch_dropout.")
     parser.add_argument("--token-cls-noise-mode", choices=["gaussian", "mahalanobis"], default="gaussian", help="Noise distribution for CLS token jitter. mahalanobis uses patch-token empirical covariance.")
     parser.add_argument("--token-cls-noise-strength", type=float, default=None, help="CLS noise strength override. Defaults to --guide-aug-strength when not set.")
@@ -352,6 +355,7 @@ def main(
     token_patch_dropout_layer: int = 0,
     token_cls_noise: bool = False,
     token_score_cls_noise: bool = False,
+    token_score_cls_mode: str = "learned",
     token_score_patch_noise: bool = False,
     token_cls_noise_mode: str = "gaussian",
     token_cls_noise_strength: float | None = None,
@@ -431,6 +435,7 @@ def main(
         token_patch_dropout_layer=token_patch_dropout_layer,
         token_cls_noise=token_cls_noise,
         token_score_cls_noise=token_score_cls_noise,
+        token_score_cls_mode=token_score_cls_mode,
         token_score_patch_noise=token_score_patch_noise,
         token_cls_noise_mode=token_cls_noise_mode,
         token_cls_noise_strength=token_cls_noise_strength,
@@ -505,6 +510,7 @@ def main(
         "token_patch_dropout_layer": token_patch_dropout_layer,
         "token_cls_noise": token_cls_noise,
         "token_score_cls_noise": token_score_cls_noise,
+        "token_score_cls_mode": token_score_cls_mode,
         "token_score_patch_noise": token_score_patch_noise,
         "dim_adjoint_echo": dim_adjoint_echo,
         "attack_loss": attack_loss,
@@ -554,6 +560,7 @@ if __name__ == "__main__":
         token_patch_dropout_layer=args.token_patch_dropout_layer,
         token_cls_noise=args.token_cls_noise,
         token_score_cls_noise=args.token_score_cls_noise,
+        token_score_cls_mode=args.token_score_cls_mode,
         token_score_patch_noise=args.token_score_patch_noise,
         token_cls_noise_mode=args.token_cls_noise_mode,
         token_cls_noise_strength=args.token_cls_noise_strength,
