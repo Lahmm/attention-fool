@@ -7,7 +7,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from attack import ATTACK_METHODS, PatchScoreAttacker
+from attack import ATTACK_METHODS, GRADIENT_POSTPROCESS_MODES, PatchScoreAttacker
 from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, build_whitebox_model
 from utils import DEVICE, load_data, save_adversarial_images
 
@@ -109,7 +109,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epsilon", type=float, default=16.0 / 255.0)
     parser.add_argument("--step-size", type=float, default=None)
     parser.add_argument("--steps", type=int, default=10)
-
+    parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--mi", dest="mi", action="store_true")
     parser.add_argument("--no-mi", dest="mi", action="store_false")
     parser.set_defaults(mi=True)
@@ -118,33 +118,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ti-sigma", type=float, default=0.0)
     parser.add_argument("--dim", action="store_true")
     parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0))
-
     parser.add_argument("--guide-aug-copies", type=int, default=20)
     parser.add_argument("--input-diversity-groups", type=int, default=10)
     parser.add_argument("--input-diversity-views-per-group", type=int, default=2)
     parser.add_argument("--input-diversity-phase-shift", type=parse_phase_shift, default=(0, 0))
-    parser.add_argument(
-        "--input-diversity-phase-shift-set",
-        type=parse_phase_shift_set,
-        default=((4, 4), (8, 8), (12, 12)),
-    )
-
+    parser.add_argument("--input-diversity-phase-shift-set", type=parse_phase_shift_set, default=((4, 4), (8, 8), (12, 12)))
     parser.add_argument("--guide-aug-strength", type=float, default=0.2)
     parser.add_argument("--patch-dropout-ratio", type=float, default=0.3)
     parser.add_argument("--patch-dropout-score-mode", choices=("high", "low", "all"), default="high")
-    parser.add_argument(
-        "--patch-dropout-sampling-mode",
-        choices=("random", "bernoulli", "extreme", "score_weighted"),
-        default="random",
-    )
+    parser.add_argument("--patch-dropout-sampling-mode", choices=("random", "bernoulli", "extreme", "score_weighted"), default="random")
     parser.add_argument("--patch-dropout-score-quantile-jitter", type=float, default=0.0)
     parser.add_argument("--patch-dropout-score-noise", type=float, default=0.0)
-    parser.add_argument(
-        "--patch-dropout-noise-mode",
-        choices=("gaussian", "opponent_channel_gaussian"),
-        default="opponent_channel_gaussian",
-    )
-
+    parser.add_argument("--patch-dropout-noise-mode", choices=("gaussian", "opponent_channel_gaussian"), default="opponent_channel_gaussian")
     parser.add_argument("--token-cls-noise", action="store_true")
     parser.add_argument("--token-score-cls-noise", dest="token_score_cls_noise", action="store_true")
     parser.add_argument("--no-token-score-cls-noise", dest="token_score_cls_noise", action="store_false")
@@ -153,19 +138,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--token-score-patch-noise", action="store_true")
     parser.add_argument("--token-cls-noise-mode", choices=("gaussian", "mahalanobis"), default="gaussian")
     parser.add_argument("--token-cls-noise-strength", type=float, default=None)
-    parser.add_argument(
-        "--post-dropout-phase-token-noise",
-        dest="post_dropout_phase_token_noise",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--no-post-dropout-phase-token-noise",
-        dest="post_dropout_phase_token_noise",
-        action="store_false",
-    )
+    parser.add_argument("--post-dropout-phase-token-noise", dest="post_dropout_phase_token_noise", action="store_true")
+    parser.add_argument("--no-post-dropout-phase-token-noise", dest="post_dropout_phase_token_noise", action="store_false")
     parser.set_defaults(post_dropout_phase_token_noise=True)
     parser.add_argument("--feature-layer", type=int, default=12)
-
+    parser.add_argument(
+        "--gradient-postprocess",
+        choices=GRADIENT_POSTPROCESS_MODES,
+        default="mean",
+    )
+    parser.add_argument("--gradient-consensus-lambda", type=float, default=0.2)
     parser.add_argument("--image-dir", default=IMAGE_DIR)
     parser.add_argument("--annotations-path", default=ANNOTATIONS_PATH)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -176,6 +158,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def main(args: argparse.Namespace) -> None:
+    if args.seed is not None:
+        import torch
+
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
     output_dir = validate_output_dir(args.output_dir)
     dataloader, num_classes = load_data(
         image_dir_arg=args.image_dir,
@@ -217,6 +205,8 @@ def main(args: argparse.Namespace) -> None:
         token_cls_noise_strength=args.token_cls_noise_strength,
         post_dropout_phase_token_noise=args.post_dropout_phase_token_noise,
         feature_layer=args.feature_layer,
+        gradient_postprocess=args.gradient_postprocess,
+        gradient_consensus_lambda=args.gradient_consensus_lambda,
         device=DEVICE,
     )
 
@@ -230,6 +220,7 @@ def main(args: argparse.Namespace) -> None:
         "epsilon": args.epsilon,
         "step_size": args.step_size if args.step_size is not None else args.epsilon / args.steps,
         "steps": args.steps,
+        "seed": args.seed,
         "mi": args.mi,
         "mi_decay": args.mi_decay,
         "ni": args.ni,
@@ -263,6 +254,8 @@ def main(args: argparse.Namespace) -> None:
         ),
         "post_dropout_phase_token_noise": args.post_dropout_phase_token_noise,
         "feature_layer": args.feature_layer,
+        "gradient_postprocess": args.gradient_postprocess,
+        "gradient_consensus_lambda": args.gradient_consensus_lambda,
     }
     (output_dir / "attack_params.json").write_text(
         json.dumps(params, indent=2, ensure_ascii=False),

@@ -14,6 +14,12 @@ ATTACK_METHODS = (
     "token_patch_dropout",
     "original_score_postdrop_phase_pair",
 )
+GRADIENT_POSTPROCESS_MODES = (
+    "mean",
+    "view_l2_mean",
+    "sign_consensus",
+    "sign_consensus_transport",
+)
 
 
 class PatchScoreAttacker:
@@ -57,6 +63,8 @@ class PatchScoreAttacker:
         token_cls_noise_strength: float | None = None,
         post_dropout_phase_token_noise: bool = True,
         feature_layer: int = 12,
+        gradient_postprocess: str = "mean",
+        gradient_consensus_lambda: float = 0.2,
         device: torch.device | None = None,
     ) -> None:
         if epsilon < 0:
@@ -108,6 +116,13 @@ class PatchScoreAttacker:
             raise ValueError("token_score_cls_mode must be learned or gaussian.")
         if token_cls_noise_mode not in ("gaussian", "mahalanobis"):
             raise ValueError("token_cls_noise_mode must be gaussian or mahalanobis.")
+        if gradient_postprocess not in GRADIENT_POSTPROCESS_MODES:
+            raise ValueError(
+                "gradient_postprocess must be one of "
+                f"{GRADIENT_POSTPROCESS_MODES}, got {gradient_postprocess!r}."
+            )
+        if not 0.0 <= gradient_consensus_lambda <= 1.0:
+            raise ValueError("gradient_consensus_lambda must be in [0, 1].")
 
         self.model = model
         self.model.eval()
@@ -150,6 +165,8 @@ class PatchScoreAttacker:
         )
         self.post_dropout_phase_token_noise = bool(post_dropout_phase_token_noise)
         self.feature_layer = int(feature_layer)
+        self.gradient_postprocess = gradient_postprocess
+        self.gradient_consensus_lambda = float(gradient_consensus_lambda)
         self.pixel_mean = torch.tensor(IMAGENET_MEAN, device=self.device).view(1, 3, 1, 1)
         self.pixel_std = torch.tensor(IMAGENET_STD, device=self.device).view(1, 3, 1, 1)
         self._patch_scores: torch.Tensor | None = None
@@ -171,6 +188,57 @@ class PatchScoreAttacker:
     @staticmethod
     def _normalize_grad(grad: torch.Tensor) -> torch.Tensor:
         return grad / grad.abs().mean(dim=(1, 2, 3), keepdim=True).clamp_min(1e-12)
+
+    @staticmethod
+    def _l2_normalize_view_gradients(view_gradients: torch.Tensor) -> torch.Tensor:
+        """Normalize each view and sample independently over C/H/W."""
+        if view_gradients.ndim != 5:
+            raise ValueError(
+                "view_gradients must have shape [num_views, batch, channels, height, width]."
+            )
+        norms = view_gradients.flatten(start_dim=2).norm(p=2, dim=2, keepdim=True)
+        return view_gradients / norms.clamp_min(1e-12).view(*norms.shape[:2], 1, 1, 1)
+
+    @classmethod
+    def _aggregate_gradients(
+        cls,
+        view_gradients: torch.Tensor,
+        gradient_postprocess: str = "mean",
+        gradient_consensus_lambda: float = 0.2,
+    ) -> torch.Tensor:
+        """Aggregate independent view gradients before the existing grad pipeline.
+
+        The default is intentionally the exact stack-and-mean operation used by the
+        original mainline. All other modes normalize views independently first.
+        """
+        if gradient_postprocess not in GRADIENT_POSTPROCESS_MODES:
+            raise ValueError(
+                "gradient_postprocess must be one of "
+                f"{GRADIENT_POSTPROCESS_MODES}, got {gradient_postprocess!r}."
+            )
+        if not 0.0 <= gradient_consensus_lambda <= 1.0:
+            raise ValueError("gradient_consensus_lambda must be in [0, 1].")
+        if view_gradients.ndim != 5:
+            raise ValueError(
+                "view_gradients must have shape [num_views, batch, channels, height, width]."
+            )
+        if view_gradients.size(0) == 0:
+            raise ValueError("view_gradients must contain at least one view.")
+
+        mean_gradient = view_gradients.mean(dim=0)
+        if gradient_postprocess == "mean":
+            return mean_gradient
+
+        normalized = cls._l2_normalize_view_gradients(view_gradients)
+        l2_mean = normalized.mean(dim=0)
+        if gradient_postprocess == "view_l2_mean":
+            return l2_mean
+
+        sign_consensus = torch.sign(torch.sign(normalized).mean(dim=0))
+        if gradient_postprocess == "sign_consensus":
+            return sign_consensus
+
+        return (1.0 - gradient_consensus_lambda) * mean_gradient + gradient_consensus_lambda * sign_consensus
 
     @staticmethod
     def _build_ti_kernel(sigma: float) -> torch.Tensor:
@@ -582,7 +650,12 @@ class PatchScoreAttacker:
             gradients.append(torch.autograd.grad(loss, pixels, retain_graph=False)[0])
         if not gradients:
             raise RuntimeError("no attack losses were generated.")
-        return torch.stack(gradients).mean(dim=0)
+        view_gradients = torch.stack(gradients, dim=0)
+        return self._aggregate_gradients(
+            view_gradients,
+            gradient_postprocess=self.gradient_postprocess,
+            gradient_consensus_lambda=self.gradient_consensus_lambda,
+        )
 
     def attack_batch(self, images: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         images = images.to(self.device)
