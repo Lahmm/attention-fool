@@ -50,12 +50,13 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 
 ## 幅值与频率的关系
 
-本轮共筛选 79 个 30 样本候选，覆盖：
+本轮共筛选 84 个 30 样本候选，覆盖：
 
 - 幅值分位删除、极值裁剪、幅值幂放大/压缩；
 - 坐标和 group Wiener/可靠性/幅值均衡；
 - 保留原始幅值的跨-view 符号可靠性 boost/gate；
 - 跨-view 中心化梯度的 PCA 主方向传输；
+- 20-view Gram 矩阵广义最小方差（GLS）组合；
 - 固定高频增益、频率 Wiener、频谱幅值幂变换；
 - 高频共享/残差成分放大；
 - patch/local spatial energy equalization；
@@ -116,6 +117,8 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 最后测试的 `sign_reliability` 使用 `abs(mean_v sign(g_v))` 作为坐标可靠性，对原始均值做 boost 或 gate。boost 只产生少量离散模型变化，gate 在多个 ViT 上下降，因此没有进入 100 样本确认。
 
 PCA 主方向传输同样没有通过筛选。最大跨-view 方差方向并不是迁移方向；把它与均值相加会把增强 view 的多样性误当成有效共享信号。
+
+GLS 组合在小 ridge 下显著降低多个 ViT，较大 ridge 只逐渐恢复到 mean。因而“最小 view 方差”也不是迁移共享子空间；迁移需要保留一部分 view 多样性，不能简单优化 view 间稳定性。
 
 ## 下一步方向
 
