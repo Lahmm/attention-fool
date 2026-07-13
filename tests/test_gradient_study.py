@@ -9,6 +9,7 @@ from gradient_study import (
     AmplitudePowerProbe,
     CoordinateWienerProbe,
     CrossScaleCovarianceProbe,
+    CrossScaleCanonicalProbe,
     CovarianceTransportProbe,
     EnergyEqualizationProbe,
     FrequencyGainProbe,
@@ -278,6 +279,15 @@ class GradientProbeTests(unittest.TestCase):
             result = CrossScaleCovarianceProbe(mode, 0.0).apply(views, ["a"], 0)
             self.assertTrue(torch.allclose(result, mean, atol=1e-5, rtol=1e-5))
 
+    def test_cross_scale_canonical_probe_shape_and_zero_identity(self):
+        views = torch.randn(20, 1, 1, 16, 16)
+        mean = views.mean(0)
+        result = CrossScaleCanonicalProbe(0.25).apply(views, ["a"], 0)
+        self.assertEqual(result.shape, views.shape[1:])
+        self.assertTrue(torch.isfinite(result).all())
+        identity = CrossScaleCanonicalProbe(0.0).apply(views, ["a"], 0)
+        self.assertTrue(torch.allclose(identity, mean, atol=1e-5, rtol=1e-5))
+
     def test_covariance_transport_uses_structured_view_variation(self):
         views = torch.tensor(
             [
@@ -327,6 +337,7 @@ class GradientProbeTests(unittest.TestCase):
             "spectral_amplitude_power150",
             "spectral_phase_consensus_a050",
             "cross_scale_replace_c50_a025",
+            "cross_scale_canonical_c50_a025",
             "covariance_transport_view_a25",
             "covariance_transport_group_a50",
             "group_reliability_t20",

@@ -803,6 +803,83 @@ class CrossScaleCovarianceProbe:
 
 
 @dataclass
+class CrossScaleCanonicalProbe:
+    """Replace high-frequency content with the top low/high CCA direction.
+
+    The 20 views are treated as repeated observations.  After removing each
+    band's view mean and normalizing each residual view, the SVD of the
+    low/high cross-view cosine matrix gives the strongest cross-scale coupled
+    direction.  This is a low-rank mathematical intervention, not a radial
+    frequency heuristic.
+    """
+
+    strength: float
+    cutoff: float = 0.50
+
+    @property
+    def name(self) -> str:
+        return (
+            f"cross_scale_canonical_c{int(round(self.cutoff * 100)):02d}"
+            f"_a{int(round(self.strength * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("cross-scale canonical strength must be in [0, 1].")
+        if not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("cross-scale canonical cutoff must be in (0, 1].")
+        mean = view_gradients.mean(dim=0)
+        height, width = mean.shape[-2:]
+        radius = _frequency_radius(height, width, mean.device)
+        low_mask = radius <= radius.max() * self.cutoff
+        spectra = torch.fft.fftshift(
+            torch.fft.fft2(view_gradients, dim=(-2, -1)), dim=(-2, -1)
+        )
+        low_views = torch.fft.ifft2(
+            torch.fft.ifftshift(
+                spectra * low_mask.view(1, 1, 1, height, width), dim=(-2, -1)
+            ),
+            dim=(-2, -1),
+        ).real
+        high_views = view_gradients - low_views
+        low_mean = low_views.mean(dim=0)
+        high_mean = high_views.mean(dim=0)
+        low_flat = low_views.flatten(2).permute(1, 0, 2)
+        high_flat = high_views.flatten(2).permute(1, 0, 2)
+        low_centered = low_flat - low_flat.mean(dim=1, keepdim=True)
+        high_centered = high_flat - high_flat.mean(dim=1, keepdim=True)
+        low_unit = low_centered / low_centered.norm(dim=2, keepdim=True).clamp_min(1e-20)
+        high_unit = high_centered / high_centered.norm(dim=2, keepdim=True).clamp_min(1e-20)
+        cross_view_cosine = torch.bmm(low_unit, high_unit.transpose(1, 2))
+        _, _, right_vectors = torch.linalg.svd(cross_view_cosine, full_matrices=False)
+        right = right_vectors[:, 0, :]
+        canonical_high = torch.einsum("bvd,bv->bd", high_unit, right)
+        canonical_high_norm = canonical_high.norm(dim=1, keepdim=True)
+        high_mean_flat = high_mean.flatten(1)
+        high_mean_norm = high_mean_flat.norm(dim=1, keepdim=True)
+        canonical_high = canonical_high * (
+            high_mean_norm / canonical_high_norm.clamp_min(1e-20)
+        )
+        alignment = (canonical_high * high_mean_flat).sum(dim=1, keepdim=True)
+        canonical_high = canonical_high * torch.where(
+            alignment >= 0, torch.ones_like(alignment), -torch.ones_like(alignment)
+        )
+        valid = (canonical_high_norm > 1e-20) & (high_mean_norm > 1e-20)
+        canonical_high = torch.where(valid, canonical_high, high_mean_flat)
+        transformed = low_mean.flatten(1) + (
+            (1.0 - self.strength) * high_mean_flat
+            + self.strength * canonical_high
+        )
+        return transformed.view_as(mean)
+
+
+@dataclass
 class CovarianceTransportProbe:
     """Add the cross-view covariance component supported along the mean.
 
@@ -998,6 +1075,12 @@ def build_probe(name: str) -> GradientProbe:
         )
     if name.startswith("cross_scale_"):
         encoded = name.removeprefix("cross_scale_")
+        if encoded.startswith("canonical_c"):
+            cutoff, strength = encoded.removeprefix("canonical_c").split("_a", 1)
+            return CrossScaleCanonicalProbe(
+                int(strength) / 100.0,
+                cutoff=int(cutoff) / 100.0,
+            )
         mode, encoded = encoded.split("_c", 1)
         cutoff, strength = encoded.split("_a", 1)
         return CrossScaleCovarianceProbe(
