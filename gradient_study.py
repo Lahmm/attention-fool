@@ -77,6 +77,52 @@ class GroupRemovalProbe:
 
 
 @dataclass
+class GroupReliabilityProbe:
+    """Softly upweight groups whose direction agrees with the other groups."""
+
+    temperature: float
+
+    @property
+    def name(self) -> str:
+        return f"group_reliability_t{int(round(self.temperature * 10)):02d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if view_gradients.size(0) % 2:
+            raise ValueError("group reliability requires paired views.")
+        group_means = view_gradients.view(view_gradients.size(0) // 2, 2, *view_gradients.shape[1:]).mean(dim=1)
+        flat = group_means.flatten(2).permute(1, 0, 2)  # [B,G,D]
+        total = flat.sum(dim=1, keepdim=True)
+        rest = (total - flat) / max(1, flat.size(1) - 1)
+        reliability = F.cosine_similarity(flat, rest, dim=2)
+        weights = torch.softmax(self.temperature * reliability, dim=1)
+        return torch.einsum("bg,bgchw->bchw", weights, group_means.permute(1, 0, 2, 3, 4))
+
+
+@dataclass
+class GroupNormEqualizationProbe:
+    """Equalize group contribution norms with a bounded power-law gain."""
+
+    strength: float
+
+    @property
+    def name(self) -> str:
+        return f"group_norm_equalize_a{int(round(self.strength * 100)):02d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if view_gradients.size(0) % 2:
+            raise ValueError("group norm equalization requires paired views.")
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("group norm equalization strength must be in [0, 1].")
+        groups = view_gradients.view(view_gradients.size(0) // 2, 2, *view_gradients.shape[1:]).mean(dim=1)
+        norms = groups.flatten(2).norm(dim=2, keepdim=True)
+        target = norms.mean(dim=0, keepdim=True)
+        gains = (target / norms.clamp_min(1e-20)).pow(self.strength).clamp(0.5, 2.0)
+        return (groups * gains.view(groups.size(0), groups.size(1), 1, 1, 1)).mean(dim=0)
+
+
+@dataclass
 class SpatialPatchProbe:
     selection: str
     ratio: float = 0.10
@@ -500,6 +546,10 @@ def build_probe(name: str) -> GradientProbe:
         return StepWindowProbe(build_probe(inner_name), start, end)
     if name.startswith("group_remove_"):
         return GroupRemovalProbe(name.removeprefix("group_remove_"))
+    if name.startswith("group_reliability_t"):
+        return GroupReliabilityProbe(int(name.removeprefix("group_reliability_t")) / 10.0)
+    if name.startswith("group_norm_equalize_a"):
+        return GroupNormEqualizationProbe(int(name.removeprefix("group_norm_equalize_a")) / 100.0)
     if name.startswith("spatial_patch_"):
         return SpatialPatchProbe(name.removeprefix("spatial_patch_"), ratio=0.10)
     if name.startswith("frequency_remove_"):

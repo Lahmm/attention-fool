@@ -12,6 +12,8 @@ from gradient_study import (
     EnergyEqualizationProbe,
     FrequencyGainProbe,
     GroupRemovalProbe,
+    GroupReliabilityProbe,
+    GroupNormEqualizationProbe,
     SpatialPatchProbe,
     SpectralWienerProbe,
     SpectralAmplitudePowerProbe,
@@ -91,6 +93,13 @@ class GradientProbeTests(unittest.TestCase):
         probe = GroupRemovalProbe("random")
         result = probe.apply(gradients, ["a", "b"], step=0)
         self.assertEqual(result.shape, gradients.shape[1:])
+
+    def test_group_reliability_and_norm_equalization_preserve_shape(self):
+        gradients = torch.arange(4 * 2 * 1 * 1 * 2, dtype=torch.float32).reshape(4, 2, 1, 1, 2) + 1
+        reliability = GroupReliabilityProbe(5.0).apply(gradients, ["a", "b"], 0)
+        equalized = GroupNormEqualizationProbe(0.5).apply(gradients, ["a", "b"], 0)
+        self.assertEqual(reliability.shape, gradients.shape[1:])
+        self.assertEqual(equalized.shape, gradients.shape[1:])
 
     def test_spatial_probe_preserves_shape(self):
         gradients = torch.ones(20, 2, 3, 224, 224)
@@ -206,6 +215,8 @@ class GradientProbeTests(unittest.TestCase):
             "spectral_amplitude_power150",
             "covariance_transport_view_a25",
             "covariance_transport_group_a50",
+            "group_reliability_t20",
+            "group_norm_equalize_a50",
             "energy_equalize_patch_a25",
             "energy_equalize_local_a50",
             "temporal_frequency_remove_high_s0e5",
