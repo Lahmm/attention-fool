@@ -50,7 +50,7 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 
 ## 幅值与频率的关系
 
-本轮共筛选 145 个 30 样本候选，覆盖：
+本轮共筛选 185 个 30 样本候选，覆盖：
 
 - 幅值分位删除、极值裁剪、幅值幂放大/压缩；
 - 坐标和 group Wiener/可靠性/幅值均衡；
@@ -72,6 +72,10 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 - 低幅值×高频占比条件下的收缩、低频增益、Gaussian、低频-only 和幅值 equalize。
 - phase-pair A/B difference transport 及 pair-difference Wiener 噪声估计。
 - 基于低幅值、高频占比和跨-group 不一致性的风险分数自适应 Gaussian 组成重构。
+- 高频不确定能量向低频方向的 L2 守恒传输；
+- log 幅值包络扩散、PCGrad 式 view 冲突投影；
+- ViT 14×14 patch-mean 子空间投影及 patch 内 L2 能量传输；
+- 仅对高频 Fourier 幅值做幂变换。
 
 关键对照是：
 
@@ -224,7 +228,7 @@ Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1
 - 同一 seed 的 baseline/candidate replay 事件完全一致；
 - 每次攻击严格保持 20 views；
 - 所有候选只在 view 聚合后、MI/normalize/sign update 前处理梯度；
-- 49 个单元测试覆盖了 probe 数值、形状、时序窗口、幅值符号、Fourier 分解、相位共识、跨尺度协方差/canonical、小波、幅值峰值、Laplacian、后动量方向、条件交互、phase-pair 处理和风险分数自适应组成；
+- 55 个单元测试覆盖了 probe 数值、形状、时序窗口、幅值符号、Fourier 分解、相位共识、跨尺度协方差/canonical、小波、幅值峰值、Laplacian、后动量方向、条件交互、phase-pair 处理、风险分数自适应组成、能量传输、冲突投影和 patch 子空间处理；
 - 当前主线和候选均评估项目配置的 11 个黑盒及单独白盒 ViT。
 
 失败的主要原因是可观测梯度特征与可迁移方向不是一一对应关系：
@@ -238,6 +242,21 @@ Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1
 最后测试的 `sign_reliability` 使用 `abs(mean_v sign(g_v))` 作为坐标可靠性，对原始均值做 boost 或 gate。boost 只产生少量离散模型变化，gate 在多个 ViT 上下降，因此没有进入 100 样本确认。
 
 风险分数候选也没有进入 100 样本确认。100 样本确认的门槛是小样本中至少出现正向 ViT/Overall 且 CNN 不下降的信号；最佳风险候选的 ViT 已为 `-0.95pp`，其余候选为 `-1.43` 至 `-2.38pp`，没有达到该门槛。相比之下，弱 Gaussian 全量叠加虽然只在小样本显示弱正向，并且后来三 seed 的平均 Overall 只有 `+0.39pp`，仍是唯一值得做大样本复核的候选。
+
+## 后续数学组成探针
+
+为避免把“高频有害”误解为“高频能量可以安全搬走”，又测试了几类保持原始约束的组成变换：
+
+| 方向 | 最佳 30 样本结果 Overall / ViT / CNN | 结论 |
+|---|---:|---|
+| 不确定高频能量 L2 传输到低频 | `-0.61 / -1.43 / +0.83pp` | 高频 residual 不是可直接搬运的无效能量 |
+| log 幅值包络扩散 | `0.00 / -0.48 / +0.83pp` | 幅值尖峰不能简单视为有害 |
+| PCGrad view 冲突投影 | `+0.30 / -0.48 / +1.67pp` | 减少负内积未提升 ViT；view 多样性并非纯冲突噪声 |
+| 14×14 patch-mean 投影 | `-0.91 / -0.95 / -0.83pp` | ViT patch 子空间不是可直接增强的迁移子空间 |
+| patch 内 L2 能量传输 | `-1.21 / -0.48 / -2.50pp` | 局部 residual 能量转移损害 CNN；强度增大时整体灾难性下降 |
+| 高频 Fourier 幅值幂变换 | `-0.30 / -0.48 / 0.00pp` | 高频幅值压缩/放大均未产生正向 ViT |
+
+其中最极端的 patch 内能量传输在 strength=`0.50/0.75` 时分别使 Overall 下降 `10.30/45.15pp`，直接证明“把高频或 patch residual 的能量集中到低频/patch DC”会破坏 sign trajectory，而不是增强迁移。
 
 PCA 主方向传输同样没有通过筛选。最大跨-view 方差方向并不是迁移方向；把它与均值相加会把增强 view 的多样性误当成有效共享信号。
 
