@@ -645,6 +645,85 @@ class LaplacianProxProbe:
 
 
 @dataclass
+class PostMomentumPreconditionProbe:
+    """Precondition only the MI direction immediately before ``sign``.
+
+    ``apply`` is intentionally the identity aggregation.  ``apply_update`` is
+    called after the attack has updated its MI state and changes only the
+    direction used for the current sign update; the unfiltered momentum is
+    retained for the next step.  This isolates the question whether harmful
+    frequency content is introduced or amplified by accumulation.
+    """
+
+    kind: str
+    value: float
+    strength: float = 0.0
+    cutoff: float = 0.50
+
+    @property
+    def name(self) -> str:
+        if self.kind == "gaussian":
+            return (
+                f"post_momentum_gaussian_s{int(round(self.value * 10)):02d}"
+                f"_a{int(round(self.strength * 100)):03d}"
+            )
+        if self.kind == "laplacian":
+            return f"post_momentum_laplacian_l{int(round(self.value * 100)):03d}"
+        return (
+            f"post_momentum_high_shrink_c{int(round(self.cutoff * 100)):02d}"
+            f"_a{int(round(self.strength * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        return view_gradients.mean(dim=0)
+
+    def apply_update(
+        self,
+        update: torch.Tensor,
+        current_gradient: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del current_gradient, sample_ids, step
+        if self.kind == "gaussian":
+            if self.value <= 0 or self.strength < 0:
+                raise ValueError("post-momentum Gaussian requires positive sigma and strength.")
+            return GaussianBlendProbe(self.value, self.strength).apply(
+                update.unsqueeze(0), ["update"] * update.size(0), 0
+            )
+        if self.kind == "laplacian":
+            if self.value < 0:
+                raise ValueError("post-momentum Laplacian regularization must be non-negative.")
+            return LaplacianProxProbe(self.value).apply(
+                update.unsqueeze(0), ["update"] * update.size(0), 0
+            )
+        if self.kind != "high_shrink":
+            raise ValueError(f"unsupported post-momentum kind: {self.kind}")
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("post-momentum high shrink strength must be in [0, 1].")
+        if not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("post-momentum cutoff must be in (0, 1].")
+        height, width = update.shape[-2:]
+        radius = _frequency_radius(height, width, update.device)
+        high = radius > radius.max() * self.cutoff
+        spectrum = torch.fft.fftshift(
+            torch.fft.fft2(update, dim=(-2, -1)), dim=(-2, -1)
+        )
+        gain = torch.ones_like(radius)
+        gain[high] = 1.0 - self.strength
+        filtered = spectrum * gain.view(1, 1, height, width)
+        return torch.fft.ifft2(
+            torch.fft.ifftshift(filtered, dim=(-2, -1)), dim=(-2, -1)
+        ).real
+
+
+@dataclass
 class HaarWaveletShrinkProbe:
     """Robustly shrink low-amplitude high-frequency details.
 
@@ -1329,6 +1408,26 @@ def build_probe(name: str) -> GradientProbe:
     if name.startswith("laplacian_prox_l"):
         return LaplacianProxProbe(
             int(name.removeprefix("laplacian_prox_l")) / 100.0
+        )
+    if name.startswith("post_momentum_gaussian_s"):
+        encoded = name.removeprefix("post_momentum_gaussian_s")
+        sigma, strength = encoded.split("_a", 1)
+        return PostMomentumPreconditionProbe(
+            "gaussian", int(sigma) / 10.0, strength=int(strength) / 100.0
+        )
+    if name.startswith("post_momentum_laplacian_l"):
+        return PostMomentumPreconditionProbe(
+            "laplacian",
+            int(name.removeprefix("post_momentum_laplacian_l")) / 100.0,
+        )
+    if name.startswith("post_momentum_high_shrink_c"):
+        encoded = name.removeprefix("post_momentum_high_shrink_c")
+        cutoff, strength = encoded.split("_a", 1)
+        return PostMomentumPreconditionProbe(
+            "high_shrink",
+            0.0,
+            strength=int(strength) / 100.0,
+            cutoff=int(cutoff) / 100.0,
         )
     if name.startswith("haar_wavelet_shrink_t"):
         return HaarWaveletShrinkProbe(

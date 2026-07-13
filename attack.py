@@ -1048,6 +1048,17 @@ class PatchScoreAttacker:
             else:
                 update = gradient
 
+            # Optional direction-only processing after MI accumulation.  A
+            # probe may precondition the update used by sign() without
+            # changing the stored MI state, view aggregation, step size, or
+            # projection path.
+            if probe is not None:
+                apply_update = getattr(probe, "apply_update", None)
+                if apply_update is not None:
+                    if sample_ids is None:
+                        raise ValueError("sample_ids are required for update probes.")
+                    update = apply_update(update, gradient, sample_ids, step_index)
+
             with torch.no_grad():
                 self._gradient_diagnostics["mi_cumulative_cosine"].append(
                     float(F.cosine_similarity(momentum, gradient, dim=1).mean().cpu())

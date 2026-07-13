@@ -24,6 +24,7 @@ from gradient_study import (
     GroupNormEqualizationProbe,
     LowFrequencyBoostProbe,
     LaplacianProxProbe,
+    PostMomentumPreconditionProbe,
     MomentumTrajectoryProbe,
     SpatialPatchProbe,
     SoftPercentileClipProbe,
@@ -219,6 +220,15 @@ class GradientProbeTests(unittest.TestCase):
         filtered = LaplacianProxProbe(1.0).apply(high, ["a"], 0)
         self.assertLess(float(filtered.abs().max()), float(high.abs().max()))
 
+    def test_post_momentum_probe_only_changes_update_direction(self):
+        views = torch.randn(4, 1, 1, 16, 16)
+        mean = views.mean(0)
+        probe = PostMomentumPreconditionProbe("high_shrink", 0.0, strength=0.5)
+        self.assertTrue(torch.equal(probe.apply(views, ["a"], 0), mean))
+        result = probe.apply_update(mean, mean, ["a"], 1)
+        self.assertEqual(result.shape, mean.shape)
+        self.assertTrue(torch.isfinite(result).all())
+
     def test_haar_wavelet_shrink_is_identity_for_zero_threshold(self):
         views = torch.randn(4, 1, 3, 16, 16)
         result = HaarWaveletShrinkProbe(0.0).apply(views, ["a"], 0)
@@ -388,6 +398,9 @@ class GradientProbeTests(unittest.TestCase):
             "sign_reliability_gate_a25",
             "frequency_high_gain50",
             "laplacian_prox_l100",
+            "post_momentum_gaussian_s10_a025",
+            "post_momentum_laplacian_l100",
+            "post_momentum_high_shrink_c50_a025",
             "haar_wavelet_shrink_t050",
             "spectral_wiener_all_floor50",
             "spectral_wiener_high_floor25",
