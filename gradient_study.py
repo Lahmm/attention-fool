@@ -123,6 +123,78 @@ class GroupNormEqualizationProbe:
 
 
 @dataclass
+class PairPhaseProbe:
+    """Use the A/B phase-pair decomposition as a noise or direction estimate."""
+
+    mode: str
+    strength: float
+    high_only: bool = False
+
+    @property
+    def name(self) -> str:
+        if self.mode in ("difference_add", "difference_reverse"):
+            return f"pair_{self.mode}_a{int(round(self.strength * 100)):03d}"
+        scope = "high_" if self.high_only else ""
+        return f"pair_phase_wiener_{scope}f{int(round(self.strength * 100)):03d}"
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if view_gradients.size(0) % 2:
+            raise ValueError("phase-pair probes require an even number of views.")
+        if self.mode not in (
+            "difference_add",
+            "difference_reverse",
+            "phase_wiener",
+        ):
+            raise ValueError("unsupported phase-pair probe mode.")
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("phase-pair probe strength must be in [0, 1].")
+        grouped = view_gradients.view(
+            view_gradients.size(0) // 2, 2, *view_gradients.shape[1:]
+        )
+        pair_mean = grouped.mean(dim=1)
+        pair_difference = (grouped[:, 0] - grouped[:, 1]) * 0.5
+        mean = pair_mean.mean(dim=0)
+        if self.mode == "difference_add":
+            return mean + self.strength * pair_difference.mean(dim=0)
+        if self.mode == "difference_reverse":
+            return mean - self.strength * pair_difference.mean(dim=0)
+
+        if self.high_only:
+            height, width = mean.shape[-2:]
+            radius = _frequency_radius(height, width, mean.device)
+            high = radius > radius.max() * 0.50
+            mean_spectrum = torch.fft.fftshift(
+                torch.fft.fft2(mean, dim=(-2, -1)), dim=(-2, -1)
+            )
+            difference_spectrum = torch.fft.fftshift(
+                torch.fft.fft2(pair_difference, dim=(-2, -1)), dim=(-2, -1)
+            )
+            noise = difference_spectrum.abs().square().mean(dim=0)
+            signal = (mean_spectrum.abs().square() - noise).clamp_min(0.0)
+            gain = signal / (signal + noise).clamp_min(1e-20)
+            gain = self.strength + (1.0 - self.strength) * gain
+            gain = torch.where(
+                high.view(1, 1, height, width), gain, torch.ones_like(gain)
+            )
+            filtered = mean_spectrum * gain
+            return torch.fft.ifft2(
+                torch.fft.ifftshift(filtered, dim=(-2, -1)), dim=(-2, -1)
+            ).real
+
+        noise = pair_difference.square().mean(dim=0)
+        signal = (mean.square() - noise).clamp_min(0.0)
+        gain = signal / (signal + noise).clamp_min(1e-20)
+        gain = self.strength + (1.0 - self.strength) * gain
+        return mean * gain
+
+
+@dataclass
 class MomentumTrajectoryProbe:
     """Project the current gradient toward its own previous MI trajectory."""
 
@@ -1461,6 +1533,27 @@ def build_probe(name: str) -> GradientProbe:
         return GroupReliabilityProbe(int(name.removeprefix("group_reliability_t")) / 10.0)
     if name.startswith("group_norm_equalize_a"):
         return GroupNormEqualizationProbe(int(name.removeprefix("group_norm_equalize_a")) / 100.0)
+    if name.startswith("pair_difference_add_a"):
+        return PairPhaseProbe(
+            "difference_add",
+            int(name.removeprefix("pair_difference_add_a")) / 100.0,
+        )
+    if name.startswith("pair_difference_reverse_a"):
+        return PairPhaseProbe(
+            "difference_reverse",
+            int(name.removeprefix("pair_difference_reverse_a")) / 100.0,
+        )
+    if name.startswith("pair_phase_wiener_high_f"):
+        return PairPhaseProbe(
+            "phase_wiener",
+            int(name.removeprefix("pair_phase_wiener_high_f")) / 100.0,
+            high_only=True,
+        )
+    if name.startswith("pair_phase_wiener_f"):
+        return PairPhaseProbe(
+            "phase_wiener",
+            int(name.removeprefix("pair_phase_wiener_f")) / 100.0,
+        )
     if name.startswith("momentum_trajectory_"):
         mode, encoded_strength = name.removeprefix("momentum_trajectory_").split("_a", 1)
         return MomentumTrajectoryProbe(int(encoded_strength) / 100.0, mode=mode)

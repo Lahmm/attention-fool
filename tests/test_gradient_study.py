@@ -26,6 +26,7 @@ from gradient_study import (
     LowFrequencyBoostProbe,
     LaplacianProxProbe,
     PostMomentumPreconditionProbe,
+    PairPhaseProbe,
     MomentumTrajectoryProbe,
     SpatialPatchProbe,
     SoftPercentileClipProbe,
@@ -118,6 +119,19 @@ class GradientProbeTests(unittest.TestCase):
         equalized = GroupNormEqualizationProbe(0.5).apply(gradients, ["a", "b"], 0)
         self.assertEqual(reliability.shape, gradients.shape[1:])
         self.assertEqual(equalized.shape, gradients.shape[1:])
+
+    def test_phase_pair_probes_use_even_views_and_preserve_shape(self):
+        gradients = torch.randn(20, 2, 3, 32, 32)
+        for mode, high_only in (
+            ("difference_add", False),
+            ("difference_reverse", False),
+            ("phase_wiener", False),
+            ("phase_wiener", True),
+        ):
+            probe = PairPhaseProbe(mode, 0.25, high_only=high_only)
+            result = probe.apply(gradients, ["a", "b"], 0)
+            self.assertEqual(result.shape, gradients.shape[1:])
+            self.assertTrue(torch.isfinite(result).all())
 
     def test_momentum_trajectory_is_identity_at_first_step_and_changes_later(self):
         first = torch.tensor([[[[[1.0, 0.0]]]]])
@@ -426,6 +440,10 @@ class GradientProbeTests(unittest.TestCase):
             "covariance_transport_group_a50",
             "group_reliability_t20",
             "group_norm_equalize_a50",
+            "pair_difference_add_a025",
+            "pair_difference_reverse_a025",
+            "pair_phase_wiener_f025",
+            "pair_phase_wiener_high_f025",
             "momentum_trajectory_align_a25",
             "momentum_trajectory_parallel_boost_a50",
             "sign_persistence_high_c50_a025",
