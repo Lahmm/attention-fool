@@ -391,6 +391,48 @@ class GaussianBlendProbe:
 
 
 @dataclass
+class AdaptiveGaussianProbe:
+    """Apply a weak smooth blend only to samples with an extreme feature."""
+
+    metric: str
+    quantile: float
+    sigma: float = 1.0
+    strength: float = 0.25
+
+    @property
+    def name(self) -> str:
+        return f"adaptive_gaussian_{self.metric}_q{int(round(self.quantile * 100)):02d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if self.metric not in ("entropy_low", "freq_high"):
+            raise ValueError("adaptive Gaussian metric must be entropy_low or freq_high.")
+        if not 0.0 < self.quantile <= 1.0:
+            raise ValueError("adaptive Gaussian quantile must be in (0, 1].")
+        gradient = view_gradients.mean(dim=0)
+        if self.metric == "entropy_low":
+            energy = gradient.detach().pow(2).sum(dim=1).flatten(1)
+            probabilities = energy / energy.sum(dim=1, keepdim=True).clamp_min(1e-20)
+            feature = -(probabilities * probabilities.clamp_min(1e-20).log()).sum(dim=1)
+            threshold = torch.quantile(feature, self.quantile)
+            selected = feature <= threshold
+        else:
+            height, width = gradient.shape[-2:]
+            radius = _frequency_radius(height, width, gradient.device)
+            spectrum_power = torch.fft.fftshift(
+                torch.fft.fft2(gradient, dim=(-2, -1)), dim=(-2, -1)
+            ).abs().square().sum(dim=1)
+            total = spectrum_power.sum(dim=(1, 2)).clamp_min(1e-20)
+            feature = (spectrum_power * (radius > radius.max() * 0.50)).sum(dim=(1, 2)) / total
+            threshold = torch.quantile(feature, 1.0 - self.quantile)
+            selected = feature >= threshold
+        smoothed = GaussianBlendProbe(self.sigma, self.strength).apply(
+            view_gradients, ["adaptive"] * gradient.size(0), 0
+        )
+        return torch.where(selected.view(-1, 1, 1, 1), smoothed, gradient)
+
+
+@dataclass
 class SpectralWienerProbe:
     """Retain Fourier components supported coherently by independent views.
 
@@ -656,6 +698,10 @@ def build_probe(name: str) -> GradientProbe:
             int(strength) / 100.0,
             normalize_component=True,
         )
+    if name.startswith("adaptive_gaussian_"):
+        encoded = name.removeprefix("adaptive_gaussian_")
+        metric, encoded_quantile = encoded.rsplit("_q", 1)
+        return AdaptiveGaussianProbe(metric, int(encoded_quantile) / 100.0)
     if name.startswith("spectral_wiener_"):
         scope, encoded_floor = name.removeprefix("spectral_wiener_").split("_floor", 1)
         if scope not in ("all", "high"):

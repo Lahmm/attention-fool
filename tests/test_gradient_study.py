@@ -12,6 +12,7 @@ from gradient_study import (
     EnergyEqualizationProbe,
     FrequencyGainProbe,
     GaussianBlendProbe,
+    AdaptiveGaussianProbe,
     GroupRemovalProbe,
     GroupReliabilityProbe,
     GroupNormEqualizationProbe,
@@ -160,6 +161,16 @@ class GradientProbeTests(unittest.TestCase):
         self.assertEqual(result.shape, views.shape[1:])
         self.assertTrue(torch.isfinite(result).all())
 
+    def test_adaptive_gaussian_only_changes_selected_samples(self):
+        low_energy = torch.ones(1, 1, 3, 32, 32)
+        concentrated = torch.zeros(1, 1, 3, 32, 32)
+        concentrated[..., 16, 16] = 10.0
+        batch = torch.cat((low_energy[0], concentrated[0]), dim=0)
+        views = batch.unsqueeze(0).repeat(2, 1, 1, 1, 1)
+        result = AdaptiveGaussianProbe("entropy_low", 0.5).apply(views, ["a", "b"], 0)
+        self.assertTrue(torch.equal(result[0], views.mean(0)[0]))
+        self.assertFalse(torch.equal(result[1], views.mean(0)[1]))
+
     def test_spectral_wiener_uses_cross_view_coherence(self):
         axis = torch.arange(8)
         checkerboard = ((axis[:, None] + axis[None, :]) % 2).mul(2).sub(1).float()
@@ -249,6 +260,8 @@ class GradientProbeTests(unittest.TestCase):
             "low_frequency_boost_c50_a50",
             "gaussian_blend_s10_a50",
             "gaussian_norm_blend_s10_a25",
+            "adaptive_gaussian_entropy_low_q50",
+            "adaptive_gaussian_freq_high_q50",
         )
         for name in names:
             probe = build_probe(name)
