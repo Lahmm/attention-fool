@@ -50,7 +50,7 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 
 ## 幅值与频率的关系
 
-本轮共筛选 137 个 30 样本候选，覆盖：
+本轮共筛选 139 个 30 样本候选，覆盖：
 
 - 幅值分位删除、极值裁剪、幅值幂放大/压缩；
 - 坐标和 group Wiener/可靠性/幅值均衡；
@@ -167,11 +167,15 @@ Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1
 | `m + 0.25d` | -3.33pp | -4.29pp | -1.67pp | 0.00pp |
 | `m + 0.50d` | -3.94pp | -3.81pp | -4.17pp | +3.33pp |
 | `m - 0.25d` | -0.30pp | -1.43pp | +1.67pp | 0.00pp |
+| `m - 0.50d` | -2.12pp | -0.95pp | -4.17pp | 0.00pp |
+| `m - 0.25 proj_d(m)` | -1.21pp | -3.33pp | +2.50pp | 0.00pp |
+| `m - 0.50 proj_d(m)` | -2.12pp | -3.33pp | 0.00pp | 0.00pp |
 | 全频 pair-Wiener，floor=0.25 | -1.52pp | -0.95pp | -2.50pp | 0.00pp |
 | 全频 pair-Wiener，floor=0.50 | +0.30pp | 0.00pp | +0.83pp | +3.33pp |
 | 高频 pair-Wiener，floor=0.25 | -0.91pp | -1.43pp | 0.00pp | 0.00pp |
+| 高频 pair-Wiener，floor=0.50 | -1.52pp | -1.43pp | -1.67pp | 0.00pp |
 
-因此 phase difference 确实携带有害的源模型特异方向，但仅用其平方做统计 shrink 只能改善 CNN，不能提升 ViT。A/B 均值已经是最基本的 phase-difference cancellation；进一步强行消除 pair 差异会损失 ViT 所需的有效方向。
+进一步测试了数学上更保守的正交化：只从 `m` 中删除沿 `d` 的投影，即 `m' = m - α proj_d(m)`，不触碰与 phase difference 正交的方向。α=0.25/0.50 都使 ViT 下降 3.33pp，Overall 分别下降 1.21/2.12pp；这说明问题不只是把差分方向直接加回或减去，连“仅删除差分对齐分量”也会损失 ViT 所需的有效方向。phase difference 确实包含源模型特异成分，但它同时与有效方向纠缠；A/B 均值仍是当前最稳妥的 phase 处理。仅用 `d²` 做统计 shrink 只能改善 CNN，不能提升 ViT。
 
 ## Gaussian 三 seed 结果
 
