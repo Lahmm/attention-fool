@@ -22,6 +22,7 @@ from gradient_study import (
     GroupRemovalProbe,
     GroupReliabilityProbe,
     GroupNormEqualizationProbe,
+    JointLowAmplitudeHighFrequencyProbe,
     LowFrequencyBoostProbe,
     LaplacianProxProbe,
     PostMomentumPreconditionProbe,
@@ -352,6 +353,15 @@ class GradientProbeTests(unittest.TestCase):
         self.assertEqual(result.shape, views.shape[1:])
         self.assertTrue(torch.isfinite(result).all())
 
+    def test_joint_amplitude_frequency_probe_preserves_shape(self):
+        views = torch.randn(4, 4, 3, 32, 32)
+        for operation in ("shrink", "low_boost", "gaussian"):
+            result = JointLowAmplitudeHighFrequencyProbe(operation, 0.25).apply(
+                views, ["a", "b", "c", "d"], 0
+            )
+            self.assertEqual(result.shape, views.shape[1:])
+            self.assertTrue(torch.isfinite(result).all())
+
     def test_covariance_transport_uses_structured_view_variation(self):
         views = torch.tensor(
             [
@@ -401,6 +411,7 @@ class GradientProbeTests(unittest.TestCase):
             "post_momentum_gaussian_s10_a025",
             "post_momentum_laplacian_l100",
             "post_momentum_high_shrink_c50_a025",
+            "joint_lowamp_highfreq_shrink_a025",
             "haar_wavelet_shrink_t050",
             "spectral_wiener_all_floor50",
             "spectral_wiener_high_floor25",

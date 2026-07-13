@@ -889,6 +889,88 @@ class CrossScaleGaussianProbe:
 
 
 @dataclass
+class JointLowAmplitudeHighFrequencyProbe:
+    """Condition a coarse spectral intervention on global gradient amplitude.
+
+    The intervention is deliberately sample-level and binary: within the
+    current batch, select samples below the median raw gradient amplitude and
+    above the median high-frequency energy fraction.  This targets the
+    interaction observed in the held-out per-sample study instead of changing
+    every coordinate or every sample.
+    """
+
+    operation: str
+    strength: float
+    cutoff: float = 0.50
+
+    @property
+    def name(self) -> str:
+        return (
+            f"joint_lowamp_highfreq_{self.operation}"
+            f"_a{int(round(self.strength * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if self.operation not in ("shrink", "low_boost", "gaussian"):
+            raise ValueError("joint operation must be shrink, low_boost, or gaussian.")
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("joint strength must be in [0, 1].")
+        if not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("joint cutoff must be in (0, 1].")
+        gradient = view_gradients.mean(dim=0)
+        batch_size, _, height, width = gradient.shape
+        radius = _frequency_radius(height, width, gradient.device)
+        high = radius > radius.max() * self.cutoff
+        spectrum = torch.fft.fftshift(
+            torch.fft.fft2(gradient, dim=(-2, -1)), dim=(-2, -1)
+        )
+        high_spectrum = spectrum * high.view(1, 1, height, width)
+        high_component = torch.fft.ifft2(
+            torch.fft.ifftshift(high_spectrum, dim=(-2, -1)), dim=(-2, -1)
+        ).real
+        low_component = gradient - high_component
+        power = spectrum.abs().square().sum(dim=1)
+        high_fraction = (
+            power.masked_select(high.view(1, height, width)).view(batch_size, -1).sum(dim=1)
+            / power.sum(dim=(1, 2)).clamp_min(1e-20)
+        )
+        amplitude = gradient.abs().mean(dim=(1, 2, 3)).log()
+        selected = (amplitude <= amplitude.median()) & (
+            high_fraction >= high_fraction.median()
+        )
+        if self.operation == "shrink":
+            transformed = low_component + (1.0 - self.strength) * high_component
+        elif self.operation == "low_boost":
+            transformed = gradient + self.strength * low_component
+        else:
+            radius_kernel = max(1, int(round(3.0)))
+            axis = torch.arange(
+                -radius_kernel,
+                radius_kernel + 1,
+                device=gradient.device,
+                dtype=gradient.dtype,
+            )
+            kernel_1d = torch.exp(-0.5 * axis.square())
+            kernel_1d = kernel_1d / kernel_1d.sum()
+            kernel = (kernel_1d[:, None] @ kernel_1d[None, :]).view(
+                1, 1, 2 * radius_kernel + 1, 2 * radius_kernel + 1
+            ).repeat(gradient.size(1), 1, 1, 1)
+            smoothed = F.conv2d(
+                F.pad(gradient, (radius_kernel,) * 4, mode="reflect"),
+                kernel,
+                groups=gradient.size(1),
+            )
+            transformed = gradient + self.strength * smoothed
+        return torch.where(selected.view(batch_size, 1, 1, 1), transformed, gradient)
+
+
+@dataclass
 class AdaptiveGaussianProbe:
     """Apply a weak smooth blend only to samples with an extreme feature."""
 
@@ -1428,6 +1510,14 @@ def build_probe(name: str) -> GradientProbe:
             0.0,
             strength=int(strength) / 100.0,
             cutoff=int(cutoff) / 100.0,
+        )
+    if name.startswith("joint_lowamp_highfreq_"):
+        operation, encoded_strength = name.removeprefix(
+            "joint_lowamp_highfreq_"
+        ).rsplit("_a", 1)
+        return JointLowAmplitudeHighFrequencyProbe(
+            operation,
+            int(encoded_strength) / 100.0,
         )
     if name.startswith("haar_wavelet_shrink_t"):
         return HaarWaveletShrinkProbe(
