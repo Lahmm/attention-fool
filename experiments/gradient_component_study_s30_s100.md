@@ -50,7 +50,7 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 
 ## 幅值与频率的关系
 
-本轮共筛选 129 个 30 样本候选，覆盖：
+本轮共筛选 137 个 30 样本候选，覆盖：
 
 - 幅值分位删除、极值裁剪、幅值幂放大/压缩；
 - 坐标和 group Wiener/可靠性/幅值均衡；
@@ -70,6 +70,7 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 - Tikhonov/Laplacian proximal 低通预条件。
 - MI 累积之后、最终 sign update 之前的 Gaussian/Laplacian/高频预条件。
 - 低幅值×高频占比条件下的收缩、低频增益、Gaussian、低频-only 和幅值 equalize。
+- phase-pair A/B difference transport 及 pair-difference Wiener 噪声估计。
 
 关键对照是：
 
@@ -157,6 +158,21 @@ Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1
 
 因此高频危害既不是简单的 view 聚合错误，也不是 MI 累积后才出现的 sign 噪声；它与源模型梯度的空间结构共同决定最终迁移方向。
 
+## Phase-pair difference 补充
+
+主线的 20 个 view 实际上是 10 个共享 dropout mask 的 A/B phase pair。令每个 pair 的均值为 `m=(g_A+g_B)/2`，差分为 `d=(g_A-g_B)/2`，新增实验直接测试了 `m±αd`，以及把 `d²` 作为相位噪声的 Wiener shrink：
+
+| pair 处理 | Overall Δ | ViT Δ | CNN Δ | 白盒 Δ |
+|---|---:|---:|---:|---:|
+| `m + 0.25d` | -3.33pp | -4.29pp | -1.67pp | 0.00pp |
+| `m + 0.50d` | -3.94pp | -3.81pp | -4.17pp | +3.33pp |
+| `m - 0.25d` | -0.30pp | -1.43pp | +1.67pp | 0.00pp |
+| 全频 pair-Wiener，floor=0.25 | -1.52pp | -0.95pp | -2.50pp | 0.00pp |
+| 全频 pair-Wiener，floor=0.50 | +0.30pp | 0.00pp | +0.83pp | +3.33pp |
+| 高频 pair-Wiener，floor=0.25 | -0.91pp | -1.43pp | 0.00pp | 0.00pp |
+
+因此 phase difference 确实携带有害的源模型特异方向，但仅用其平方做统计 shrink 只能改善 CNN，不能提升 ViT。A/B 均值已经是最基本的 phase-difference cancellation；进一步强行消除 pair 差异会损失 ViT 所需的有效方向。
+
 ## Gaussian 三 seed 结果
 
 候选为 `gaussian_blend_s10_a25`，每个 seed 都使用同 seed baseline 的完全一致 replay manifest。
@@ -186,7 +202,7 @@ Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1
 - 同一 seed 的 baseline/candidate replay 事件完全一致；
 - 每次攻击严格保持 20 views；
 - 所有候选只在 view 聚合后、MI/normalize/sign update 前处理梯度；
-- 47 个单元测试覆盖了 probe 数值、形状、时序窗口、幅值符号、Fourier 分解、相位共识、跨尺度协方差/canonical、小波、幅值峰值、Laplacian、后动量方向和条件交互处理；
+- 48 个单元测试覆盖了 probe 数值、形状、时序窗口、幅值符号、Fourier 分解、相位共识、跨尺度协方差/canonical、小波、幅值峰值、Laplacian、后动量方向、条件交互和 phase-pair 处理；
 - 当前主线和候选均评估项目配置的 11 个黑盒及单独白盒 ViT。
 
 失败的主要原因是可观测梯度特征与可迁移方向不是一一对应关系：
