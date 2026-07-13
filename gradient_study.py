@@ -358,10 +358,12 @@ class GaussianBlendProbe:
 
     sigma: float
     strength: float
+    normalize_component: bool = False
 
     @property
     def name(self) -> str:
-        return f"gaussian_blend_s{int(round(self.sigma * 10)):02d}_a{int(round(self.strength * 100)):02d}"
+        prefix = "gaussian_norm_blend" if self.normalize_component else "gaussian_blend"
+        return f"{prefix}_s{int(round(self.sigma * 10)):02d}_a{int(round(self.strength * 100)):02d}"
 
     def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
         del sample_ids, step
@@ -381,6 +383,10 @@ class GaussianBlendProbe:
             kernel,
             groups=gradient.size(1),
         )
+        if self.normalize_component:
+            original_scale = gradient.abs().mean(dim=(1, 2, 3), keepdim=True)
+            smooth_scale = smoothed.abs().mean(dim=(1, 2, 3), keepdim=True).clamp_min(1e-20)
+            smoothed = smoothed * (original_scale / smooth_scale)
         return gradient + self.strength * smoothed
 
 
@@ -640,6 +646,16 @@ def build_probe(name: str) -> GradientProbe:
         if not sigma.startswith("s"):
             raise ValueError(f"unsupported Gaussian blend name: {name}")
         return GaussianBlendProbe(int(sigma.removeprefix("s")) / 10.0, int(strength) / 100.0)
+    if name.startswith("gaussian_norm_blend_"):
+        encoded = name.removeprefix("gaussian_norm_blend_")
+        sigma, strength = encoded.split("_a", 1)
+        if not sigma.startswith("s"):
+            raise ValueError(f"unsupported normalized Gaussian name: {name}")
+        return GaussianBlendProbe(
+            int(sigma.removeprefix("s")) / 10.0,
+            int(strength) / 100.0,
+            normalize_component=True,
+        )
     if name.startswith("spectral_wiener_"):
         scope, encoded_floor = name.removeprefix("spectral_wiener_").split("_floor", 1)
         if scope not in ("all", "high"):

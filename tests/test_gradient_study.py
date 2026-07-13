@@ -153,6 +153,13 @@ class GradientProbeTests(unittest.TestCase):
         result = GaussianBlendProbe(1.0, 0.5).apply(views, ["a"], 0)
         self.assertEqual(result.shape, views.shape[1:])
 
+    def test_normalized_gaussian_blend_equalizes_component_l1_scale(self):
+        views = torch.randn(2, 1, 3, 32, 32)
+        probe = GaussianBlendProbe(1.0, 0.25, normalize_component=True)
+        result = probe.apply(views, ["a"], 0)
+        self.assertEqual(result.shape, views.shape[1:])
+        self.assertTrue(torch.isfinite(result).all())
+
     def test_spectral_wiener_uses_cross_view_coherence(self):
         axis = torch.arange(8)
         checkerboard = ((axis[:, None] + axis[None, :]) % 2).mul(2).sub(1).float()
@@ -241,6 +248,7 @@ class GradientProbeTests(unittest.TestCase):
             "spectral_boost_residual_all_a100",
             "low_frequency_boost_c50_a50",
             "gaussian_blend_s10_a50",
+            "gaussian_norm_blend_s10_a25",
         )
         for name in names:
             probe = build_probe(name)
