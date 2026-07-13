@@ -50,7 +50,7 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 
 ## 幅值与频率的关系
 
-本轮共筛选 185 个 30 样本候选，覆盖：
+本轮共筛选 193 个 30 样本候选，覆盖：
 
 - 幅值分位删除、极值裁剪、幅值幂放大/压缩；
 - 坐标和 group Wiener/可靠性/幅值均衡；
@@ -76,6 +76,8 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 - log 幅值包络扩散、PCGrad 式 view 冲突投影；
 - ViT 14×14 patch-mean 子空间投影及 patch 内 L2 能量传输；
 - 仅对高频 Fourier 幅值做幂变换。
+- 高频幅值幂变换与 Gaussian 的组合；
+- 仅对高幅值、低高频、强 group agreement 样本放大低频投影。
 
 关键对照是：
 
@@ -228,7 +230,7 @@ Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1
 - 同一 seed 的 baseline/candidate replay 事件完全一致；
 - 每次攻击严格保持 20 views；
 - 所有候选只在 view 聚合后、MI/normalize/sign update 前处理梯度；
-- 55 个单元测试覆盖了 probe 数值、形状、时序窗口、幅值符号、Fourier 分解、相位共识、跨尺度协方差/canonical、小波、幅值峰值、Laplacian、后动量方向、条件交互、phase-pair 处理、风险分数自适应组成、能量传输、冲突投影和 patch 子空间处理；
+- 57 个单元测试覆盖了 probe 数值、形状、时序窗口、幅值符号、Fourier 分解、相位共识、跨尺度协方差/canonical、小波、幅值峰值、Laplacian、后动量方向、条件交互、phase-pair 处理、风险分数自适应组成、能量传输、冲突投影、patch 子空间、频率幅值组合和正面低频增强；
 - 当前主线和候选均评估项目配置的 11 个黑盒及单独白盒 ViT。
 
 失败的主要原因是可观测梯度特征与可迁移方向不是一一对应关系：
@@ -257,6 +259,8 @@ Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1
 | 高频 Fourier 幅值幂变换 | `-0.30 / -0.48 / 0.00pp` | 高频幅值压缩/放大均未产生正向 ViT |
 
 其中最极端的 patch 内能量传输在 strength=`0.50/0.75` 时分别使 Overall 下降 `10.30/45.15pp`，直接证明“把高频或 patch residual 的能量集中到低频/patch DC”会破坏 sign trajectory，而不是增强迁移。
+
+高频幅值幂变换与弱 Gaussian 的组合也没有互补性：最佳组合的 Overall/ViT/CNN 变化为 `0.00/-0.48/+0.83pp`。最后的“正面幅值”反事实——只对高幅值、低高频占比、强 group agreement 样本增加低频投影——最佳为 `-0.30/-0.48/0.00pp`。因此当前源梯度统计可以描述哪些样本更容易迁移，但不能可靠地指出一组可以被放大的正向坐标或频带。
 
 PCA 主方向传输同样没有通过筛选。最大跨-view 方差方向并不是迁移方向；把它与均值相加会把增强 view 的多样性误当成有效共享信号。
 
