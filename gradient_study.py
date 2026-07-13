@@ -390,6 +390,38 @@ class ViewGLSProbe:
 
 
 @dataclass
+class PatchProjectionProbe:
+    """Blend the orthogonal projection onto the ViT patch-mean subspace."""
+
+    strength: float
+    grid: int = 14
+
+    @property
+    def name(self) -> str:
+        return f"patch_projection_g{self.grid}_a{int(round(self.strength * 100)):03d}"
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("patch projection strength must be in [0, 1].")
+        gradient = view_gradients.mean(dim=0)
+        height, width = gradient.shape[-2:]
+        if height % self.grid or width % self.grid:
+            raise ValueError("patch projection requires dimensions divisible by grid.")
+        kernel_size = (height // self.grid, width // self.grid)
+        patch_mean = F.avg_pool2d(gradient, kernel_size=kernel_size, stride=kernel_size)
+        projection = patch_mean.repeat_interleave(kernel_size[0], dim=2).repeat_interleave(
+            kernel_size[1], dim=3
+        )
+        return gradient + self.strength * projection
+
+
+@dataclass
 class SpatialPatchProbe:
     selection: str
     ratio: float = 0.10
@@ -1888,6 +1920,13 @@ def build_probe(name: str) -> GradientProbe:
         return ViewGLSProbe(int(name.removeprefix("view_gls_ridge")) / 100.0)
     if name.startswith("spatial_patch_"):
         return SpatialPatchProbe(name.removeprefix("spatial_patch_"), ratio=0.10)
+    if name.startswith("patch_projection_g"):
+        encoded = name.removeprefix("patch_projection_g")
+        grid, strength = encoded.split("_a", 1)
+        return PatchProjectionProbe(
+            int(strength) / 100.0,
+            grid=int(grid),
+        )
     if name.startswith("frequency_remove_"):
         return FrequencyBandProbe(name.removeprefix("frequency_remove_"))
     if name.startswith("amplitude_"):

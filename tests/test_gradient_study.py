@@ -28,6 +28,7 @@ from gradient_study import (
     LaplacianProxProbe,
     PostMomentumPreconditionProbe,
     PairPhaseProbe,
+    PatchProjectionProbe,
     RiskAdaptiveGaussianProbe,
     MomentumTrajectoryProbe,
     MagnitudeEnvelopeProbe,
@@ -177,6 +178,12 @@ class GradientProbeTests(unittest.TestCase):
             )
             self.assertEqual(result.shape, gradients.shape[1:])
             self.assertTrue(torch.isfinite(result).all())
+
+    def test_patch_projection_preserves_shape_and_signs(self):
+        gradients = torch.randn(20, 2, 3, 32, 32)
+        result = PatchProjectionProbe(0.5, grid=8).apply(gradients, ["a", "b"], 0)
+        self.assertEqual(result.shape, gradients.shape[1:])
+        self.assertTrue(torch.isfinite(result).all())
 
     def test_momentum_trajectory_is_identity_at_first_step_and_changes_later(self):
         first = torch.tensor([[[[[1.0, 0.0]]]]])
@@ -479,6 +486,7 @@ class GradientProbeTests(unittest.TestCase):
             "magnitude_envelope_s10_a025",
             "conflict_project_view_a025",
             "conflict_project_group_a050",
+            "patch_projection_g14_a025",
             "haar_wavelet_shrink_t050",
             "spectral_wiener_all_floor50",
             "spectral_wiener_high_floor25",
