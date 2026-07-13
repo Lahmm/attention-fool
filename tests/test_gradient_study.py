@@ -138,7 +138,13 @@ class GradientProbeTests(unittest.TestCase):
 
     def test_risk_adaptive_gaussian_preserves_shape_and_is_bounded(self):
         gradients = torch.randn(20, 4, 3, 32, 32)
-        for mode in ("amp_freq", "amp_freq_group", "freq_group"):
+        for mode in (
+            "amp_freq",
+            "amp_freq_group",
+            "freq_group",
+            "positive_amp_freq",
+            "positive_amp_freq_group",
+        ):
             probe = RiskAdaptiveGaussianProbe(mode, 0.5)
             result = probe.apply(gradients, ["a", "b", "c", "d"], 0)
             self.assertEqual(result.shape, gradients.shape[1:])
@@ -449,6 +455,8 @@ class GradientProbeTests(unittest.TestCase):
             "joint_lowamp_highfreq_low_only_a025",
             "risk_gaussian_amp_freq_s10_a025",
             "risk_gaussian_amp_freq_group_s10_a050",
+            "risk_gaussian_positive_amp_freq_s10_a025",
+            "risk_gaussian_positive_amp_freq_group_s10_a050",
             "haar_wavelet_shrink_t050",
             "spectral_wiener_all_floor50",
             "spectral_wiener_high_floor25",

@@ -1116,9 +1116,15 @@ class RiskAdaptiveGaussianProbe:
         step: int,
     ) -> torch.Tensor:
         del sample_ids, step
-        if self.mode not in ("amp_freq", "amp_freq_group", "freq_group"):
+        if self.mode not in (
+            "amp_freq",
+            "amp_freq_group",
+            "freq_group",
+            "positive_amp_freq",
+            "positive_amp_freq_group",
+        ):
             raise ValueError(
-                "risk Gaussian mode must be amp_freq, amp_freq_group, or freq_group."
+                "unsupported risk Gaussian mode."
             )
         if self.strength < 0 or self.sigma <= 0:
             raise ValueError("risk Gaussian requires strength >= 0 and sigma > 0.")
@@ -1130,6 +1136,9 @@ class RiskAdaptiveGaussianProbe:
         if self.mode in ("amp_freq", "amp_freq_group"):
             amplitude = gradient.abs().mean(dim=(1, 2, 3))
             scores.append(1.0 - self._rank01(amplitude))
+        elif self.mode in ("positive_amp_freq", "positive_amp_freq_group"):
+            amplitude = gradient.abs().mean(dim=(1, 2, 3))
+            scores.append(self._rank01(amplitude))
 
         radius = _frequency_radius(height, width, gradient.device)
         high = radius > radius.max() * 0.50
@@ -1139,9 +1148,16 @@ class RiskAdaptiveGaussianProbe:
         high_fraction = spectrum_power[:, high].sum(dim=1) / spectrum_power.sum(
             dim=(1, 2)
         ).clamp_min(1e-20)
-        scores.append(self._rank01(high_fraction))
+        if self.mode in ("positive_amp_freq", "positive_amp_freq_group"):
+            scores.append(1.0 - self._rank01(high_fraction))
+        else:
+            scores.append(self._rank01(high_fraction))
 
-        if self.mode in ("amp_freq_group", "freq_group"):
+        if self.mode in (
+            "amp_freq_group",
+            "freq_group",
+            "positive_amp_freq_group",
+        ):
             if view_gradients.size(0) % 2:
                 raise ValueError("risk Gaussian group score requires paired views.")
             groups = view_gradients.view(
@@ -1150,7 +1166,10 @@ class RiskAdaptiveGaussianProbe:
             flat = groups.flatten(2).permute(1, 0, 2)
             rest = (flat.sum(dim=1, keepdim=True) - flat) / max(1, flat.size(1) - 1)
             agreement = F.cosine_similarity(flat, rest, dim=2).mean(dim=1)
-            scores.append(1.0 - self._rank01(agreement))
+            if self.mode == "positive_amp_freq_group":
+                scores.append(self._rank01(agreement))
+            else:
+                scores.append(1.0 - self._rank01(agreement))
 
         risk = torch.stack(scores, dim=0).prod(dim=0).pow(1.0 / len(scores))
         smooth_delta = GaussianBlendProbe(self.sigma, 1.0).apply(
