@@ -1076,6 +1076,90 @@ class JointLowAmplitudeHighFrequencyProbe:
 
 
 @dataclass
+class RiskAdaptiveGaussianProbe:
+    """Use a source-only risk score to allocate a bounded smooth component.
+
+    The score combines three observations from the gradient itself: low raw
+    amplitude, high-frequency energy, and (optionally) low agreement between
+    dropout groups.  Each feature is converted to a within-batch percentile
+    rank, so the probe does not use black-box labels or running statistics.
+    The geometric mean avoids allowing one feature to dominate the other two.
+    Only the Gaussian residual is weighted; the original gradient is retained.
+    """
+
+    mode: str
+    strength: float
+    sigma: float = 1.0
+
+    @property
+    def name(self) -> str:
+        return (
+            f"risk_gaussian_{self.mode}_s{int(round(self.sigma * 10)):02d}"
+            f"_a{int(round(self.strength * 100)):03d}"
+        )
+
+    @staticmethod
+    def _rank01(values: torch.Tensor) -> torch.Tensor:
+        if values.numel() <= 1:
+            return torch.zeros_like(values)
+        order = torch.argsort(values)
+        ranks = torch.empty_like(values, dtype=torch.float32)
+        ranks[order] = torch.arange(
+            values.numel(), device=values.device, dtype=torch.float32
+        )
+        return ranks / float(values.numel() - 1)
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if self.mode not in ("amp_freq", "amp_freq_group", "freq_group"):
+            raise ValueError(
+                "risk Gaussian mode must be amp_freq, amp_freq_group, or freq_group."
+            )
+        if self.strength < 0 or self.sigma <= 0:
+            raise ValueError("risk Gaussian requires strength >= 0 and sigma > 0.")
+
+        gradient = view_gradients.mean(dim=0)
+        batch_size, _, height, width = gradient.shape
+        scores = []
+
+        if self.mode in ("amp_freq", "amp_freq_group"):
+            amplitude = gradient.abs().mean(dim=(1, 2, 3))
+            scores.append(1.0 - self._rank01(amplitude))
+
+        radius = _frequency_radius(height, width, gradient.device)
+        high = radius > radius.max() * 0.50
+        spectrum_power = torch.fft.fftshift(
+            torch.fft.fft2(gradient, dim=(-2, -1)), dim=(-2, -1)
+        ).abs().square().sum(dim=1)
+        high_fraction = spectrum_power[:, high].sum(dim=1) / spectrum_power.sum(
+            dim=(1, 2)
+        ).clamp_min(1e-20)
+        scores.append(self._rank01(high_fraction))
+
+        if self.mode in ("amp_freq_group", "freq_group"):
+            if view_gradients.size(0) % 2:
+                raise ValueError("risk Gaussian group score requires paired views.")
+            groups = view_gradients.view(
+                view_gradients.size(0) // 2, 2, *view_gradients.shape[1:]
+            ).mean(dim=1)
+            flat = groups.flatten(2).permute(1, 0, 2)
+            rest = (flat.sum(dim=1, keepdim=True) - flat) / max(1, flat.size(1) - 1)
+            agreement = F.cosine_similarity(flat, rest, dim=2).mean(dim=1)
+            scores.append(1.0 - self._rank01(agreement))
+
+        risk = torch.stack(scores, dim=0).prod(dim=0).pow(1.0 / len(scores))
+        smooth_delta = GaussianBlendProbe(self.sigma, 1.0).apply(
+            view_gradients, ["risk"] * batch_size, 0
+        ) - gradient
+        return gradient + self.strength * risk.view(-1, 1, 1, 1) * smooth_delta
+
+
+@dataclass
 class AdaptiveGaussianProbe:
     """Apply a weak smooth blend only to samples with an extreme feature."""
 
@@ -1649,6 +1733,15 @@ def build_probe(name: str) -> GradientProbe:
         return JointLowAmplitudeHighFrequencyProbe(
             operation,
             int(encoded_strength) / 100.0,
+        )
+    if name.startswith("risk_gaussian_"):
+        encoded = name.removeprefix("risk_gaussian_")
+        mode, encoded = encoded.split("_s", 1)
+        sigma, strength = encoded.split("_a", 1)
+        return RiskAdaptiveGaussianProbe(
+            mode,
+            int(strength) / 100.0,
+            sigma=int(sigma) / 10.0,
         )
     if name.startswith("haar_wavelet_shrink_t"):
         return HaarWaveletShrinkProbe(

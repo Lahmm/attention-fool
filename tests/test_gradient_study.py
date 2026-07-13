@@ -27,6 +27,7 @@ from gradient_study import (
     LaplacianProxProbe,
     PostMomentumPreconditionProbe,
     PairPhaseProbe,
+    RiskAdaptiveGaussianProbe,
     MomentumTrajectoryProbe,
     SpatialPatchProbe,
     SoftPercentileClipProbe,
@@ -131,6 +132,14 @@ class GradientProbeTests(unittest.TestCase):
         ):
             probe = PairPhaseProbe(mode, 0.25, high_only=high_only)
             result = probe.apply(gradients, ["a", "b"], 0)
+            self.assertEqual(result.shape, gradients.shape[1:])
+            self.assertTrue(torch.isfinite(result).all())
+
+    def test_risk_adaptive_gaussian_preserves_shape_and_is_bounded(self):
+        gradients = torch.randn(20, 4, 3, 32, 32)
+        for mode in ("amp_freq", "amp_freq_group", "freq_group"):
+            probe = RiskAdaptiveGaussianProbe(mode, 0.5)
+            result = probe.apply(gradients, ["a", "b", "c", "d"], 0)
             self.assertEqual(result.shape, gradients.shape[1:])
             self.assertTrue(torch.isfinite(result).all())
 
@@ -428,6 +437,8 @@ class GradientProbeTests(unittest.TestCase):
             "post_momentum_high_shrink_c50_a025",
             "joint_lowamp_highfreq_shrink_a025",
             "joint_lowamp_highfreq_low_only_a025",
+            "risk_gaussian_amp_freq_s10_a025",
+            "risk_gaussian_amp_freq_group_s10_a050",
             "haar_wavelet_shrink_t050",
             "spectral_wiener_all_floor50",
             "spectral_wiener_high_floor25",
