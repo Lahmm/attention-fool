@@ -17,6 +17,7 @@ from gradient_study import (
     GroupReliabilityProbe,
     GroupNormEqualizationProbe,
     LowFrequencyBoostProbe,
+    MomentumTrajectoryProbe,
     SpatialPatchProbe,
     SpectralWienerProbe,
     SpectralAmplitudePowerProbe,
@@ -103,6 +104,15 @@ class GradientProbeTests(unittest.TestCase):
         equalized = GroupNormEqualizationProbe(0.5).apply(gradients, ["a", "b"], 0)
         self.assertEqual(reliability.shape, gradients.shape[1:])
         self.assertEqual(equalized.shape, gradients.shape[1:])
+
+    def test_momentum_trajectory_is_identity_at_first_step_and_changes_later(self):
+        first = torch.tensor([[[[[1.0, 0.0]]]]])
+        second = torch.tensor([[[[[1.0, 1.0]]]]])
+        probe = MomentumTrajectoryProbe(0.5, mode="align")
+        first_result = probe.apply(first, ["a"], 0)
+        second_result = probe.apply(second, ["a"], 1)
+        self.assertTrue(torch.equal(first_result, first.mean(0) / first.mean(0).abs().mean()))
+        self.assertFalse(torch.equal(second_result, second.mean(0)))
 
     def test_spatial_probe_preserves_shape(self):
         gradients = torch.ones(20, 2, 3, 224, 224)
@@ -251,6 +261,8 @@ class GradientProbeTests(unittest.TestCase):
             "covariance_transport_group_a50",
             "group_reliability_t20",
             "group_norm_equalize_a50",
+            "momentum_trajectory_align_a25",
+            "momentum_trajectory_parallel_boost_a50",
             "energy_equalize_patch_a25",
             "energy_equalize_local_a50",
             "temporal_frequency_remove_high_s0e5",

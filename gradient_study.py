@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
@@ -120,6 +120,50 @@ class GroupNormEqualizationProbe:
         target = norms.mean(dim=0, keepdim=True)
         gains = (target / norms.clamp_min(1e-20)).pow(self.strength).clamp(0.5, 2.0)
         return (groups * gains.view(groups.size(0), groups.size(1), 1, 1, 1)).mean(dim=0)
+
+
+@dataclass
+class MomentumTrajectoryProbe:
+    """Project the current gradient toward its own previous MI trajectory."""
+
+    strength: float
+    mode: str = "align"
+    _momentum: dict[str, torch.Tensor] = field(default_factory=dict, init=False, repr=False)
+
+    @property
+    def name(self) -> str:
+        return f"momentum_trajectory_{self.mode}_a{int(round(self.strength * 100)):02d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        if self.mode not in ("align", "parallel_boost"):
+            raise ValueError("trajectory mode must be align or parallel_boost.")
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("trajectory strength must be in [0, 1].")
+        gradient = view_gradients.mean(dim=0)
+        normalized = gradient / gradient.abs().mean(dim=(1, 2, 3), keepdim=True).clamp_min(1e-20)
+        outputs = []
+        for index, sample_id in enumerate(sample_ids):
+            if step == 0:
+                self._momentum.pop(sample_id, None)
+            current = normalized[index]
+            previous = self._momentum.get(sample_id)
+            if previous is not None:
+                current_flat = current.flatten()
+                previous_flat = previous.flatten()
+                projection = (
+                    current_flat.dot(previous_flat)
+                    / previous_flat.dot(previous_flat).clamp_min(1e-20)
+                ) * previous_flat
+                if self.mode == "align":
+                    current = (
+                        (1.0 - self.strength) * current_flat
+                        + self.strength * projection
+                    ).view_as(current)
+                else:
+                    current = (current_flat + self.strength * projection).view_as(current)
+            self._momentum[sample_id] = previous.mul(1.0).add(current) if previous is not None else current
+            outputs.append(current)
+        return torch.stack(outputs, dim=0)
 
 
 @dataclass
@@ -657,6 +701,9 @@ def build_probe(name: str) -> GradientProbe:
         return GroupReliabilityProbe(int(name.removeprefix("group_reliability_t")) / 10.0)
     if name.startswith("group_norm_equalize_a"):
         return GroupNormEqualizationProbe(int(name.removeprefix("group_norm_equalize_a")) / 100.0)
+    if name.startswith("momentum_trajectory_"):
+        mode, encoded_strength = name.removeprefix("momentum_trajectory_").split("_a", 1)
+        return MomentumTrajectoryProbe(int(encoded_strength) / 100.0, mode=mode)
     if name.startswith("spatial_patch_"):
         return SpatialPatchProbe(name.removeprefix("spatial_patch_"), ratio=0.10)
     if name.startswith("frequency_remove_"):
