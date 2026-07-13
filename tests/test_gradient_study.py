@@ -550,6 +550,7 @@ class GradientProbeTests(unittest.TestCase):
             "pair_phase_wiener_high_f025",
             "momentum_trajectory_align_a25",
             "momentum_trajectory_parallel_boost_a50",
+            "momentum_trajectory_orthogonal_a25",
             "sign_persistence_high_c50_a025",
             "view_pc_transport_a25",
             "view_gls_ridge10",

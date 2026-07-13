@@ -223,8 +223,8 @@ class MomentumTrajectoryProbe:
         return f"momentum_trajectory_{self.mode}_a{int(round(self.strength * 100)):02d}"
 
     def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
-        if self.mode not in ("align", "parallel_boost"):
-            raise ValueError("trajectory mode must be align or parallel_boost.")
+        if self.mode not in ("align", "parallel_boost", "orthogonal"):
+            raise ValueError("trajectory mode must be align, parallel_boost, or orthogonal.")
         if not 0.0 <= self.strength <= 1.0:
             raise ValueError("trajectory strength must be in [0, 1].")
         gradient = view_gradients.mean(dim=0)
@@ -247,8 +247,10 @@ class MomentumTrajectoryProbe:
                         (1.0 - self.strength) * current_flat
                         + self.strength * projection
                     ).view_as(current)
-                else:
+                elif self.mode == "parallel_boost":
                     current = (current_flat + self.strength * projection).view_as(current)
+                else:
+                    current = (current_flat - self.strength * projection).view_as(current)
             self._momentum[sample_id] = previous.mul(1.0).add(current) if previous is not None else current
             outputs.append(current)
         return torch.stack(outputs, dim=0)
