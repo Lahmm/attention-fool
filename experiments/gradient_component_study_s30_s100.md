@@ -214,6 +214,18 @@ Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1
 
 它不满足 Overall `+3–5pp` 或 ViT `+3–5pp`，也没有稳定 CNN 保持条件。因此不进入主线。
 
+## `_normalize_grad` 直接对照
+
+为区分“全局幅值被归一化”和“攻击约束被破坏”，对同一 replay 运行了不执行
+`_normalize_grad` 的 30/100 样本对照。epsilon 投影、步长、20 views、MI 累积和 sign update 均保持不变。
+
+| 样本数 | Overall Δ | ViT Δ | CNN Δ | 白盒 Δ |
+|---:|---:|---:|---:|---:|
+| 30 | +0.61pp | -0.48pp | +2.50pp | +3.33pp |
+| 100 | +0.36pp | 0.00pp | +1.00pp | +3.00pp |
+
+100 样本 Overall bootstrap 95% CI 为 `[-0.64, +1.36]pp`。因此取消归一化不会突破 epsilon 约束，也没有导致大幅 ASR 下降；但它重新引入了跨 step 的绝对梯度尺度。当前 raw gradient 的 `agg_abs_mean` 从 step 0 的约 `0.000198` 上升到后期约 `0.00050–0.00059`，在 `momentum_decay=1` 下会让后期梯度获得更大 MI 权重。实验证明这只带来轻微、非稳定的 Overall/CNN 变化，不能改善黑盒 ViT。
+
 ## 轨迹级处理补充
 
 为检验“当前梯度与 MI 累积方向的平行分量是否应放大”，增加了有状态的 trajectory probe。它只在当前梯度上做平行/正交分解，攻击内部的 MI 累积实现不变。
