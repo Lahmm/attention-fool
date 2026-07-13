@@ -701,6 +701,108 @@ class SpectralPhaseConsensusProbe:
 
 
 @dataclass
+class CrossScaleCovarianceProbe:
+    """Use cross-view low/high covariance to separate useful high frequencies.
+
+    Let ``l_v`` and ``h_v`` be orthogonal low/high Fourier projections of view
+    ``v``.  The high-frequency direction ``C_hl l`` is the linear least-squares
+    covariance transport from low-frequency variation into the high-frequency
+    space.  This gives a mathematical test for whether a high-frequency
+    component is coupled to the low-frequency signal, instead of assuming that
+    every high-frequency coordinate is harmful.
+
+    ``replace`` keeps the mean low-frequency component and interpolates the
+    mean high-frequency component toward the covariance-transport direction.
+    ``project`` removes only the part of the mean high-frequency component that
+    is orthogonal to that direction.  Both operations preserve the original
+    low/high split and do not change the augmentation or update rule.
+    """
+
+    mode: str
+    strength: float
+    cutoff: float = 0.50
+
+    @property
+    def name(self) -> str:
+        return (
+            f"cross_scale_{self.mode}_c{int(round(self.cutoff * 100)):02d}"
+            f"_a{int(round(self.strength * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if self.mode not in ("replace", "project", "add"):
+            raise ValueError("cross-scale mode must be replace, project, or add.")
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("cross-scale strength must be in [0, 1].")
+        if not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("cross-scale cutoff must be in (0, 1].")
+
+        mean = view_gradients.mean(dim=0)
+        height, width = mean.shape[-2:]
+        radius = _frequency_radius(height, width, mean.device)
+        low_mask = radius <= radius.max() * self.cutoff
+        spectra = torch.fft.fftshift(
+            torch.fft.fft2(view_gradients, dim=(-2, -1)), dim=(-2, -1)
+        )
+        low_views = torch.fft.ifft2(
+            torch.fft.ifftshift(
+                spectra * low_mask.view(1, 1, 1, height, width), dim=(-2, -1)
+            ),
+            dim=(-2, -1),
+        ).real
+        high_views = view_gradients - low_views
+        low_mean = low_views.mean(dim=0)
+        high_mean = high_views.mean(dim=0)
+
+        low_flat = low_views.flatten(2).permute(1, 0, 2)  # [B,V,D]
+        high_flat = high_views.flatten(2).permute(1, 0, 2)
+        low_centered = low_flat - low_flat.mean(dim=1, keepdim=True)
+        high_centered = high_flat - high_flat.mean(dim=1, keepdim=True)
+        low_mean_flat = low_mean.flatten(1)
+        high_mean_flat = high_mean.flatten(1)
+
+        # C_hl l = (1/V) sum_v (h_v-h_bar)<l_v-l_bar,l_bar>.
+        coefficients = torch.einsum(
+            "bvd,bd->bv", low_centered, low_mean_flat
+        )
+        transported = torch.einsum(
+            "bvd,bv->bd", high_centered, coefficients
+        ) / max(1, view_gradients.size(0))
+        transported_norm = transported.norm(dim=1, keepdim=True)
+        high_norm = high_mean_flat.norm(dim=1, keepdim=True)
+        transported = transported * (
+            high_norm / transported_norm.clamp_min(1e-20)
+        )
+        valid = (transported_norm > 1e-20) & (high_norm > 1e-20)
+        transported = torch.where(valid, transported, high_mean_flat)
+
+        if self.mode == "add":
+            transformed = low_mean_flat + high_mean_flat + self.strength * transported
+        elif self.mode == "replace":
+            transformed = low_mean_flat + (
+                (1.0 - self.strength) * high_mean_flat
+                + self.strength * transported
+            )
+        else:
+            transport_norm_sq = transported.square().sum(dim=1, keepdim=True)
+            aligned = (
+                (high_mean_flat * transported).sum(dim=1, keepdim=True)
+                / transport_norm_sq.clamp_min(1e-20)
+            ) * transported
+            aligned = torch.where(valid, aligned, high_mean_flat)
+            transformed = low_mean_flat + high_mean_flat + self.strength * (
+                aligned - high_mean_flat
+            )
+        return transformed.view_as(mean)
+
+
+@dataclass
 class CovarianceTransportProbe:
     """Add the cross-view covariance component supported along the mean.
 
@@ -893,6 +995,15 @@ def build_probe(name: str) -> GradientProbe:
     if name.startswith("spectral_phase_consensus_a"):
         return SpectralPhaseConsensusProbe(
             int(name.removeprefix("spectral_phase_consensus_a")) / 100.0
+        )
+    if name.startswith("cross_scale_"):
+        encoded = name.removeprefix("cross_scale_")
+        mode, encoded = encoded.split("_c", 1)
+        cutoff, strength = encoded.split("_a", 1)
+        return CrossScaleCovarianceProbe(
+            mode,
+            int(strength) / 100.0,
+            cutoff=int(cutoff) / 100.0,
         )
     if name.startswith("covariance_transport_"):
         scope, encoded_strength = name.removeprefix("covariance_transport_").split("_a", 1)
