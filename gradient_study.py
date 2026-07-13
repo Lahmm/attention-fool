@@ -1410,6 +1410,38 @@ class AdaptiveGaussianProbe:
 
 
 @dataclass
+class GaussianHighPowerCompositeProbe:
+    """Compose high-band magnitude shaping with a weak signed Gaussian blend."""
+
+    power: float
+    gaussian_strength: float
+    sigma: float = 1.0
+
+    @property
+    def name(self) -> str:
+        return (
+            f"composite_gaussian_s{int(round(self.sigma * 10)):02d}"
+            f"_highpower{int(round(self.power * 100)):03d}"
+            f"_a{int(round(self.gaussian_strength * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        if self.power <= 0 or self.sigma <= 0 or self.gaussian_strength < 0:
+            raise ValueError("invalid Gaussian/high-power composite parameters.")
+        shaped = SpectralBandAmplitudePowerProbe(self.power).apply(
+            view_gradients, sample_ids, step
+        )
+        return GaussianBlendProbe(self.sigma, self.gaussian_strength).apply(
+            shaped.unsqueeze(0), sample_ids, step
+        )
+
+
+@dataclass
 class SpectralBandAmplitudePowerProbe:
     """Apply a power-law magnitude map only to the high-frequency band."""
 
@@ -2151,6 +2183,15 @@ def build_probe(name: str) -> GradientProbe:
     if name.startswith("spectral_high_amplitude_power"):
         return SpectralBandAmplitudePowerProbe(
             int(name.removeprefix("spectral_high_amplitude_power")) / 100.0
+        )
+    if name.startswith("composite_gaussian_s"):
+        encoded = name.removeprefix("composite_gaussian_s")
+        sigma, encoded = encoded.split("_highpower", 1)
+        power, strength = encoded.split("_a", 1)
+        return GaussianHighPowerCompositeProbe(
+            int(power) / 100.0,
+            int(strength) / 100.0,
+            sigma=int(sigma) / 10.0,
         )
     if name.startswith("spectral_boost_"):
         component, scope, encoded_strength = name.removeprefix("spectral_boost_").split("_", 2)
