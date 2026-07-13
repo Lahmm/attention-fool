@@ -10,6 +10,7 @@ from gradient_study import (
     CoordinateWienerProbe,
     CrossScaleCovarianceProbe,
     CrossScaleCanonicalProbe,
+    CrossScaleGaussianProbe,
     DivisiveNormalizationProbe,
     CovarianceTransportProbe,
     CrossStepSignPersistenceProbe,
@@ -323,6 +324,14 @@ class GradientProbeTests(unittest.TestCase):
         identity = CrossScaleCanonicalProbe(0.0).apply(views, ["a"], 0)
         self.assertTrue(torch.allclose(identity, mean, atol=1e-5, rtol=1e-5))
 
+    def test_cross_scale_gaussian_composition_preserves_shape(self):
+        views = torch.randn(4, 2, 3, 16, 16)
+        result = CrossScaleGaussianProbe(0.5, 0.25, 1.0, 0.25).apply(
+            views, ["a", "b"], 0
+        )
+        self.assertEqual(result.shape, views.shape[1:])
+        self.assertTrue(torch.isfinite(result).all())
+
     def test_covariance_transport_uses_structured_view_variation(self):
         views = torch.tensor(
             [
@@ -376,6 +385,7 @@ class GradientProbeTests(unittest.TestCase):
             "spectral_phase_consensus_a050",
             "cross_scale_replace_c50_a025",
             "cross_scale_canonical_c50_a025",
+            "cross_scale_gaussian_c50_x025_s10_a025",
             "covariance_transport_view_a25",
             "covariance_transport_group_a50",
             "group_reliability_t20",

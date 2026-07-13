@@ -733,6 +733,42 @@ class GaussianBlendProbe:
 
 
 @dataclass
+class CrossScaleGaussianProbe:
+    """Compose cross-scale high-frequency replacement with weak smoothing."""
+
+    cutoff: float
+    cross_strength: float
+    sigma: float
+    smooth_strength: float
+
+    @property
+    def name(self) -> str:
+        return (
+            f"cross_scale_gaussian_c{int(round(self.cutoff * 100)):02d}"
+            f"_x{int(round(self.cross_strength * 100)):03d}"
+            f"_s{int(round(self.sigma * 10)):02d}"
+            f"_a{int(round(self.smooth_strength * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        if not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("cross-scale Gaussian cutoff must be in (0, 1].")
+        if not 0.0 <= self.cross_strength <= 1.0:
+            raise ValueError("cross-scale Gaussian strength must be in [0, 1].")
+        base = CrossScaleCovarianceProbe(
+            "replace", self.cross_strength, cutoff=self.cutoff
+        ).apply(view_gradients, sample_ids, step)
+        return GaussianBlendProbe(
+            self.sigma, self.smooth_strength
+        ).apply(base.unsqueeze(0), sample_ids, step)
+
+
+@dataclass
 class AdaptiveGaussianProbe:
     """Apply a weak smooth blend only to samples with an extreme feature."""
 
@@ -1305,6 +1341,16 @@ def build_probe(name: str) -> GradientProbe:
         )
     if name.startswith("cross_scale_"):
         encoded = name.removeprefix("cross_scale_")
+        if encoded.startswith("gaussian_c"):
+            cutoff, encoded = encoded.removeprefix("gaussian_c").split("_x", 1)
+            cross_strength, encoded = encoded.split("_s", 1)
+            sigma, smooth_strength = encoded.split("_a", 1)
+            return CrossScaleGaussianProbe(
+                cutoff=int(cutoff) / 100.0,
+                cross_strength=int(cross_strength) / 100.0,
+                sigma=int(sigma) / 10.0,
+                smooth_strength=int(smooth_strength) / 100.0,
+            )
         if encoded.startswith("canonical_c"):
             cutoff, strength = encoded.removeprefix("canonical_c").split("_a", 1)
             return CrossScaleCanonicalProbe(
