@@ -29,6 +29,7 @@ from gradient_study import (
     PairPhaseProbe,
     RiskAdaptiveGaussianProbe,
     MomentumTrajectoryProbe,
+    MagnitudeEnvelopeProbe,
     SpatialPatchProbe,
     SoftPercentileClipProbe,
     SpectralWienerProbe,
@@ -158,6 +159,14 @@ class GradientProbeTests(unittest.TestCase):
             )
             self.assertEqual(result.shape, gradients.shape[1:])
             self.assertTrue(torch.isfinite(result).all())
+
+    def test_magnitude_envelope_preserves_signs_and_shape(self):
+        gradients = torch.randn(20, 2, 3, 32, 32)
+        result = MagnitudeEnvelopeProbe(1.0, 0.5).apply(gradients, ["a", "b"], 0)
+        self.assertEqual(result.shape, gradients.shape[1:])
+        self.assertTrue(torch.isfinite(result).all())
+        mean = gradients.mean(dim=0)
+        self.assertTrue(torch.equal(result.sign(), mean.sign()))
 
     def test_momentum_trajectory_is_identity_at_first_step_and_changes_later(self):
         first = torch.tensor([[[[[1.0, 0.0]]]]])
@@ -457,6 +466,7 @@ class GradientProbeTests(unittest.TestCase):
             "risk_gaussian_amp_freq_group_s10_a050",
             "risk_gaussian_positive_amp_freq_s10_a025",
             "risk_gaussian_positive_amp_freq_group_s10_a050",
+            "magnitude_envelope_s10_a025",
             "haar_wavelet_shrink_t050",
             "spectral_wiener_all_floor50",
             "spectral_wiener_high_floor25",

@@ -1076,6 +1076,59 @@ class JointLowAmplitudeHighFrequencyProbe:
 
 
 @dataclass
+class MagnitudeEnvelopeProbe:
+    """Diffuse the spatial log-magnitude envelope while preserving signs.
+
+    Signed-gradient smoothing changes the phase and can remove useful detail.
+    This probe instead smooths ``log(|g|)`` and uses the result as a bounded
+    multiplicative gain on the original signed gradient.  Isolated amplitude
+    spikes are reduced, while low-amplitude coordinates inside a coherent
+    neighborhood are amplified.  The gain is normalized per sample only up
+    to a global scalar, which is immaterial because the existing pipeline
+    performs mean-absolute gradient normalization afterwards.
+    """
+
+    sigma: float
+    strength: float
+
+    @property
+    def name(self) -> str:
+        return (
+            f"magnitude_envelope_s{int(round(self.sigma * 10)):02d}"
+            f"_a{int(round(self.strength * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if self.sigma <= 0 or not 0.0 <= self.strength <= 1.0:
+            raise ValueError("magnitude envelope requires sigma > 0 and strength in [0, 1].")
+        gradient = view_gradients.mean(dim=0)
+        radius = max(1, int(round(3.0 * self.sigma)))
+        axis = torch.arange(
+            -radius, radius + 1, device=gradient.device, dtype=gradient.dtype
+        )
+        kernel_1d = torch.exp(-0.5 * (axis / self.sigma).square())
+        kernel_1d = kernel_1d / kernel_1d.sum()
+        kernel = (kernel_1d[:, None] @ kernel_1d[None, :]).view(
+            1, 1, 2 * radius + 1, 2 * radius + 1
+        ).repeat(gradient.size(1), 1, 1, 1)
+        log_magnitude = gradient.abs().clamp_min(1e-12).log()
+        smooth_log_magnitude = F.conv2d(
+            F.pad(log_magnitude, (radius,) * 4, mode="reflect"),
+            kernel,
+            groups=gradient.size(1),
+        )
+        log_gain = self.strength * (smooth_log_magnitude - log_magnitude)
+        gain = log_gain.exp().clamp(0.5, 2.0)
+        return gradient * gain
+
+
+@dataclass
 class RiskAdaptiveGaussianProbe:
     """Use a source-only risk score to allocate a bounded smooth component.
 
@@ -1829,6 +1882,13 @@ def build_probe(name: str) -> GradientProbe:
         return JointLowAmplitudeHighFrequencyProbe(
             operation,
             int(encoded_strength) / 100.0,
+        )
+    if name.startswith("magnitude_envelope_s"):
+        encoded = name.removeprefix("magnitude_envelope_s")
+        sigma, strength = encoded.split("_a", 1)
+        return MagnitudeEnvelopeProbe(
+            int(sigma) / 10.0,
+            int(strength) / 100.0,
         )
     if name.startswith("risk_gaussian_"):
         encoded = name.removeprefix("risk_gaussian_")
