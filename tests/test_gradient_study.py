@@ -22,6 +22,7 @@ from gradient_study import (
     SpectralWienerProbe,
     SpectralAmplitudePowerProbe,
     SpectralComponentBoostProbe,
+    SpectralPhaseConsensusProbe,
     SignReliabilityProbe,
     ViewPCProbe,
     ViewGLSProbe,
@@ -254,6 +255,12 @@ class GradientProbeTests(unittest.TestCase):
         cosine = torch.nn.functional.cosine_similarity(result.flatten(), checkerboard.flatten(), dim=0)
         self.assertAlmostEqual(float(cosine), 1.0, places=5)
 
+    def test_spectral_phase_consensus_is_identity_for_identical_views(self):
+        gradient = torch.randn(1, 1, 16, 16)
+        views = gradient.unsqueeze(0).repeat(4, 1, 1, 1, 1)
+        result = SpectralPhaseConsensusProbe(1.0).apply(views, ["a"], 0)
+        self.assertTrue(torch.allclose(result, gradient, atol=1e-5, rtol=1e-5))
+
     def test_covariance_transport_uses_structured_view_variation(self):
         views = torch.tensor(
             [
@@ -301,6 +308,7 @@ class GradientProbeTests(unittest.TestCase):
             "spectral_wiener_high_floor25",
             "amplitude_power125",
             "spectral_amplitude_power150",
+            "spectral_phase_consensus_a050",
             "covariance_transport_view_a25",
             "covariance_transport_group_a50",
             "group_reliability_t20",

@@ -673,6 +673,34 @@ class SpectralAmplitudePowerProbe:
 
 
 @dataclass
+class SpectralPhaseConsensusProbe:
+    """Separate Fourier magnitude averaging from circular phase averaging."""
+
+    strength: float
+
+    @property
+    def name(self) -> str:
+        return f"spectral_phase_consensus_a{int(round(self.strength * 100)):03d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("phase consensus strength must be in [0, 1].")
+        spectra = torch.fft.fft2(view_gradients, dim=(-2, -1))
+        mean_spectrum = spectra.mean(dim=0)
+        magnitudes = spectra.abs()
+        phase_vectors = spectra / magnitudes.clamp_min(1e-20)
+        phase_mean = phase_vectors.mean(dim=0)
+        phase_unit = phase_mean / phase_mean.abs().clamp_min(1e-20)
+        consensus = magnitudes.mean(dim=0) * phase_unit
+        mean_scale = mean_spectrum.abs().mean(dim=(1, 2, 3), keepdim=True)
+        consensus_scale = consensus.abs().mean(dim=(1, 2, 3), keepdim=True).clamp_min(1e-20)
+        consensus = consensus * (mean_scale / consensus_scale)
+        transformed = (1.0 - self.strength) * mean_spectrum + self.strength * consensus
+        return torch.fft.ifft2(transformed, dim=(-2, -1)).real
+
+
+@dataclass
 class CovarianceTransportProbe:
     """Add the cross-view covariance component supported along the mean.
 
@@ -862,6 +890,10 @@ def build_probe(name: str) -> GradientProbe:
     if name.startswith("spectral_amplitude_power"):
         power = int(name.removeprefix("spectral_amplitude_power")) / 100.0
         return SpectralAmplitudePowerProbe(power)
+    if name.startswith("spectral_phase_consensus_a"):
+        return SpectralPhaseConsensusProbe(
+            int(name.removeprefix("spectral_phase_consensus_a")) / 100.0
+        )
     if name.startswith("covariance_transport_"):
         scope, encoded_strength = name.removeprefix("covariance_transport_").split("_a", 1)
         if scope not in ("view", "group"):
