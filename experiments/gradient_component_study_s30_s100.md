@@ -50,7 +50,7 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 
 ## 幅值与频率的关系
 
-本轮共筛选 111 个 30 样本候选，覆盖：
+本轮共筛选 115 个 30 样本候选，覆盖：
 
 - 幅值分位删除、极值裁剪、幅值幂放大/压缩；
 - 坐标和 group Wiener/可靠性/幅值均衡；
@@ -67,6 +67,7 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 - 跨步符号持久性增益；
 - Haar 小波 MAD/universal-threshold 高频细节收缩；
 - 局部 divisive normalization、软百分位幅值裁剪及跨尺度/Gaussian 组合。
+- Tikhonov/Laplacian proximal 低通预条件。
 
 关键对照是：
 
@@ -113,6 +114,8 @@ Haar 小波的 MAD 阈值实验进一步区分了高频幅值：即使只收缩�
 
 直接抑制局部幅值峰值同样失败：divisive normalization 的最佳变化为 Overall/ViT/CNN `-0.91/-0.95/-0.83pp`，软百分位裁剪最佳为 `-0.61/-0.48/-0.83pp`。跨尺度替换再叠加弱 Gaussian 后为 `-0.30/-1.43/+1.67pp`，没有出现幅值与频率的协同增益。
 
+Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1.0`：Overall/ViT/CNN/白盒变化为 `+0.61/0.00/+1.67/+3.33pp`，ViT 没有提升；其余强度的 ViT 变化为 `-1.90` 至 `-2.86pp`。因此把 Gaussian 低频叠加改写成更强的二阶平滑正则，并没有解决 ViT 瓶颈。
+
 ## Gaussian 三 seed 结果
 
 候选为 `gaussian_blend_s10_a25`，每个 seed 都使用同 seed baseline 的完全一致 replay manifest。
@@ -142,7 +145,7 @@ Haar 小波的 MAD 阈值实验进一步区分了高频幅值：即使只收缩�
 - 同一 seed 的 baseline/candidate replay 事件完全一致；
 - 每次攻击严格保持 20 views；
 - 所有候选只在 view 聚合后、MI/normalize/sign update 前处理梯度；
-- 44 个单元测试覆盖了 probe 数值、形状、时序窗口、幅值符号、Fourier 分解、相位共识、跨尺度协方差/canonical、小波和幅值峰值处理；
+- 45 个单元测试覆盖了 probe 数值、形状、时序窗口、幅值符号、Fourier 分解、相位共识、跨尺度协方差/canonical、小波、幅值峰值和 Laplacian 处理；
 - 当前主线和候选均评估项目配置的 11 个黑盒及单独白盒 ViT。
 
 失败的主要原因是可观测梯度特征与可迁移方向不是一一对应关系：
