@@ -167,6 +167,41 @@ class MomentumTrajectoryProbe:
 
 
 @dataclass
+class ViewPCProbe:
+    """Add a mean-aligned principal direction of cross-view variation."""
+
+    strength: float
+    iterations: int = 3
+
+    @property
+    def name(self) -> str:
+        return f"view_pc_transport_a{int(round(self.strength * 100)):02d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if self.strength < 0:
+            raise ValueError("view PC transport strength must be non-negative.")
+        if self.iterations <= 0:
+            raise ValueError("view PC iterations must be positive.")
+        mean = view_gradients.mean(dim=0)
+        mean_flat = mean.flatten(1)
+        centered = (view_gradients - mean.unsqueeze(0)).flatten(2).permute(1, 0, 2)
+        direction = centered[:, 0]
+        direction = direction / direction.norm(dim=1, keepdim=True).clamp_min(1e-20)
+        for _ in range(self.iterations):
+            coefficients = torch.einsum("bvd,bd->bv", centered, direction)
+            direction = torch.einsum("bvd,bv->bd", centered, coefficients)
+            direction = direction / direction.norm(dim=1, keepdim=True).clamp_min(1e-20)
+        alignment = (direction * mean_flat).sum(dim=1, keepdim=True)
+        direction = direction * torch.where(alignment >= 0, 1.0, -1.0)
+        direction = direction * (
+            mean_flat.abs().mean(dim=1, keepdim=True)
+            / direction.abs().mean(dim=1, keepdim=True).clamp_min(1e-20)
+        )
+        return (mean_flat + self.strength * direction).view_as(mean)
+
+
+@dataclass
 class SpatialPatchProbe:
     selection: str
     ratio: float = 0.10
@@ -730,6 +765,8 @@ def build_probe(name: str) -> GradientProbe:
     if name.startswith("momentum_trajectory_"):
         mode, encoded_strength = name.removeprefix("momentum_trajectory_").split("_a", 1)
         return MomentumTrajectoryProbe(int(encoded_strength) / 100.0, mode=mode)
+    if name.startswith("view_pc_transport_a"):
+        return ViewPCProbe(int(name.removeprefix("view_pc_transport_a")) / 100.0)
     if name.startswith("spatial_patch_"):
         return SpatialPatchProbe(name.removeprefix("spatial_patch_"), ratio=0.10)
     if name.startswith("frequency_remove_"):

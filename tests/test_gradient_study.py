@@ -23,6 +23,7 @@ from gradient_study import (
     SpectralAmplitudePowerProbe,
     SpectralComponentBoostProbe,
     SignReliabilityProbe,
+    ViewPCProbe,
     StepWindowProbe,
     build_probe,
 )
@@ -114,6 +115,20 @@ class GradientProbeTests(unittest.TestCase):
         second_result = probe.apply(second, ["a"], 1)
         self.assertTrue(torch.equal(first_result, first.mean(0) / first.mean(0).abs().mean()))
         self.assertFalse(torch.equal(second_result, second.mean(0)))
+
+    def test_view_pc_transport_preserves_shape_and_changes_mean(self):
+        views = torch.tensor(
+            [
+                [[[[2.0, 0.0]]]],
+                [[[[0.0, 2.0]]]],
+                [[[[3.0, -1.0]]]],
+                [[[[1.0, 1.0]]]],
+            ]
+        )
+        result = ViewPCProbe(0.25).apply(views, ["a"], 0)
+        self.assertEqual(result.shape, views.shape[1:])
+        self.assertFalse(torch.allclose(result, views.mean(0)))
+        self.assertTrue(torch.isfinite(result).all())
 
     def test_spatial_probe_preserves_shape(self):
         gradients = torch.ones(20, 2, 3, 224, 224)
@@ -277,6 +292,7 @@ class GradientProbeTests(unittest.TestCase):
             "group_norm_equalize_a50",
             "momentum_trajectory_align_a25",
             "momentum_trajectory_parallel_boost_a50",
+            "view_pc_transport_a25",
             "energy_equalize_patch_a25",
             "energy_equalize_local_a50",
             "temporal_frequency_remove_high_s0e5",
