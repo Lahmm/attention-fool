@@ -37,6 +37,7 @@ from gradient_study import (
     SoftPercentileClipProbe,
     SpectralWienerProbe,
     SpectralEnergyTransportProbe,
+    SpectralBandAmplitudePowerProbe,
     SpectralAmplitudePowerProbe,
     SpectralComponentBoostProbe,
     SpectralPhaseConsensusProbe,
@@ -189,6 +190,14 @@ class GradientProbeTests(unittest.TestCase):
     def test_patch_energy_transport_preserves_shape_and_finite_values(self):
         gradients = torch.randn(20, 2, 3, 32, 32)
         result = PatchEnergyTransportProbe(1.0, grid=8).apply(
+            gradients, ["a", "b"], 0
+        )
+        self.assertEqual(result.shape, gradients.shape[1:])
+        self.assertTrue(torch.isfinite(result).all())
+
+    def test_spectral_band_amplitude_power_preserves_shape_and_finite_values(self):
+        gradients = torch.randn(20, 2, 3, 32, 32)
+        result = SpectralBandAmplitudePowerProbe(0.75).apply(
             gradients, ["a", "b"], 0
         )
         self.assertEqual(result.shape, gradients.shape[1:])
@@ -497,6 +506,7 @@ class GradientProbeTests(unittest.TestCase):
             "conflict_project_group_a050",
             "patch_projection_g14_a025",
             "patch_energy_transport_g14_a050",
+            "spectral_high_amplitude_power075",
             "haar_wavelet_shrink_t050",
             "spectral_wiener_all_floor50",
             "spectral_wiener_high_floor25",

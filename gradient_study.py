@@ -1410,6 +1410,51 @@ class AdaptiveGaussianProbe:
 
 
 @dataclass
+class SpectralBandAmplitudePowerProbe:
+    """Apply a power-law magnitude map only to the high-frequency band."""
+
+    power: float
+    cutoff: float = 0.50
+
+    @property
+    def name(self) -> str:
+        return f"spectral_high_amplitude_power{int(round(self.power * 100)):03d}"
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if self.power <= 0:
+            raise ValueError("spectral band amplitude power must be positive.")
+        if not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("spectral band amplitude cutoff must be in (0, 1].")
+        gradient = view_gradients.mean(dim=0)
+        height, width = gradient.shape[-2:]
+        radius = _frequency_radius(height, width, gradient.device)
+        high = radius > radius.max() * self.cutoff
+        spectrum = torch.fft.fftshift(
+            torch.fft.fft2(gradient, dim=(-2, -1)), dim=(-2, -1)
+        )
+        magnitude = spectrum.abs()
+        high_scale = magnitude[:, :, high].mean(dim=2, keepdim=True).unsqueeze(-1)
+        high_scale = high_scale.clamp_min(1e-20)
+        transformed_magnitude = high_scale * (
+            magnitude / high_scale
+        ).pow(self.power)
+        transformed = torch.where(
+            high.view(1, 1, height, width),
+            spectrum / magnitude.clamp_min(1e-20) * transformed_magnitude,
+            spectrum,
+        )
+        return torch.fft.ifft2(
+            torch.fft.ifftshift(transformed, dim=(-2, -1)), dim=(-2, -1)
+        ).real
+
+
+@dataclass
 class SpectralEnergyTransportProbe:
     """Transport uncertain high-frequency energy into the low-frequency axis.
 
@@ -2102,6 +2147,10 @@ def build_probe(name: str) -> GradientProbe:
         return SpectralEnergyTransportProbe(
             int(floor) / 100.0,
             int(strength) / 100.0,
+        )
+    if name.startswith("spectral_high_amplitude_power"):
+        return SpectralBandAmplitudePowerProbe(
+            int(name.removeprefix("spectral_high_amplitude_power")) / 100.0
         )
     if name.startswith("spectral_boost_"):
         component, scope, encoded_strength = name.removeprefix("spectral_boost_").split("_", 2)
