@@ -1202,6 +1202,83 @@ class AdaptiveGaussianProbe:
 
 
 @dataclass
+class SpectralEnergyTransportProbe:
+    """Transport uncertain high-frequency energy into the low-frequency axis.
+
+    The mean spectrum is split into low and high bands.  A view-wise Wiener
+    estimate retains high-frequency coefficients supported across views; the
+    rejected high-frequency residual is not discarded.  Instead, a bounded
+    fraction of its L2 energy is transferred to the existing low-frequency
+    direction.  At strength one the transfer conserves the L2 energy of the
+    original low+high decomposition (up to numerical error), while preserving
+    the phase and sign of the retained components.
+    """
+
+    floor: float
+    strength: float
+    cutoff: float = 0.50
+
+    @property
+    def name(self) -> str:
+        return (
+            f"spectral_transport_high_f{int(round(self.floor * 100)):02d}"
+            f"_a{int(round(self.strength * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.floor <= 1.0:
+            raise ValueError("spectral transport floor must be in [0, 1].")
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("spectral transport strength must be in [0, 1].")
+        if not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("spectral transport cutoff must be in (0, 1].")
+
+        spectra = torch.fft.fftshift(
+            torch.fft.fft2(view_gradients, dim=(-2, -1)), dim=(-2, -1)
+        )
+        mean_spectrum = spectra.mean(dim=0)
+        height, width = mean_spectrum.shape[-2:]
+        radius = _frequency_radius(height, width, mean_spectrum.device)
+        low = radius <= radius.max() * self.cutoff
+        high = ~low
+
+        noise = (spectra - mean_spectrum.unsqueeze(0)).abs().square().mean(dim=0)
+        signal = (mean_spectrum.abs().square() - noise).clamp_min(0.0)
+        wiener = signal / (signal + noise).clamp_min(1e-20)
+        high_gain = self.floor + (1.0 - self.floor) * wiener
+        gain = torch.where(
+            high.view(1, 1, height, width), high_gain, torch.ones_like(high_gain)
+        )
+        retained_spectrum = mean_spectrum * gain
+        retained = torch.fft.ifft2(
+            torch.fft.ifftshift(retained_spectrum, dim=(-2, -1)), dim=(-2, -1)
+        ).real
+        low_component = torch.fft.ifft2(
+            torch.fft.ifftshift(mean_spectrum * low.view(1, 1, height, width), dim=(-2, -1)),
+            dim=(-2, -1),
+        ).real
+        removed = retained.new_zeros(retained.shape)
+        removed_spectrum = mean_spectrum * (1.0 - gain)
+        removed = torch.fft.ifft2(
+            torch.fft.ifftshift(removed_spectrum, dim=(-2, -1)), dim=(-2, -1)
+        ).real
+        low_norm = low_component.flatten(1).norm(dim=1, keepdim=True)
+        removed_norm = removed.flatten(1).norm(dim=1, keepdim=True)
+        energy_ratio = (
+            self.strength * removed_norm / low_norm.clamp_min(1e-20)
+        )
+        low_gain = torch.sqrt(1.0 + energy_ratio.square())
+        low_gain = torch.where(low_norm > 1e-20, low_gain, torch.ones_like(low_gain))
+        return retained + low_component * (low_gain.view(-1, 1, 1, 1) - 1.0)
+
+
+@dataclass
 class SpectralWienerProbe:
     """Retain Fourier components supported coherently by independent views.
 
@@ -1781,6 +1858,13 @@ def build_probe(name: str) -> GradientProbe:
         if scope not in ("all", "high"):
             raise ValueError(f"unsupported spectral Wiener scope: {scope}")
         return SpectralWienerProbe(int(encoded_floor) / 100.0, high_only=scope == "high")
+    if name.startswith("spectral_transport_high_f"):
+        encoded = name.removeprefix("spectral_transport_high_f")
+        floor, strength = encoded.split("_a", 1)
+        return SpectralEnergyTransportProbe(
+            int(floor) / 100.0,
+            int(strength) / 100.0,
+        )
     if name.startswith("spectral_boost_"):
         component, scope, encoded_strength = name.removeprefix("spectral_boost_").split("_", 2)
         if scope not in ("all", "high") or not encoded_strength.startswith("a"):

@@ -32,6 +32,7 @@ from gradient_study import (
     SpatialPatchProbe,
     SoftPercentileClipProbe,
     SpectralWienerProbe,
+    SpectralEnergyTransportProbe,
     SpectralAmplitudePowerProbe,
     SpectralComponentBoostProbe,
     SpectralPhaseConsensusProbe,
@@ -140,6 +141,15 @@ class GradientProbeTests(unittest.TestCase):
         for mode in ("amp_freq", "amp_freq_group", "freq_group"):
             probe = RiskAdaptiveGaussianProbe(mode, 0.5)
             result = probe.apply(gradients, ["a", "b", "c", "d"], 0)
+            self.assertEqual(result.shape, gradients.shape[1:])
+            self.assertTrue(torch.isfinite(result).all())
+
+    def test_spectral_energy_transport_preserves_shape_and_finite_values(self):
+        gradients = torch.randn(20, 2, 3, 32, 32)
+        for floor, strength in ((0.0, 0.5), (0.0, 1.0), (0.5, 1.0)):
+            result = SpectralEnergyTransportProbe(floor, strength).apply(
+                gradients, ["a", "b"], 0
+            )
             self.assertEqual(result.shape, gradients.shape[1:])
             self.assertTrue(torch.isfinite(result).all())
 
@@ -442,6 +452,7 @@ class GradientProbeTests(unittest.TestCase):
             "haar_wavelet_shrink_t050",
             "spectral_wiener_all_floor50",
             "spectral_wiener_high_floor25",
+            "spectral_transport_high_f00_a100",
             "amplitude_power125",
             "spectral_amplitude_power150",
             "spectral_phase_consensus_a050",
