@@ -167,6 +167,78 @@ class MomentumTrajectoryProbe:
 
 
 @dataclass
+class CrossStepSignPersistenceProbe:
+    """Boost sign-persistent gradient amplitudes across attack steps.
+
+    A coordinate that flips sign between consecutive gradients cannot build a
+    stable sign trajectory under MI.  Persistent coordinates receive a gain
+    of ``1 + strength`` and flip coordinates receive ``1 - strength``.
+    ``low``/``high`` restrict the same operation to an orthogonal Fourier band.
+    """
+
+    band: str
+    strength: float
+    cutoff: float = 0.50
+    _previous: dict[str, torch.Tensor] = field(default_factory=dict, init=False, repr=False)
+
+    @property
+    def name(self) -> str:
+        return (
+            f"sign_persistence_{self.band}_c{int(round(self.cutoff * 100)):02d}"
+            f"_a{int(round(self.strength * 100)):03d}"
+        )
+
+    def _select_band(self, gradient: torch.Tensor) -> torch.Tensor:
+        if self.band == "all":
+            return gradient
+        if self.band not in ("low", "high"):
+            raise ValueError("sign persistence band must be all, low, or high.")
+        height, width = gradient.shape[-2:]
+        radius = _frequency_radius(height, width, gradient.device)
+        low = radius <= radius.max() * self.cutoff
+        spectrum = torch.fft.fftshift(
+            torch.fft.fft2(gradient, dim=(-2, -1)), dim=(-2, -1)
+        )
+        mask = low if self.band == "low" else ~low
+        return torch.fft.ifft2(
+            torch.fft.ifftshift(
+                spectrum * mask.view(1, 1, height, width), dim=(-2, -1)
+            ),
+            dim=(-2, -1),
+        ).real
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        if self.band not in ("all", "low", "high"):
+            raise ValueError("sign persistence band must be all, low, or high.")
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("sign persistence strength must be in [0, 1].")
+        if not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("sign persistence cutoff must be in (0, 1].")
+        current = view_gradients.mean(dim=0)
+        selected = self._select_band(current)
+        outputs = []
+        for index, sample_id in enumerate(sample_ids):
+            if step == 0:
+                self._previous.pop(sample_id, None)
+            previous = self._previous.get(sample_id)
+            if previous is None:
+                transformed = current[index]
+            else:
+                previous_selected = self._select_band(previous.unsqueeze(0))[0]
+                agreement = (selected[index] * previous_selected > 0).to(current.dtype)
+                gain = 1.0 + self.strength * (2.0 * agreement - 1.0)
+                transformed = current[index] + selected[index] * (gain - 1.0)
+            self._previous[sample_id] = current[index].detach()
+            outputs.append(transformed)
+        return torch.stack(outputs, dim=0)
+
+
+@dataclass
 class ViewPCProbe:
     """Add a mean-aligned principal direction of cross-view variation."""
 
@@ -1000,6 +1072,15 @@ def build_probe(name: str) -> GradientProbe:
     if name.startswith("momentum_trajectory_"):
         mode, encoded_strength = name.removeprefix("momentum_trajectory_").split("_a", 1)
         return MomentumTrajectoryProbe(int(encoded_strength) / 100.0, mode=mode)
+    if name.startswith("sign_persistence_"):
+        encoded = name.removeprefix("sign_persistence_")
+        band, encoded = encoded.split("_c", 1)
+        cutoff, strength = encoded.split("_a", 1)
+        return CrossStepSignPersistenceProbe(
+            band,
+            int(strength) / 100.0,
+            cutoff=int(cutoff) / 100.0,
+        )
     if name.startswith("view_pc_transport_a"):
         return ViewPCProbe(int(name.removeprefix("view_pc_transport_a")) / 100.0)
     if name.startswith("view_gls_ridge"):

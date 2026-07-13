@@ -11,6 +11,7 @@ from gradient_study import (
     CrossScaleCovarianceProbe,
     CrossScaleCanonicalProbe,
     CovarianceTransportProbe,
+    CrossStepSignPersistenceProbe,
     EnergyEqualizationProbe,
     FrequencyGainProbe,
     GaussianBlendProbe,
@@ -119,6 +120,15 @@ class GradientProbeTests(unittest.TestCase):
         second_result = probe.apply(second, ["a"], 1)
         self.assertTrue(torch.equal(first_result, first.mean(0) / first.mean(0).abs().mean()))
         self.assertFalse(torch.equal(second_result, second.mean(0)))
+
+    def test_sign_persistence_is_identity_at_first_step_and_preserves_shape(self):
+        views = torch.randn(20, 1, 1, 16, 16)
+        probe = CrossStepSignPersistenceProbe("high", 0.5)
+        first = probe.apply(views, ["a"], 0)
+        second = probe.apply(-views, ["a"], 1)
+        self.assertTrue(torch.allclose(first, views.mean(0), atol=1e-6))
+        self.assertEqual(second.shape, views.shape[1:])
+        self.assertTrue(torch.isfinite(second).all())
 
     def test_view_pc_transport_preserves_shape_and_changes_mean(self):
         views = torch.tensor(
@@ -344,6 +354,7 @@ class GradientProbeTests(unittest.TestCase):
             "group_norm_equalize_a50",
             "momentum_trajectory_align_a25",
             "momentum_trajectory_parallel_boost_a50",
+            "sign_persistence_high_c50_a025",
             "view_pc_transport_a25",
             "view_gls_ridge10",
             "energy_equalize_patch_a25",
