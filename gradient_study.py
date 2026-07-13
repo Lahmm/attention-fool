@@ -132,7 +132,11 @@ class PairPhaseProbe:
 
     @property
     def name(self) -> str:
-        if self.mode in ("difference_add", "difference_reverse"):
+        if self.mode in (
+            "difference_add",
+            "difference_reverse",
+            "difference_orthogonal",
+        ):
             return f"pair_{self.mode}_a{int(round(self.strength * 100)):03d}"
         scope = "high_" if self.high_only else ""
         return f"pair_phase_wiener_{scope}f{int(round(self.strength * 100)):03d}"
@@ -149,6 +153,7 @@ class PairPhaseProbe:
         if self.mode not in (
             "difference_add",
             "difference_reverse",
+            "difference_orthogonal",
             "phase_wiener",
         ):
             raise ValueError("unsupported phase-pair probe mode.")
@@ -164,6 +169,17 @@ class PairPhaseProbe:
             return mean + self.strength * pair_difference.mean(dim=0)
         if self.mode == "difference_reverse":
             return mean - self.strength * pair_difference.mean(dim=0)
+        if self.mode == "difference_orthogonal":
+            difference = pair_difference.mean(dim=0)
+            mean_flat = mean.flatten(1)
+            difference_flat = difference.flatten(1)
+            projection = (
+                (mean_flat * difference_flat).sum(dim=1, keepdim=True)
+                / difference_flat.square().sum(dim=1, keepdim=True).clamp_min(1e-20)
+            ) * difference_flat
+            return (
+                mean_flat - self.strength * projection
+            ).view_as(mean)
 
         if self.high_only:
             height, width = mean.shape[-2:]
@@ -1542,6 +1558,11 @@ def build_probe(name: str) -> GradientProbe:
         return PairPhaseProbe(
             "difference_reverse",
             int(name.removeprefix("pair_difference_reverse_a")) / 100.0,
+        )
+    if name.startswith("pair_difference_orthogonal_a"):
+        return PairPhaseProbe(
+            "difference_orthogonal",
+            int(name.removeprefix("pair_difference_orthogonal_a")) / 100.0,
         )
     if name.startswith("pair_phase_wiener_high_f"):
         return PairPhaseProbe(

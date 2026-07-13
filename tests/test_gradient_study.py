@@ -125,6 +125,7 @@ class GradientProbeTests(unittest.TestCase):
         for mode, high_only in (
             ("difference_add", False),
             ("difference_reverse", False),
+            ("difference_orthogonal", False),
             ("phase_wiener", False),
             ("phase_wiener", True),
         ):
@@ -442,6 +443,7 @@ class GradientProbeTests(unittest.TestCase):
             "group_norm_equalize_a50",
             "pair_difference_add_a025",
             "pair_difference_reverse_a025",
+            "pair_difference_orthogonal_a025",
             "pair_phase_wiener_f025",
             "pair_phase_wiener_high_f025",
             "momentum_trajectory_align_a25",
