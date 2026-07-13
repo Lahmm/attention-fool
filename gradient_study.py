@@ -390,6 +390,57 @@ class ViewGLSProbe:
 
 
 @dataclass
+class PatchEnergyTransportProbe:
+    """Move patch-residual energy into the patch mean direction."""
+
+    strength: float
+    grid: int = 14
+
+    @property
+    def name(self) -> str:
+        return f"patch_energy_transport_g{self.grid}_a{int(round(self.strength * 100)):03d}"
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("patch energy transport strength must be in [0, 1].")
+        gradient = view_gradients.mean(dim=0)
+        height, width = gradient.shape[-2:]
+        if height % self.grid or width % self.grid:
+            raise ValueError("patch energy transport requires dimensions divisible by grid.")
+        kernel_size = (height // self.grid, width // self.grid)
+        patch_mean = F.avg_pool2d(gradient, kernel_size=kernel_size, stride=kernel_size)
+        projection = patch_mean.repeat_interleave(kernel_size[0], dim=2).repeat_interleave(
+            kernel_size[1], dim=3
+        )
+        residual = gradient - projection
+        patch_area = float(kernel_size[0] * kernel_size[1])
+        mean_energy = (
+            patch_mean.square().sum(dim=1, keepdim=True) * patch_area
+        )
+        residual_energy = F.avg_pool2d(
+            residual.square().sum(dim=1, keepdim=True),
+            kernel_size=kernel_size,
+            stride=kernel_size,
+        ) * patch_area
+        ratio = (
+            self.strength**2
+            * residual_energy
+            / mean_energy.clamp_min(1e-20)
+        )
+        mean_gain = torch.sqrt(1.0 + ratio)
+        mean_gain = mean_gain.repeat_interleave(kernel_size[0], dim=2).repeat_interleave(
+            kernel_size[1], dim=3
+        )
+        return projection * mean_gain + (1.0 - self.strength) * residual
+
+
+@dataclass
 class PatchProjectionProbe:
     """Blend the orthogonal projection onto the ViT patch-mean subspace."""
 
@@ -1924,6 +1975,13 @@ def build_probe(name: str) -> GradientProbe:
         encoded = name.removeprefix("patch_projection_g")
         grid, strength = encoded.split("_a", 1)
         return PatchProjectionProbe(
+            int(strength) / 100.0,
+            grid=int(grid),
+        )
+    if name.startswith("patch_energy_transport_g"):
+        encoded = name.removeprefix("patch_energy_transport_g")
+        grid, strength = encoded.split("_a", 1)
+        return PatchEnergyTransportProbe(
             int(strength) / 100.0,
             grid=int(grid),
         )
