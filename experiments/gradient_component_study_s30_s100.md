@@ -50,7 +50,7 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 
 ## 幅值与频率的关系
 
-本轮共筛选 139 个 30 样本候选，覆盖：
+本轮共筛选 145 个 30 样本候选，覆盖：
 
 - 幅值分位删除、极值裁剪、幅值幂放大/压缩；
 - 坐标和 group Wiener/可靠性/幅值均衡；
@@ -71,6 +71,7 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 - MI 累积之后、最终 sign update 之前的 Gaussian/Laplacian/高频预条件。
 - 低幅值×高频占比条件下的收缩、低频增益、Gaussian、低频-only 和幅值 equalize。
 - phase-pair A/B difference transport 及 pair-difference Wiener 噪声估计。
+- 基于低幅值、高频占比和跨-group 不一致性的风险分数自适应 Gaussian 组成重构。
 
 关键对照是：
 
@@ -82,6 +83,23 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 另外，只有对全部样本施加原始 Gaussian 弱叠加才出现弱正向；按低空间熵或高频能量选择样本后再平滑，30 样本上没有稳定收益。说明当前特征更像迁移性的描述变量，不能直接作为样本级因果开关。
 
 这说明幅值与频率不是可以独立相加的两个“好/坏开关”。有效影响来自原始梯度中自然幅值比例和空间频率相位共同形成的方向；改变其中一个而不保持另一个的比例，会破坏迁移。
+
+## 风险分数驱动的组成重构
+
+观察分析中，`group_to_rest_cosine_mean` 与迁移性在 discovery/validation 中分别为 `+0.355/+0.510`。因此新增了一个不使用黑盒标签的风险分数：低 raw amplitude、高 high-frequency fraction、以及低跨-group agreement 分别转换为 batch 内 percentile rank，再取几何平均；风险分数只分配一个弱 Gaussian residual，原始梯度和其全部符号均保留。
+
+六个 30 样本候选结果如下：
+
+| 探针 | Overall Δ | ViT Δ | CNN Δ | 白盒 Δ |
+|---|---:|---:|---:|---:|
+| risk Gaussian，低幅值×高频，a=0.25 | 0.00pp | -0.95pp | +1.67pp | +3.33pp |
+| risk Gaussian，低幅值×高频，a=0.50 | -0.91pp | -2.38pp | +1.67pp | 0.00pp |
+| risk Gaussian，再加入低 group agreement，a=0.25 | -0.61pp | -2.38pp | +2.50pp | -3.33pp |
+| risk Gaussian，再加入低 group agreement，a=0.50 | -1.52pp | -2.38pp | 0.00pp | 0.00pp |
+| risk Gaussian，高频×低 group agreement，a=0.25 | -1.21pp | -1.43pp | -0.83pp | 0.00pp |
+| risk Gaussian，高频×低 group agreement，a=0.50 | -1.52pp | -1.90pp | -0.83pp | 0.00pp |
+
+结果否定了“先找出低幅值高频困难样本，再对其施加平滑即可修复迁移”的简单因果解释。该联合特征更像样本难度和源方向质量的标志；把平滑预算集中到它们身上没有改善 ViT，加入 group 不一致性后反而进一步下降。因此这些候选不进入 100 样本确认。
 
 ## 幅值×频率交互分析
 
@@ -206,7 +224,7 @@ Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1
 - 同一 seed 的 baseline/candidate replay 事件完全一致；
 - 每次攻击严格保持 20 views；
 - 所有候选只在 view 聚合后、MI/normalize/sign update 前处理梯度；
-- 48 个单元测试覆盖了 probe 数值、形状、时序窗口、幅值符号、Fourier 分解、相位共识、跨尺度协方差/canonical、小波、幅值峰值、Laplacian、后动量方向、条件交互和 phase-pair 处理；
+- 49 个单元测试覆盖了 probe 数值、形状、时序窗口、幅值符号、Fourier 分解、相位共识、跨尺度协方差/canonical、小波、幅值峰值、Laplacian、后动量方向、条件交互、phase-pair 处理和风险分数自适应组成；
 - 当前主线和候选均评估项目配置的 11 个黑盒及单独白盒 ViT。
 
 失败的主要原因是可观测梯度特征与可迁移方向不是一一对应关系：
@@ -218,6 +236,8 @@ Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1
 5. MI 历史方向同时包含有效和源模型特异成分，不能仅通过当前梯度与历史方向的 cosine 做放大。
 
 最后测试的 `sign_reliability` 使用 `abs(mean_v sign(g_v))` 作为坐标可靠性，对原始均值做 boost 或 gate。boost 只产生少量离散模型变化，gate 在多个 ViT 上下降，因此没有进入 100 样本确认。
+
+风险分数候选也没有进入 100 样本确认。100 样本确认的门槛是小样本中至少出现正向 ViT/Overall 且 CNN 不下降的信号；最佳风险候选的 ViT 已为 `-0.95pp`，其余候选为 `-1.43` 至 `-2.38pp`，没有达到该门槛。相比之下，弱 Gaussian 全量叠加虽然只在小样本显示弱正向，并且后来三 seed 的平均 Overall 只有 `+0.39pp`，仍是唯一值得做大样本复核的候选。
 
 PCA 主方向传输同样没有通过筛选。最大跨-view 方差方向并不是迁移方向；把它与均值相加会把增强 view 的多样性误当成有效共享信号。
 
