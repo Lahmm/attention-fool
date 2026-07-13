@@ -4,7 +4,15 @@ import torch
 
 from gradient_observer import GradientObserver
 from gradient_replay import GradientReplay
-from gradient_study import GroupRemovalProbe, SpatialPatchProbe
+from gradient_study import (
+    AmplitudeProbe,
+    CoordinateWienerProbe,
+    FrequencyGainProbe,
+    GroupRemovalProbe,
+    SpatialPatchProbe,
+    SpectralWienerProbe,
+    build_probe,
+)
 
 
 class GradientReplayTests(unittest.TestCase):
@@ -84,6 +92,54 @@ class GradientProbeTests(unittest.TestCase):
         result = probe.apply(gradients, ["a", "b"], step=0)
         self.assertEqual(result.shape, gradients.shape[1:])
         self.assertGreater(float(result.eq(0).float().mean()), 0.05)
+
+    def test_amplitude_remove_and_clip_preserve_signs(self):
+        gradient = torch.tensor([[[[[1.0, -2.0, 3.0, -100.0]]]]])
+        removed = AmplitudeProbe("remove_high", 0.75).apply(gradient, ["a"], 0)
+        clipped = AmplitudeProbe("clip_high", 0.75).apply(gradient, ["a"], 0)
+        self.assertEqual(float(removed[0, 0, 0, 3]), 0.0)
+        self.assertLess(float(clipped[0, 0, 0, 3]), 0.0)
+        self.assertLess(abs(float(clipped[0, 0, 0, 3])), 100.0)
+        self.assertTrue(torch.equal(clipped.sign(), gradient.mean(dim=0).sign()))
+
+    def test_coordinate_wiener_preserves_stable_and_shrinks_noisy_coordinates(self):
+        views = torch.tensor(
+            [
+                [[[[2.0, 1.0]]]],
+                [[[[2.0, 3.0]]]],
+            ]
+        )
+        result = CoordinateWienerProbe(0.0).apply(views, ["a"], 0)
+        self.assertAlmostEqual(float(result[0, 0, 0, 0]), 2.0, places=6)
+        self.assertAlmostEqual(float(result[0, 0, 0, 1]), 1.75, places=6)
+
+    def test_fixed_frequency_gain_leaves_dc_and_attenuates_checkerboard(self):
+        constant = torch.ones(2, 1, 1, 8, 8)
+        axis = torch.arange(8)
+        checkerboard = ((axis[:, None] + axis[None, :]) % 2).mul(2).sub(1).float()
+        high = checkerboard.view(1, 1, 1, 8, 8).repeat(2, 1, 1, 1, 1)
+        probe = FrequencyGainProbe(0.5)
+        self.assertTrue(torch.allclose(probe.apply(constant, ["a"], 0), constant.mean(0)))
+        self.assertTrue(torch.allclose(probe.apply(high, ["a"], 0), high.mean(0) * 0.5))
+
+    def test_spectral_wiener_uses_cross_view_coherence(self):
+        axis = torch.arange(8)
+        checkerboard = ((axis[:, None] + axis[None, :]) % 2).mul(2).sub(1).float()
+        views = torch.stack((checkerboard, checkerboard * 3.0)).view(2, 1, 1, 8, 8)
+        result = SpectralWienerProbe(0.0).apply(views, ["a"], 0)
+        self.assertTrue(torch.allclose(result, checkerboard.view(1, 1, 8, 8) * 1.75, atol=1e-5))
+
+    def test_component_probe_names_round_trip(self):
+        names = (
+            "amplitude_remove_low_q20",
+            "amplitude_clip_high_q99",
+            "coordinate_wiener_floor25",
+            "frequency_high_gain50",
+            "spectral_wiener_all_floor50",
+            "spectral_wiener_high_floor25",
+        )
+        for name in names:
+            self.assertEqual(build_probe(name).name, name)
 
 
 if __name__ == "__main__":

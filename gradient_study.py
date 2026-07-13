@@ -160,6 +160,146 @@ class FrequencyBandProbe:
         return torch.fft.ifft2(torch.fft.ifftshift(spectrum, dim=(-2, -1)), dim=(-2, -1)).real
 
 
+def _sample_quantile(values: torch.Tensor, quantile: float) -> torch.Tensor:
+    """Return one quantile per sample with broadcastable image dimensions."""
+    if not 0.0 <= quantile <= 1.0:
+        raise ValueError("quantile must be in [0, 1].")
+    return torch.quantile(values.flatten(1), quantile, dim=1).view(-1, 1, 1, 1)
+
+
+@dataclass
+class AmplitudeProbe:
+    """Causal interventions on spatial-coordinate gradient magnitudes.
+
+    The intervention keeps each retained coordinate's sign and therefore tests
+    relative amplitude information before the existing MI normalization.
+    """
+
+    operation: str
+    quantile: float
+
+    @property
+    def name(self) -> str:
+        return f"amplitude_{self.operation}_q{int(round(self.quantile * 100)):02d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        gradient = view_gradients.mean(dim=0)
+        magnitude = gradient.abs()
+        threshold = _sample_quantile(magnitude, self.quantile)
+        if self.operation == "remove_low":
+            return gradient.masked_fill(magnitude <= threshold, 0.0)
+        if self.operation == "remove_high":
+            return gradient.masked_fill(magnitude >= threshold, 0.0)
+        if self.operation == "clip_high":
+            return gradient.sign() * magnitude.minimum(threshold)
+        raise ValueError(f"unsupported amplitude operation: {self.operation}")
+
+
+@dataclass
+class CoordinateWienerProbe:
+    """Empirical-Bayes shrinkage of coordinates unreliable across views.
+
+    Views are treated as repeated noisy measurements g_v = s + e_v.  The
+    variance of their mean is var(g_v)/V; subtracting it from |mean|^2 gives a
+    non-negative signal-power estimate.  The resulting Wiener gain changes
+    gradient composition without changing augmentation or update mechanics.
+    """
+
+    floor: float
+
+    @property
+    def name(self) -> str:
+        return f"coordinate_wiener_floor{int(round(self.floor * 100)):02d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.floor <= 1.0:
+            raise ValueError("Wiener floor must be in [0, 1].")
+        mean = view_gradients.mean(dim=0)
+        noise = view_gradients.var(dim=0, unbiased=False) / view_gradients.size(0)
+        signal = (mean.square() - noise).clamp_min(0.0)
+        gain = signal / (signal + noise).clamp_min(1e-20)
+        gain = self.floor + (1.0 - self.floor) * gain
+        return mean * gain
+
+
+def _frequency_radius(height: int, width: int, device: torch.device) -> torch.Tensor:
+    yy, xx = torch.meshgrid(
+        torch.arange(height, device=device, dtype=torch.float32),
+        torch.arange(width, device=device, dtype=torch.float32),
+        indexing="ij",
+    )
+    return ((yy - height / 2.0).square() + (xx - width / 2.0).square()).sqrt()
+
+
+@dataclass
+class FrequencyGainProbe:
+    """Fixed high-frequency gain used as a matched component-mixing control."""
+
+    high_gain: float
+
+    @property
+    def name(self) -> str:
+        return f"frequency_high_gain{int(round(self.high_gain * 100)):02d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.high_gain <= 1.0:
+            raise ValueError("high-frequency gain must be in [0, 1].")
+        gradient = view_gradients.mean(dim=0)
+        height, width = gradient.shape[-2:]
+        radius = _frequency_radius(height, width, gradient.device)
+        high = radius > radius.max() * 0.50
+        spectrum = torch.fft.fftshift(torch.fft.fft2(gradient, dim=(-2, -1)), dim=(-2, -1))
+        gain = torch.ones_like(radius)
+        gain[high] = self.high_gain
+        spectrum = spectrum * gain.view(1, 1, height, width)
+        return torch.fft.ifft2(
+            torch.fft.ifftshift(spectrum, dim=(-2, -1)), dim=(-2, -1)
+        ).real
+
+
+@dataclass
+class SpectralWienerProbe:
+    """Retain Fourier components supported coherently by independent views.
+
+    Unlike a radial low-pass filter, this estimates signal and noise power for
+    every complex Fourier coefficient.  ``high_only`` leaves low/mid frequency
+    components unchanged and decomposes only the empirically harmful band.
+    """
+
+    floor: float
+    high_only: bool = False
+
+    @property
+    def name(self) -> str:
+        scope = "high" if self.high_only else "all"
+        return f"spectral_wiener_{scope}_floor{int(round(self.floor * 100)):02d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.floor <= 1.0:
+            raise ValueError("Wiener floor must be in [0, 1].")
+        spectra = torch.fft.fftshift(
+            torch.fft.fft2(view_gradients, dim=(-2, -1)), dim=(-2, -1)
+        )
+        mean = spectra.mean(dim=0)
+        noise = (spectra - mean.unsqueeze(0)).abs().square().mean(dim=0) / spectra.size(0)
+        signal = (mean.abs().square() - noise).clamp_min(0.0)
+        gain = signal / (signal + noise).clamp_min(1e-20)
+        gain = self.floor + (1.0 - self.floor) * gain
+        if self.high_only:
+            height, width = mean.shape[-2:]
+            radius = _frequency_radius(height, width, mean.device)
+            high = radius > radius.max() * 0.50
+            gain = torch.where(high.view(1, 1, height, width), gain, torch.ones_like(gain))
+        filtered = mean * gain
+        return torch.fft.ifft2(
+            torch.fft.ifftshift(filtered, dim=(-2, -1)), dim=(-2, -1)
+        ).real
+
+
 def build_probe(name: str) -> GradientProbe:
     if name.startswith("group_remove_"):
         return GroupRemovalProbe(name.removeprefix("group_remove_"))
@@ -167,6 +307,20 @@ def build_probe(name: str) -> GradientProbe:
         return SpatialPatchProbe(name.removeprefix("spatial_patch_"), ratio=0.10)
     if name.startswith("frequency_remove_"):
         return FrequencyBandProbe(name.removeprefix("frequency_remove_"))
+    if name.startswith("amplitude_"):
+        operation, encoded_quantile = name.removeprefix("amplitude_").rsplit("_q", 1)
+        return AmplitudeProbe(operation, int(encoded_quantile) / 100.0)
+    if name.startswith("coordinate_wiener_floor"):
+        floor = int(name.removeprefix("coordinate_wiener_floor")) / 100.0
+        return CoordinateWienerProbe(floor)
+    if name.startswith("frequency_high_gain"):
+        gain = int(name.removeprefix("frequency_high_gain")) / 100.0
+        return FrequencyGainProbe(gain)
+    if name.startswith("spectral_wiener_"):
+        scope, encoded_floor = name.removeprefix("spectral_wiener_").split("_floor", 1)
+        if scope not in ("all", "high"):
+            raise ValueError(f"unsupported spectral Wiener scope: {scope}")
+        return SpectralWienerProbe(int(encoded_floor) / 100.0, high_only=scope == "high")
     raise ValueError(f"unsupported probe: {name}")
 
 
