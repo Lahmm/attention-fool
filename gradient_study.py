@@ -1410,6 +1410,74 @@ class AdaptiveGaussianProbe:
 
 
 @dataclass
+class PositiveLowFrequencyProbe:
+    """Boost low-frequency components only for source-side positive-score samples."""
+
+    mode: str
+    strength: float
+    cutoff: float = 0.50
+
+    @property
+    def name(self) -> str:
+        return (
+            f"positive_low_boost_{self.mode}_c{int(round(self.cutoff * 100)):02d}"
+            f"_a{int(round(self.strength * 100)):03d}"
+        )
+
+    @staticmethod
+    def _rank01(values: torch.Tensor) -> torch.Tensor:
+        if values.numel() <= 1:
+            return torch.zeros_like(values)
+        order = torch.argsort(values)
+        ranks = torch.empty_like(values, dtype=torch.float32)
+        ranks[order] = torch.arange(values.numel(), device=values.device, dtype=torch.float32)
+        return ranks / float(values.numel() - 1)
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if self.mode not in ("amp_freq", "amp_freq_group"):
+            raise ValueError("positive low-frequency mode must be amp_freq or amp_freq_group.")
+        if not 0.0 <= self.strength <= 1.0 or not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("invalid positive low-frequency parameters.")
+        gradient = view_gradients.mean(dim=0)
+        batch_size, _, height, width = gradient.shape
+        radius = _frequency_radius(height, width, gradient.device)
+        low = radius <= radius.max() * self.cutoff
+        spectrum = torch.fft.fftshift(
+            torch.fft.fft2(gradient, dim=(-2, -1)), dim=(-2, -1)
+        )
+        low_component = torch.fft.ifft2(
+            torch.fft.ifftshift(
+                spectrum * low.view(1, 1, height, width), dim=(-2, -1)
+            ),
+            dim=(-2, -1),
+        ).real
+        amplitude = gradient.abs().mean(dim=(1, 2, 3))
+        power = spectrum.abs().square().sum(dim=1)
+        high_fraction = power[:, ~low].sum(dim=1) / power.sum(dim=(1, 2)).clamp_min(1e-20)
+        scores = [self._rank01(amplitude), 1.0 - self._rank01(high_fraction)]
+        if self.mode == "amp_freq_group":
+            if view_gradients.size(0) % 2:
+                raise ValueError("positive low-frequency group mode requires paired views.")
+            groups = view_gradients.view(
+                view_gradients.size(0) // 2, 2, *view_gradients.shape[1:]
+            ).mean(dim=1)
+            flat = groups.flatten(2).permute(1, 0, 2)
+            rest = (flat.sum(dim=1, keepdim=True) - flat) / max(1, flat.size(1) - 1)
+            agreement = F.cosine_similarity(flat, rest, dim=2).mean(dim=1)
+            scores.append(self._rank01(agreement))
+        positive_score = torch.stack(scores, dim=0).prod(dim=0).pow(1.0 / len(scores))
+        return gradient + self.strength * positive_score.view(
+            batch_size, 1, 1, 1
+        ) * low_component
+
+
+@dataclass
 class GaussianHighPowerCompositeProbe:
     """Compose high-band magnitude shaping with a weak signed Gaussian blend."""
 
@@ -2192,6 +2260,15 @@ def build_probe(name: str) -> GradientProbe:
             int(power) / 100.0,
             int(strength) / 100.0,
             sigma=int(sigma) / 10.0,
+        )
+    if name.startswith("positive_low_boost_"):
+        encoded = name.removeprefix("positive_low_boost_")
+        mode, encoded = encoded.split("_c", 1)
+        cutoff, strength = encoded.split("_a", 1)
+        return PositiveLowFrequencyProbe(
+            mode,
+            int(strength) / 100.0,
+            cutoff=int(cutoff) / 100.0,
         )
     if name.startswith("spectral_boost_"):
         component, scope, encoded_strength = name.removeprefix("spectral_boost_").split("_", 2)
