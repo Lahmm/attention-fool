@@ -10,6 +10,7 @@ from gradient_study import (
     CoordinateWienerProbe,
     CrossScaleCovarianceProbe,
     CrossScaleCanonicalProbe,
+    DivisiveNormalizationProbe,
     CovarianceTransportProbe,
     CrossStepSignPersistenceProbe,
     EnergyEqualizationProbe,
@@ -23,6 +24,7 @@ from gradient_study import (
     LowFrequencyBoostProbe,
     MomentumTrajectoryProbe,
     SpatialPatchProbe,
+    SoftPercentileClipProbe,
     SpectralWienerProbe,
     SpectralAmplitudePowerProbe,
     SpectralComponentBoostProbe,
@@ -271,6 +273,17 @@ class GradientProbeTests(unittest.TestCase):
         self.assertAlmostEqual(ratio, 4.0)
         self.assertTrue(torch.equal(result.sign(), views.mean(0).sign()))
 
+    def test_amplitude_peak_controls_preserve_shape_and_sign(self):
+        views = torch.randn(4, 2, 3, 16, 16)
+        divisive = DivisiveNormalizationProbe(1.0).apply(views, ["a", "b"], 0)
+        clipped = SoftPercentileClipProbe(0.01).apply(views, ["a", "b"], 0)
+        mean = views.mean(0)
+        self.assertEqual(divisive.shape, mean.shape)
+        self.assertEqual(clipped.shape, mean.shape)
+        self.assertTrue(torch.isfinite(divisive).all())
+        self.assertTrue(torch.isfinite(clipped).all())
+        self.assertTrue(torch.equal(clipped.sign(), mean.sign()))
+
     def test_spectral_amplitude_power_preserves_single_frequency_shape(self):
         axis = torch.arange(8)
         checkerboard = ((axis[:, None] + axis[None, :]) % 2).mul(2).sub(1).float()
@@ -349,6 +362,8 @@ class GradientProbeTests(unittest.TestCase):
         names = (
             "amplitude_remove_low_q20",
             "amplitude_clip_high_q99",
+            "amplitude_softclip_p010",
+            "divisive_normalize_s10",
             "coordinate_wiener_floor25",
             "sign_reliability_boost_a50",
             "sign_reliability_gate_a25",

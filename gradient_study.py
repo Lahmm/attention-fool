@@ -441,6 +441,79 @@ class AmplitudePowerProbe:
 
 
 @dataclass
+class DivisiveNormalizationProbe:
+    """Suppress local amplitude peaks using a smooth divisive envelope."""
+
+    sigma: float
+
+    @property
+    def name(self) -> str:
+        return f"divisive_normalize_s{int(round(self.sigma * 10)):02d}"
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if self.sigma <= 0:
+            raise ValueError("divisive normalization sigma must be positive.")
+        gradient = view_gradients.mean(dim=0)
+        radius = int(3 * self.sigma)
+        axis = torch.arange(
+            -radius, radius + 1, dtype=gradient.dtype, device=gradient.device
+        )
+        gaussian = torch.exp(-0.5 * (axis / self.sigma).square())
+        gaussian = gaussian / gaussian.sum()
+        kernel = (gaussian[:, None] @ gaussian[None, :]).view(
+            1, 1, 2 * radius + 1, 2 * radius + 1
+        )
+        kernel = kernel.repeat(gradient.size(1), 1, 1, 1)
+        local_scale = F.conv2d(
+            F.pad(gradient.abs(), (radius, radius, radius, radius), mode="reflect"),
+            kernel,
+            groups=gradient.size(1),
+        )
+        return gradient / (1.0 + local_scale)
+
+
+@dataclass
+class SoftPercentileClipProbe:
+    """Smoothly clip only the signed amplitude tails."""
+
+    percentile: float
+
+    @property
+    def name(self) -> str:
+        return f"amplitude_softclip_p{int(round(self.percentile * 1000)):03d}"
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 < self.percentile <= 0.5:
+            raise ValueError("soft clip percentile must be in (0, 0.5].")
+        gradient = view_gradients.mean(dim=0)
+        flat = gradient.flatten(1)
+        lower = torch.quantile(flat, self.percentile, dim=1, keepdim=True)
+        upper = torch.quantile(flat, 1.0 - self.percentile, dim=1, keepdim=True)
+        scale = (upper - lower).clamp_min(1e-8) * 0.5
+        upper_value = upper + (flat - upper) / (
+            1.0 + (flat - upper).abs() / scale
+        )
+        lower_value = lower - (lower - flat) / (
+            1.0 + (lower - flat).abs() / scale
+        )
+        flat = torch.where(flat > upper, upper_value, flat)
+        flat = torch.where(flat < lower, lower_value, flat)
+        return flat.view_as(gradient)
+
+
+@dataclass
 class CoordinateWienerProbe:
     """Empirical-Bayes shrinkage of coordinates unreliable across views.
 
@@ -1157,8 +1230,16 @@ def build_probe(name: str) -> GradientProbe:
         if name.startswith("amplitude_power"):
             power = int(name.removeprefix("amplitude_power")) / 100.0
             return AmplitudePowerProbe(power)
+        if name.startswith("amplitude_softclip_p"):
+            return SoftPercentileClipProbe(
+                int(name.removeprefix("amplitude_softclip_p")) / 1000.0
+            )
         operation, encoded_quantile = name.removeprefix("amplitude_").rsplit("_q", 1)
         return AmplitudeProbe(operation, int(encoded_quantile) / 100.0)
+    if name.startswith("divisive_normalize_s"):
+        return DivisiveNormalizationProbe(
+            int(name.removeprefix("divisive_normalize_s")) / 10.0
+        )
     if name.startswith("coordinate_wiener_floor"):
         floor = int(name.removeprefix("coordinate_wiener_floor")) / 100.0
         return CoordinateWienerProbe(floor)
