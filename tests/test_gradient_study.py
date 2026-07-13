@@ -6,11 +6,14 @@ from gradient_observer import GradientObserver
 from gradient_replay import GradientReplay
 from gradient_study import (
     AmplitudeProbe,
+    AmplitudePowerProbe,
     CoordinateWienerProbe,
+    CovarianceTransportProbe,
     FrequencyGainProbe,
     GroupRemovalProbe,
     SpatialPatchProbe,
     SpectralWienerProbe,
+    SpectralAmplitudePowerProbe,
     build_probe,
 )
 
@@ -129,6 +132,35 @@ class GradientProbeTests(unittest.TestCase):
         result = SpectralWienerProbe(0.0).apply(views, ["a"], 0)
         self.assertTrue(torch.allclose(result, checkerboard.view(1, 1, 8, 8) * 1.75, atol=1e-5))
 
+    def test_amplitude_power_emphasizes_large_coordinates(self):
+        views = torch.tensor([[[[[1.0, -2.0]]]]])
+        result = AmplitudePowerProbe(2.0).apply(views, ["a"], 0)
+        ratio = abs(float(result[0, 0, 0, 1] / result[0, 0, 0, 0]))
+        self.assertAlmostEqual(ratio, 4.0)
+        self.assertTrue(torch.equal(result.sign(), views.mean(0).sign()))
+
+    def test_spectral_amplitude_power_preserves_single_frequency_shape(self):
+        axis = torch.arange(8)
+        checkerboard = ((axis[:, None] + axis[None, :]) % 2).mul(2).sub(1).float()
+        views = checkerboard.view(1, 1, 1, 8, 8)
+        result = SpectralAmplitudePowerProbe(1.5).apply(views, ["a"], 0)
+        cosine = torch.nn.functional.cosine_similarity(result.flatten(), checkerboard.flatten(), dim=0)
+        self.assertAlmostEqual(float(cosine), 1.0, places=5)
+
+    def test_covariance_transport_uses_structured_view_variation(self):
+        views = torch.tensor(
+            [
+                [[[[3.0, 0.0]]]],
+                [[[[1.0, 2.0]]]],
+                [[[[2.0, 1.0]]]],
+            ]
+        )
+        mean = views.mean(0)
+        result = CovarianceTransportProbe(0.5).apply(views, ["a"], 0)
+        self.assertEqual(result.shape, mean.shape)
+        self.assertGreater(float(torch.nn.functional.cosine_similarity(result.flatten(), mean.flatten(), dim=0)), 0.0)
+        self.assertFalse(torch.allclose(result, mean))
+
     def test_component_probe_names_round_trip(self):
         names = (
             "amplitude_remove_low_q20",
@@ -137,6 +169,10 @@ class GradientProbeTests(unittest.TestCase):
             "frequency_high_gain50",
             "spectral_wiener_all_floor50",
             "spectral_wiener_high_floor25",
+            "amplitude_power125",
+            "spectral_amplitude_power150",
+            "covariance_transport_view_a25",
+            "covariance_transport_group_a50",
         )
         for name in names:
             self.assertEqual(build_probe(name).name, name)

@@ -197,6 +197,25 @@ class AmplitudeProbe:
 
 
 @dataclass
+class AmplitudePowerProbe:
+    """Redistribute spatial-coordinate magnitude while retaining every sign."""
+
+    power: float
+
+    @property
+    def name(self) -> str:
+        return f"amplitude_power{int(round(self.power * 100)):03d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if self.power <= 0:
+            raise ValueError("amplitude power must be positive.")
+        gradient = view_gradients.mean(dim=0)
+        scale = gradient.abs().mean(dim=(1, 2, 3), keepdim=True).clamp_min(1e-20)
+        return gradient.sign() * (gradient.abs() / scale).pow(self.power)
+
+
+@dataclass
 class CoordinateWienerProbe:
     """Empirical-Bayes shrinkage of coordinates unreliable across views.
 
@@ -300,6 +319,74 @@ class SpectralWienerProbe:
         ).real
 
 
+@dataclass
+class SpectralAmplitudePowerProbe:
+    """Power-law Fourier magnitudes while preserving the mean gradient phase.
+
+    This combines amplitude and frequency without assuming that radial high
+    frequencies are uniformly harmful.  Large Fourier components are amplified
+    for power > 1 and compressed for power < 1, regardless of their radius.
+    """
+
+    power: float
+
+    @property
+    def name(self) -> str:
+        return f"spectral_amplitude_power{int(round(self.power * 100)):03d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if self.power <= 0:
+            raise ValueError("spectral amplitude power must be positive.")
+        gradient = view_gradients.mean(dim=0)
+        spectrum = torch.fft.fft2(gradient, dim=(-2, -1))
+        magnitude = spectrum.abs()
+        scale = magnitude.mean(dim=(1, 2, 3), keepdim=True).clamp_min(1e-20)
+        phase = spectrum / magnitude.clamp_min(1e-20)
+        transformed = phase * (magnitude / scale).pow(self.power)
+        return torch.fft.ifft2(transformed, dim=(-2, -1)).real
+
+
+@dataclass
+class CovarianceTransportProbe:
+    """Add the cross-view covariance component supported along the mean.
+
+    C*mean is the first power-iteration direction of the centered view-gradient
+    covariance.  It emphasizes structured augmentation variation aligned with
+    the attack direction instead of discarding view disagreement as noise.
+    """
+
+    strength: float
+    grouped: bool = False
+
+    @property
+    def name(self) -> str:
+        scope = "group" if self.grouped else "view"
+        return f"covariance_transport_{scope}_a{int(round(self.strength * 100)):02d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if self.strength < 0:
+            raise ValueError("covariance transport strength must be non-negative.")
+        components = view_gradients
+        if self.grouped:
+            if view_gradients.size(0) % 2:
+                raise ValueError("group covariance requires paired views.")
+            components = view_gradients.view(
+                view_gradients.size(0) // 2, 2, *view_gradients.shape[1:]
+            ).mean(dim=1)
+        mean = view_gradients.mean(dim=0)
+        flat = components.flatten(2).permute(1, 0, 2)  # [B,K,D]
+        mean_flat = mean.flatten(1)
+        centered = flat - flat.mean(dim=1, keepdim=True)
+        projection = torch.einsum("bkd,bd->bk", centered, mean_flat)
+        transported = torch.einsum("bkd,bk->bd", centered, projection) / components.size(0)
+        transported_norm = transported.norm(dim=1, keepdim=True).clamp_min(1e-20)
+        mean_norm = mean_flat.norm(dim=1, keepdim=True)
+        transported = transported * (mean_norm / transported_norm)
+        return (mean_flat + self.strength * transported).view_as(mean)
+
+
 def build_probe(name: str) -> GradientProbe:
     if name.startswith("group_remove_"):
         return GroupRemovalProbe(name.removeprefix("group_remove_"))
@@ -308,6 +395,9 @@ def build_probe(name: str) -> GradientProbe:
     if name.startswith("frequency_remove_"):
         return FrequencyBandProbe(name.removeprefix("frequency_remove_"))
     if name.startswith("amplitude_"):
+        if name.startswith("amplitude_power"):
+            power = int(name.removeprefix("amplitude_power")) / 100.0
+            return AmplitudePowerProbe(power)
         operation, encoded_quantile = name.removeprefix("amplitude_").rsplit("_q", 1)
         return AmplitudeProbe(operation, int(encoded_quantile) / 100.0)
     if name.startswith("coordinate_wiener_floor"):
@@ -321,6 +411,14 @@ def build_probe(name: str) -> GradientProbe:
         if scope not in ("all", "high"):
             raise ValueError(f"unsupported spectral Wiener scope: {scope}")
         return SpectralWienerProbe(int(encoded_floor) / 100.0, high_only=scope == "high")
+    if name.startswith("spectral_amplitude_power"):
+        power = int(name.removeprefix("spectral_amplitude_power")) / 100.0
+        return SpectralAmplitudePowerProbe(power)
+    if name.startswith("covariance_transport_"):
+        scope, encoded_strength = name.removeprefix("covariance_transport_").split("_a", 1)
+        if scope not in ("view", "group"):
+            raise ValueError(f"unsupported covariance scope: {scope}")
+        return CovarianceTransportProbe(int(encoded_strength) / 100.0, grouped=scope == "group")
     raise ValueError(f"unsupported probe: {name}")
 
 
