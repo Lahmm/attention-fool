@@ -50,7 +50,7 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 
 ## 幅值与频率的关系
 
-本轮共筛选 84 个 30 样本候选，覆盖：
+本轮共筛选 88 个 30 样本候选，覆盖：
 
 - 幅值分位删除、极值裁剪、幅值幂放大/压缩；
 - 坐标和 group Wiener/可靠性/幅值均衡；
@@ -61,7 +61,8 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 - 高频共享/残差成分放大；
 - patch/local spatial energy equalization；
 - 时间窗口频率处理；
-- 低频叠加、Gaussian 平滑叠加及 feature-conditioned Gaussian。
+- 低频叠加、Gaussian 平滑叠加及 feature-conditioned Gaussian；
+- 频谱复数系数的 circular phase consensus。
 
 关键对照是：
 
@@ -73,6 +74,21 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 另外，只有对全部样本施加原始 Gaussian 弱叠加才出现弱正向；按低空间熵或高频能量选择样本后再平滑，30 样本上没有稳定收益。说明当前特征更像迁移性的描述变量，不能直接作为样本级因果开关。
 
 这说明幅值与频率不是可以独立相加的两个“好/坏开关”。有效影响来自原始梯度中自然幅值比例和空间频率相位共同形成的方向；改变其中一个而不保持另一个的比例，会破坏迁移。
+
+## 频谱相位共识补充
+
+为区分“频率幅值”与“跨 view 的频谱相位一致性”，新增了相位共识 probe。对每个频率坐标先取 20 个 view 的复数 FFT，保留平均幅值，并对单位复数相位做 circular mean；随后将共识频谱的整体幅度缩放回原始 view-mean 的幅度。最终与原始平均频谱按 `a025/a050/a075/a100` 混合。该处理只发生在 view 聚合之后，20 views、mask、phase、noise、MI 和更新规则均未改变。
+
+30 样本结果如下；基线是同一 replay manifest 下的 `mean`，Overall 为 11 个黑盒平均，ViT/CNN 为对应架构平均：
+
+| 相位共识强度 | Overall Δ | ViT Δ | CNN Δ | 白盒 Δ | Overall bootstrap 95% CI |
+|---|---:|---:|---:|---:|---:|
+| 0.25 | -2.42pp | -3.33pp | -0.83pp | 0.00pp | [-5.76, 0.00]pp |
+| 0.50 | -4.85pp | -4.76pp | -5.00pp | 0.00pp | [-9.09, -1.21]pp |
+| 0.75 | -4.55pp | -4.76pp | -4.17pp | -3.33pp | [-9.09, -0.91]pp |
+| 1.00 | -5.76pp | -4.76pp | -7.50pp | -3.33pp | [-10.30, -1.82]pp |
+
+相位的一致性并不等价于迁移性的一致性。随着共识强度增加，黑盒 ViT 和 CNN 同时下降，且下降具有单调趋势；因此“保留跨 view 共同频谱相位”应从候选方向中排除。它还进一步支持了前面的判断：增强 view 之间的相位差并非纯噪声，其中包含有助于跨架构迁移的方向多样性。
 
 ## Gaussian 三 seed 结果
 
@@ -103,7 +119,7 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 - 同一 seed 的 baseline/candidate replay 事件完全一致；
 - 每次攻击严格保持 20 views；
 - 所有候选只在 view 聚合后、MI/normalize/sign update 前处理梯度；
-- 31 个单元测试覆盖了 probe 数值、形状、时序窗口、幅值符号和 Fourier 分解；
+- 36 个单元测试覆盖了 probe 数值、形状、时序窗口、幅值符号、Fourier 分解和相位共识；
 - 当前主线和候选均评估项目配置的 11 个黑盒及单独白盒 ViT。
 
 失败的主要原因是可观测梯度特征与可迁移方向不是一一对应关系：
