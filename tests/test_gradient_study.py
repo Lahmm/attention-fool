@@ -355,7 +355,7 @@ class GradientProbeTests(unittest.TestCase):
 
     def test_joint_amplitude_frequency_probe_preserves_shape(self):
         views = torch.randn(4, 4, 3, 32, 32)
-        for operation in ("shrink", "low_boost", "gaussian"):
+        for operation in ("shrink", "low_boost", "gaussian", "low_only", "low_equalize"):
             result = JointLowAmplitudeHighFrequencyProbe(operation, 0.25).apply(
                 views, ["a", "b", "c", "d"], 0
             )
@@ -412,6 +412,7 @@ class GradientProbeTests(unittest.TestCase):
             "post_momentum_laplacian_l100",
             "post_momentum_high_shrink_c50_a025",
             "joint_lowamp_highfreq_shrink_a025",
+            "joint_lowamp_highfreq_low_only_a025",
             "haar_wavelet_shrink_t050",
             "spectral_wiener_all_floor50",
             "spectral_wiener_high_floor25",

@@ -917,8 +917,16 @@ class JointLowAmplitudeHighFrequencyProbe:
         step: int,
     ) -> torch.Tensor:
         del sample_ids, step
-        if self.operation not in ("shrink", "low_boost", "gaussian"):
-            raise ValueError("joint operation must be shrink, low_boost, or gaussian.")
+        if self.operation not in (
+            "shrink",
+            "low_boost",
+            "gaussian",
+            "low_only",
+            "low_equalize",
+        ):
+            raise ValueError(
+                "joint operation must be shrink, low_boost, gaussian, low_only, or low_equalize."
+            )
         if not 0.0 <= self.strength <= 1.0:
             raise ValueError("joint strength must be in [0, 1].")
         if not 0.0 < self.cutoff <= 1.0:
@@ -948,6 +956,15 @@ class JointLowAmplitudeHighFrequencyProbe:
             transformed = low_component + (1.0 - self.strength) * high_component
         elif self.operation == "low_boost":
             transformed = gradient + self.strength * low_component
+        elif self.operation == "low_only":
+            transformed = low_component
+        elif self.operation == "low_equalize":
+            low_scale = low_component.abs().mean(dim=(1, 2, 3), keepdim=True)
+            full_scale = gradient.abs().mean(dim=(1, 2, 3), keepdim=True)
+            transformed = (
+                low_component * (full_scale / low_scale.clamp_min(1e-20))
+                + high_component
+            )
         else:
             radius_kernel = max(1, int(round(3.0)))
             axis = torch.arange(
