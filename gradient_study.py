@@ -326,6 +326,65 @@ class FrequencyGainProbe:
 
 
 @dataclass
+class LowFrequencyBoostProbe:
+    """Add a low-frequency projection while retaining the complete gradient."""
+
+    strength: float
+    cutoff: float = 0.50
+
+    @property
+    def name(self) -> str:
+        return f"low_frequency_boost_c{int(round(self.cutoff * 100)):02d}_a{int(round(self.strength * 100)):02d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if self.strength < 0 or not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("low-frequency boost requires strength >= 0 and cutoff in (0, 1].")
+        gradient = view_gradients.mean(dim=0)
+        height, width = gradient.shape[-2:]
+        radius = _frequency_radius(height, width, gradient.device)
+        low = radius <= radius.max() * self.cutoff
+        spectrum = torch.fft.fftshift(torch.fft.fft2(gradient, dim=(-2, -1)), dim=(-2, -1))
+        low_component = spectrum * low.view(1, 1, height, width)
+        low_component = torch.fft.ifft2(
+            torch.fft.ifftshift(low_component, dim=(-2, -1)), dim=(-2, -1)
+        ).real
+        return gradient + self.strength * low_component
+
+
+@dataclass
+class GaussianBlendProbe:
+    """Add a spatially smoothed projection while retaining the original detail."""
+
+    sigma: float
+    strength: float
+
+    @property
+    def name(self) -> str:
+        return f"gaussian_blend_s{int(round(self.sigma * 10)):02d}_a{int(round(self.strength * 100)):02d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if self.sigma <= 0 or self.strength < 0:
+            raise ValueError("Gaussian blend requires sigma > 0 and strength >= 0.")
+        gradient = view_gradients.mean(dim=0)
+        radius = max(1, int(round(3 * self.sigma)))
+        axis = torch.arange(-radius, radius + 1, device=gradient.device, dtype=gradient.dtype)
+        kernel_1d = torch.exp(-0.5 * (axis / self.sigma).square())
+        kernel_1d = kernel_1d / kernel_1d.sum()
+        kernel = (kernel_1d[:, None] @ kernel_1d[None, :]).view(
+            1, 1, 2 * radius + 1, 2 * radius + 1
+        )
+        kernel = kernel.repeat(gradient.size(1), 1, 1, 1)
+        smoothed = F.conv2d(
+            F.pad(gradient, (radius, radius, radius, radius), mode="reflect"),
+            kernel,
+            groups=gradient.size(1),
+        )
+        return gradient + self.strength * smoothed
+
+
+@dataclass
 class SpectralWienerProbe:
     """Retain Fourier components supported coherently by independent views.
 
@@ -566,6 +625,18 @@ def build_probe(name: str) -> GradientProbe:
     if name.startswith("frequency_high_gain"):
         gain = int(name.removeprefix("frequency_high_gain")) / 100.0
         return FrequencyGainProbe(gain)
+    if name.startswith("low_frequency_boost_"):
+        encoded = name.removeprefix("low_frequency_boost_")
+        cutoff, strength = encoded.split("_a", 1)
+        if not cutoff.startswith("c"):
+            raise ValueError(f"unsupported low-frequency boost name: {name}")
+        return LowFrequencyBoostProbe(int(cutoff.removeprefix("c")) / 100.0, int(strength) / 100.0)
+    if name.startswith("gaussian_blend_"):
+        encoded = name.removeprefix("gaussian_blend_")
+        sigma, strength = encoded.split("_a", 1)
+        if not sigma.startswith("s"):
+            raise ValueError(f"unsupported Gaussian blend name: {name}")
+        return GaussianBlendProbe(int(sigma.removeprefix("s")) / 10.0, int(strength) / 100.0)
     if name.startswith("spectral_wiener_"):
         scope, encoded_floor = name.removeprefix("spectral_wiener_").split("_floor", 1)
         if scope not in ("all", "high"):

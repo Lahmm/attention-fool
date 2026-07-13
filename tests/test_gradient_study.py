@@ -11,9 +11,11 @@ from gradient_study import (
     CovarianceTransportProbe,
     EnergyEqualizationProbe,
     FrequencyGainProbe,
+    GaussianBlendProbe,
     GroupRemovalProbe,
     GroupReliabilityProbe,
     GroupNormEqualizationProbe,
+    LowFrequencyBoostProbe,
     SpatialPatchProbe,
     SpectralWienerProbe,
     SpectralAmplitudePowerProbe,
@@ -137,6 +139,20 @@ class GradientProbeTests(unittest.TestCase):
         self.assertTrue(torch.allclose(probe.apply(constant, ["a"], 0), constant.mean(0)))
         self.assertTrue(torch.allclose(probe.apply(high, ["a"], 0), high.mean(0) * 0.5))
 
+    def test_low_frequency_boost_retains_original_high_frequency_component(self):
+        axis = torch.arange(8)
+        checkerboard = ((axis[:, None] + axis[None, :]) % 2).mul(2).sub(1).float()
+        gradient = torch.ones(1, 1, 8, 8) + checkerboard.view(1, 1, 8, 8)
+        views = gradient.unsqueeze(0)
+        result = LowFrequencyBoostProbe(1.0, cutoff=0.5).apply(views, ["a"], 0)
+        self.assertGreater(float(result.abs().max()), float(gradient.abs().max()))
+        self.assertGreater(float(result.mean()), float(gradient.mean()))
+
+    def test_gaussian_blend_preserves_shape(self):
+        views = torch.randn(2, 1, 3, 32, 32)
+        result = GaussianBlendProbe(1.0, 0.5).apply(views, ["a"], 0)
+        self.assertEqual(result.shape, views.shape[1:])
+
     def test_spectral_wiener_uses_cross_view_coherence(self):
         axis = torch.arange(8)
         checkerboard = ((axis[:, None] + axis[None, :]) % 2).mul(2).sub(1).float()
@@ -223,6 +239,8 @@ class GradientProbeTests(unittest.TestCase):
             "temporal_spectral_wiener_high_floor00_s1e5",
             "spectral_boost_signal_high_a025",
             "spectral_boost_residual_all_a100",
+            "low_frequency_boost_c50_a50",
+            "gaussian_blend_s10_a50",
         )
         for name in names:
             self.assertEqual(build_probe(name).name, name)
