@@ -531,6 +531,70 @@ class FrequencyGainProbe:
 
 
 @dataclass
+class HaarWaveletShrinkProbe:
+    """Robustly shrink low-amplitude high-frequency details.
+
+    A one-level orthonormal Haar transform separates a low-pass approximation
+    from three detail bands.  The detail threshold is estimated by the robust
+    MAD noise estimator on HH and scaled by the universal threshold.  This is
+    an amplitude-aware frequency intervention: small details are treated as
+    noise while large high-frequency coefficients are retained.
+    """
+
+    threshold_strength: float
+
+    @property
+    def name(self) -> str:
+        return f"haar_wavelet_shrink_t{int(round(self.threshold_strength * 100)):03d}"
+
+    @staticmethod
+    def _soft_threshold(values: torch.Tensor, threshold: torch.Tensor) -> torch.Tensor:
+        return values.sign() * (values.abs() - threshold).clamp_min(0.0)
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if self.threshold_strength < 0:
+            raise ValueError("Haar threshold strength must be non-negative.")
+        gradient = view_gradients.mean(dim=0)
+        if gradient.size(-2) % 2 or gradient.size(-1) % 2:
+            raise ValueError("Haar shrinkage requires even spatial dimensions.")
+        a = gradient[..., 0::2, 0::2]
+        b = gradient[..., 0::2, 1::2]
+        c = gradient[..., 1::2, 0::2]
+        d = gradient[..., 1::2, 1::2]
+        low = (a + b + c + d) * 0.5
+        horizontal = (a - b + c - d) * 0.5
+        vertical = (a + b - c - d) * 0.5
+        diagonal = (a - b - c + d) * 0.5
+        noise_scale = torch.median(diagonal.abs().flatten(1), dim=1).values
+        noise_scale = noise_scale / 0.67448975
+        coefficient_count = diagonal[0].numel() * 3
+        threshold = (
+            self.threshold_strength
+            * noise_scale
+            * (2.0 * np.log(max(2, coefficient_count))) ** 0.5
+        ).view(-1, 1, 1, 1)
+        horizontal = self._soft_threshold(horizontal, threshold)
+        vertical = self._soft_threshold(vertical, threshold)
+        diagonal = self._soft_threshold(diagonal, threshold)
+        a = (low + horizontal + vertical + diagonal) * 0.5
+        b = (low - horizontal + vertical - diagonal) * 0.5
+        c = (low + horizontal - vertical - diagonal) * 0.5
+        d = (low - horizontal - vertical + diagonal) * 0.5
+        result = torch.zeros_like(gradient)
+        result[..., 0::2, 0::2] = a
+        result[..., 0::2, 1::2] = b
+        result[..., 1::2, 0::2] = c
+        result[..., 1::2, 1::2] = d
+        return result
+
+
+@dataclass
 class LowFrequencyBoostProbe:
     """Add a low-frequency projection while retaining the complete gradient."""
 
@@ -1104,6 +1168,10 @@ def build_probe(name: str) -> GradientProbe:
     if name.startswith("frequency_high_gain"):
         gain = int(name.removeprefix("frequency_high_gain")) / 100.0
         return FrequencyGainProbe(gain)
+    if name.startswith("haar_wavelet_shrink_t"):
+        return HaarWaveletShrinkProbe(
+            int(name.removeprefix("haar_wavelet_shrink_t")) / 100.0
+        )
     if name.startswith("low_frequency_boost_"):
         encoded = name.removeprefix("low_frequency_boost_")
         cutoff, strength = encoded.split("_a", 1)

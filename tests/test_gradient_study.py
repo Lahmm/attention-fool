@@ -14,6 +14,7 @@ from gradient_study import (
     CrossStepSignPersistenceProbe,
     EnergyEqualizationProbe,
     FrequencyGainProbe,
+    HaarWaveletShrinkProbe,
     GaussianBlendProbe,
     AdaptiveGaussianProbe,
     GroupRemovalProbe,
@@ -205,6 +206,17 @@ class GradientProbeTests(unittest.TestCase):
         self.assertTrue(torch.allclose(probe.apply(constant, ["a"], 0), constant.mean(0)))
         self.assertTrue(torch.allclose(probe.apply(high, ["a"], 0), high.mean(0) * 0.5))
 
+    def test_haar_wavelet_shrink_is_identity_for_zero_threshold(self):
+        views = torch.randn(4, 1, 3, 16, 16)
+        result = HaarWaveletShrinkProbe(0.0).apply(views, ["a"], 0)
+        self.assertTrue(torch.allclose(result, views.mean(0), atol=1e-5, rtol=1e-5))
+
+    def test_haar_wavelet_shrink_preserves_shape_and_finite_values(self):
+        views = torch.randn(4, 2, 3, 16, 16)
+        result = HaarWaveletShrinkProbe(0.5).apply(views, ["a", "b"], 0)
+        self.assertEqual(result.shape, views.shape[1:])
+        self.assertTrue(torch.isfinite(result).all())
+
     def test_low_frequency_boost_retains_original_high_frequency_component(self):
         axis = torch.arange(8)
         checkerboard = ((axis[:, None] + axis[None, :]) % 2).mul(2).sub(1).float()
@@ -341,6 +353,7 @@ class GradientProbeTests(unittest.TestCase):
             "sign_reliability_boost_a50",
             "sign_reliability_gate_a25",
             "frequency_high_gain50",
+            "haar_wavelet_shrink_t050",
             "spectral_wiener_all_floor50",
             "spectral_wiener_high_floor25",
             "amplitude_power125",
