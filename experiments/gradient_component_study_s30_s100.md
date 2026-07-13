@@ -50,7 +50,7 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 
 ## 幅值与频率的关系
 
-本轮共筛选 115 个 30 样本候选，覆盖：
+本轮共筛选 121 个 30 样本候选，覆盖：
 
 - 幅值分位删除、极值裁剪、幅值幂放大/压缩；
 - 坐标和 group Wiener/可靠性/幅值均衡；
@@ -68,6 +68,7 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 - Haar 小波 MAD/universal-threshold 高频细节收缩；
 - 局部 divisive normalization、软百分位幅值裁剪及跨尺度/Gaussian 组合。
 - Tikhonov/Laplacian proximal 低通预条件。
+- MI 累积之后、最终 sign update 之前的 Gaussian/Laplacian/高频预条件。
 
 关键对照是：
 
@@ -116,6 +117,18 @@ Haar 小波的 MAD 阈值实验进一步区分了高频幅值：即使只收缩�
 
 Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1.0`：Overall/ViT/CNN/白盒变化为 `+0.61/0.00/+1.67/+3.33pp`，ViT 没有提升；其余强度的 ViT 变化为 `-1.90` 至 `-2.86pp`。因此把 Gaussian 低频叠加改写成更强的二阶平滑正则，并没有解决 ViT 瓶颈。
 
+最后增加了一个独立的处理位置：MI 累积状态保持原样，只对当前用于 sign update 的 momentum 做预条件。结果为：
+
+| 后动量处理 | Overall Δ | ViT Δ | CNN Δ | 白盒 Δ |
+|---|---:|---:|---:|---:|
+| Gaussian，sigma=1，a=0.25 | 0.00pp | 0.00pp | 0.00pp | +3.33pp |
+| Gaussian，sigma=1，a=0.50 | -2.12pp | -2.86pp | -0.83pp | 0.00pp |
+| Laplacian，lambda=0.50 | -1.82pp | -3.33pp | +0.83pp | 0.00pp |
+| Laplacian，lambda=1.00 | 0.00pp | -0.48pp | +0.83pp | +3.33pp |
+| 高频收缩，a=0.25 | -0.61pp | -1.90pp | +1.67pp | 0.00pp |
+
+因此高频危害既不是简单的 view 聚合错误，也不是 MI 累积后才出现的 sign 噪声；它与源模型梯度的空间结构共同决定最终迁移方向。
+
 ## Gaussian 三 seed 结果
 
 候选为 `gaussian_blend_s10_a25`，每个 seed 都使用同 seed baseline 的完全一致 replay manifest。
@@ -145,7 +158,7 @@ Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1
 - 同一 seed 的 baseline/candidate replay 事件完全一致；
 - 每次攻击严格保持 20 views；
 - 所有候选只在 view 聚合后、MI/normalize/sign update 前处理梯度；
-- 45 个单元测试覆盖了 probe 数值、形状、时序窗口、幅值符号、Fourier 分解、相位共识、跨尺度协方差/canonical、小波、幅值峰值和 Laplacian 处理；
+- 46 个单元测试覆盖了 probe 数值、形状、时序窗口、幅值符号、Fourier 分解、相位共识、跨尺度协方差/canonical、小波、幅值峰值、Laplacian 和后动量方向处理；
 - 当前主线和候选均评估项目配置的 11 个黑盒及单独白盒 ViT。
 
 失败的主要原因是可观测梯度特征与可迁移方向不是一一对应关系：
