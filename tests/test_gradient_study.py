@@ -22,6 +22,7 @@ from gradient_study import (
     SpectralWienerProbe,
     SpectralAmplitudePowerProbe,
     SpectralComponentBoostProbe,
+    SignReliabilityProbe,
     StepWindowProbe,
     build_probe,
 )
@@ -141,6 +142,17 @@ class GradientProbeTests(unittest.TestCase):
         self.assertAlmostEqual(float(result[0, 0, 0, 0]), 2.0, places=6)
         self.assertAlmostEqual(float(result[0, 0, 0, 1]), 1.75, places=6)
 
+    def test_sign_reliability_keeps_amplitude_and_reweights_consensus(self):
+        views = torch.tensor(
+            [
+                [[[[2.0, 1.0]]]],
+                [[[[2.0, -1.0]]]],
+            ]
+        )
+        result = SignReliabilityProbe("boost", 1.0).apply(views, ["a"], 0)
+        self.assertAlmostEqual(float(result[0, 0, 0, 0]), 4.0, places=6)
+        self.assertAlmostEqual(float(result[0, 0, 0, 1]), 0.0, places=6)
+
     def test_fixed_frequency_gain_leaves_dc_and_attenuates_checkerboard(self):
         constant = torch.ones(2, 1, 1, 8, 8)
         axis = torch.arange(8)
@@ -252,6 +264,8 @@ class GradientProbeTests(unittest.TestCase):
             "amplitude_remove_low_q20",
             "amplitude_clip_high_q99",
             "coordinate_wiener_floor25",
+            "sign_reliability_boost_a50",
+            "sign_reliability_gate_a25",
             "frequency_high_gain50",
             "spectral_wiener_all_floor50",
             "spectral_wiener_high_floor25",

@@ -333,6 +333,32 @@ class CoordinateWienerProbe:
         return mean * gain
 
 
+@dataclass
+class SignReliabilityProbe:
+    """Use view sign reliability as a soft multiplier on original amplitudes."""
+
+    mode: str
+    strength: float
+
+    @property
+    def name(self) -> str:
+        return f"sign_reliability_{self.mode}_a{int(round(self.strength * 100)):02d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if self.mode not in ("boost", "gate"):
+            raise ValueError("sign reliability mode must be boost or gate.")
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("sign reliability strength must be in [0, 1].")
+        mean = view_gradients.mean(dim=0)
+        reliability = view_gradients.sign().mean(dim=0).abs()
+        if self.mode == "boost":
+            gain = 1.0 + self.strength * reliability
+        else:
+            gain = (1.0 - self.strength) + self.strength * reliability
+        return mean * gain
+
+
 def _frequency_radius(height: int, width: int, device: torch.device) -> torch.Tensor:
     yy, xx = torch.meshgrid(
         torch.arange(height, device=device, dtype=torch.float32),
@@ -717,6 +743,9 @@ def build_probe(name: str) -> GradientProbe:
     if name.startswith("coordinate_wiener_floor"):
         floor = int(name.removeprefix("coordinate_wiener_floor")) / 100.0
         return CoordinateWienerProbe(floor)
+    if name.startswith("sign_reliability_"):
+        mode, encoded_strength = name.removeprefix("sign_reliability_").split("_a", 1)
+        return SignReliabilityProbe(mode, int(encoded_strength) / 100.0)
     if name.startswith("frequency_high_gain"):
         gain = int(name.removeprefix("frequency_high_gain")) / 100.0
         return FrequencyGainProbe(gain)
