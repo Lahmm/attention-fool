@@ -433,7 +433,32 @@ class EnergyEqualizationProbe:
         return gradient * gain
 
 
+@dataclass
+class StepWindowProbe:
+    """Apply a component intervention only on a half-open step interval."""
+
+    inner: GradientProbe
+    start: int
+    end: int
+
+    @property
+    def name(self) -> str:
+        return f"temporal_{self.inner.name}_s{self.start}e{self.end}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        if self.start <= step < self.end:
+            return self.inner.apply(view_gradients, sample_ids, step)
+        return view_gradients.mean(dim=0)
+
+
 def build_probe(name: str) -> GradientProbe:
+    if name.startswith("temporal_"):
+        inner_name, encoded_window = name.removeprefix("temporal_").rsplit("_s", 1)
+        encoded_start, encoded_end = encoded_window.split("e", 1)
+        start, end = int(encoded_start), int(encoded_end)
+        if start < 0 or end <= start:
+            raise ValueError("temporal probe requires 0 <= start < end.")
+        return StepWindowProbe(build_probe(inner_name), start, end)
     if name.startswith("group_remove_"):
         return GroupRemovalProbe(name.removeprefix("group_remove_"))
     if name.startswith("spatial_patch_"):

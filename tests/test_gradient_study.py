@@ -15,6 +15,7 @@ from gradient_study import (
     SpatialPatchProbe,
     SpectralWienerProbe,
     SpectralAmplitudePowerProbe,
+    StepWindowProbe,
     build_probe,
 )
 
@@ -177,6 +178,12 @@ class GradientProbeTests(unittest.TestCase):
         result = EnergyEqualizationProbe(0.25, scope="local").apply(gradient, ["a"], 0)
         self.assertEqual(result.shape, gradient.shape[1:])
 
+    def test_step_window_is_identity_outside_and_active_inside(self):
+        views = torch.tensor([[[[[1.0, 100.0]]]]])
+        probe = StepWindowProbe(AmplitudeProbe("remove_high", 0.5), 1, 3)
+        self.assertTrue(torch.equal(probe.apply(views, ["a"], 0), views.mean(0)))
+        self.assertEqual(float(probe.apply(views, ["a"], 1)[0, 0, 0, 1]), 0.0)
+
     def test_component_probe_names_round_trip(self):
         names = (
             "amplitude_remove_low_q20",
@@ -191,6 +198,8 @@ class GradientProbeTests(unittest.TestCase):
             "covariance_transport_group_a50",
             "energy_equalize_patch_a25",
             "energy_equalize_local_a50",
+            "temporal_frequency_remove_high_s0e5",
+            "temporal_spectral_wiener_high_floor00_s1e5",
         )
         for name in names:
             self.assertEqual(build_probe(name).name, name)
