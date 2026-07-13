@@ -202,6 +202,34 @@ class ViewPCProbe:
 
 
 @dataclass
+class ViewGLSProbe:
+    """Generalized least-squares combination in the cross-view direction space."""
+
+    ridge: float
+
+    @property
+    def name(self) -> str:
+        return f"view_gls_ridge{int(round(self.ridge * 100)):02d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if self.ridge <= 0:
+            raise ValueError("GLS ridge must be positive.")
+        flat = view_gradients.flatten(2).permute(1, 0, 2)  # [B,V,D]
+        unit = flat / flat.norm(dim=2, keepdim=True).clamp_min(1e-20)
+        gram = torch.bmm(unit, unit.transpose(1, 2))
+        identity = torch.eye(unit.size(1), device=unit.device, dtype=unit.dtype).expand_as(gram)
+        rhs = torch.ones(unit.size(0), unit.size(1), 1, device=unit.device, dtype=unit.dtype)
+        raw_weights = torch.linalg.solve(gram + self.ridge * identity, rhs).squeeze(-1)
+        weights = raw_weights.clamp_min(0.0)
+        weights = weights / weights.sum(dim=1, keepdim=True).clamp_min(1e-20)
+        fallback = torch.full_like(weights, 1.0 / weights.size(1))
+        valid = weights.sum(dim=1, keepdim=True) > 1e-20
+        weights = torch.where(valid, weights, fallback)
+        return torch.einsum("bv,bvchw->bchw", weights, unit.view_as(view_gradients.permute(1, 0, 2, 3, 4)))
+
+
+@dataclass
 class SpatialPatchProbe:
     selection: str
     ratio: float = 0.10
@@ -767,6 +795,8 @@ def build_probe(name: str) -> GradientProbe:
         return MomentumTrajectoryProbe(int(encoded_strength) / 100.0, mode=mode)
     if name.startswith("view_pc_transport_a"):
         return ViewPCProbe(int(name.removeprefix("view_pc_transport_a")) / 100.0)
+    if name.startswith("view_gls_ridge"):
+        return ViewGLSProbe(int(name.removeprefix("view_gls_ridge")) / 100.0)
     if name.startswith("spatial_patch_"):
         return SpatialPatchProbe(name.removeprefix("spatial_patch_"), ratio=0.10)
     if name.startswith("frequency_remove_"):

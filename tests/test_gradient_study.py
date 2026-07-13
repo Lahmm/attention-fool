@@ -24,6 +24,7 @@ from gradient_study import (
     SpectralComponentBoostProbe,
     SignReliabilityProbe,
     ViewPCProbe,
+    ViewGLSProbe,
     StepWindowProbe,
     build_probe,
 )
@@ -129,6 +130,20 @@ class GradientProbeTests(unittest.TestCase):
         self.assertEqual(result.shape, views.shape[1:])
         self.assertFalse(torch.allclose(result, views.mean(0)))
         self.assertTrue(torch.isfinite(result).all())
+
+    def test_view_gls_probe_returns_valid_shared_direction(self):
+        views = torch.tensor(
+            [
+                [[[[1.0, 0.0]]]],
+                [[[[1.0, 0.1]]]],
+                [[[[0.9, 0.2]]]],
+                [[[[1.0, -0.1]]]],
+            ]
+        )
+        result = ViewGLSProbe(0.1).apply(views, ["a"], 0)
+        self.assertEqual(result.shape, views.shape[1:])
+        self.assertTrue(torch.isfinite(result).all())
+        self.assertGreater(float(torch.nn.functional.cosine_similarity(result.flatten(), views.mean(0).flatten(), dim=0)), 0.0)
 
     def test_spatial_probe_preserves_shape(self):
         gradients = torch.ones(20, 2, 3, 224, 224)
@@ -293,6 +308,7 @@ class GradientProbeTests(unittest.TestCase):
             "momentum_trajectory_align_a25",
             "momentum_trajectory_parallel_boost_a50",
             "view_pc_transport_a25",
+            "view_gls_ridge10",
             "energy_equalize_patch_a25",
             "energy_equalize_local_a50",
             "temporal_frequency_remove_high_s0e5",
