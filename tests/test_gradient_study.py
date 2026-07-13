@@ -243,7 +243,11 @@ class GradientProbeTests(unittest.TestCase):
             "gaussian_blend_s10_a50",
         )
         for name in names:
-            self.assertEqual(build_probe(name).name, name)
+            probe = build_probe(name)
+            self.assertEqual(probe.name, name)
+            if name == "low_frequency_boost_c50_a50":
+                self.assertAlmostEqual(probe.cutoff, 0.5)
+                self.assertAlmostEqual(probe.strength, 0.5)
 
 
 if __name__ == "__main__":

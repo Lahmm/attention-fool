@@ -630,7 +630,10 @@ def build_probe(name: str) -> GradientProbe:
         cutoff, strength = encoded.split("_a", 1)
         if not cutoff.startswith("c"):
             raise ValueError(f"unsupported low-frequency boost name: {name}")
-        return LowFrequencyBoostProbe(int(cutoff.removeprefix("c")) / 100.0, int(strength) / 100.0)
+        return LowFrequencyBoostProbe(
+            int(strength) / 100.0,
+            cutoff=int(cutoff.removeprefix("c")) / 100.0,
+        )
     if name.startswith("gaussian_blend_"):
         encoded = name.removeprefix("gaussian_blend_")
         sigma, strength = encoded.split("_a", 1)
