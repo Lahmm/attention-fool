@@ -15,6 +15,7 @@ from gradient_study import (
     SpatialPatchProbe,
     SpectralWienerProbe,
     SpectralAmplitudePowerProbe,
+    SpectralComponentBoostProbe,
     StepWindowProbe,
     build_probe,
 )
@@ -134,6 +135,15 @@ class GradientProbeTests(unittest.TestCase):
         result = SpectralWienerProbe(0.0).apply(views, ["a"], 0)
         self.assertTrue(torch.allclose(result, checkerboard.view(1, 1, 8, 8) * 1.75, atol=1e-5))
 
+    def test_spectral_component_boost_separates_signal_and_residual(self):
+        axis = torch.arange(8)
+        checkerboard = ((axis[:, None] + axis[None, :]) % 2).mul(2).sub(1).float()
+        views = torch.stack((checkerboard, checkerboard * 3.0)).view(2, 1, 1, 8, 8)
+        signal = SpectralComponentBoostProbe("signal", 1.0).apply(views, ["a"], 0)
+        residual = SpectralComponentBoostProbe("residual", 1.0).apply(views, ["a"], 0)
+        self.assertTrue(torch.allclose(signal, checkerboard.view(1, 1, 8, 8) * 3.75, atol=1e-5))
+        self.assertTrue(torch.allclose(residual, checkerboard.view(1, 1, 8, 8) * 2.25, atol=1e-5))
+
     def test_amplitude_power_emphasizes_large_coordinates(self):
         views = torch.tensor([[[[[1.0, -2.0]]]]])
         result = AmplitudePowerProbe(2.0).apply(views, ["a"], 0)
@@ -200,6 +210,8 @@ class GradientProbeTests(unittest.TestCase):
             "energy_equalize_local_a50",
             "temporal_frequency_remove_high_s0e5",
             "temporal_spectral_wiener_high_floor00_s1e5",
+            "spectral_boost_signal_high_a025",
+            "spectral_boost_residual_all_a100",
         )
         for name in names:
             self.assertEqual(build_probe(name).name, name)

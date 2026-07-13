@@ -320,6 +320,45 @@ class SpectralWienerProbe:
 
 
 @dataclass
+class SpectralComponentBoostProbe:
+    """Amplify coherent signal or uncertain residual Fourier components."""
+
+    component: str
+    strength: float
+    high_only: bool = True
+
+    @property
+    def name(self) -> str:
+        scope = "high" if self.high_only else "all"
+        return f"spectral_boost_{self.component}_{scope}_a{int(round(self.strength * 100)):03d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if self.component not in ("signal", "residual"):
+            raise ValueError("spectral boost component must be signal or residual.")
+        if self.strength < 0:
+            raise ValueError("spectral boost strength must be non-negative.")
+        spectra = torch.fft.fftshift(
+            torch.fft.fft2(view_gradients, dim=(-2, -1)), dim=(-2, -1)
+        )
+        mean = spectra.mean(dim=0)
+        noise = (spectra - mean.unsqueeze(0)).abs().square().mean(dim=0) / spectra.size(0)
+        signal = (mean.abs().square() - noise).clamp_min(0.0)
+        wiener = signal / (signal + noise).clamp_min(1e-20)
+        component_weight = wiener if self.component == "signal" else 1.0 - wiener
+        gain = 1.0 + self.strength * component_weight
+        if self.high_only:
+            height, width = mean.shape[-2:]
+            radius = _frequency_radius(height, width, mean.device)
+            high = radius > radius.max() * 0.50
+            gain = torch.where(high.view(1, 1, height, width), gain, torch.ones_like(gain))
+        transformed = mean * gain
+        return torch.fft.ifft2(
+            torch.fft.ifftshift(transformed, dim=(-2, -1)), dim=(-2, -1)
+        ).real
+
+
+@dataclass
 class SpectralAmplitudePowerProbe:
     """Power-law Fourier magnitudes while preserving the mean gradient phase.
 
@@ -482,6 +521,15 @@ def build_probe(name: str) -> GradientProbe:
         if scope not in ("all", "high"):
             raise ValueError(f"unsupported spectral Wiener scope: {scope}")
         return SpectralWienerProbe(int(encoded_floor) / 100.0, high_only=scope == "high")
+    if name.startswith("spectral_boost_"):
+        component, scope, encoded_strength = name.removeprefix("spectral_boost_").split("_", 2)
+        if scope not in ("all", "high") or not encoded_strength.startswith("a"):
+            raise ValueError(f"unsupported spectral boost name: {name}")
+        return SpectralComponentBoostProbe(
+            component,
+            int(encoded_strength.removeprefix("a")) / 100.0,
+            high_only=scope == "high",
+        )
     if name.startswith("spectral_amplitude_power"):
         power = int(name.removeprefix("spectral_amplitude_power")) / 100.0
         return SpectralAmplitudePowerProbe(power)
