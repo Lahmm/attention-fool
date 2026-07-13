@@ -11,6 +11,7 @@ from gradient_study import (
     CrossScaleCovarianceProbe,
     CrossScaleCanonicalProbe,
     CrossScaleGaussianProbe,
+    ConflictProjectionProbe,
     DivisiveNormalizationProbe,
     CovarianceTransportProbe,
     CrossStepSignPersistenceProbe,
@@ -167,6 +168,15 @@ class GradientProbeTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(result).all())
         mean = gradients.mean(dim=0)
         self.assertTrue(torch.equal(result.sign(), mean.sign()))
+
+    def test_conflict_projection_preserves_shape_and_finite_values(self):
+        gradients = torch.randn(20, 2, 3, 32, 32)
+        for grouped in (False, True):
+            result = ConflictProjectionProbe(0.5, grouped=grouped).apply(
+                gradients, ["a", "b"], 0
+            )
+            self.assertEqual(result.shape, gradients.shape[1:])
+            self.assertTrue(torch.isfinite(result).all())
 
     def test_momentum_trajectory_is_identity_at_first_step_and_changes_later(self):
         first = torch.tensor([[[[[1.0, 0.0]]]]])
@@ -467,6 +477,8 @@ class GradientProbeTests(unittest.TestCase):
             "risk_gaussian_positive_amp_freq_s10_a025",
             "risk_gaussian_positive_amp_freq_group_s10_a050",
             "magnitude_envelope_s10_a025",
+            "conflict_project_view_a025",
+            "conflict_project_group_a050",
             "haar_wavelet_shrink_t050",
             "spectral_wiener_all_floor50",
             "spectral_wiener_high_floor25",

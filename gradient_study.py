@@ -1076,6 +1076,59 @@ class JointLowAmplitudeHighFrequencyProbe:
 
 
 @dataclass
+class ConflictProjectionProbe:
+    """Project only pairwise-conflicting view components before averaging.
+
+    For each view, negative inner products with the other views are removed
+    by a PCGrad-style projection.  Positive agreement and non-conflicting
+    diversity are retained.  ``grouped`` applies the same operation to the
+    ten A/B pair means, so phase-pair diversity is not treated as independent
+    conflict.  The operation is a gradient-space change only.
+    """
+
+    strength: float
+    grouped: bool = False
+
+    @property
+    def name(self) -> str:
+        scope = "group" if self.grouped else "view"
+        return f"conflict_project_{scope}_a{int(round(self.strength * 100)):03d}"
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("conflict projection strength must be in [0, 1].")
+        components = view_gradients
+        if self.grouped:
+            if view_gradients.size(0) % 2:
+                raise ValueError("group conflict projection requires paired views.")
+            components = view_gradients.view(
+                view_gradients.size(0) // 2, 2, *view_gradients.shape[1:]
+            ).mean(dim=1)
+        flat = components.flatten(2).permute(1, 0, 2)  # [B,K,D]
+        adjusted = flat.clone()
+        for view_index in range(flat.size(1)):
+            current = adjusted[:, view_index]
+            for reference_index in range(flat.size(1)):
+                if view_index == reference_index:
+                    continue
+                reference = flat[:, reference_index]
+                dot = (current * reference).sum(dim=1, keepdim=True)
+                coefficient = (
+                    self.strength * dot.clamp_max(0.0)
+                    / reference.square().sum(dim=1, keepdim=True).clamp_min(1e-20)
+                )
+                current = current - coefficient * reference
+            adjusted[:, view_index] = current
+        return adjusted.mean(dim=1).view_as(components[0])
+
+
+@dataclass
 class MagnitudeEnvelopeProbe:
     """Diffuse the spatial log-magnitude envelope while preserving signs.
 
@@ -1782,6 +1835,15 @@ def build_probe(name: str) -> GradientProbe:
         return GroupReliabilityProbe(int(name.removeprefix("group_reliability_t")) / 10.0)
     if name.startswith("group_norm_equalize_a"):
         return GroupNormEqualizationProbe(int(name.removeprefix("group_norm_equalize_a")) / 100.0)
+    if name.startswith("conflict_project_"):
+        encoded = name.removeprefix("conflict_project_")
+        scope, strength = encoded.split("_a", 1)
+        if scope not in ("view", "group"):
+            raise ValueError(f"unsupported conflict projection scope: {scope}")
+        return ConflictProjectionProbe(
+            int(strength) / 100.0,
+            grouped=scope == "group",
+        )
     if name.startswith("pair_difference_add_a"):
         return PairPhaseProbe(
             "difference_add",
