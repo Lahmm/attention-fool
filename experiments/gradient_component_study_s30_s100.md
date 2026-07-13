@@ -54,6 +54,7 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 
 - 幅值分位删除、极值裁剪、幅值幂放大/压缩；
 - 坐标和 group Wiener/可靠性/幅值均衡；
+- 保留原始幅值的跨-view 符号可靠性 boost/gate；
 - 固定高频增益、频率 Wiener、频谱幅值幂变换；
 - 高频共享/残差成分放大；
 - patch/local spatial energy equalization；
@@ -110,6 +111,8 @@ g' = g + 0.25 * GaussianBlur(g, sigma=1)
 3. `_normalize_grad` 和 MI 把绝对尺度变成相对坐标结构；单独调整 norm、频带或概率权重不能直接增加有效 sign trajectory。
 4. 当前白盒是单一 ViT-B/16，任何 patch 对齐或强平滑都容易提高源模型而损害其他 ViT。
 5. MI 历史方向同时包含有效和源模型特异成分，不能仅通过当前梯度与历史方向的 cosine 做放大。
+
+最后测试的 `sign_reliability` 使用 `abs(mean_v sign(g_v))` 作为坐标可靠性，对原始均值做 boost 或 gate。boost 只产生少量离散模型变化，gate 在多个 ViT 上下降，因此没有进入 100 样本确认。
 
 ## 下一步方向
 
