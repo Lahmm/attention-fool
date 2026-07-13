@@ -604,6 +604,47 @@ class FrequencyGainProbe:
 
 
 @dataclass
+class LaplacianProxProbe:
+    """Tikhonov/Laplacian proximal low-pass preconditioning.
+
+    It solves ``argmin_x ||x-g||^2 + lambda ||∇x||^2`` in the Fourier domain,
+    yielding the rational filter ``1 / (1 + lambda r^2)``.  This is a
+    mathematically specified constructive low-frequency enhancement rather
+    than hard band deletion.
+    """
+
+    regularization: float
+
+    @property
+    def name(self) -> str:
+        return f"laplacian_prox_l{int(round(self.regularization * 100)):03d}"
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if self.regularization < 0:
+            raise ValueError("Laplacian regularization must be non-negative.")
+        gradient = view_gradients.mean(dim=0)
+        height, width = gradient.shape[-2:]
+        radius = _frequency_radius(height, width, gradient.device)
+        normalized_radius = radius / radius.max().clamp_min(1e-20)
+        filter_gain = 1.0 / (
+            1.0 + self.regularization * normalized_radius.square()
+        )
+        spectrum = torch.fft.fftshift(
+            torch.fft.fft2(gradient, dim=(-2, -1)), dim=(-2, -1)
+        )
+        filtered = spectrum * filter_gain.view(1, 1, height, width)
+        return torch.fft.ifft2(
+            torch.fft.ifftshift(filtered, dim=(-2, -1)), dim=(-2, -1)
+        ).real
+
+
+@dataclass
 class HaarWaveletShrinkProbe:
     """Robustly shrink low-amplitude high-frequency details.
 
@@ -1285,6 +1326,10 @@ def build_probe(name: str) -> GradientProbe:
     if name.startswith("frequency_high_gain"):
         gain = int(name.removeprefix("frequency_high_gain")) / 100.0
         return FrequencyGainProbe(gain)
+    if name.startswith("laplacian_prox_l"):
+        return LaplacianProxProbe(
+            int(name.removeprefix("laplacian_prox_l")) / 100.0
+        )
     if name.startswith("haar_wavelet_shrink_t"):
         return HaarWaveletShrinkProbe(
             int(name.removeprefix("haar_wavelet_shrink_t")) / 100.0

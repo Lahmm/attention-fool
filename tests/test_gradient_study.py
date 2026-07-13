@@ -23,6 +23,7 @@ from gradient_study import (
     GroupReliabilityProbe,
     GroupNormEqualizationProbe,
     LowFrequencyBoostProbe,
+    LaplacianProxProbe,
     MomentumTrajectoryProbe,
     SpatialPatchProbe,
     SoftPercentileClipProbe,
@@ -209,6 +210,15 @@ class GradientProbeTests(unittest.TestCase):
         self.assertTrue(torch.allclose(probe.apply(constant, ["a"], 0), constant.mean(0)))
         self.assertTrue(torch.allclose(probe.apply(high, ["a"], 0), high.mean(0) * 0.5))
 
+    def test_laplacian_prox_is_identity_at_zero_and_attenuates_checkerboard(self):
+        constant = torch.ones(2, 1, 1, 8, 8)
+        axis = torch.arange(8)
+        checkerboard = ((axis[:, None] + axis[None, :]) % 2).mul(2).sub(1).float()
+        high = checkerboard.view(1, 1, 1, 8, 8).repeat(2, 1, 1, 1, 1)
+        self.assertTrue(torch.allclose(LaplacianProxProbe(0.0).apply(constant, ["a"], 0), constant.mean(0)))
+        filtered = LaplacianProxProbe(1.0).apply(high, ["a"], 0)
+        self.assertLess(float(filtered.abs().max()), float(high.abs().max()))
+
     def test_haar_wavelet_shrink_is_identity_for_zero_threshold(self):
         views = torch.randn(4, 1, 3, 16, 16)
         result = HaarWaveletShrinkProbe(0.0).apply(views, ["a"], 0)
@@ -377,6 +387,7 @@ class GradientProbeTests(unittest.TestCase):
             "sign_reliability_boost_a50",
             "sign_reliability_gate_a25",
             "frequency_high_gain50",
+            "laplacian_prox_l100",
             "haar_wavelet_shrink_t050",
             "spectral_wiener_all_floor50",
             "spectral_wiener_high_floor25",
