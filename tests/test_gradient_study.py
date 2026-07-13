@@ -9,6 +9,7 @@ from gradient_study import (
     AmplitudePowerProbe,
     CoordinateWienerProbe,
     CovarianceTransportProbe,
+    EnergyEqualizationProbe,
     FrequencyGainProbe,
     GroupRemovalProbe,
     SpatialPatchProbe,
@@ -161,6 +162,21 @@ class GradientProbeTests(unittest.TestCase):
         self.assertGreater(float(torch.nn.functional.cosine_similarity(result.flatten(), mean.flatten(), dim=0)), 0.0)
         self.assertFalse(torch.allclose(result, mean))
 
+    def test_patch_energy_equalization_preserves_signs_and_reduces_energy_ratio(self):
+        gradient = torch.ones(1, 1, 1, 32, 32)
+        gradient[..., :16, :16] = 4.0
+        probe = EnergyEqualizationProbe(0.5, scope="patch")
+        result = probe.apply(gradient, ["a"], 0)
+        before = gradient[..., :16, :16].square().mean() / gradient[..., 16:, 16:].square().mean()
+        after = result[..., :16, :16].square().mean() / result[..., 16:, 16:].square().mean()
+        self.assertLess(float(after), float(before))
+        self.assertTrue(torch.equal(result.sign(), gradient.mean(0).sign()))
+
+    def test_local_energy_equalization_preserves_shape(self):
+        gradient = torch.randn(2, 1, 3, 32, 32)
+        result = EnergyEqualizationProbe(0.25, scope="local").apply(gradient, ["a"], 0)
+        self.assertEqual(result.shape, gradient.shape[1:])
+
     def test_component_probe_names_round_trip(self):
         names = (
             "amplitude_remove_low_q20",
@@ -173,6 +189,8 @@ class GradientProbeTests(unittest.TestCase):
             "spectral_amplitude_power150",
             "covariance_transport_view_a25",
             "covariance_transport_group_a50",
+            "energy_equalize_patch_a25",
+            "energy_equalize_local_a50",
         )
         for name in names:
             self.assertEqual(build_probe(name).name, name)

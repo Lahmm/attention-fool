@@ -387,6 +387,52 @@ class CovarianceTransportProbe:
         return (mean_flat + self.strength * transported).view_as(mean)
 
 
+@dataclass
+class EnergyEqualizationProbe:
+    """Redistribute gradient energy without deleting signs or components.
+
+    ``patch`` uses the ViT-B/16 token grid and assigns one bounded gain to each
+    16x16 patch. ``local`` uses a smooth 17x17 RMS envelope.  Both preserve the
+    internal direction of energetic regions while increasing spatial entropy.
+    """
+
+    strength: float
+    scope: str = "patch"
+
+    @property
+    def name(self) -> str:
+        return f"energy_equalize_{self.scope}_a{int(round(self.strength * 100)):02d}"
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("energy equalization strength must be in [0, 1].")
+        gradient = view_gradients.mean(dim=0)
+        global_rms = gradient.square().mean(dim=(1, 2, 3), keepdim=True).sqrt().clamp_min(1e-20)
+        if self.scope == "patch":
+            if gradient.size(-2) % 16 or gradient.size(-1) % 16:
+                raise ValueError("patch energy equalization requires dimensions divisible by 16.")
+            local_rms = F.avg_pool2d(
+                gradient.square().mean(dim=1, keepdim=True), kernel_size=16, stride=16
+            ).sqrt().clamp_min(1e-20)
+            gain = (global_rms / local_rms).pow(self.strength).clamp(0.5, 2.0)
+            gain = gain.repeat_interleave(16, dim=2).repeat_interleave(16, dim=3)
+        elif self.scope == "local":
+            local_rms = F.avg_pool2d(
+                F.pad(
+                    gradient.square().mean(dim=1, keepdim=True),
+                    (8, 8, 8, 8),
+                    mode="reflect",
+                ),
+                kernel_size=17,
+                stride=1,
+            ).sqrt().clamp_min(1e-20)
+            gain = (global_rms / local_rms).pow(self.strength).clamp(0.5, 2.0)
+        else:
+            raise ValueError(f"unsupported energy equalization scope: {self.scope}")
+        return gradient * gain
+
+
 def build_probe(name: str) -> GradientProbe:
     if name.startswith("group_remove_"):
         return GroupRemovalProbe(name.removeprefix("group_remove_"))
@@ -419,6 +465,9 @@ def build_probe(name: str) -> GradientProbe:
         if scope not in ("view", "group"):
             raise ValueError(f"unsupported covariance scope: {scope}")
         return CovarianceTransportProbe(int(encoded_strength) / 100.0, grouped=scope == "group")
+    if name.startswith("energy_equalize_"):
+        scope, encoded_strength = name.removeprefix("energy_equalize_").split("_a", 1)
+        return EnergyEqualizationProbe(int(encoded_strength) / 100.0, scope=scope)
     raise ValueError(f"unsupported probe: {name}")
 
 
