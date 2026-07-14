@@ -447,6 +447,48 @@ class ViewGLSProbe:
 
 
 @dataclass
+class GeometricMedianProbe:
+    """Robustly aggregate views with a few Weiszfeld iterations."""
+
+    strength: float
+    preserve_scale: bool = False
+    iterations: int = 3
+
+    @property
+    def name(self) -> str:
+        suffix = "scaled" if self.preserve_scale else "raw"
+        return f"geometric_median_a{int(round(self.strength * 100)):03d}_{suffix}"
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("geometric median strength must be in [0, 1].")
+        if self.iterations < 1:
+            raise ValueError("geometric median requires at least one iteration.")
+        batch_size = view_gradients.size(1)
+        flat = view_gradients.flatten(2).permute(1, 0, 2)
+        mean = flat.mean(dim=1)
+        estimate = mean
+        for _ in range(self.iterations):
+            distances = (flat - estimate.unsqueeze(1)).norm(dim=2).clamp_min(1e-12)
+            weights = distances.reciprocal()
+            estimate = (weights.unsqueeze(-1) * flat).sum(dim=1) / weights.sum(
+                dim=1, keepdim=True
+            )
+        estimate = mean + self.strength * (estimate - mean)
+        if self.preserve_scale:
+            source_scale = mean.abs().mean(dim=1, keepdim=True)
+            estimate_scale = estimate.abs().mean(dim=1, keepdim=True)
+            estimate = estimate * (source_scale / estimate_scale.clamp_min(1e-20))
+        return estimate.view(batch_size, *view_gradients.shape[2:])
+
+
+@dataclass
 class PatchEnergyTransportProbe:
     """Move patch-residual energy into the patch mean direction."""
 
@@ -2832,6 +2874,15 @@ def build_probe(name: str, model: torch.nn.Module | None = None) -> GradientProb
         return ViewPCProbe(int(name.removeprefix("view_pc_transport_a")) / 100.0)
     if name.startswith("view_gls_ridge"):
         return ViewGLSProbe(int(name.removeprefix("view_gls_ridge")) / 100.0)
+    if name.startswith("geometric_median_a"):
+        encoded = name.removeprefix("geometric_median_a")
+        strength, suffix = encoded.split("_", 1)
+        if suffix not in ("raw", "scaled"):
+            raise ValueError(f"unsupported geometric median name: {name}")
+        return GeometricMedianProbe(
+            int(strength) / 100.0,
+            preserve_scale=suffix == "scaled",
+        )
     if name.startswith("spatial_patch_"):
         return SpatialPatchProbe(name.removeprefix("spatial_patch_"), ratio=0.10)
     if name.startswith("patch_projection_g"):

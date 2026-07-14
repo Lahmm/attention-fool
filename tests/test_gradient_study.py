@@ -60,6 +60,7 @@ from gradient_study import (
     SignReliabilityProbe,
     ViewPCProbe,
     ViewGLSProbe,
+    GeometricMedianProbe,
     StepWindowProbe,
     build_probe,
 )
@@ -286,6 +287,15 @@ class GradientProbeTests(unittest.TestCase):
         probe = build_probe("patch_embedding_metric_a050_scaled", model=Model())
         self.assertIsInstance(probe, PatchEmbeddingMetricProbe)
         self.assertEqual(probe.name, "patch_embedding_metric_a050_scaled")
+
+    def test_geometric_median_preserves_shape_and_finite_values(self):
+        views = torch.randn(20, 2, 3, 16, 16)
+        for preserve_scale in (False, True):
+            result = GeometricMedianProbe(
+                0.5, preserve_scale=preserve_scale
+            ).apply(views, ["a", "b"], 0)
+            self.assertEqual(result.shape, views.shape[1:])
+            self.assertTrue(torch.isfinite(result).all())
 
     def test_raw_temporal_gaussian_preserves_first_scale_and_weights_later_scale(self):
         views = torch.ones(2, 1, 1, 8, 8)
@@ -719,6 +729,7 @@ class GradientProbeTests(unittest.TestCase):
             "sign_persistence_high_c50_a025",
             "view_pc_transport_a25",
             "view_gls_ridge10",
+            "geometric_median_a050_raw",
             "energy_equalize_patch_a25",
             "energy_equalize_local_a50",
             "temporal_frequency_remove_high_s0e5",
