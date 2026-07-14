@@ -1721,6 +1721,82 @@ class CrossScaleCoherentGaussianProbe:
 
 
 @dataclass
+class CrossSamplePrototypeProbe:
+    """Inject a weak cross-image gradient prototype.
+
+    The first batch at each attack step uses a leave-one-out prototype. Later
+    batches use an EMA collected from earlier samples at the same step. The
+    prototype is normalized to each sample's raw L2 scale before injection,
+    so this tests direction sharing rather than an arbitrary global amplitude.
+    """
+
+    scope: str
+    sigma: float
+    strength: float
+    ema_decay: float = 0.75
+    _prototype_by_step: dict[int, torch.Tensor] = field(default_factory=dict, init=False, repr=False)
+
+    @property
+    def name(self) -> str:
+        return (
+            f"cross_sample_proto_{self.scope}"
+            f"_s{int(round(self.sigma * 10)):02d}"
+            f"_a{int(round(self.strength * 100)):03d}"
+            f"_d{int(round(self.ema_decay * 100)):02d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids
+        if self.scope not in ("low", "full"):
+            raise ValueError("cross-sample prototype scope must be low or full.")
+        if self.sigma <= 0:
+            raise ValueError("cross-sample prototype sigma must be positive.")
+        if self.strength < 0:
+            raise ValueError("cross-sample prototype strength must be non-negative.")
+        if not 0.0 <= self.ema_decay < 1.0:
+            raise ValueError("cross-sample prototype EMA decay must be in [0, 1).")
+
+        gradient = view_gradients.mean(dim=0)
+        if self.scope == "low":
+            source = GaussianBlendProbe(self.sigma, 1.0).apply(
+                gradient.unsqueeze(0), ["cross_sample_low"] * gradient.size(0), 0
+            )
+        else:
+            source = gradient
+
+        batch_size = source.size(0)
+        batch_prototype = source.mean(dim=0, keepdim=True).detach()
+        previous = self._prototype_by_step.get(step)
+        if previous is None:
+            if batch_size > 1:
+                prototype = (source.sum(dim=0, keepdim=True) - source) / (batch_size - 1)
+            else:
+                prototype = source
+        else:
+            prototype = previous.to(device=source.device, dtype=source.dtype).expand(
+                batch_size, -1, -1, -1
+            )
+
+        self._prototype_by_step[step] = (
+            batch_prototype
+            if previous is None
+            else self.ema_decay * previous.to(batch_prototype) + (1.0 - self.ema_decay) * batch_prototype
+        ).detach()
+
+        gradient_norm = gradient.flatten(1).norm(dim=1, keepdim=True)
+        prototype_norm = prototype.flatten(1).norm(dim=1, keepdim=True)
+        scaled = prototype * (
+            gradient_norm / prototype_norm.clamp_min(1e-20)
+        ).view(batch_size, 1, 1, 1)
+        return gradient + self.strength * scaled
+
+
+@dataclass
 class GaussianBandBlendProbe:
     """Adjust low/high spatial components while retaining the full gradient."""
 
@@ -3440,6 +3516,17 @@ def build_probe(name: str, model: torch.nn.Module | None = None) -> GradientProb
             mode,
             int(strength) / 100.0,
             cutoff=int(cutoff) / 100.0,
+        )
+    if name.startswith("cross_sample_proto_"):
+        encoded = name.removeprefix("cross_sample_proto_")
+        scope, encoded = encoded.split("_s", 1)
+        sigma, encoded = encoded.split("_a", 1)
+        strength, decay = encoded.split("_d", 1)
+        return CrossSamplePrototypeProbe(
+            scope=scope,
+            sigma=int(sigma) / 10.0,
+            strength=int(strength) / 100.0,
+            ema_decay=int(decay) / 100.0,
         )
     if name.startswith("covariance_transport_"):
         scope, encoded_strength = name.removeprefix("covariance_transport_").split("_a", 1)
