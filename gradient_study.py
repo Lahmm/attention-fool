@@ -1558,6 +1558,50 @@ class PatchGaussianBlendProbe:
 
 
 @dataclass
+class PatchwiseL2MeanProbe:
+    """Locally normalize view directions inside each ViT-sized patch."""
+
+    strength: float
+    patch_size: int = 16
+
+    @property
+    def name(self) -> str:
+        return f"patchwise_l2_mean_a{int(round(self.strength * 100)):03d}"
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("patchwise L2 strength must be in [0, 1].")
+        gradient = view_gradients.mean(dim=0)
+        height, width = gradient.shape[-2:]
+        if height % self.patch_size or width % self.patch_size:
+            raise ValueError("patchwise L2 requires dimensions divisible by patch size.")
+        grid_h, grid_w = height // self.patch_size, width // self.patch_size
+        channels = gradient.size(1)
+        patches = view_gradients.view(
+            view_gradients.size(0), view_gradients.size(1), channels,
+            grid_h, self.patch_size, grid_w, self.patch_size,
+        ).permute(0, 1, 3, 5, 2, 4, 6).reshape(
+            view_gradients.size(0), view_gradients.size(1), grid_h * grid_w, -1
+        )
+        norms = patches.norm(dim=-1, keepdim=True)
+        unit_mean = (patches / norms.clamp_min(1e-20)).mean(dim=0)
+        unit_mean = unit_mean / unit_mean.norm(dim=-1, keepdim=True).clamp_min(1e-20)
+        raw_patch_mean = patches.mean(dim=0)
+        target_patches = unit_mean * raw_patch_mean.norm(dim=-1, keepdim=True)
+        target = target_patches.view(
+            view_gradients.size(1), grid_h, grid_w, channels,
+            self.patch_size, self.patch_size,
+        ).permute(0, 3, 1, 4, 2, 5).reshape_as(gradient)
+        return gradient + self.strength * (target - gradient)
+
+
+@dataclass
 class CrossScalePatchGaussianProbe:
     """Add patch-grid DC structure to the cross-scale Gaussian direction.
 
@@ -3357,6 +3401,10 @@ def build_probe(name: str, model: torch.nn.Module | None = None) -> GradientProb
             int(sigma) / 10.0,
             int(gaussian_strength) / 100.0,
             int(patch_strength) / 100.0,
+        )
+    if name.startswith("patchwise_l2_mean_a"):
+        return PatchwiseL2MeanProbe(
+            int(name.removeprefix("patchwise_l2_mean_a")) / 100.0
         )
     if name.startswith("gaussian_band_s"):
         encoded = name.removeprefix("gaussian_band_s")
