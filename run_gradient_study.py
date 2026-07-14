@@ -52,11 +52,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_attacker(model) -> PatchScoreAttacker:
+def build_attacker(model, steps: int = 10) -> PatchScoreAttacker:
     return PatchScoreAttacker(
         model=model,
         epsilon=16.0 / 255.0,
-        steps=10,
+        steps=steps,
         attack_method="original_score_postdrop_phase_pair",
         use_momentum=True,
         momentum_decay=1.0,
@@ -87,6 +87,7 @@ def run_attack(
     num_samples: int,
     batch_size: int,
     seed: int,
+    steps: int = 10,
     probe_name: str | None,
     baseline_sign_dir: Path | None,
     expected_manifest: dict[str, object] | None,
@@ -98,7 +99,7 @@ def run_attack(
 
     dataloader, num_classes = load_data(batch_size=batch_size, num_workers=4, prefetch_factor=4)
     model = build_whitebox_model(num_classes=num_classes, model_name=DEFAULT_MODEL_NAME)
-    attacker = build_attacker(model)
+    attacker = build_attacker(model, steps=steps)
     replay = GradientReplay(seed)
     probe = build_probe(probe_name) if probe_name else None
     attacked = 0
@@ -163,7 +164,7 @@ def run_attack(
                 "seed": seed,
                 "num_samples": num_samples,
                 "batch_size": batch_size,
-                "steps": 10,
+                "steps": steps,
                 "epsilon": 16.0 / 255.0,
                 "actual_views": 20,
                 "gradient_postprocess": "mean",

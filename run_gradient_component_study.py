@@ -40,6 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-samples", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--seed", type=int, default=20260713)
+    parser.add_argument("--steps", type=int, default=10)
     parser.add_argument(
         "--output-dir", default="outputs/attack/gradient_component_study_screen_s30"
     )
@@ -89,6 +90,7 @@ def main() -> None:
             num_samples=args.num_samples,
             batch_size=args.batch_size,
             seed=args.seed,
+            steps=args.steps,
             probe_name=None,
             baseline_sign_dir=None,
             expected_manifest=None,
@@ -115,6 +117,7 @@ def main() -> None:
                 num_samples=args.num_samples,
                 batch_size=args.batch_size,
                 seed=args.seed,
+                steps=args.steps,
                 probe_name=probe_name,
                 baseline_sign_dir=baseline_dir,
                 expected_manifest=manifest,
