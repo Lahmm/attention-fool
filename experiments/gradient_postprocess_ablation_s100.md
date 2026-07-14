@@ -220,3 +220,7 @@
 进一步使用白盒 ViT 的 patch embedding 权重构造 `W^T W`，对每个 16×16 patch 的像素梯度做特征度量预条件，再回到像素空间。该操作仍只改变聚合梯度，不改变 view、score、mask、noise、MI 或投影。
 
 30 样本结果显示该白盒几何不能直接代表跨 ViT 共享方向：raw strength `0.25/0.50/0.75` 的 ViT 变化为 `-0.95/-2.38/-3.81pp`；L1 scale-preserving 版本为 `-0.95/-0.48/-2.86pp`。最佳 scaled `0.25` 的 Overall/CNN/白盒变化为 `-0.30/+0.83/-3.33pp`。因此不进行 100 样本确认。目录为 `outputs/attack/patch_embedding_metric_screen_s30_seed20260713`。
+
+### 跨 ViT 黑盒梯度的颜色边际
+
+对 7 个黑盒 ViT 的输入梯度做独立分析，发现绿色通道的平均梯度能量约为 `1.2–1.3×`，蓝色约为 `0.7–0.85×`，红色接近平均。将这一统计转成固定的逐通道 gain，并作用于白盒 raw 梯度后，30 样本中所有正向/反向强度的 ViT 变化均为 `0pp`（最差也只有 CNN `-0.83pp`）。因此黑盒 ViT 的颜色边际统计不足以提供可用的共享 sign 方向；需要更高阶的跨模型空间方向信息。目录为 `outputs/attack/cross_vit_channel_screen_s30_seed20260713`。
