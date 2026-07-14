@@ -1613,6 +1613,114 @@ class CrossScalePatchGaussianProbe:
 
 
 @dataclass
+class CrossScaleCoherentGaussianProbe:
+    """Gate cross-scale transport by frequency-wise view coherence."""
+
+    cutoff: float
+    cross_strength: float
+    coherence_threshold: float
+    sigma: float
+    smooth_strength: float
+
+    @property
+    def name(self) -> str:
+        return (
+            f"cross_scale_coherent_gaussian_c{int(round(self.cutoff * 100)):02d}"
+            f"_x{int(round(self.cross_strength * 100)):03d}"
+            f"_q{int(round(self.coherence_threshold * 100)):03d}"
+            f"_s{int(round(self.sigma * 10)):02d}"
+            f"_a{int(round(self.smooth_strength * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("coherent cross-scale cutoff must be in (0, 1].")
+        if not 0.0 <= self.cross_strength <= 1.0:
+            raise ValueError("coherent cross-scale strength must be in [0, 1].")
+        if not 0.0 <= self.coherence_threshold < 1.0:
+            raise ValueError("coherence threshold must be in [0, 1).")
+        if self.sigma <= 0 or self.smooth_strength < 0:
+            raise ValueError("coherent cross-scale Gaussian parameters are invalid.")
+
+        mean = view_gradients.mean(dim=0)
+        height, width = mean.shape[-2:]
+        radius = _frequency_radius(height, width, mean.device)
+        low_mask = radius <= radius.max() * self.cutoff
+        spectra = torch.fft.fftshift(
+            torch.fft.fft2(view_gradients, dim=(-2, -1)), dim=(-2, -1)
+        )
+        low_views = torch.fft.ifft2(
+            torch.fft.ifftshift(
+                spectra * low_mask.view(1, 1, 1, height, width), dim=(-2, -1)
+            ),
+            dim=(-2, -1),
+        ).real
+        high_views = view_gradients - low_views
+        low_mean = low_views.mean(dim=0)
+        high_mean = high_views.mean(dim=0)
+
+        low_flat = low_views.flatten(2).permute(1, 0, 2)
+        high_flat = high_views.flatten(2).permute(1, 0, 2)
+        low_centered = low_flat - low_flat.mean(dim=1, keepdim=True)
+        high_centered = high_flat - high_flat.mean(dim=1, keepdim=True)
+        low_mean_flat = low_mean.flatten(1)
+        high_mean_flat = high_mean.flatten(1)
+        coefficients = torch.einsum("bvd,bd->bv", low_centered, low_mean_flat)
+        transported = torch.einsum("bvd,bv->bd", high_centered, coefficients)
+        transported = transported / view_gradients.size(0)
+        transported_norm = transported.norm(dim=1, keepdim=True)
+        high_norm = high_mean_flat.norm(dim=1, keepdim=True)
+        transported = transported * (high_norm / transported_norm.clamp_min(1e-20))
+        valid = (transported_norm > 1e-20) & (high_norm > 1e-20)
+        transported = torch.where(valid, transported, high_mean_flat)
+
+        high_spectrum = torch.fft.fftshift(
+            torch.fft.fft2(high_views, dim=(-2, -1)), dim=(-2, -1)
+        )
+        high_mean_spectrum = torch.fft.fftshift(
+            torch.fft.fft2(high_mean, dim=(-2, -1)), dim=(-2, -1)
+        )
+        transported_spectrum = torch.fft.fftshift(
+            torch.fft.fft2(transported.view_as(high_mean), dim=(-2, -1)), dim=(-2, -1)
+        )
+        centered_spectrum = high_spectrum - high_mean_spectrum.unsqueeze(0)
+        covariance = torch.einsum(
+            "vbchw,bv->bchw", centered_spectrum, coefficients.to(centered_spectrum.dtype)
+        )
+        covariance = covariance / view_gradients.size(0)
+        variance_high = centered_spectrum.abs().square().mean(dim=0)
+        variance_coeff = coefficients.square().mean(dim=1, keepdim=True).view(
+            coefficients.size(0), 1, 1, 1
+        )
+        coherence = covariance.abs() / (
+            variance_high * variance_coeff
+        ).sqrt().clamp_min(1e-20)
+        coherence = coherence.clamp(0.0, 1.0)
+        coherence = (
+            (coherence - self.coherence_threshold)
+            / (1.0 - self.coherence_threshold)
+        ).clamp(0.0, 1.0)
+        transported_spectrum = high_mean_spectrum + coherence * (
+            transported_spectrum - high_mean_spectrum
+        )
+        mixed_spectrum = (1.0 - self.cross_strength) * high_mean_spectrum
+        mixed_spectrum = mixed_spectrum + self.cross_strength * transported_spectrum
+        mixed_high = torch.fft.ifft2(
+            torch.fft.ifftshift(mixed_spectrum, dim=(-2, -1)), dim=(-2, -1)
+        ).real
+        transformed = low_mean + mixed_high
+        return GaussianBlendProbe(self.sigma, self.smooth_strength).apply(
+            transformed.unsqueeze(0), ["coherent_cross_scale"] * transformed.size(0), 0
+        )
+
+
+@dataclass
 class GaussianBandBlendProbe:
     """Adjust low/high spatial components while retaining the full gradient."""
 
@@ -3273,6 +3381,18 @@ def build_probe(name: str, model: torch.nn.Module | None = None) -> GradientProb
         )
     if name.startswith("cross_scale_"):
         encoded = name.removeprefix("cross_scale_")
+        if encoded.startswith("coherent_gaussian_c"):
+            cutoff, encoded = encoded.removeprefix("coherent_gaussian_c").split("_x", 1)
+            cross_strength, encoded = encoded.split("_q", 1)
+            threshold, encoded = encoded.split("_s", 1)
+            sigma, smooth_strength = encoded.split("_a", 1)
+            return CrossScaleCoherentGaussianProbe(
+                cutoff=int(cutoff) / 100.0,
+                cross_strength=int(cross_strength) / 100.0,
+                coherence_threshold=int(threshold) / 100.0,
+                sigma=int(sigma) / 10.0,
+                smooth_strength=int(smooth_strength) / 100.0,
+            )
         if encoded.startswith("patch_gaussian_c"):
             cutoff, encoded = encoded.removeprefix("patch_gaussian_c").split("_x", 1)
             cross_strength, encoded = encoded.split("_s", 1)

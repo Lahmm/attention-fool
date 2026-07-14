@@ -12,6 +12,7 @@ from gradient_study import (
     CrossScaleCanonicalProbe,
     CrossScaleGaussianProbe,
     CrossScalePatchGaussianProbe,
+    CrossScaleCoherentGaussianProbe,
     CrossScaleResidualGaussianProbe,
     ConfidenceCrossScaleGaussianProbe,
     ConflictProjectionProbe,
@@ -611,6 +612,14 @@ class GradientProbeTests(unittest.TestCase):
         )
         self.assertTrue(torch.allclose(identity, base, atol=1e-5, rtol=1e-5))
 
+    def test_cross_scale_coherent_gaussian_composition(self):
+        views = torch.randn(20, 2, 3, 32, 32)
+        result = CrossScaleCoherentGaussianProbe(0.5, 0.5, 0.25, 4.0, 0.75).apply(
+            views, ["a", "b"], 0
+        )
+        self.assertEqual(result.shape, views.shape[1:])
+        self.assertTrue(torch.isfinite(result).all())
+
     def test_cross_scale_residual_gaussian_identity_at_full_residual_gain(self):
         views = torch.randn(20, 1, 3, 16, 16)
         base = CrossScaleGaussianProbe(0.5, 0.5, 1.0, 0.25).apply(
@@ -733,6 +742,7 @@ class GradientProbeTests(unittest.TestCase):
             "cross_scale_canonical_c50_a025",
             "cross_scale_gaussian_c50_x025_s10_a025",
             "cross_scale_patch_gaussian_c50_x050_s40_a075_p025",
+            "cross_scale_coherent_gaussian_c50_x050_q025_s40_a075",
             "cross_scale_residual_gaussian_c50_x050_r025_s10_a025",
             "confidence_cross_scale_gaussian_c50_x050_s40_a075_q050",
             "orthogonal_gaussian_s40_a075",
