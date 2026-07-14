@@ -19,6 +19,7 @@ from gradient_study import (
     EnergyEqualizationProbe,
     FrequencyGainProbe,
     FrequencyGainRescaleProbe,
+    AdaptiveFrequencyGainRescaleProbe,
     HaarWaveletShrinkProbe,
     GaussianBlendProbe,
     GaussianBandBlendProbe,
@@ -368,6 +369,14 @@ class GradientProbeTests(unittest.TestCase):
                 actual = result.flatten(1).norm(dim=1)
             self.assertTrue(torch.allclose(actual, expected, atol=1e-5, rtol=1e-5))
 
+    def test_adaptive_rescaled_frequency_gain_preserves_shape_and_finite_values(self):
+        views = torch.randn(20, 2, 3, 16, 16)
+        result = AdaptiveFrequencyGainRescaleProbe(0.25, 0.5).apply(
+            views, ["a", "b"], 0
+        )
+        self.assertEqual(result.shape, views.shape[1:])
+        self.assertTrue(torch.isfinite(result).all())
+
     def test_laplacian_prox_is_identity_at_zero_and_attenuates_checkerboard(self):
         constant = torch.ones(2, 1, 1, 8, 8)
         axis = torch.arange(8)
@@ -609,6 +618,7 @@ class GradientProbeTests(unittest.TestCase):
             "cross_scale_gaussian_c50_x025_s10_a025",
             "cross_scale_residual_gaussian_c50_x050_r025_s10_a025",
             "frequency_rescaled_high_l1_g025",
+            "adaptive_frequency_rescaled_l1_q50_g025",
             "covariance_transport_view_a25",
             "covariance_transport_group_a50",
             "group_reliability_t20",

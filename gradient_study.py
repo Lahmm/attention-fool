@@ -819,6 +819,57 @@ class FrequencyGainRescaleProbe:
 
 
 @dataclass
+class AdaptiveFrequencyGainRescaleProbe:
+    """Rescale high-frequency gain only for high-frequency-heavy samples."""
+
+    high_gain: float
+    quantile: float
+    scale: str = "l1"
+    cutoff: float = 0.50
+
+    @property
+    def name(self) -> str:
+        return (
+            f"adaptive_frequency_rescaled_{self.scale}"
+            f"_q{int(round(self.quantile * 100)):02d}"
+            f"_g{int(round(self.high_gain * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.high_gain <= 1.0:
+            raise ValueError("adaptive high-frequency gain must be in [0, 1].")
+        if not 0.0 <= self.quantile <= 1.0:
+            raise ValueError("adaptive frequency quantile must be in [0, 1].")
+        if self.scale not in ("l1", "l2"):
+            raise ValueError("adaptive frequency scale must be l1 or l2.")
+        if not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("adaptive frequency cutoff must be in (0, 1].")
+        gradient = view_gradients.mean(dim=0)
+        height, width = gradient.shape[-2:]
+        radius = _frequency_radius(height, width, gradient.device)
+        high = radius > radius.max() * self.cutoff
+        spectrum = torch.fft.fftshift(
+            torch.fft.fft2(gradient, dim=(-2, -1)), dim=(-2, -1)
+        )
+        power = spectrum.abs().square().sum(dim=1)
+        high_fraction = power.masked_select(high.view(1, height, width)).view(
+            gradient.size(0), -1
+        ).sum(dim=1) / power.sum(dim=(1, 2)).clamp_min(1e-20)
+        threshold = torch.quantile(high_fraction, self.quantile)
+        selected = high_fraction >= threshold
+        transformed = FrequencyGainRescaleProbe(
+            self.high_gain, scale=self.scale
+        ).apply(gradient.unsqueeze(0), ["adaptive_frequency"] * gradient.size(0), 0)
+        return torch.where(selected.view(-1, 1, 1, 1), transformed, gradient)
+
+
+@dataclass
 class LaplacianProxProbe:
     """Tikhonov/Laplacian proximal low-pass preconditioning.
 
@@ -2431,6 +2482,15 @@ def build_probe(name: str) -> GradientProbe:
         scale, encoded_gain = encoded.split("_g", 1)
         return FrequencyGainRescaleProbe(
             int(encoded_gain) / 100.0,
+            scale=scale,
+        )
+    if name.startswith("adaptive_frequency_rescaled_"):
+        encoded = name.removeprefix("adaptive_frequency_rescaled_")
+        scale, encoded = encoded.split("_q", 1)
+        quantile, encoded_gain = encoded.split("_g", 1)
+        return AdaptiveFrequencyGainRescaleProbe(
+            int(encoded_gain) / 100.0,
+            int(quantile) / 100.0,
             scale=scale,
         )
     if name.startswith("amplitude_"):
