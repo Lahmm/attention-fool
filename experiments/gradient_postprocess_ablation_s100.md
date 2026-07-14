@@ -170,3 +170,20 @@
 | top 75% | 84.85% | +0.30pp | 86.67% | +0.95pp | 81.67% | -0.83pp | 93.33% |
 
 门控验证了相关性与因果增益之间的差距：top 75% 只产生弱正向，且低于 Overall `+3–5pp` 目标；top 50% 已损伤 CNN。该方向不进行 100 样本确认，也不改变当前主线。目录为 `outputs/attack/confidence_cross_scale_screen_s30_seed20260713`。
+
+### 早期 raw Gaussian 的轨迹窗口
+
+30 样本窗口筛选显示，`sigma=4, a=0.75` 的 raw Gaussian 只作用于前 5 步时，黑盒 ViT `+1.90pp`、Overall `+1.21pp`，而只作用于第 3–8 步时 ViT `-0.95pp`；这提示后期梯度可能更容易包含源模型特异方向。随后进行 100 样本、3 seed、完整 11 黑盒确认：
+
+| seed | Overall | Δ Overall | 黑盒 ViT | Δ ViT | CNN | Δ CNN | 白盒 | Δ 白盒 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 20260713 | 82.55% | +1.73pp | 85.57% | +2.14pp | 77.25% | +1.00pp | 93% | +1pp |
+| 20260714 | 81.73% | +0.45pp | 85.14% | +0.29pp | 75.75% | +0.75pp | 92% | 0pp |
+| 20260715 | 82.18% | +1.09pp | 84.86% | +0.71pp | 77.50% | +1.75pp | 93% | 0pp |
+| 三 seed 平均增量 | — | **+1.09pp** | — | **+1.05pp** | — | **+1.17pp** | — | **+0.33pp** |
+
+该方向具有一定轨迹解释力，但 seed 间波动较大，未达到 Overall `+3–5pp` 或黑盒 ViT `90%`；不进入主线。结果目录为：
+
+- `outputs/attack/raw_gaussian_early_s100_seed20260713`
+- `outputs/attack/raw_gaussian_early_s100_seed20260714`
+- `outputs/attack/raw_gaussian_early_s100_seed20260715`
