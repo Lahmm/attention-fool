@@ -24,6 +24,7 @@ from gradient_study import (
     GaussianBandBlendProbe,
     PatchGaussianBlendProbe,
     RawScaleTemporalGaussianProbe,
+    RawScaleCrossScaleGaussianProbe,
     AdaptiveGaussianProbe,
     GroupRemovalProbe,
     GroupReliabilityProbe,
@@ -245,6 +246,14 @@ class GradientProbeTests(unittest.TestCase):
         self.assertAlmostEqual(float(first.abs().mean()), 1.25, places=5)
         self.assertGreater(float(second.abs().mean()), 4.25)
         self.assertTrue(torch.isfinite(second).all())
+
+    def test_raw_temporal_cross_scale_probe_preserves_shape_and_finite_values(self):
+        views = torch.randn(20, 2, 3, 16, 16)
+        result = RawScaleCrossScaleGaussianProbe(
+            0.5, 0.5, 0.5, 4.0, 0.75
+        ).apply(views, ["a", "b"], 0)
+        self.assertEqual(result.shape, views.shape[1:])
+        self.assertTrue(torch.isfinite(result).all())
 
     def test_patch_gaussian_blend_preserves_shape_and_finite_values(self):
         views = torch.randn(20, 2, 3, 224, 224)
@@ -624,6 +633,7 @@ class GradientProbeTests(unittest.TestCase):
             "low_frequency_boost_c50_a50",
             "gaussian_blend_s10_a50",
             "raw_temporal_gaussian_p050_s10_a025",
+            "raw_temporal_cross_scale_p050_c50_x050_s40_a075",
             "patch_gaussian_s40_a075_p025",
             "gaussian_band_s40_l075_h050",
             "gaussian_norm_blend_s10_a25",

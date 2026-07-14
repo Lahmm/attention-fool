@@ -1120,6 +1120,68 @@ class RawScaleTemporalGaussianProbe:
 
 
 @dataclass
+class RawScaleCrossScaleGaussianProbe:
+    """Apply raw temporal weighting before cross-scale Gaussian processing."""
+
+    power: float
+    cutoff: float
+    cross_strength: float
+    sigma: float
+    smooth_strength: float
+    ema_decay: float = 0.9
+    _ema_by_sample: dict[str, torch.Tensor] = field(default_factory=dict, init=False, repr=False)
+
+    @property
+    def name(self) -> str:
+        return (
+            f"raw_temporal_cross_scale_p{int(round(self.power * 100)):03d}"
+            f"_c{int(round(self.cutoff * 100)):02d}"
+            f"_x{int(round(self.cross_strength * 100)):03d}"
+            f"_s{int(round(self.sigma * 10)):02d}"
+            f"_a{int(round(self.smooth_strength * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        if not 0.0 <= self.power <= 1.0:
+            raise ValueError("raw temporal cross-scale power must be in [0, 1].")
+        if not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("raw temporal cross-scale cutoff must be in (0, 1].")
+        if not 0.0 <= self.cross_strength <= 1.0:
+            raise ValueError("raw temporal cross-scale strength must be in [0, 1].")
+        if self.sigma <= 0 or self.smooth_strength < 0:
+            raise ValueError("raw temporal cross-scale Gaussian parameters are invalid.")
+        if not 0.0 <= self.ema_decay < 1.0:
+            raise ValueError("raw temporal cross-scale ema_decay must be in [0, 1).")
+        gradient = view_gradients.mean(dim=0)
+        raw_scale = gradient.detach().abs().mean(dim=(1, 2, 3), keepdim=True)
+        weighted = []
+        for index, sample_id in enumerate(sample_ids):
+            if step == 0:
+                self._ema_by_sample.pop(sample_id, None)
+            current_scale = raw_scale[index]
+            previous_ema = self._ema_by_sample.get(sample_id)
+            if previous_ema is None:
+                ema = current_scale
+            else:
+                ema = self.ema_decay * previous_ema + (1.0 - self.ema_decay) * current_scale
+            self._ema_by_sample[sample_id] = ema.detach()
+            relative_scale = (current_scale / ema.clamp_min(1e-20)).clamp(0.25, 4.0)
+            weighted.append(gradient[index] * relative_scale.pow(self.power))
+        weighted_gradient = torch.stack(weighted, dim=0)
+        return CrossScaleGaussianProbe(
+            self.cutoff,
+            self.cross_strength,
+            self.sigma,
+            self.smooth_strength,
+        ).apply(weighted_gradient.unsqueeze(0), sample_ids, step)
+
+
+@dataclass
 class PatchGaussianBlendProbe:
     """Add Gaussian and soft ViT patch-scale residuals without projection."""
 
@@ -2470,6 +2532,19 @@ def build_probe(name: str) -> GradientProbe:
             int(power.removeprefix("p")) / 100.0,
             int(sigma.removeprefix("s")) / 10.0,
             int(strength.removeprefix("a")) / 100.0,
+        )
+    if name.startswith("raw_temporal_cross_scale_"):
+        encoded = name.removeprefix("raw_temporal_cross_scale_p")
+        power, encoded = encoded.split("_c", 1)
+        cutoff, encoded = encoded.split("_x", 1)
+        cross_strength, encoded = encoded.split("_s", 1)
+        sigma, smooth_strength = encoded.split("_a", 1)
+        return RawScaleCrossScaleGaussianProbe(
+            int(power) / 100.0,
+            int(cutoff) / 100.0,
+            int(cross_strength) / 100.0,
+            int(sigma) / 10.0,
+            int(smooth_strength) / 100.0,
         )
     if name.startswith("patch_gaussian_s"):
         encoded = name.removeprefix("patch_gaussian_s")
