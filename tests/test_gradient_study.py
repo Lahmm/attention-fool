@@ -23,6 +23,7 @@ from gradient_study import (
     HaarWaveletShrinkProbe,
     GaussianBlendProbe,
     GaussianBandBlendProbe,
+    GlobalGradientScaleProbe,
     PatchGaussianBlendProbe,
     RawScaleTemporalGaussianProbe,
     RawScaleCrossScaleGaussianProbe,
@@ -470,6 +471,14 @@ class GradientProbeTests(unittest.TestCase):
         self.assertAlmostEqual(ratio, 4.0)
         self.assertTrue(torch.equal(result.sign(), views.mean(0).sign()))
 
+    def test_global_raw_gradient_scale_is_identity_at_one(self):
+        views = torch.randn(20, 2, 3, 16, 16)
+        mean = views.mean(0)
+        identity = GlobalGradientScaleProbe(1.0).apply(views, ["a", "b"], 0)
+        doubled = GlobalGradientScaleProbe(2.0).apply(views, ["a", "b"], 0)
+        self.assertTrue(torch.equal(identity, mean))
+        self.assertTrue(torch.allclose(doubled, mean * 2.0))
+
     def test_amplitude_peak_controls_preserve_shape_and_sign(self):
         views = torch.randn(4, 2, 3, 16, 16)
         divisive = DivisiveNormalizationProbe(1.0).apply(views, ["a", "b"], 0)
@@ -630,6 +639,7 @@ class GradientProbeTests(unittest.TestCase):
             "cross_scale_residual_gaussian_c50_x050_r025_s10_a025",
             "frequency_rescaled_high_l1_g025",
             "adaptive_frequency_rescaled_l1_q50_g025",
+            "raw_global_scale_g0.5",
             "covariance_transport_view_a25",
             "covariance_transport_group_a50",
             "group_reliability_t20",

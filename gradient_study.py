@@ -657,6 +657,28 @@ class AmplitudePowerProbe:
 
 
 @dataclass
+class GlobalGradientScaleProbe:
+    """Change only the current raw-gradient weight entering MI."""
+
+    scale: float
+
+    @property
+    def name(self) -> str:
+        return f"raw_global_scale_g{self.scale:g}"
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if self.scale <= 0:
+            raise ValueError("global raw gradient scale must be positive.")
+        return view_gradients.mean(dim=0) * self.scale
+
+
+@dataclass
 class DivisiveNormalizationProbe:
     """Suppress local amplitude peaks using a smooth divisive envelope."""
 
@@ -2544,6 +2566,10 @@ def build_probe(name: str) -> GradientProbe:
             int(encoded_gain) / 100.0,
             int(quantile) / 100.0,
             scale=scale,
+        )
+    if name.startswith("raw_global_scale_g"):
+        return GlobalGradientScaleProbe(
+            float(name.removeprefix("raw_global_scale_g"))
         )
     if name.startswith("amplitude_"):
         if name.startswith("amplitude_power"):
