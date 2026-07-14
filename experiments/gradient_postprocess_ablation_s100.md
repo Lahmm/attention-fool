@@ -230,3 +230,34 @@
 为验证是否可以直接利用黑盒 ViT 的输入 CE gradient，比较了 30 个样本上 7 个黑盒 ViT 的 gradient sign 与白盒 L12 攻击第 10 步 sign：在 clean 输入点，单模型 agreement 约 `0.50`，7 模型 consensus 与白盒约 `0.507`；在同一批最终对抗样本点，单模型约 `0.50`，consensus 约 `0.504`。黑盒模型彼此的 CE sign consensus agreement 约 `0.66`，但它与当前 L12 攻击方向几乎独立。
 
 这说明黑盒 ViT 的 CE gradient consensus 不能作为当前 L12 score 梯度的后处理共享方向；直接注入它会改变攻击目标来源，因此不纳入本主线。
+
+### 黑盒 DeiT 的同类 L12 score 梯度对齐诊断
+
+为避免 CE 梯度与 L12 score 梯度目标不同造成误判，进一步在同一攻击接口上比较了
+源 `vit_base_patch16_224` 与黑盒 `deit_base_patch16_224` 的 L12 score view 梯度。
+两者均为 12-block、CLS+patch token 的标准 ViT 接口，因此没有使用架构近似；两边
+均固定 20 views、相同 sample IDs、相同 `GradientReplay(seed=20260713)` 事件序列，
+只在 clean pixel 上运行一步以捕获 20 个独立 view 梯度。该实验是方向诊断，不是 ASR
+候选攻击。
+
+30 样本结果如下：
+
+| 对齐指标 | 源 ViT vs DeiT |
+|---|---:|
+| 对应 view raw gradient cosine | `0.0193` |
+| 20-view raw mean gradient cosine | `0.0622` |
+| 对应 view sign agreement | `0.4334` |
+| 对应 view低频分量 cosine | `0.0269` |
+
+对应 view 的 sign agreement 甚至低于随机符号基线附近的 `0.5`，而不是一个可以稳定
+注入的共享方向。由于这次比较使用的是与攻击完全相同的 L12 score、score mask、
+phase-pair、kept-only noise 和 view 数，结果说明问题不只是 CE 目标不匹配：即使改成
+同类 L12 score，源 ViT 与 DeiT 的像素梯度仍然高度模型特异。因而不能把黑盒 L12
+梯度直接做 ensemble 后作为当前白盒梯度后处理；这条路径不再继续扩展到结构不兼容
+的模型，避免把架构接口差异或模型特异方向误当成可迁移信息。
+
+该诊断进一步支持当前的下一步边界：若要继续提升黑盒 ViT，后处理必须提取不依赖
+单个模型坐标的跨架构空间统计/算子（例如对源梯度施加可证伪的多尺度不变变换），
+而不是直接寻找另一个模型的梯度方向。当前已验证的最佳候选仍为三 seed 平均
+`+1.52pp` Overall 的 cross-scale Gaussian，尚未达到 Overall `+3–5pp` 或黑盒 ViT
+约 `90%` 的目标。
