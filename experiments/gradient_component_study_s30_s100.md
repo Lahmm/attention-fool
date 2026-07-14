@@ -296,7 +296,7 @@ Gaussian 的单 seed 信号，不能替代固定 10-step 主线的结论。当�
 对每个样本维护 raw 梯度幅值 EMA，使用
 
 ```text
-g_t' = (g_t / μ_t) × (μ_t / EMA(μ_t))^0.5
+g_t' = g_t × (μ_t / EMA(μ_t))^0.5
 g_t'' = g_t' + 0.25 × GaussianBlur(g_t', sigma=1)
 ```
 
