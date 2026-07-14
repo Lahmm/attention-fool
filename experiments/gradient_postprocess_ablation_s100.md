@@ -211,6 +211,10 @@
 
 因此跨步不一致的方向不能简单视为有害源模型成分；攻击迁移需要保留部分轨迹创新。该方向不进入大样本确认。目录为 `outputs/attack/adaptive_trajectory_screen_s30_seed20260713`。
 
+### Geometric median view aggregation
+
+新增 Weiszfeld 几何中位数聚合，以检验少数源模型特异 view 是否拉偏 raw mean。结果显示 view 离群点不是主要问题：raw strength `0.50/1.00` 的 ViT 变化为 `-0.48/-2.38pp`；L1 scale-preserving 版本为 `0/-1.43pp`，对应 CNN 变化为 `-4.17/-2.50pp`。因此迁移需要保留 view 多样性，鲁棒地压制离群 view 反而损害共享方向。目录为 `outputs/attack/geometric_median_screen_s30_seed20260713`。
+
 ### ViT patch embedding metric 预条件
 
 进一步使用白盒 ViT 的 patch embedding 权重构造 `W^T W`，对每个 16×16 patch 的像素梯度做特征度量预条件，再回到像素空间。该操作仍只改变聚合梯度，不改变 view、score、mask、noise、MI 或投影。
