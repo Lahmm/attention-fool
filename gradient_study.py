@@ -1179,6 +1179,77 @@ class CrossScaleGaussianProbe:
 
 
 @dataclass
+class CrossScaleResidualGaussianProbe:
+    """Keep covariance-supported high frequency and attenuate its residual.
+
+    ``CrossScaleCovarianceProbe`` replaces part of the mean high-frequency
+    component with the direction supported by low/high cross-view covariance.
+    This probe decomposes that result as
+
+    ``transported_high + residual_high``
+
+    and applies a bounded gain only to ``residual_high`` before the same weak
+    Gaussian blend.  The gain of one is exactly the existing cross-scale
+    Gaussian candidate; lower gains test whether unsupported high-frequency
+    detail is harmful while retaining the structured component.
+    """
+
+    cutoff: float
+    cross_strength: float
+    residual_gain: float
+    sigma: float
+    smooth_strength: float
+
+    @property
+    def name(self) -> str:
+        return (
+            f"cross_scale_residual_gaussian_c{int(round(self.cutoff * 100)):02d}"
+            f"_x{int(round(self.cross_strength * 100)):03d}"
+            f"_r{int(round(self.residual_gain * 100)):03d}"
+            f"_s{int(round(self.sigma * 10)):02d}"
+            f"_a{int(round(self.smooth_strength * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        if not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("cross-scale residual cutoff must be in (0, 1].")
+        if not 0.0 < self.cross_strength <= 1.0:
+            raise ValueError("cross-scale residual strength must be in (0, 1].")
+        if not 0.0 <= self.residual_gain <= 1.0:
+            raise ValueError("cross-scale residual gain must be in [0, 1].")
+
+        mean = view_gradients.mean(dim=0)
+        height, width = mean.shape[-2:]
+        radius = _frequency_radius(height, width, mean.device)
+        low_mask = radius <= radius.max() * self.cutoff
+        spectrum = torch.fft.fftshift(
+            torch.fft.fft2(mean, dim=(-2, -1)), dim=(-2, -1)
+        )
+        low_spectrum = spectrum * low_mask.view(1, 1, height, width)
+        low = torch.fft.ifft2(
+            torch.fft.ifftshift(low_spectrum, dim=(-2, -1)), dim=(-2, -1)
+        ).real
+        high = mean - low
+
+        cross_scale = CrossScaleCovarianceProbe(
+            "replace", self.cross_strength, cutoff=self.cutoff
+        ).apply(view_gradients, sample_ids, step)
+        transported = (
+            cross_scale - low - (1.0 - self.cross_strength) * high
+        ) / self.cross_strength
+        residual = cross_scale - low - transported
+        transformed = low + transported + self.residual_gain * residual
+        return GaussianBlendProbe(
+            self.sigma, self.smooth_strength
+        ).apply(transformed.unsqueeze(0), sample_ids, step)
+
+
+@dataclass
 class JointLowAmplitudeHighFrequencyProbe:
     """Condition a coarse spectral intervention on global gradient amplitude.
 
@@ -2435,6 +2506,19 @@ def build_probe(name: str) -> GradientProbe:
         )
     if name.startswith("cross_scale_"):
         encoded = name.removeprefix("cross_scale_")
+        if encoded.startswith("residual_gaussian_c"):
+            encoded = encoded.removeprefix("residual_gaussian_c")
+            cutoff, encoded = encoded.split("_x", 1)
+            cross_strength, encoded = encoded.split("_r", 1)
+            residual_gain, encoded = encoded.split("_s", 1)
+            sigma, smooth_strength = encoded.split("_a", 1)
+            return CrossScaleResidualGaussianProbe(
+                cutoff=int(cutoff) / 100.0,
+                cross_strength=int(cross_strength) / 100.0,
+                residual_gain=int(residual_gain) / 100.0,
+                sigma=int(sigma) / 10.0,
+                smooth_strength=int(smooth_strength) / 100.0,
+            )
         if encoded.startswith("gaussian_c"):
             cutoff, encoded = encoded.removeprefix("gaussian_c").split("_x", 1)
             cross_strength, encoded = encoded.split("_s", 1)

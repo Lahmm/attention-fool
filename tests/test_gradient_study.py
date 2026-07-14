@@ -11,6 +11,7 @@ from gradient_study import (
     CrossScaleCovarianceProbe,
     CrossScaleCanonicalProbe,
     CrossScaleGaussianProbe,
+    CrossScaleResidualGaussianProbe,
     ConflictProjectionProbe,
     DivisiveNormalizationProbe,
     CovarianceTransportProbe,
@@ -483,6 +484,21 @@ class GradientProbeTests(unittest.TestCase):
         self.assertEqual(result.shape, views.shape[1:])
         self.assertTrue(torch.isfinite(result).all())
 
+    def test_cross_scale_residual_gaussian_identity_at_full_residual_gain(self):
+        views = torch.randn(20, 1, 3, 16, 16)
+        base = CrossScaleGaussianProbe(0.5, 0.5, 1.0, 0.25).apply(
+            views, ["a"], 0
+        )
+        result = CrossScaleResidualGaussianProbe(
+            0.5, 0.5, 1.0, 1.0, 0.25
+        ).apply(views, ["a"], 0)
+        self.assertTrue(torch.allclose(result, base, atol=1e-5, rtol=1e-5))
+        attenuated = CrossScaleResidualGaussianProbe(
+            0.5, 0.5, 0.0, 1.0, 0.25
+        ).apply(views, ["a"], 0)
+        self.assertEqual(attenuated.shape, views.shape[1:])
+        self.assertTrue(torch.isfinite(attenuated).all())
+
     def test_joint_amplitude_frequency_probe_preserves_shape(self):
         views = torch.randn(4, 4, 3, 32, 32)
         for operation in ("shrink", "low_boost", "gaussian", "low_only", "low_equalize"):
@@ -566,6 +582,7 @@ class GradientProbeTests(unittest.TestCase):
             "cross_scale_replace_c50_a025",
             "cross_scale_canonical_c50_a025",
             "cross_scale_gaussian_c50_x025_s10_a025",
+            "cross_scale_residual_gaussian_c50_x050_r025_s10_a025",
             "covariance_transport_view_a25",
             "covariance_transport_group_a50",
             "group_reliability_t20",
