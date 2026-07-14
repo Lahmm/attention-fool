@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_attacker(model, steps: int = 10) -> PatchScoreAttacker:
+def build_attacker(model, steps: int = 10, input_diversity_groups: int = 10) -> PatchScoreAttacker:
     return PatchScoreAttacker(
         model=model,
         epsilon=16.0 / 255.0,
@@ -63,7 +63,7 @@ def build_attacker(model, steps: int = 10) -> PatchScoreAttacker:
         nesterov=False,
         ti_sigma=0.0,
         input_diversity=False,
-        input_diversity_groups=10,
+        input_diversity_groups=input_diversity_groups,
         input_diversity_views_per_group=2,
         input_diversity_phase_shift_set=((4, 4), (8, 8), (12, 12)),
         guide_aug_strength=0.2,
@@ -88,6 +88,7 @@ def run_attack(
     batch_size: int,
     seed: int,
     steps: int = 10,
+    input_diversity_groups: int = 10,
     probe_name: str | None,
     baseline_sign_dir: Path | None,
     expected_manifest: dict[str, object] | None,
@@ -99,7 +100,11 @@ def run_attack(
 
     dataloader, num_classes = load_data(batch_size=batch_size, num_workers=4, prefetch_factor=4)
     model = build_whitebox_model(num_classes=num_classes, model_name=DEFAULT_MODEL_NAME)
-    attacker = build_attacker(model, steps=steps)
+    attacker = build_attacker(
+        model,
+        steps=steps,
+        input_diversity_groups=input_diversity_groups,
+    )
     replay = GradientReplay(seed)
     probe = build_probe(probe_name) if probe_name else None
     attacked = 0
@@ -166,7 +171,9 @@ def run_attack(
                 "batch_size": batch_size,
                 "steps": steps,
                 "epsilon": 16.0 / 255.0,
-                "actual_views": 20,
+                "input_diversity_groups": input_diversity_groups,
+                "input_diversity_views_per_group": 2,
+                "actual_views": input_diversity_groups * 2,
                 "gradient_postprocess": "mean",
                 "probe": probe_name,
                 "replay_digest": manifest["event_digest"],
