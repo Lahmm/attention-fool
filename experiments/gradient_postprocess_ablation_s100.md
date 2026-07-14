@@ -193,3 +193,8 @@
 相关目录：`outputs/attack/cross_scale_gaussian_window_screen_s30_seed20260713`。
 
 对前 5 步 Gaussian 的强度/尺度进行有限探索后，`a=1.00` 和 `a=1.50` 均只有 Overall `+0.30pp`（ViT 分别 `+0.48pp/0pp`），而 sigma 从 4 增至 6 使 Overall/ViT/CNN 变为 `-1.21/-0.48/-2.50pp`。因此早期收益不是简单的“更强平滑”或“更大空间尺度”，停止继续扩展 Gaussian 参数。目录为 `outputs/attack/raw_gaussian_early_strength_screen_s30_seed20260713`。
+
+### 正交 Gaussian 残差
+
+为区分 Gaussian 的方向作用与其沿原梯度投影的幅值混合，测试了
+`g' = g + a(B(g)-proj_g B(g))`。全程 sigma=4、a=0.75 时 Overall/ViT/CNN 为 `0/+0.48/-0.83pp`；a=1.50 为 `0/+1.43/-2.50pp`；前 5 步 a=0.75 为 `-0.30/+0.48/-1.67pp`。正交残差没有超过原始 Gaussian 或跨尺度候选，说明 Gaussian 的正向效应不能简化为一个独立的正交共享方向。目录为 `outputs/attack/orthogonal_gaussian_screen_s30_seed20260713`。
