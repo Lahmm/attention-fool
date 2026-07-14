@@ -210,3 +210,9 @@
 | 0.75 | -0.91pp | -1.43pp | 0pp | -3.33pp |
 
 因此跨步不一致的方向不能简单视为有害源模型成分；攻击迁移需要保留部分轨迹创新。该方向不进入大样本确认。目录为 `outputs/attack/adaptive_trajectory_screen_s30_seed20260713`。
+
+### ViT patch embedding metric 预条件
+
+进一步使用白盒 ViT 的 patch embedding 权重构造 `W^T W`，对每个 16×16 patch 的像素梯度做特征度量预条件，再回到像素空间。该操作仍只改变聚合梯度，不改变 view、score、mask、noise、MI 或投影。
+
+30 样本结果显示该白盒几何不能直接代表跨 ViT 共享方向：raw strength `0.25/0.50/0.75` 的 ViT 变化为 `-0.95/-2.38/-3.81pp`；L1 scale-preserving 版本为 `-0.95/-0.48/-2.86pp`。最佳 scaled `0.25` 的 Overall/CNN/白盒变化为 `-0.30/+0.83/-3.33pp`。因此不进行 100 样本确认。目录为 `outputs/attack/patch_embedding_metric_screen_s30_seed20260713`。
