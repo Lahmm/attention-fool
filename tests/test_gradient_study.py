@@ -37,6 +37,7 @@ from gradient_study import (
     PairPhaseProbe,
     PatchProjectionProbe,
     PatchEnergyTransportProbe,
+    PatchEnergyTransportRescaleProbe,
     RiskAdaptiveGaussianProbe,
     MomentumTrajectoryProbe,
     MagnitudeEnvelopeProbe,
@@ -203,6 +204,15 @@ class GradientProbeTests(unittest.TestCase):
         )
         self.assertEqual(result.shape, gradients.shape[1:])
         self.assertTrue(torch.isfinite(result).all())
+
+    def test_patch_energy_transport_rescale_preserves_raw_l1_scale(self):
+        gradients = torch.randn(20, 2, 3, 32, 32)
+        result = PatchEnergyTransportRescaleProbe(0.25, grid=8).apply(
+            gradients, ["a", "b"], 0
+        )
+        expected = gradients.mean(0).abs().mean(dim=(1, 2, 3))
+        actual = result.abs().mean(dim=(1, 2, 3))
+        self.assertTrue(torch.allclose(actual, expected, atol=1e-5, rtol=1e-5))
 
     def test_spectral_band_amplitude_power_preserves_shape_and_finite_values(self):
         gradients = torch.randn(20, 2, 3, 32, 32)
@@ -602,6 +612,7 @@ class GradientProbeTests(unittest.TestCase):
             "conflict_project_group_a050",
             "patch_projection_g14_a025",
             "patch_energy_transport_g14_a050",
+            "patch_energy_transport_rescaled_l1_g14_a025",
             "spectral_high_amplitude_power075",
             "composite_gaussian_s10_highpower075_a025",
             "positive_low_boost_amp_freq_c50_a025",

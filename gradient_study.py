@@ -443,6 +443,49 @@ class PatchEnergyTransportProbe:
 
 
 @dataclass
+class PatchEnergyTransportRescaleProbe:
+    """Patch energy transport with explicit preservation of raw scale."""
+
+    strength: float
+    grid: int = 14
+    scale: str = "l1"
+
+    @property
+    def name(self) -> str:
+        return (
+            f"patch_energy_transport_rescaled_{self.scale}"
+            f"_g{self.grid}_a{int(round(self.strength * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("rescaled patch energy strength must be in [0, 1].")
+        if self.scale not in ("l1", "l2"):
+            raise ValueError("rescaled patch energy scale must be l1 or l2.")
+        gradient = view_gradients.mean(dim=0)
+        transformed = PatchEnergyTransportProbe(
+            self.strength, grid=self.grid
+        ).apply(gradient.unsqueeze(0), ["patch_energy"] * gradient.size(0), 0)
+        if self.scale == "l1":
+            original_scale = gradient.abs().mean(dim=(1, 2, 3), keepdim=True)
+            transformed_scale = transformed.abs().mean(dim=(1, 2, 3), keepdim=True)
+        else:
+            original_scale = gradient.flatten(1).norm(dim=1, keepdim=True).view(
+                -1, 1, 1, 1
+            )
+            transformed_scale = transformed.flatten(1).norm(dim=1, keepdim=True).view(
+                -1, 1, 1, 1
+            )
+        return transformed * (original_scale / transformed_scale.clamp_min(1e-20))
+
+
+@dataclass
 class PatchProjectionProbe:
     """Blend the orthogonal projection onto the ViT patch-mean subspace."""
 
@@ -2474,6 +2517,15 @@ def build_probe(name: str) -> GradientProbe:
         return PatchEnergyTransportProbe(
             int(strength) / 100.0,
             grid=int(grid),
+        )
+    if name.startswith("patch_energy_transport_rescaled_"):
+        encoded = name.removeprefix("patch_energy_transport_rescaled_")
+        scale, encoded = encoded.split("_g", 1)
+        grid, strength = encoded.split("_a", 1)
+        return PatchEnergyTransportRescaleProbe(
+            int(strength) / 100.0,
+            grid=int(grid),
+            scale=scale,
         )
     if name.startswith("frequency_remove_"):
         return FrequencyBandProbe(name.removeprefix("frequency_remove_"))
