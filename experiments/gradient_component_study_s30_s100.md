@@ -261,6 +261,26 @@ bootstrap 95% CI 为 `[+0.27,+3.73]pp`，bootstrap 正向概率为 `0.9886`。
 `outputs/attack/gradient_gaussian_no_normalize_s100_seed20260713`，下一步应优先用
 至少两个新 seed 复验，再决定是否更新主线。
 
+## ViT-focused Gaussian scale confirmation
+
+后续梯度分析只以 7 个黑盒 ViT 为主指标，CNN 仅作为最终损失预算检查。在 30 样本
+筛选中，`gaussian_blend_s40_a075`（`sigma=4`、`alpha=0.75`）的黑盒 ViT 信号
+最好，随后进行三个 100 样本 seed 的配对确认：
+
+| seed | Overall Δ | 黑盒 ViT Δ | CNN Δ | 白盒 Δ |
+|---:|---:|---:|---:|---:|
+| 20260713 | +1.73pp | +2.29pp | +0.75pp | +1.00pp |
+| 20260714 | +0.36pp | +0.14pp | +0.75pp | 0.00pp |
+| 20260715 | +1.27pp | +1.29pp | +1.25pp | 0.00pp |
+| 平均 | +1.12pp | +1.24pp | +0.92pp | +0.33pp |
+
+该候选没有超过 ViT `+3pp` 目标，说明扩大 Gaussian 空间尺度可以产生稳定但有限
+的 ViT 迁移收益，单独继续增强 Gaussian 不足以达到 `90%` 左右。三个实验目录为：
+
+- `outputs/attack/raw_gaussian_scale_confirm_s100_seed20260713`
+- `outputs/attack/raw_gaussian_s40a075_s100_seed20260714`
+- `outputs/attack/raw_gaussian_s40a075_s100_seed20260715`
+
 ## raw-scale 主线改为 20 steps
 
 进一步将 MI-FGSM 的步数从 10 改为 20，保持 epsilon `16/255` 不变，因此默认步长
