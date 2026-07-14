@@ -191,3 +191,5 @@
 将同样的 step-window 施加到当前稳定候选 `cross-scale + Gaussian` 后，30 样本结果为：前 5 步 Overall/ViT/CNN `-0.30/+0.95/-2.50pp`，第 3–8 步 `+0.61/+1.43/-0.83pp`，后 5 步 `+0.30/0/+0.83pp`。它们都没有超过全程跨尺度候选，也没有达到 Overall `+3–5pp`；因此 Gaussian 的早期轨迹效应不能与跨尺度输运简单叠加。
 
 相关目录：`outputs/attack/cross_scale_gaussian_window_screen_s30_seed20260713`。
+
+对前 5 步 Gaussian 的强度/尺度进行有限探索后，`a=1.00` 和 `a=1.50` 均只有 Overall `+0.30pp`（ViT 分别 `+0.48pp/0pp`），而 sigma 从 4 增至 6 使 Overall/ViT/CNN 变为 `-1.21/-0.48/-2.50pp`。因此早期收益不是简单的“更强平滑”或“更大空间尺度”，停止继续扩展 Gaussian 参数。目录为 `outputs/attack/raw_gaussian_early_strength_screen_s30_seed20260713`。
