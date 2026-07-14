@@ -106,7 +106,7 @@ def run_attack(
         input_diversity_groups=input_diversity_groups,
     )
     replay = GradientReplay(seed)
-    probe = build_probe(probe_name) if probe_name else None
+    probe = build_probe(probe_name, model=model) if probe_name else None
     attacked = 0
     saved_count = 0
     all_sample_ids: list[str] = []

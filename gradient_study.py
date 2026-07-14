@@ -573,6 +573,55 @@ class PatchProjectionProbe:
 
 
 @dataclass
+class PatchEmbeddingMetricProbe:
+    """Precondition each ViT patch gradient with its embedding metric W^T W."""
+
+    strength: float
+    metric: torch.Tensor
+    preserve_scale: bool = False
+    patch_size: int = 16
+
+    @property
+    def name(self) -> str:
+        suffix = "scaled" if self.preserve_scale else "raw"
+        return f"patch_embedding_metric_a{int(round(self.strength * 100)):03d}_{suffix}"
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("patch embedding metric strength must be in [0, 1].")
+        gradient = view_gradients.mean(dim=0)
+        height, width = gradient.shape[-2:]
+        if height % self.patch_size or width % self.patch_size:
+            raise ValueError("patch embedding metric requires divisible image dimensions.")
+        metric = self.metric.to(device=gradient.device, dtype=gradient.dtype)
+        patches = F.unfold(
+            gradient,
+            kernel_size=self.patch_size,
+            stride=self.patch_size,
+        ).transpose(1, 2)
+        transformed = torch.matmul(patches, metric.transpose(0, 1))
+        transformed = F.fold(
+            transformed.transpose(1, 2),
+            output_size=(height, width),
+            kernel_size=self.patch_size,
+            stride=self.patch_size,
+        )
+        if self.preserve_scale:
+            source_scale = gradient.abs().mean(dim=(1, 2, 3), keepdim=True)
+            transformed_scale = transformed.abs().mean(dim=(1, 2, 3), keepdim=True)
+            transformed = transformed * (
+                source_scale / transformed_scale.clamp_min(1e-20)
+            )
+        return gradient + self.strength * (transformed - gradient)
+
+
+@dataclass
 class SpatialPatchProbe:
     selection: str
     ratio: float = 0.10
@@ -2714,14 +2763,14 @@ class StepWindowProbe:
         return view_gradients.mean(dim=0)
 
 
-def build_probe(name: str) -> GradientProbe:
+def build_probe(name: str, model: torch.nn.Module | None = None) -> GradientProbe:
     if name.startswith("temporal_"):
         inner_name, encoded_window = name.removeprefix("temporal_").rsplit("_s", 1)
         encoded_start, encoded_end = encoded_window.split("e", 1)
         start, end = int(encoded_start), int(encoded_end)
         if start < 0 or end <= start:
             raise ValueError("temporal probe requires 0 <= start < end.")
-        return StepWindowProbe(build_probe(inner_name), start, end)
+        return StepWindowProbe(build_probe(inner_name, model=model), start, end)
     if name.startswith("group_remove_"):
         return GroupRemovalProbe(name.removeprefix("group_remove_"))
     if name.startswith("group_reliability_t"):
@@ -2791,6 +2840,26 @@ def build_probe(name: str) -> GradientProbe:
         return PatchProjectionProbe(
             int(strength) / 100.0,
             grid=int(grid),
+        )
+    if name.startswith("patch_embedding_metric_a"):
+        encoded = name.removeprefix("patch_embedding_metric_a")
+        strength, suffix = encoded.split("_", 1)
+        if suffix not in ("raw", "scaled"):
+            raise ValueError(f"unsupported patch embedding metric name: {name}")
+        if model is None:
+            raise ValueError("patch embedding metric requires the whitebox model.")
+        patch_embed = getattr(getattr(model, "model", model), "patch_embed", None)
+        projection = getattr(patch_embed, "proj", None)
+        weight = getattr(projection, "weight", None)
+        if weight is None or weight.ndim != 4 or tuple(weight.shape[1:]) != (3, 16, 16):
+            raise ValueError("whitebox model has no compatible 16x16 patch embedding.")
+        flat_weight = weight.detach().float().flatten(1)
+        metric = flat_weight.transpose(0, 1) @ flat_weight
+        metric = metric / metric.trace().clamp_min(1e-20) * metric.size(0)
+        return PatchEmbeddingMetricProbe(
+            int(strength) / 100.0,
+            metric,
+            preserve_scale=suffix == "scaled",
         )
     if name.startswith("patch_energy_transport_g"):
         encoded = name.removeprefix("patch_energy_transport_g")

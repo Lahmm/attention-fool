@@ -41,6 +41,7 @@ from gradient_study import (
     PostMomentumPreconditionProbe,
     PairPhaseProbe,
     PatchProjectionProbe,
+    PatchEmbeddingMetricProbe,
     PatchEnergyTransportProbe,
     PatchEnergyTransportRescaleProbe,
     RiskAdaptiveGaussianProbe,
@@ -261,6 +262,30 @@ class GradientProbeTests(unittest.TestCase):
         self.assertEqual(first.shape, views.shape[1:])
         self.assertTrue(torch.isfinite(first).all())
         self.assertTrue(torch.isfinite(second).all())
+
+    def test_patch_embedding_metric_preserves_shape_and_finite_values(self):
+        metric = torch.eye(3 * 16 * 16)
+        views = torch.randn(20, 2, 3, 32, 32)
+        for preserve_scale in (False, True):
+            result = PatchEmbeddingMetricProbe(
+                0.5, metric, preserve_scale=preserve_scale
+            ).apply(views, ["a", "b"], 0)
+            self.assertEqual(result.shape, views.shape[1:])
+            self.assertTrue(torch.isfinite(result).all())
+
+    def test_patch_embedding_metric_parser_uses_whitebox_projection(self):
+        class Projection:
+            weight = torch.randn(8, 3, 16, 16)
+
+        class PatchEmbed:
+            proj = Projection()
+
+        class Model:
+            model = type("Inner", (), {"patch_embed": PatchEmbed()})()
+
+        probe = build_probe("patch_embedding_metric_a050_scaled", model=Model())
+        self.assertIsInstance(probe, PatchEmbeddingMetricProbe)
+        self.assertEqual(probe.name, "patch_embedding_metric_a050_scaled")
 
     def test_raw_temporal_gaussian_preserves_first_scale_and_weights_later_scale(self):
         views = torch.ones(2, 1, 1, 8, 8)
