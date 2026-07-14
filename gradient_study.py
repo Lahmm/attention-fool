@@ -1558,6 +1558,61 @@ class PatchGaussianBlendProbe:
 
 
 @dataclass
+class CrossScalePatchGaussianProbe:
+    """Add patch-grid DC structure to the cross-scale Gaussian direction.
+
+    The cross-scale transport preserves Fourier low/high structure while the
+    patch term tests whether a token-sized, architecture-agnostic spatial
+    statistic contains complementary transfer information.  The original
+    raw mean remains the base component; no view, mask, or update path is
+    changed.
+    """
+
+    cutoff: float
+    cross_strength: float
+    sigma: float
+    smooth_strength: float
+    patch_strength: float
+    patch_size: int = 16
+
+    @property
+    def name(self) -> str:
+        return (
+            f"cross_scale_patch_gaussian_c{int(round(self.cutoff * 100)):02d}"
+            f"_x{int(round(self.cross_strength * 100)):03d}"
+            f"_s{int(round(self.sigma * 10)):02d}"
+            f"_a{int(round(self.smooth_strength * 100)):03d}"
+            f"_p{int(round(self.patch_strength * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        if self.patch_strength < 0:
+            raise ValueError("patch strength must be non-negative.")
+        gradient = view_gradients.mean(dim=0)
+        base = CrossScaleGaussianProbe(
+            self.cutoff,
+            self.cross_strength,
+            self.sigma,
+            self.smooth_strength,
+        ).apply(view_gradients, sample_ids, step)
+        height, width = gradient.shape[-2:]
+        if height % self.patch_size or width % self.patch_size:
+            raise ValueError("cross-scale patch Gaussian requires divisible dimensions.")
+        patch = F.avg_pool2d(
+            gradient,
+            kernel_size=self.patch_size,
+            stride=self.patch_size,
+        )
+        patch = F.interpolate(patch, size=(height, width), mode="nearest")
+        return base + self.patch_strength * patch
+
+
+@dataclass
 class GaussianBandBlendProbe:
     """Adjust low/high spatial components while retaining the full gradient."""
 
@@ -3218,6 +3273,18 @@ def build_probe(name: str, model: torch.nn.Module | None = None) -> GradientProb
         )
     if name.startswith("cross_scale_"):
         encoded = name.removeprefix("cross_scale_")
+        if encoded.startswith("patch_gaussian_c"):
+            cutoff, encoded = encoded.removeprefix("patch_gaussian_c").split("_x", 1)
+            cross_strength, encoded = encoded.split("_s", 1)
+            sigma, encoded = encoded.split("_a", 1)
+            smooth_strength, patch_strength = encoded.split("_p", 1)
+            return CrossScalePatchGaussianProbe(
+                cutoff=int(cutoff) / 100.0,
+                cross_strength=int(cross_strength) / 100.0,
+                sigma=int(sigma) / 10.0,
+                smooth_strength=int(smooth_strength) / 100.0,
+                patch_strength=int(patch_strength) / 100.0,
+            )
         if encoded.startswith("residual_gaussian_c"):
             encoded = encoded.removeprefix("residual_gaussian_c")
             cutoff, encoded = encoded.split("_x", 1)
