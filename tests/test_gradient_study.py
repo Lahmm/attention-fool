@@ -23,6 +23,7 @@ from gradient_study import (
     AdaptiveFrequencyGainRescaleProbe,
     HaarWaveletShrinkProbe,
     GaussianBlendProbe,
+    OrthogonalGaussianProbe,
     GaussianBandBlendProbe,
     GlobalGradientScaleProbe,
     PatchGaussianBlendProbe,
@@ -570,6 +571,12 @@ class GradientProbeTests(unittest.TestCase):
         self.assertEqual(result.shape, views.shape[1:])
         self.assertTrue(torch.isfinite(result).all())
 
+    def test_orthogonal_gaussian_preserves_shape_and_finite_values(self):
+        views = torch.randn(20, 2, 3, 16, 16)
+        result = OrthogonalGaussianProbe(4.0, 0.75).apply(views, ["a", "b"], 0)
+        self.assertEqual(result.shape, views.shape[1:])
+        self.assertTrue(torch.isfinite(result).all())
+
     def test_joint_amplitude_frequency_probe_preserves_shape(self):
         views = torch.randn(4, 4, 3, 32, 32)
         for operation in ("shrink", "low_boost", "gaussian", "low_only", "low_equalize"):
@@ -656,6 +663,7 @@ class GradientProbeTests(unittest.TestCase):
             "cross_scale_gaussian_c50_x025_s10_a025",
             "cross_scale_residual_gaussian_c50_x050_r025_s10_a025",
             "confidence_cross_scale_gaussian_c50_x050_s40_a075_q050",
+            "orthogonal_gaussian_s40_a075",
             "low_consensus_gaussian_c50_x025_s40_a075",
             "frequency_rescaled_high_l1_g025",
             "adaptive_frequency_rescaled_l1_q50_g025",

@@ -1184,6 +1184,52 @@ class GaussianBlendProbe:
 
 
 @dataclass
+class OrthogonalGaussianProbe:
+    """Inject only the Gaussian component orthogonal to the raw gradient."""
+
+    sigma: float
+    strength: float
+
+    @property
+    def name(self) -> str:
+        return (
+            f"orthogonal_gaussian_s{int(round(self.sigma * 10)):02d}"
+            f"_a{int(round(self.strength * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if self.sigma <= 0 or self.strength < 0:
+            raise ValueError("orthogonal Gaussian requires sigma > 0 and strength >= 0.")
+        gradient = view_gradients.mean(dim=0)
+        radius = max(1, int(round(3 * self.sigma)))
+        axis = torch.arange(-radius, radius + 1, device=gradient.device, dtype=gradient.dtype)
+        kernel_1d = torch.exp(-0.5 * (axis / self.sigma).square())
+        kernel_1d = kernel_1d / kernel_1d.sum()
+        kernel = (kernel_1d[:, None] @ kernel_1d[None, :]).view(
+            1, 1, 2 * radius + 1, 2 * radius + 1
+        ).repeat(gradient.size(1), 1, 1, 1)
+        smoothed = F.conv2d(
+            F.pad(gradient, (radius,) * 4, mode="reflect"),
+            kernel,
+            groups=gradient.size(1),
+        )
+        flat_gradient = gradient.flatten(1)
+        flat_smoothed = smoothed.flatten(1)
+        projection = (
+            (flat_smoothed * flat_gradient).sum(dim=1, keepdim=True)
+            / flat_gradient.square().sum(dim=1, keepdim=True).clamp_min(1e-20)
+        ) * flat_gradient
+        residual = (flat_smoothed - projection).view_as(gradient)
+        return gradient + self.strength * residual
+
+
+@dataclass
 class RawScaleTemporalGaussianProbe:
     """Preserve raw temporal scale while adding a weak spatially smooth component.
 
@@ -2815,6 +2861,13 @@ def build_probe(name: str) -> GradientProbe:
         if not sigma.startswith("s"):
             raise ValueError(f"unsupported Gaussian blend name: {name}")
         return GaussianBlendProbe(int(sigma.removeprefix("s")) / 10.0, int(strength) / 100.0)
+    if name.startswith("orthogonal_gaussian_s"):
+        encoded = name.removeprefix("orthogonal_gaussian_s")
+        sigma, strength = encoded.split("_a", 1)
+        return OrthogonalGaussianProbe(
+            int(sigma) / 10.0,
+            int(strength) / 100.0,
+        )
     if name.startswith("raw_temporal_gaussian_"):
         encoded = name.removeprefix("raw_temporal_gaussian_")
         power, sigma, strength = encoded.split("_")
