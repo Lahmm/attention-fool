@@ -1399,6 +1399,64 @@ class CrossScaleGaussianProbe:
 
 
 @dataclass
+class LowFrequencyConsensusGaussianProbe:
+    """Use view sign consensus only in the low-frequency ViT patch structure."""
+
+    cutoff: float
+    consensus_strength: float
+    sigma: float
+    smooth_strength: float
+
+    @property
+    def name(self) -> str:
+        return (
+            f"low_consensus_gaussian_c{int(round(self.cutoff * 100)):02d}"
+            f"_x{int(round(self.consensus_strength * 100)):03d}"
+            f"_s{int(round(self.sigma * 10)):02d}"
+            f"_a{int(round(self.smooth_strength * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        if not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("low-frequency consensus cutoff must be in (0, 1].")
+        if not 0.0 <= self.consensus_strength <= 1.0:
+            raise ValueError("low-frequency consensus strength must be in [0, 1].")
+        if self.sigma <= 0 or self.smooth_strength < 0:
+            raise ValueError("low-frequency consensus Gaussian parameters are invalid.")
+        mean = view_gradients.mean(dim=0)
+        height, width = mean.shape[-2:]
+        radius = _frequency_radius(height, width, mean.device)
+        low_mask = radius <= radius.max() * self.cutoff
+        spectra = torch.fft.fftshift(
+            torch.fft.fft2(view_gradients, dim=(-2, -1)), dim=(-2, -1)
+        )
+        low_views = torch.fft.ifft2(
+            torch.fft.ifftshift(
+                spectra * low_mask.view(1, 1, 1, height, width), dim=(-2, -1)
+            ),
+            dim=(-2, -1),
+        ).real
+        low_mean = low_views.mean(dim=0)
+        high_mean = mean - low_mean
+        consensus = low_views.sign().mean(dim=0).sign()
+        low_scale = low_mean.abs().mean(dim=(1, 2, 3), keepdim=True)
+        consensus = consensus * low_scale
+        transformed = (
+            (1.0 - self.consensus_strength) * low_mean
+            + self.consensus_strength * consensus
+            + high_mean
+        )
+        return GaussianBlendProbe(
+            self.sigma, self.smooth_strength
+        ).apply(transformed.unsqueeze(0), sample_ids, step)
+
+
+@dataclass
 class CrossScaleResidualGaussianProbe:
     """Keep covariance-supported high frequency and attenuate its residual.
 
@@ -2765,6 +2823,17 @@ def build_probe(name: str) -> GradientProbe:
     if name.startswith("spectral_phase_consensus_a"):
         return SpectralPhaseConsensusProbe(
             int(name.removeprefix("spectral_phase_consensus_a")) / 100.0
+        )
+    if name.startswith("low_consensus_gaussian_"):
+        encoded = name.removeprefix("low_consensus_gaussian_c")
+        cutoff, encoded = encoded.split("_x", 1)
+        consensus_strength, encoded = encoded.split("_s", 1)
+        sigma, smooth_strength = encoded.split("_a", 1)
+        return LowFrequencyConsensusGaussianProbe(
+            int(cutoff) / 100.0,
+            int(consensus_strength) / 100.0,
+            int(sigma) / 10.0,
+            int(smooth_strength) / 100.0,
         )
     if name.startswith("cross_scale_"):
         encoded = name.removeprefix("cross_scale_")

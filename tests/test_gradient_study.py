@@ -33,6 +33,7 @@ from gradient_study import (
     GroupNormEqualizationProbe,
     JointLowAmplitudeHighFrequencyProbe,
     LowFrequencyBoostProbe,
+    LowFrequencyConsensusGaussianProbe,
     LaplacianProxProbe,
     PostMomentumPreconditionProbe,
     PairPhaseProbe,
@@ -552,6 +553,14 @@ class GradientProbeTests(unittest.TestCase):
         self.assertEqual(attenuated.shape, views.shape[1:])
         self.assertTrue(torch.isfinite(attenuated).all())
 
+    def test_low_frequency_consensus_gaussian_preserves_shape_and_finite_values(self):
+        views = torch.randn(20, 2, 3, 16, 16)
+        result = LowFrequencyConsensusGaussianProbe(
+            0.5, 0.25, 4.0, 0.75
+        ).apply(views, ["a", "b"], 0)
+        self.assertEqual(result.shape, views.shape[1:])
+        self.assertTrue(torch.isfinite(result).all())
+
     def test_joint_amplitude_frequency_probe_preserves_shape(self):
         views = torch.randn(4, 4, 3, 32, 32)
         for operation in ("shrink", "low_boost", "gaussian", "low_only", "low_equalize"):
@@ -637,6 +646,7 @@ class GradientProbeTests(unittest.TestCase):
             "cross_scale_canonical_c50_a025",
             "cross_scale_gaussian_c50_x025_s10_a025",
             "cross_scale_residual_gaussian_c50_x050_r025_s10_a025",
+            "low_consensus_gaussian_c50_x025_s40_a075",
             "frequency_rescaled_high_l1_g025",
             "adaptive_frequency_rescaled_l1_q50_g025",
             "raw_global_scale_g0.5",
