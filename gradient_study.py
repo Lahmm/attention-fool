@@ -825,6 +825,37 @@ class GlobalGradientScaleProbe:
 
 
 @dataclass
+class FixedChannelGainProbe:
+    """Apply a fixed cross-ViT color-gradient gain learned offline."""
+
+    strength: float
+    inverse: bool = False
+
+    @property
+    def name(self) -> str:
+        prefix = "vit_shared_color_inverse" if self.inverse else "vit_shared_color"
+        return f"{prefix}_a{int(round(self.strength * 100)):03d}"
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("fixed channel gain strength must be in [0, 1].")
+        gradient = view_gradients.mean(dim=0)
+        gains = torch.tensor(
+            (1.02, 0.76, 1.22) if self.inverse else (0.98, 1.24, 0.78),
+            device=gradient.device,
+            dtype=gradient.dtype,
+        )
+        gains = 1.0 + self.strength * (gains - 1.0)
+        return gradient * gains.view(1, 3, 1, 1)
+
+
+@dataclass
 class DivisiveNormalizationProbe:
     """Suppress local amplitude peaks using a smooth divisive envelope."""
 
@@ -2949,6 +2980,15 @@ def build_probe(name: str, model: torch.nn.Module | None = None) -> GradientProb
     if name.startswith("raw_global_scale_g"):
         return GlobalGradientScaleProbe(
             float(name.removeprefix("raw_global_scale_g"))
+        )
+    if name.startswith("vit_shared_color_inverse_a"):
+        return FixedChannelGainProbe(
+            int(name.removeprefix("vit_shared_color_inverse_a")) / 100.0,
+            inverse=True,
+        )
+    if name.startswith("vit_shared_color_a"):
+        return FixedChannelGainProbe(
+            int(name.removeprefix("vit_shared_color_a")) / 100.0
         )
     if name.startswith("amplitude_"):
         if name.startswith("amplitude_power"):

@@ -27,6 +27,7 @@ from gradient_study import (
     OrthogonalGaussianProbe,
     GaussianBandBlendProbe,
     GlobalGradientScaleProbe,
+    FixedChannelGainProbe,
     PatchGaussianBlendProbe,
     RawScaleTemporalGaussianProbe,
     RawScaleCrossScaleGaussianProbe,
@@ -294,6 +295,15 @@ class GradientProbeTests(unittest.TestCase):
             result = GeometricMedianProbe(
                 0.5, preserve_scale=preserve_scale
             ).apply(views, ["a", "b"], 0)
+            self.assertEqual(result.shape, views.shape[1:])
+            self.assertTrue(torch.isfinite(result).all())
+
+    def test_fixed_channel_gain_preserves_shape_and_finite_values(self):
+        views = torch.randn(20, 2, 3, 16, 16)
+        for inverse in (False, True):
+            result = FixedChannelGainProbe(0.5, inverse=inverse).apply(
+                views, ["a", "b"], 0
+            )
             self.assertEqual(result.shape, views.shape[1:])
             self.assertTrue(torch.isfinite(result).all())
 
@@ -713,6 +723,8 @@ class GradientProbeTests(unittest.TestCase):
             "frequency_rescaled_high_l1_g025",
             "adaptive_frequency_rescaled_l1_q50_g025",
             "raw_global_scale_g0.5",
+            "vit_shared_color_a050",
+            "vit_shared_color_inverse_a050",
             "covariance_transport_view_a25",
             "covariance_transport_group_a50",
             "group_reliability_t20",
