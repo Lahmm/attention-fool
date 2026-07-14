@@ -1399,6 +1399,102 @@ class CrossScaleGaussianProbe:
 
 
 @dataclass
+class ConfidenceCrossScaleGaussianProbe:
+    """Apply cross-scale transport only to samples with sharedness signals."""
+
+    cutoff: float
+    cross_strength: float
+    sigma: float
+    smooth_strength: float
+    selected_fraction: float
+
+    @property
+    def name(self) -> str:
+        return (
+            f"confidence_cross_scale_gaussian_c{int(round(self.cutoff * 100)):02d}"
+            f"_x{int(round(self.cross_strength * 100)):03d}"
+            f"_s{int(round(self.sigma * 10)):02d}"
+            f"_a{int(round(self.smooth_strength * 100)):03d}"
+            f"_q{int(round(self.selected_fraction * 100)):03d}"
+        )
+
+    @staticmethod
+    def _rank01(values: torch.Tensor) -> torch.Tensor:
+        if values.numel() <= 1:
+            return torch.zeros_like(values)
+        order = torch.argsort(values)
+        ranks = torch.empty_like(values, dtype=torch.float32)
+        ranks[order] = torch.arange(
+            values.numel(), device=values.device, dtype=torch.float32
+        )
+        return ranks / float(values.numel() - 1)
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        if not 0.0 < self.cutoff <= 1.0:
+            raise ValueError("confidence cross-scale cutoff must be in (0, 1].")
+        if not 0.0 <= self.cross_strength <= 1.0:
+            raise ValueError("confidence cross-scale strength must be in [0, 1].")
+        if self.sigma <= 0 or self.smooth_strength < 0:
+            raise ValueError("confidence cross-scale Gaussian parameters are invalid.")
+        if not 0.0 < self.selected_fraction <= 1.0:
+            raise ValueError("confidence selected fraction must be in (0, 1].")
+        if view_gradients.size(0) % 2:
+            raise ValueError("confidence cross-scale requires paired views.")
+
+        mean = view_gradients.mean(dim=0)
+        batch_size, _, height, width = mean.shape
+        amplitude = mean.detach().abs().mean(dim=(1, 2, 3))
+
+        spatial_power = mean.detach().square().sum(dim=1)
+        spatial_probability = spatial_power / spatial_power.sum(
+            dim=(1, 2), keepdim=True
+        ).clamp_min(1e-20)
+        spatial_entropy = -(
+            spatial_probability * spatial_probability.clamp_min(1e-20).log()
+        ).sum(dim=(1, 2))
+
+        grouped = view_gradients.view(
+            view_gradients.size(0) // 2, 2, batch_size, 3, height, width
+        ).mean(dim=1)
+        group_flat = grouped.flatten(2).permute(1, 0, 2)
+        group_sum = group_flat.sum(dim=1, keepdim=True)
+        group_rest = (group_sum - group_flat) / float(group_flat.size(1) - 1)
+        group_agreement = F.cosine_similarity(
+            group_flat, group_rest, dim=2
+        ).mean(dim=1)
+
+        radius = _frequency_radius(height, width, mean.device)
+        high = radius > radius.max() * self.cutoff
+        spectrum_power = torch.fft.fftshift(
+            torch.fft.fft2(mean.detach(), dim=(-2, -1)), dim=(-2, -1)
+        ).abs().square().sum(dim=1)
+        high_fraction = spectrum_power[:, high].sum(dim=1) / spectrum_power.sum(
+            dim=(1, 2)
+        ).clamp_min(1e-20)
+
+        confidence = (
+            self._rank01(amplitude)
+            * self._rank01(spatial_entropy)
+            * self._rank01(group_agreement)
+            * (1.0 - self._rank01(high_fraction))
+        )
+        threshold = torch.quantile(confidence, 1.0 - self.selected_fraction)
+        selected = confidence >= threshold
+        transformed = CrossScaleGaussianProbe(
+            self.cutoff,
+            self.cross_strength,
+            self.sigma,
+            self.smooth_strength,
+        ).apply(view_gradients, sample_ids, step)
+        return torch.where(selected.view(batch_size, 1, 1, 1), transformed, mean)
+
+
+@dataclass
 class LowFrequencyConsensusGaussianProbe:
     """Use view sign consensus only in the low-frequency ViT patch structure."""
 
@@ -2823,6 +2919,19 @@ def build_probe(name: str) -> GradientProbe:
     if name.startswith("spectral_phase_consensus_a"):
         return SpectralPhaseConsensusProbe(
             int(name.removeprefix("spectral_phase_consensus_a")) / 100.0
+        )
+    if name.startswith("confidence_cross_scale_gaussian_"):
+        encoded = name.removeprefix("confidence_cross_scale_gaussian_c")
+        cutoff, encoded = encoded.split("_x", 1)
+        cross_strength, encoded = encoded.split("_s", 1)
+        sigma, encoded = encoded.split("_a", 1)
+        smooth_strength, selected_fraction = encoded.split("_q", 1)
+        return ConfidenceCrossScaleGaussianProbe(
+            int(cutoff) / 100.0,
+            int(cross_strength) / 100.0,
+            int(sigma) / 10.0,
+            int(smooth_strength) / 100.0,
+            int(selected_fraction) / 100.0,
         )
     if name.startswith("low_consensus_gaussian_"):
         encoded = name.removeprefix("low_consensus_gaussian_c")
