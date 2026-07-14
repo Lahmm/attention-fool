@@ -90,14 +90,14 @@ class GradientObserverTests(unittest.TestCase):
     def test_pre_momentum_and_step_to_step_are_recorded(self):
         observer = GradientObserver(sample_ids=["sample"])
         first = torch.ones(1, 1, 2, 2)
-        observer.record_normalized(first)
+        observer.record_gradient(first)
         observer.record_pre_momentum(torch.zeros_like(first), first)
         observer.record_momentum(first)
         observer.record_sign_update(first.sign())
         observer.close_step()
 
         second = -first
-        observer.record_normalized(second)
+        observer.record_gradient(second)
         observer.record_pre_momentum(first, second)
         observer.record_momentum(torch.zeros_like(first))
         observer.record_sign_update(second.sign())

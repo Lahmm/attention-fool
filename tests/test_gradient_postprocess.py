@@ -3,6 +3,7 @@ import unittest
 
 import torch
 
+from gradient_observer import GradientObserver
 from attack import GRADIENT_POSTPROCESS_MODES, PatchScoreAttacker
 from main import parse_args
 
@@ -83,6 +84,26 @@ class GradientPostprocessTests(unittest.TestCase):
 
         self.assertEqual(attacker.input_diversity_groups * attacker.input_diversity_views_per_group, 20)
         self.assertTrue(torch.equal(actual, torch.full_like(pixels, 10.5)))
+
+    def test_attack_batch_keeps_raw_gradient_scale_and_projects(self):
+        attacker = make_attacker(steps=1, epsilon=0.1, step_size=0.2, use_momentum=False)
+        attacker._compute_generic_patch_scores = lambda _pixels: None
+
+        def raw_gradient(pixels, _labels, **_kwargs):
+            attacker._actual_forward_view_count = 20
+            return torch.full_like(pixels, 2.0)
+
+        attacker._attack_grad = raw_gradient
+        observer = GradientObserver()
+        images = torch.zeros(1, 3, 2, 2)
+        labels = torch.zeros(1, dtype=torch.long)
+
+        adversarial = attacker.attack_batch(images, labels, observer=observer)
+
+        self.assertAlmostEqual(observer._records[0]["per_sample"][0]["norm_abs_mean"], 2.0)
+        clean_pixels = attacker._denormalize(images)
+        adversarial_pixels = attacker._denormalize(adversarial)
+        self.assertLessEqual(float((adversarial_pixels - clean_pixels).abs().max()), 0.1 + 1e-6)
 
     def test_invalid_modes_and_lambda_are_rejected(self):
         gradients = torch.ones(2, 1, 1, 1, 1)

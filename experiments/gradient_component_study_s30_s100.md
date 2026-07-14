@@ -226,6 +226,12 @@ Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1
 
 100 样本 Overall bootstrap 95% CI 为 `[-0.64, +1.36]pp`。因此取消归一化不会突破 epsilon 约束，也没有导致大幅 ASR 下降；但它重新引入了跨 step 的绝对梯度尺度。当前 raw gradient 的 `agg_abs_mean` 从 step 0 的约 `0.000198` 上升到后期约 `0.00050–0.00059`，在 `momentum_decay=1` 下会让后期梯度获得更大 MI 权重。实验证明这只带来轻微、非稳定的 Overall/CNN 变化，不能改善黑盒 ViT。
 
+基于该直接对照，当前实现已将“不执行 `_normalize_grad`”设为攻击主线行为：它在 30
+样本白盒 ViT 上提升 `+3.33pp`，在 100 样本白盒 ViT 上提升 `+3.00pp`；对应黑盒 ViT
+分别为 `-0.48pp` 和 `0.00pp`，CNN 分别为 `+2.50pp` 和 `+1.00pp`。因此保留其
+白盒收益，同时接受黑盒 ViT 没有改善这一边界。后续诊断中的 `norm_l2` 与
+`norm_abs_mean` 记录的是未经全局归一化的实际梯度尺度。
+
 ## 轨迹级处理补充
 
 为检验“当前梯度与 MI 累积方向的平行分量是否应放大”，增加了有状态的 trajectory probe。它只在当前梯度上做平行/正交分解，攻击内部的 MI 累积实现不变。
@@ -242,7 +248,8 @@ Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1
 
 - 同一 seed 的 baseline/candidate replay 事件完全一致；
 - 每次攻击严格保持 20 views；
-- 所有候选只在 view 聚合后、MI/normalize/sign update 前处理梯度；
+- 历史候选只在 view 聚合后、MI/sign update 前处理梯度；这些结果是在取消全局梯度
+  归一化之前获得的；
 - 57 个单元测试覆盖了 probe 数值、形状、时序窗口、幅值符号、Fourier 分解、相位共识、跨尺度协方差/canonical、小波、幅值峰值、Laplacian、后动量方向、条件交互、phase-pair 处理、风险分数自适应组成、能量传输、冲突投影、patch 子空间、频率幅值组合、正面低频增强和历史轨迹正交处理；
 - 当前主线和候选均评估项目配置的 11 个黑盒及单独白盒 ViT。
 

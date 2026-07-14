@@ -31,7 +31,7 @@ class GradientObserver:
         self.captured_signs: list[torch.Tensor] = []
         self._step = 0
         self._records: list[dict[str, Any]] = []
-        self._normalized_by_step: list[torch.Tensor] = []
+        self._gradient_by_step: list[torch.Tensor] = []
 
     def _current(self) -> dict[str, Any]:
         while len(self._records) <= self._step:
@@ -197,22 +197,22 @@ class GradientObserver:
                 )
             self._update_step_means(rec)
 
-    def record_normalized(self, grad: torch.Tensor) -> None:
+    def record_gradient(self, grad: torch.Tensor) -> None:
         if not self.enabled:
             return
         with torch.no_grad():
-            normalized = grad.detach().flatten(1).cpu()
-            self._normalized_by_step.append(normalized)
+            gradient = grad.detach().flatten(1).cpu()
+            self._gradient_by_step.append(gradient)
             rec = self._current()
             samples = self._ensure_sample_records(rec, self._ids(grad.size(0)))
             for index, sample in enumerate(samples):
-                sample["norm_l2"] = float(normalized[index].norm())
-                sample["norm_abs_mean"] = float(normalized[index].abs().mean())
+                sample["norm_l2"] = float(gradient[index].norm())
+                sample["norm_abs_mean"] = float(gradient[index].abs().mean())
                 if self._step > 0:
                     sample["step_to_step_grad_cosine"] = float(
                         F.cosine_similarity(
-                            normalized[index : index + 1],
-                            self._normalized_by_step[self._step - 1][index : index + 1],
+                            gradient[index : index + 1],
+                            self._gradient_by_step[self._step - 1][index : index + 1],
                             dim=1,
                         )[0]
                     )
@@ -239,8 +239,8 @@ class GradientObserver:
             rec = self._current()
             samples = self._ensure_sample_records(rec, self._ids(momentum.size(0)))
             momentum_flat = momentum.detach().flatten(1).cpu()
-            normalized = self._normalized_by_step[self._step]
-            cosines = F.cosine_similarity(momentum_flat, normalized, dim=1)
+            gradient = self._gradient_by_step[self._step]
+            cosines = F.cosine_similarity(momentum_flat, gradient, dim=1)
             for index, sample in enumerate(samples):
                 sample["post_momentum_to_grad_cosine"] = float(cosines[index])
                 sample["momentum_norm"] = float(momentum_flat[index].norm())

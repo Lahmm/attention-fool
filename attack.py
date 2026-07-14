@@ -219,10 +219,6 @@ class PatchScoreAttacker:
         return (images - self.pixel_mean) / self.pixel_std
 
     @staticmethod
-    def _normalize_grad(grad: torch.Tensor) -> torch.Tensor:
-        return grad / grad.abs().mean(dim=(1, 2, 3), keepdim=True).clamp_min(1e-12)
-
-    @staticmethod
     def _l2_normalize_view_gradients(view_gradients: torch.Tensor) -> torch.Tensor:
         """Normalize each view and sample independently over C/H/W."""
         if view_gradients.ndim != 5:
@@ -1038,9 +1034,12 @@ class PatchScoreAttacker:
                     f"view count mismatch: {self._actual_forward_view_count} != {expected_views}."
                 )
 
-            gradient = self._normalize_grad(gradient)
+            # Keep the aggregated gradient's absolute scale. The update is
+            # still sign-based and is projected back into the epsilon ball
+            # below, so removing per-step normalization only changes the
+            # relative weighting of gradients in the MI accumulator.
             if observer is not None:
-                observer.record_normalized(gradient)
+                observer.record_gradient(gradient)
                 observer.record_pre_momentum(momentum, gradient)
             if self.use_momentum:
                 momentum = self.decay * momentum + gradient

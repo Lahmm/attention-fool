@@ -9,13 +9,16 @@ original L12 score/mask
 → original/post-dropout phase pair
 → kept-only opponent-channel token noise
 → 20-view gradient mean
-→ MI-FGSM update
+→ raw-scale MI-FGSM update
 ```
 
 梯度后处理默认是 `mean`，保持上述主线行为。可选模式为
 `view_l2_mean`、`sign_consensus` 和 `sign_consensus_transport`；transport 的权重由
 `--gradient-consensus-lambda` 控制，默认 `0.2`。100 样本完整消融结果见
 `experiments/gradient_postprocess_ablation_s100.md`。
+
+主线不再执行旧的 `_normalize_grad`：20 个 view 聚合后的梯度以原始绝对幅值进入
+MI 累积。更新仍使用 `sign()`，并继续执行 epsilon 投影，因此攻击约束和步长不变。
 
 仓库仅保留以下攻击能力：
 
