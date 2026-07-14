@@ -187,3 +187,7 @@
 - `outputs/attack/raw_gaussian_early_s100_seed20260713`
 - `outputs/attack/raw_gaussian_early_s100_seed20260714`
 - `outputs/attack/raw_gaussian_early_s100_seed20260715`
+
+将同样的 step-window 施加到当前稳定候选 `cross-scale + Gaussian` 后，30 样本结果为：前 5 步 Overall/ViT/CNN `-0.30/+0.95/-2.50pp`，第 3–8 步 `+0.61/+1.43/-0.83pp`，后 5 步 `+0.30/0/+0.83pp`。它们都没有超过全程跨尺度候选，也没有达到 Overall `+3–5pp`；因此 Gaussian 的早期轨迹效应不能与跨尺度输运简单叠加。
+
+相关目录：`outputs/attack/cross_scale_gaussian_window_screen_s30_seed20260713`。
