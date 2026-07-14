@@ -224,3 +224,9 @@
 ### 跨 ViT 黑盒梯度的颜色边际
 
 对 7 个黑盒 ViT 的输入梯度做独立分析，发现绿色通道的平均梯度能量约为 `1.2–1.3×`，蓝色约为 `0.7–0.85×`，红色接近平均。将这一统计转成固定的逐通道 gain，并作用于白盒 raw 梯度后，30 样本中所有正向/反向强度的 ViT 变化均为 `0pp`（最差也只有 CNN `-0.83pp`）。因此黑盒 ViT 的颜色边际统计不足以提供可用的共享 sign 方向；需要更高阶的跨模型空间方向信息。目录为 `outputs/attack/cross_vit_channel_screen_s30_seed20260713`。
+
+### 黑盒 ViT CE gradient 与 L12 攻击 sign 的对齐诊断
+
+为验证是否可以直接利用黑盒 ViT 的输入 CE gradient，比较了 30 个样本上 7 个黑盒 ViT 的 gradient sign 与白盒 L12 攻击第 10 步 sign：在 clean 输入点，单模型 agreement 约 `0.50`，7 模型 consensus 与白盒约 `0.507`；在同一批最终对抗样本点，单模型约 `0.50`，consensus 约 `0.504`。黑盒模型彼此的 CE sign consensus agreement 约 `0.66`，但它与当前 L12 攻击方向几乎独立。
+
+这说明黑盒 ViT 的 CE gradient consensus 不能作为当前 L12 score 梯度的后处理共享方向；直接注入它会改变攻击目标来源，因此不纳入本主线。
