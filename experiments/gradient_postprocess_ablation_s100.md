@@ -261,3 +261,55 @@ phase-pair、kept-only noise 和 view 数，结果说明问题不只是 CE 目�
 而不是直接寻找另一个模型的梯度方向。当前已验证的最佳候选仍为三 seed 平均
 `+1.52pp` Overall 的 cross-scale Gaussian，尚未达到 Overall `+3–5pp` 或黑盒 ViT
 约 `90%` 的目标。
+
+### patch-scale 与 cross-scale 组合补充
+
+由于单纯像素 Gaussian 的最佳效果来自多尺度平滑，而 ViT 还具有 `16×16` patch
+token 结构，新增了两个只处理聚合梯度的可证伪方向。
+
+第一，`patch_gaussian_s40_a075_p100` 在 raw mean 上叠加 sigma=4 的 Gaussian 和
+16×16 patch 均值；它不是替换原始梯度。30 样本筛选中该方向为 Overall `+1.52pp`、
+黑盒 ViT `+1.43pp`、CNN `+1.67pp`，因此进入 100 样本确认。但在 seed `20260716`
+的完整 11 黑盒评估中：
+
+| 配置 | Overall | Δ Overall | 黑盒 ViT | Δ ViT | CNN | Δ CNN | 白盒 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| raw mean | 81.91% | — | 84.43% | — | 77.50% | — | 91.00% |
+| patch + Gaussian | 81.91% | 0pp | 85.43% | +1.00pp | 75.75% | -1.75pp | 91.00% |
+
+逐模型变化为：LeViT `+4pp`、PiT `-3pp`、DeiT `+2pp`、TNT `+1pp`、ConViT
+`+1pp`、Visformer `+2pp`、CaiT `0pp`；CNN 四模型分别为 `-2/-3/-1/-1pp`。
+这说明 patch-scale 结构只能帮助部分模型，不能稳定增加 Overall，且会牺牲 CNN。
+
+第二，测试了把 patch 均值叠加到已经验证的 cross-scale Gaussian 上。30 样本完整
+11 黑盒筛选结果为：
+
+| patch strength | Δ Overall | Δ ViT | Δ CNN | Δ 白盒 |
+|---:|---:|---:|---:|---:|
+| 0.25 | +0.30pp | +0.48pp | 0pp | -3.33pp |
+| 0.50 | -1.21pp | 0pp | -3.33pp | 0pp |
+| 1.00 | +0.30pp | +1.43pp | -1.67pp | 0pp |
+
+patch DC 与 cross-scale transport 没有表现出可加性，因此不进行 100 样本确认。
+
+### 频率级 cross-scale coherence gating
+
+全局 cross-scale transport 对所有高频坐标使用同一替换比例。为检验是否是低相干
+高频被误替换，新增 `cross_scale_coherent_gaussian`：先估计每个 Fourier 坐标的
+低/高尺度跨-view coherence，只在超过阈值的坐标使用 transport，其余保留原始
+高频，再加入相同的 weak Gaussian。
+
+30 样本完整 11 黑盒结果如下：
+
+| coherence threshold | Δ Overall | Δ ViT | Δ CNN | Δ 白盒 |
+|---:|---:|---:|---:|---:|
+| 0.00 | -1.21pp | -0.95pp | -1.67pp | -3.33pp |
+| 0.25 | +0.30pp | +0.48pp | 0pp | -3.33pp |
+| 0.50 | +0.30pp | 0pp | +0.83pp | -3.33pp |
+
+没有一个阈值接近 Overall `+3pp` 或 ViT `+3pp`。因此当前 cross-scale Gaussian 的
+收益不是简单来自“挑出高相干频率”；过窄的频率门控会丢掉对迁移有用的多样性。
+
+截至目前，patch-scale 组合和 coherence gating 均被筛除；稳定最佳仍是三 seed
+平均 Overall `+1.52pp` 的全局 cross-scale Gaussian。代码探针已通过单元测试并推送，
+但没有任何新候选满足切换主线的 3–5pp Overall 标准。
