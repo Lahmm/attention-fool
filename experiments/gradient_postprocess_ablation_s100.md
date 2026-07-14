@@ -102,3 +102,41 @@
 - `outputs/attack/raw_view_subspace_screen_s30_seed20260713`
 
 当前结论：不把该候选切为攻击主线；下一步若继续，应分析为什么只有部分 ViT（尤其 LeViT、Visformer）受益，并做按 ViT 共享性的梯度诊断，而不是继续无约束增加后处理算子。目标阈值仍未满足。
+
+## 进一步 raw 梯度验证
+
+### 高频与 raw scale
+
+在当前 raw 主线重新验证旧的 `freq_high` 线索后，直接去掉高频并没有改善 ViT：30 样本中 `frequency_remove_high` 为 ViT `-1.90pp`。随机频段删除为 `-6.19pp`，说明破坏频率结构会明显伤害迁移。对高频衰减后的结果回标原始 L1/L2 范数也没有恢复收益，L1 最好只达到 ViT `+0.48pp`。
+
+进一步只衰减高频能量高分位样本的自适应版本同样没有正向信号，最佳为 ViT `+0.95pp`。因此旧实验中“高频有害”的相关性不能直接转化为全局高频删除；在 raw 主线下，梯度的整体幅值和频率组成存在耦合。
+
+### raw temporal + 跨尺度协方差 + Gaussian
+
+将每个样本的当前 raw 梯度相对 EMA 的 scale 权重与跨尺度协方差输运、`sigma=4` 弱高斯组合，是 30 样本中最强的 ViT 定向候选。`power=0.45` 的 100 样本三 seed 结果为：
+
+| seed | Overall | Δ Overall | 黑盒 ViT | Δ ViT | CNN | Δ CNN | 白盒 |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 20260713 | 82.18% | +1.36pp | 85.86% | +2.43pp | 75.75% | -0.50pp | 93% |
+| 20260714 | 81.64% | +0.36pp | 85.14% | +0.29pp | 75.50% | +0.50pp | 91% |
+| 20260715 | 82.82% | +1.64pp | 85.71% | +1.43pp | 77.75% | +2.00pp | 93% |
+| 三 seed 平均增量 | — | **+1.12pp** | — | **+1.38pp** | — | **+0.67pp** | **0pp** |
+
+因此它没有超过不加 temporal 的跨尺度+Gaussian 三 seed 平均 ViT `+1.48pp`，也没有达到 90%。全局把当前 raw 梯度乘以 `0.25/0.5/2/4` 在 sign-MI 更新下 ASR 完全不变，说明常数 scale 不改变最终符号轨迹。
+
+### Patch 能量输运回标
+
+对 ViT 14×14 patch 能量输运做 L1/L2 raw scale 回标后，30 样本最佳仍为 ViT `-0.95pp`；较强 L1 版本 Overall `-8.48pp` 且 CNN `-13.33pp`。这排除了“patch 输运仅因 raw scale 失控而失败”的解释。
+
+本轮新增探针均只作用于梯度后处理，未改变 data augmentation、20 views、steps、epsilon、MI 或投影逻辑。新增实验目录包括：
+
+- `outputs/attack/raw_frequency_screen_s30_seed20260713`
+- `outputs/attack/raw_frequency_rescaled_screen_s30_seed20260713`
+- `outputs/attack/raw_cross_scale_residual_screen_s30_seed20260713`
+- `outputs/attack/raw_temporal_cross_scale_p045_confirm_s100_seed20260713`
+- `outputs/attack/raw_temporal_cross_scale_p045_confirm_s100_seed20260714`
+- `outputs/attack/raw_temporal_cross_scale_p045_confirm_s100_seed20260715`
+- `outputs/attack/raw_patch_energy_rescaled_screen_s30_seed20260713`
+- `outputs/attack/raw_global_scale_screen_s30_seed20260713`
+
+当前证据仍支持跨尺度协方差支持的高频方向加弱 Gaussian 是最有效的数学后处理，但稳定收益约为 `+1.5pp`，距离 Overall `+3–5pp` 和黑盒 ViT `90%` 仍有差距；不应把任一候选宣称为已达标主线。
