@@ -329,6 +329,61 @@ class CrossStepSignPersistenceProbe:
 
 
 @dataclass
+class AdaptiveTrajectoryBlendProbe:
+    """Damp only abrupt raw-gradient innovations along the attack trajectory."""
+
+    strength: float
+    ema_decay: float = 0.9
+    _ema: dict[str, torch.Tensor] = field(default_factory=dict, init=False, repr=False)
+
+    @property
+    def name(self) -> str:
+        return f"adaptive_trajectory_blend_a{int(round(self.strength * 100)):03d}"
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        if not 0.0 <= self.strength <= 1.0:
+            raise ValueError("adaptive trajectory strength must be in [0, 1].")
+        if not 0.0 <= self.ema_decay < 1.0:
+            raise ValueError("adaptive trajectory ema_decay must be in [0, 1).")
+        current = view_gradients.mean(dim=0)
+        outputs = []
+        for index, sample_id in enumerate(sample_ids):
+            if step == 0:
+                self._ema.pop(sample_id, None)
+            gradient = current[index]
+            previous = self._ema.get(sample_id)
+            if previous is None:
+                transformed = gradient
+                ema = gradient.detach()
+            else:
+                gradient_flat = gradient.flatten()
+                previous_flat = previous.flatten()
+                projection = (
+                    (gradient_flat * previous_flat).sum()
+                    / previous_flat.square().sum().clamp_min(1e-20)
+                ) * previous_flat
+                innovation = gradient_flat - projection
+                cosine = F.cosine_similarity(
+                    gradient_flat.unsqueeze(0), previous_flat.unsqueeze(0), dim=1
+                )[0].clamp(-1.0, 1.0)
+                disagreement = ((1.0 - cosine) * 0.5).clamp(0.0, 1.0)
+                weight = self.strength * disagreement
+                transformed = (gradient_flat - weight * innovation).view_as(gradient)
+                ema = (
+                    self.ema_decay * previous
+                    + (1.0 - self.ema_decay) * gradient.detach()
+                )
+            self._ema[sample_id] = ema.detach()
+            outputs.append(transformed)
+        return torch.stack(outputs, dim=0)
+
+
+@dataclass
 class ViewPCProbe:
     """Add a mean-aligned principal direction of cross-view variation."""
 
@@ -2711,6 +2766,10 @@ def build_probe(name: str) -> GradientProbe:
     if name.startswith("momentum_trajectory_"):
         mode, encoded_strength = name.removeprefix("momentum_trajectory_").split("_a", 1)
         return MomentumTrajectoryProbe(int(encoded_strength) / 100.0, mode=mode)
+    if name.startswith("adaptive_trajectory_blend_a"):
+        return AdaptiveTrajectoryBlendProbe(
+            int(name.removeprefix("adaptive_trajectory_blend_a")) / 100.0
+        )
     if name.startswith("sign_persistence_"):
         encoded = name.removeprefix("sign_persistence_")
         band, encoded = encoded.split("_c", 1)

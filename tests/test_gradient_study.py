@@ -21,6 +21,7 @@ from gradient_study import (
     FrequencyGainProbe,
     FrequencyGainRescaleProbe,
     AdaptiveFrequencyGainRescaleProbe,
+    AdaptiveTrajectoryBlendProbe,
     HaarWaveletShrinkProbe,
     GaussianBlendProbe,
     OrthogonalGaussianProbe,
@@ -251,6 +252,15 @@ class GradientProbeTests(unittest.TestCase):
         second_result = probe.apply(second, ["a"], 1)
         self.assertTrue(torch.equal(first_result, first.mean(0) / first.mean(0).abs().mean()))
         self.assertFalse(torch.equal(second_result, second.mean(0)))
+
+    def test_adaptive_trajectory_blend_is_finite_and_stateful(self):
+        probe = AdaptiveTrajectoryBlendProbe(0.5)
+        views = torch.randn(20, 2, 3, 16, 16)
+        first = probe.apply(views, ["a", "b"], 0)
+        second = probe.apply(-views, ["a", "b"], 1)
+        self.assertEqual(first.shape, views.shape[1:])
+        self.assertTrue(torch.isfinite(first).all())
+        self.assertTrue(torch.isfinite(second).all())
 
     def test_raw_temporal_gaussian_preserves_first_scale_and_weights_later_scale(self):
         views = torch.ones(2, 1, 1, 8, 8)
@@ -680,6 +690,7 @@ class GradientProbeTests(unittest.TestCase):
             "momentum_trajectory_align_a25",
             "momentum_trajectory_parallel_boost_a50",
             "momentum_trajectory_orthogonal_a25",
+            "adaptive_trajectory_blend_a050",
             "sign_persistence_high_c50_a025",
             "view_pc_transport_a25",
             "view_gls_ridge10",
