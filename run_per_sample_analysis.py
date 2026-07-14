@@ -21,10 +21,14 @@ from nets import DEFAULT_MODEL_NAME, build_whitebox_model
 from utils import DEVICE, load_data, save_adversarial_images
 
 
-QUICK_EVAL_MODELS = [
+DEFAULT_VIT_EVAL_MODELS = [
+    "levit_256",
+    "pit_b_224",
     "deit_base_patch16_224",
-    "inception_v3",
-    "resnet101",
+    "tnt_s_patch16_224",
+    "convit_base",
+    "visformer_small",
+    "cait_s24_224",
 ]
 
 
@@ -40,9 +44,12 @@ def build_quick_blackbox_model(model_name: str):
 
 
 def evaluate_per_sample_transfer(
-    adv_dir: Path, annotations_path: str, num_samples: int
+    adv_dir: Path,
+    annotations_path: str,
+    num_samples: int,
+    model_names: list[str],
 ) -> dict[str, list[float]]:
-    """Return per-sample ASR for each quick black-box model."""
+    """Return per-sample ASR for the requested black-box models."""
     from transfer_eval import (
         collect_images, build_transfer_samples, pre_cache_tensors,
         load_annotations,
@@ -53,7 +60,7 @@ def evaluate_per_sample_transfer(
     image_paths = sorted(collect_images(adv_dir, "adv_"))[:num_samples]
     results: dict[str, list[float]] = {}
 
-    for model_name in QUICK_EVAL_MODELS:
+    for model_name in model_names:
         try:
             model, transform = build_quick_blackbox_model(model_name)
         except Exception as exc:
@@ -85,7 +92,15 @@ def main():
     parser.add_argument("--num-samples", type=int, default=50)
     parser.add_argument("--seed", type=int, default=20260710)
     parser.add_argument("--output-dir", default="outputs/attack/per_sample_correlation")
+    parser.add_argument(
+        "--eval-models",
+        default=",".join(DEFAULT_VIT_EVAL_MODELS),
+        help="Comma-separated timm models used for per-sample transfer analysis.",
+    )
     args = parser.parse_args()
+    eval_models = [name.strip() for name in args.eval_models.split(",") if name.strip()]
+    if not eval_models:
+        parser.error("--eval-models must contain at least one model")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -169,19 +184,22 @@ def main():
     # Evaluate transfer per sample
     print("Evaluating per-sample transfer...")
     transfer_results = evaluate_per_sample_transfer(
-        output_dir, "data/image_name_to_class_id_and_name.json", total
+        output_dir,
+        "data/image_name_to_class_id_and_name.json",
+        total,
+        eval_models,
     )
 
     # Merge transfer results
     for i, rec in enumerate(per_sample_records):
-        for model_name in QUICK_EVAL_MODELS:
+        for model_name in eval_models:
             if model_name in transfer_results and i < len(transfer_results[model_name]):
                 rec[f"transfer_{model_name}"] = transfer_results[model_name][i]
             else:
                 rec[f"transfer_{model_name}"] = 0.0
-        # Overall transfer ASR (average of 3 models)
+        # Overall transfer ASR (average of the requested models)
         rec["transfer_overall"] = np.mean([
-            rec[f"transfer_{m}"] for m in QUICK_EVAL_MODELS
+            rec[f"transfer_{m}"] for m in eval_models
         ])
 
     # Correlation analysis
