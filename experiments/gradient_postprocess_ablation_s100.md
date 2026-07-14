@@ -57,3 +57,48 @@
 - `outputs/attack/gradient_postprocess_transport_l03_s100`
 
 对应迁移 CSV 位于 `outputs/csv/outputs_attack_gradient_postprocess_*_s100.csv`，其中 `attack_params` 包含 `gradient_postprocess` 和 `gradient_consensus_lambda`。
+
+## 后续 ViT 定向梯度分析
+
+后续分析只用 7 个黑盒 ViT 作为梯度处理的主要筛选指标；CNN 仅作为最终不大幅损伤的约束。所有迁移评估仍包含完整的 11 个可加载黑盒模型（7 个 ViT、4 个 CNN），并单独评估白盒 ViT-B/16。攻击约束固定为 raw mean 主线：10 steps、20 views、`epsilon=16/255`，不重新启用 `_normalize_grad`。
+
+### 跨尺度协方差输运 + 弱高斯
+
+对每个样本，把 20 个 view 梯度分成 Fourier 低频 `l_v` 与高频 `h_v`。用跨 view 协方差得到由低频变化支持的高频方向 `C_hl l`，再与原始平均梯度的高频分量插值，最后加入弱 Gaussian blur：
+
+`g' = low_mean + (1-x) high_mean + x C_hl l + 0.75 GaussianBlur(g, sigma=4)`。
+
+其中当前最佳候选为 cutoff `0.50`、输运比例 `x=0.50`。它没有改变 score、mask、noise、phase pair、view 数、MI 或投影。
+
+三组 100 样本 seed 的结果如下，增量均相对于同 seed、同一随机轨迹的 raw mean：
+
+| seed | Overall | Δ Overall | 黑盒 ViT 平均 | Δ ViT | CNN 平均 | Δ CNN | 白盒 ViT |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 20260713 | 82.45% | +1.64pp | 85.71% | +2.29pp | 76.75% | +0.50pp | 93% |
+| 20260714 | 82.36% | +1.09pp | 85.14% | +0.29pp | 77.50% | +2.50pp | 93% |
+| 20260715 | 83.00% | +1.82pp | 86.14% | +1.86pp | 77.50% | +1.75pp | 93% |
+| 三 seed 平均增量 | — | **+1.52pp** | — | **+1.48pp** | — | **+1.58pp** | **+0.67pp** |
+
+三 seed 的黑盒 ViT 逐模型平均（候选相对 raw mean）为：
+
+| 模型 | raw mean | 跨尺度+高斯 | Δ |
+|---|---:|---:|---:|
+| LeViT-256 | 81.67% | 84.33% | +2.67pp |
+| PiT-B | 83.67% | 84.00% | +0.33pp |
+| DeiT-B | 84.00% | 85.33% | +1.33pp |
+| TNT-S | 85.33% | 85.67% | +0.33pp |
+| ConViT | 84.33% | 85.00% | +0.67pp |
+| Visformer-S | 80.33% | 84.33% | +4.00pp |
+| CaiT-S24 | 90.00% | 91.00% | +1.00pp |
+
+在同一 30 样本 screen 中，直接的 view-PC、view/covariance transport、CCA 及 Fourier phase consensus 均未形成稳定正向信号。围绕候选做的局部检查也显示：cutoff `0.35` 在 30 样本为 ViT `+1.90pp`，但 100 样本只有 `+1.00pp`；增大输运比例或改变 Gaussian 强度没有改善。因此目前证据支持“低频结构支持的部分高频方向 + 温和空间平滑”是有效的 ViT 共享成分，但收益约为 `+1.5pp`，尚未达到 Overall `+3–5pp` 或黑盒 ViT `90%` 的目标。
+
+相关目录：
+
+- `outputs/attack/raw_cross_scale_confirm_s100_seed20260713`
+- `outputs/attack/raw_cross_scale_confirm_s100_seed20260714`
+- `outputs/attack/raw_cross_scale_confirm_s100_seed20260715`
+- `outputs/attack/raw_cross_scale_c35_confirm_s100_seed20260713`
+- `outputs/attack/raw_view_subspace_screen_s30_seed20260713`
+
+当前结论：不把该候选切为攻击主线；下一步若继续，应分析为什么只有部分 ViT（尤其 LeViT、Visformer）受益，并做按 ViT 共享性的梯度诊断，而不是继续无约束增加后处理算子。目标阈值仍未满足。
