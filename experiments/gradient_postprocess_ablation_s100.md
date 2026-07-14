@@ -198,3 +198,15 @@
 
 为区分 Gaussian 的方向作用与其沿原梯度投影的幅值混合，测试了
 `g' = g + a(B(g)-proj_g B(g))`。全程 sigma=4、a=0.75 时 Overall/ViT/CNN 为 `0/+0.48/-0.83pp`；a=1.50 为 `0/+1.43/-2.50pp`；前 5 步 a=0.75 为 `-0.30/+0.48/-1.67pp`。正交残差没有超过原始 Gaussian 或跨尺度候选，说明 Gaussian 的正向效应不能简化为一个独立的正交共享方向。目录为 `outputs/attack/orthogonal_gaussian_screen_s30_seed20260713`。
+
+### 自适应跨步轨迹创新
+
+新增 raw-scale trajectory probe：维护每个样本的历史 raw 梯度 EMA，计算当前梯度相对历史方向的正交 innovation，只在当前/历史 cosine 较低时按比例抑制该 innovation。30 样本结果为：
+
+| strength | Overall Δ | ViT Δ | CNN Δ | 白盒 Δ |
+|---:|---:|---:|---:|---:|
+| 0.25 | -0.61pp | -0.48pp | -0.83pp | 0pp |
+| 0.50 | -1.21pp | -1.43pp | -0.83pp | 0pp |
+| 0.75 | -0.91pp | -1.43pp | 0pp | -3.33pp |
+
+因此跨步不一致的方向不能简单视为有害源模型成分；攻击迁移需要保留部分轨迹创新。该方向不进入大样本确认。目录为 `outputs/attack/adaptive_trajectory_screen_s30_seed20260713`。
