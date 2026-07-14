@@ -19,6 +19,7 @@ from gradient_study import (
     FrequencyGainProbe,
     HaarWaveletShrinkProbe,
     GaussianBlendProbe,
+    RawScaleTemporalGaussianProbe,
     AdaptiveGaussianProbe,
     GroupRemovalProbe,
     GroupReliabilityProbe,
@@ -230,6 +231,16 @@ class GradientProbeTests(unittest.TestCase):
         second_result = probe.apply(second, ["a"], 1)
         self.assertTrue(torch.equal(first_result, first.mean(0) / first.mean(0).abs().mean()))
         self.assertFalse(torch.equal(second_result, second.mean(0)))
+
+    def test_raw_temporal_gaussian_preserves_first_scale_and_weights_later_scale(self):
+        views = torch.ones(2, 1, 1, 8, 8)
+        probe = RawScaleTemporalGaussianProbe(0.5, 1.0, 0.25, ema_decay=0.5)
+        first = probe.apply(views, ["a"], 0)
+        second = probe.apply(views * 4.0, ["a"], 1)
+
+        self.assertAlmostEqual(float(first.abs().mean()), 1.25, places=5)
+        self.assertGreater(float(second.abs().mean()), 4.25)
+        self.assertTrue(torch.isfinite(second).all())
 
     def test_sign_persistence_is_identity_at_first_step_and_preserves_shape(self):
         views = torch.randn(20, 1, 1, 16, 16)
@@ -562,6 +573,7 @@ class GradientProbeTests(unittest.TestCase):
             "spectral_boost_residual_all_a100",
             "low_frequency_boost_c50_a50",
             "gaussian_blend_s10_a50",
+            "raw_temporal_gaussian_p050_s10_a025",
             "gaussian_norm_blend_s10_a25",
             "adaptive_gaussian_entropy_low_q50",
             "adaptive_gaussian_freq_high_q50",

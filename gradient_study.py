@@ -1026,6 +1026,58 @@ class GaussianBlendProbe:
 
 
 @dataclass
+class RawScaleTemporalGaussianProbe:
+    """Preserve raw temporal scale while adding a weak spatially smooth component.
+
+    The per-sample raw gradient scale is compared with an EMA from earlier
+    attack steps.  ``power=0`` keeps the raw mean unchanged, while larger
+    powers give later high-magnitude gradients a bounded extra MI weight.
+    Gaussian blending is applied after this temporal weighting.
+    """
+
+    power: float
+    sigma: float
+    strength: float
+    ema_decay: float = 0.9
+    _ema_by_sample: dict[str, torch.Tensor] = field(default_factory=dict, init=False, repr=False)
+
+    @property
+    def name(self) -> str:
+        return (
+            f"raw_temporal_gaussian_p{int(round(self.power * 100)):03d}"
+            f"_s{int(round(self.sigma * 10)):02d}"
+            f"_a{int(round(self.strength * 100)):03d}"
+        )
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        if not 0.0 <= self.power <= 1.0:
+            raise ValueError("raw temporal Gaussian power must be in [0, 1].")
+        if self.sigma <= 0 or self.strength < 0:
+            raise ValueError("raw temporal Gaussian requires sigma > 0 and strength >= 0.")
+        if not 0.0 <= self.ema_decay < 1.0:
+            raise ValueError("raw temporal Gaussian ema_decay must be in [0, 1).")
+        gradient = view_gradients.mean(dim=0)
+        raw_scale = gradient.detach().abs().mean(dim=(1, 2, 3), keepdim=True)
+        weighted = []
+        for index, sample_id in enumerate(sample_ids):
+            if step == 0:
+                self._ema_by_sample.pop(sample_id, None)
+            current_scale = raw_scale[index]
+            previous_ema = self._ema_by_sample.get(sample_id)
+            if previous_ema is None:
+                ema = current_scale
+            else:
+                ema = self.ema_decay * previous_ema + (1.0 - self.ema_decay) * current_scale
+            self._ema_by_sample[sample_id] = ema.detach()
+            relative_scale = (current_scale / ema.clamp_min(1e-20)).clamp(0.25, 4.0)
+            weighted.append(gradient[index] * relative_scale.pow(self.power))
+        weighted_gradient = torch.stack(weighted, dim=0)
+        return GaussianBlendProbe(self.sigma, self.strength).apply(
+            weighted_gradient.unsqueeze(0), sample_ids, step
+        )
+
+
+@dataclass
 class CrossScaleGaussianProbe:
     """Compose cross-scale high-frequency replacement with weak smoothing."""
 
@@ -2224,6 +2276,16 @@ def build_probe(name: str) -> GradientProbe:
         if not sigma.startswith("s"):
             raise ValueError(f"unsupported Gaussian blend name: {name}")
         return GaussianBlendProbe(int(sigma.removeprefix("s")) / 10.0, int(strength) / 100.0)
+    if name.startswith("raw_temporal_gaussian_"):
+        encoded = name.removeprefix("raw_temporal_gaussian_")
+        power, sigma, strength = encoded.split("_")
+        if not power.startswith("p") or not sigma.startswith("s") or not strength.startswith("a"):
+            raise ValueError(f"unsupported raw temporal Gaussian name: {name}")
+        return RawScaleTemporalGaussianProbe(
+            int(power.removeprefix("p")) / 100.0,
+            int(sigma.removeprefix("s")) / 10.0,
+            int(strength.removeprefix("a")) / 100.0,
+        )
     if name.startswith("gaussian_norm_blend_"):
         encoded = name.removeprefix("gaussian_norm_blend_")
         sigma, strength = encoded.split("_a", 1)
