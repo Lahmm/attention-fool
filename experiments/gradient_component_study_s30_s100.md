@@ -232,6 +232,35 @@ Tikhonov/Laplacian proximal 低通的四个强度中，最佳结果为 `lambda=1
 白盒收益，同时接受黑盒 ViT 没有改善这一边界。后续诊断中的 `norm_l2` 与
 `norm_abs_mean` 记录的是未经全局归一化的实际梯度尺度。
 
+## raw-scale 主线上的弱 Gaussian 复验
+
+在取消 `_normalize_grad` 后，重新用同一 replay 流程测试
+`gaussian_blend_s10_a25`，即对 raw `mean` 梯度执行：
+
+```text
+g' = g + 0.25 * GaussianBlur(g, sigma=1)
+```
+
+100 样本、seed `20260713` 的结果如下。baseline 与 candidate 的 replay digest 均为
+`6d59971b...d1b081`，因此随机 mask、phase 和 noise 完全配对：
+
+| 指标 | raw mean | raw Gaussian | 变化 |
+|---|---:|---:|---:|
+| Overall，11 黑盒 | 80.82% | 82.64% | +1.82pp |
+| 黑盒 ViT 平均 | 83.43% | 85.14% | +1.71pp |
+| CNN 平均 | 76.25% | 78.25% | +2.00pp |
+| 白盒 ViT-B/16 | 92.00% | 92.00% | 0.00pp |
+
+逐模型变化为：LeViT `+4pp`、PiT `+2pp`、DeiT `+4pp`、TNT `0pp`、ConViT
+`-2pp`、Visformer `+3pp`、CaiT `+1pp`；Inception-v3 `0pp`、Inception-v4
+`+3pp`、Inception-ResNet-v2 `+1pp`、ResNet-101 `+4pp`。Overall 的 paired
+bootstrap 95% CI 为 `[+0.27,+3.73]pp`，bootstrap 正向概率为 `0.9886`。
+
+这说明 Gaussian 的弱平滑分量可能与 raw 梯度幅值共同作用，当前信号比旧的归一化
+主线更有希望；但它仍只有一个 seed，不能据此宣称稳定收益。实验目录为
+`outputs/attack/gradient_gaussian_no_normalize_s100_seed20260713`，下一步应优先用
+至少两个新 seed 复验，再决定是否更新主线。
+
 ## 轨迹级处理补充
 
 为检验“当前梯度与 MI 累积方向的平行分量是否应放大”，增加了有状态的 trajectory probe。它只在当前梯度上做平行/正交分解，攻击内部的 MI 累积实现不变。
