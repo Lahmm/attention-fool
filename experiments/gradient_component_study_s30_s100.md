@@ -275,11 +275,17 @@ bootstrap 95% CI 为 `[+0.27,+3.73]pp`，bootstrap 正向概率为 `0.9886`。
 | 白盒 ViT-B/16 | 92.00% | 93.00% | 93.00% |
 
 相对 10-step raw mean，20-step raw Gaussian 的变化为 Overall `+4.00pp`、黑盒 ViT
-`+4.00pp`、CNN `+4.00pp`、白盒 `+1.00pp`。其中仅增加步数的贡献为
-`+3.09/+3.00/+3.25/+1.00pp`（Overall/ViT/CNN/白盒），Gaussian 在同步 20-step
-baseline 上的额外贡献为 `+0.91/+1.00/+0.75/0.00pp`。Gaussian 的 Overall paired
-bootstrap 95% CI 为 `[-0.18,+2.09]pp`，正向概率为 `0.9528`，所以该结果仍需多
-seed 复验，不能单凭这一 seed 更新主线。
+`+4.00pp`、CNN `+4.00pp`、白盒 `+1.00pp`。但该比较不属于当前主线的公平梯度
+处理比较：10 steps 使用约 `10×20=200` 次随机 view 梯度观测，20 steps 使用约
+`20×20=400` 次，同时拥有两倍的更新机会。因而步数带来的
+`+3.09/+3.00/+3.25/+1.00pp`（Overall/ViT/CNN/白盒）只能作为增加优化预算的
+诊断结果，不能归因于梯度处理。
+
+在同步 20-step baseline 上，Gaussian 的额外变化为
+`+0.91/+1.00/+0.75/0.00pp`；其 Overall paired bootstrap 95% CI 为
+`[-0.18,+2.09]pp`，正向概率为 `0.9528`。这个同步比较只说明 20-step 条件下
+Gaussian 的单 seed 信号，不能替代固定 10-step 主线的结论。当前主线约束下，仍应
+以 10 steps 的 raw mean 与 raw Gaussian 配对复验作为有效实验。
 
 20-step 实验目录为
 `outputs/attack/gradient_gaussian_no_normalize_s100_steps20_seed20260713`。
