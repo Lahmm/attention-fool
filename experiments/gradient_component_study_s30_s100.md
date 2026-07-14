@@ -290,6 +290,33 @@ Gaussian 的单 seed 信号，不能替代固定 10-step 主线的结论。当�
 20-step 实验目录为
 `outputs/attack/gradient_gaussian_no_normalize_s100_steps20_seed20260713`。
 
+## raw-scale temporal weighting + weak Gaussian
+
+在固定主线 10 steps、10 groups × 2 views、raw mean 的条件下，新增了一个状态 probe：
+对每个样本维护 raw 梯度幅值 EMA，使用
+
+```text
+g_t' = (g_t / μ_t) × (μ_t / EMA(μ_t))^0.5
+g_t'' = g_t' + 0.25 × GaussianBlur(g_t', sigma=1)
+```
+
+其中 EMA decay=`0.9`，梯度幅值比限制在 `[0.25, 4]`。100 样本、seed `20260713`
+结果如下，baseline/candidate replay digest 均为 `6d59971b...d1b081`：
+
+| 指标 | raw mean | temporal weighting + Gaussian | 变化 |
+|---|---:|---:|---:|
+| Overall，11 黑盒 | 80.82% | 81.91% | +1.09pp |
+| 黑盒 ViT 平均 | 83.43% | 84.43% | +1.00pp |
+| CNN 平均 | 76.25% | 77.50% | +1.25pp |
+| 白盒 ViT-B/16 | 92.00% | 92.00% | 0.00pp |
+
+Overall paired bootstrap 95% CI 为 `[-0.36,+2.82]pp`，正向概率为 `0.9218`。相比
+固定 raw Gaussian 的黑盒 ViT `+1.71pp`、Overall `+1.82pp`，该 temporal weighting
+分别下降约 `0.71pp` 和 `0.73pp`。因此“当前/历史 raw 幅值 EMA 权重”在首个配置中
+没有带来额外 ViT 迁移收益；它仍需多 seed 才能判断是否只是参数不合适，但暂不进入
+主线选择。实验目录为
+`outputs/attack/raw_temporal_gaussian_s100_seed20260713`。
+
 ## 固定总 view 预算：20 steps × 5 groups × 2 views
 
 为排除“20 steps 只是使用了更多随机梯度样本”的影响，进一步固定总 view 预算：
