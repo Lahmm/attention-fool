@@ -1078,6 +1078,43 @@ class RawScaleTemporalGaussianProbe:
 
 
 @dataclass
+class PatchGaussianBlendProbe:
+    """Add Gaussian and soft ViT patch-scale residuals without projection."""
+
+    sigma: float
+    gaussian_strength: float
+    patch_strength: float
+    patch_size: int = 16
+
+    @property
+    def name(self) -> str:
+        return (
+            f"patch_gaussian_s{int(round(self.sigma * 10)):02d}"
+            f"_a{int(round(self.gaussian_strength * 100)):03d}"
+            f"_p{int(round(self.patch_strength * 100)):03d}"
+        )
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if self.sigma <= 0 or self.gaussian_strength < 0 or self.patch_strength < 0:
+            raise ValueError("patch Gaussian strengths must be non-negative and sigma > 0.")
+        gradient = view_gradients.mean(dim=0)
+        height, width = gradient.shape[-2:]
+        if height % self.patch_size or width % self.patch_size:
+            raise ValueError("patch Gaussian requires dimensions divisible by patch_size.")
+        gaussian = GaussianBlendProbe(self.sigma, self.gaussian_strength).apply(
+            gradient.unsqueeze(0), ["patch_gaussian"] * gradient.size(0), 0
+        ) - gradient
+        patch = F.avg_pool2d(
+            gradient,
+            kernel_size=self.patch_size,
+            stride=self.patch_size,
+        )
+        patch = F.interpolate(patch, size=(height, width), mode="nearest")
+        return gradient + gaussian + self.patch_strength * patch
+
+
+@dataclass
 class CrossScaleGaussianProbe:
     """Compose cross-scale high-frequency replacement with weak smoothing."""
 
@@ -2285,6 +2322,15 @@ def build_probe(name: str) -> GradientProbe:
             int(power.removeprefix("p")) / 100.0,
             int(sigma.removeprefix("s")) / 10.0,
             int(strength.removeprefix("a")) / 100.0,
+        )
+    if name.startswith("patch_gaussian_s"):
+        encoded = name.removeprefix("patch_gaussian_s")
+        sigma, encoded = encoded.split("_a", 1)
+        gaussian_strength, patch_strength = encoded.split("_p", 1)
+        return PatchGaussianBlendProbe(
+            int(sigma) / 10.0,
+            int(gaussian_strength) / 100.0,
+            int(patch_strength) / 100.0,
         )
     if name.startswith("gaussian_norm_blend_"):
         encoded = name.removeprefix("gaussian_norm_blend_")
