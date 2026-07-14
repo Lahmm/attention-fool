@@ -18,6 +18,7 @@ from gradient_study import (
     CrossStepSignPersistenceProbe,
     EnergyEqualizationProbe,
     FrequencyGainProbe,
+    FrequencyGainRescaleProbe,
     HaarWaveletShrinkProbe,
     GaussianBlendProbe,
     GaussianBandBlendProbe,
@@ -343,6 +344,21 @@ class GradientProbeTests(unittest.TestCase):
         self.assertTrue(torch.allclose(probe.apply(constant, ["a"], 0), constant.mean(0)))
         self.assertTrue(torch.allclose(probe.apply(high, ["a"], 0), high.mean(0) * 0.5))
 
+    def test_rescaled_frequency_gain_preserves_raw_l1_and_l2_scale(self):
+        views = torch.randn(20, 2, 3, 16, 16)
+        mean = views.mean(0)
+        for scale in ("l1", "l2"):
+            result = FrequencyGainRescaleProbe(0.25, scale).apply(
+                views, ["a", "b"], 0
+            )
+            if scale == "l1":
+                expected = mean.abs().mean(dim=(1, 2, 3))
+                actual = result.abs().mean(dim=(1, 2, 3))
+            else:
+                expected = mean.flatten(1).norm(dim=1)
+                actual = result.flatten(1).norm(dim=1)
+            self.assertTrue(torch.allclose(actual, expected, atol=1e-5, rtol=1e-5))
+
     def test_laplacian_prox_is_identity_at_zero_and_attenuates_checkerboard(self):
         constant = torch.ones(2, 1, 1, 8, 8)
         axis = torch.arange(8)
@@ -583,6 +599,7 @@ class GradientProbeTests(unittest.TestCase):
             "cross_scale_canonical_c50_a025",
             "cross_scale_gaussian_c50_x025_s10_a025",
             "cross_scale_residual_gaussian_c50_x050_r025_s10_a025",
+            "frequency_rescaled_high_l1_g025",
             "covariance_transport_view_a25",
             "covariance_transport_group_a50",
             "group_reliability_t20",

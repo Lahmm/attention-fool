@@ -777,6 +777,48 @@ class FrequencyGainProbe:
 
 
 @dataclass
+class FrequencyGainRescaleProbe:
+    """Apply a high-frequency gain while preserving raw gradient scale."""
+
+    high_gain: float
+    scale: str = "l1"
+
+    @property
+    def name(self) -> str:
+        return (
+            f"frequency_rescaled_high_{self.scale}_g"
+            f"{int(round(self.high_gain * 100)):03d}"
+        )
+
+    def apply(
+        self,
+        view_gradients: torch.Tensor,
+        sample_ids: list[str],
+        step: int,
+    ) -> torch.Tensor:
+        del sample_ids, step
+        if not 0.0 <= self.high_gain <= 1.0:
+            raise ValueError("rescaled high-frequency gain must be in [0, 1].")
+        if self.scale not in ("l1", "l2"):
+            raise ValueError("rescaled frequency scale must be l1 or l2.")
+        gradient = view_gradients.mean(dim=0)
+        filtered = FrequencyGainProbe(self.high_gain).apply(
+            gradient.unsqueeze(0), ["frequency_rescaled"] * gradient.size(0), 0
+        )
+        if self.scale == "l1":
+            original_scale = gradient.abs().mean(dim=(1, 2, 3), keepdim=True)
+            filtered_scale = filtered.abs().mean(dim=(1, 2, 3), keepdim=True)
+        else:
+            original_scale = gradient.flatten(1).norm(dim=1, keepdim=True).view(
+                -1, 1, 1, 1
+            )
+            filtered_scale = filtered.flatten(1).norm(dim=1, keepdim=True).view(
+                -1, 1, 1, 1
+            )
+        return filtered * (original_scale / filtered_scale.clamp_min(1e-20))
+
+
+@dataclass
 class LaplacianProxProbe:
     """Tikhonov/Laplacian proximal low-pass preconditioning.
 
@@ -2322,6 +2364,13 @@ def build_probe(name: str) -> GradientProbe:
         )
     if name.startswith("frequency_remove_"):
         return FrequencyBandProbe(name.removeprefix("frequency_remove_"))
+    if name.startswith("frequency_rescaled_high_"):
+        encoded = name.removeprefix("frequency_rescaled_high_")
+        scale, encoded_gain = encoded.split("_g", 1)
+        return FrequencyGainRescaleProbe(
+            int(encoded_gain) / 100.0,
+            scale=scale,
+        )
     if name.startswith("amplitude_"):
         if name.startswith("amplitude_power"):
             power = int(name.removeprefix("amplitude_power")) / 100.0
