@@ -140,3 +140,18 @@
 - `outputs/attack/raw_global_scale_screen_s30_seed20260713`
 
 当前证据仍支持跨尺度协方差支持的高频方向加弱 Gaussian 是最有效的数学后处理，但稳定收益约为 `+1.5pp`，距离 Overall `+3–5pp` 和黑盒 ViT `90%` 仍有差距；不应把任一候选宣称为已达标主线。
+
+### 低频 view-sign 共识 + 弱 Gaussian 筛选
+
+针对“ViT 共享方向可能集中在低频结构”的假设，新增了只对 Fourier 低频分量做逐 view 符号共识的探针；高频仍保留 raw mean，最后使用 `sigma=4, a=0.75` 的弱 Gaussian。该探针未改变 20 views、score、mask、noise、phase、MI 或投影。
+
+首轮目录因并发评估竞态导致基线只包含 14 个已评估样本，已废弃；以下是单进程、30/30 完整重跑的结果：
+
+| 探针 | Overall | Δ Overall | 黑盒 ViT | Δ ViT | CNN | Δ CNN | 白盒 ViT |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| raw mean baseline | 84.55% | — | 85.71% | — | 82.50% | — | 93.33% |
+| low consensus c50, x0.25 | 85.45% | +0.91pp | 87.14% | +1.43pp | 82.50% | 0pp | 93.33% |
+| low consensus c35, x0.25 | 84.85% | +0.30pp | 86.19% | +0.48pp | 82.50% | 0pp | 93.33% |
+| low consensus c50, x0.50 | 81.82% | -2.73pp | 83.33% | -2.38pp | 79.17% | -3.33pp | 90.00% |
+
+因此低频共识在小样本 screen 中有弱正向信号，但远低于 Overall `+3–5pp` 目标；共识权重过大还会同时损害 ViT 与 CNN。该方向暂不进入 100 样本确认，后续应优先做 ViT 逐模型梯度共享性诊断，而不是继续增大 consensus 权重。有效重跑目录为 `outputs/attack/raw_low_consensus_screen_s30_seed20260713_rerun`。
