@@ -1115,6 +1115,34 @@ class PatchGaussianBlendProbe:
 
 
 @dataclass
+class GaussianBandBlendProbe:
+    """Adjust low/high spatial components while retaining the full gradient."""
+
+    sigma: float
+    low_strength: float
+    high_strength: float
+
+    @property
+    def name(self) -> str:
+        return (
+            f"gaussian_band_s{int(round(self.sigma * 10)):02d}"
+            f"_l{int(round(self.low_strength * 100)):03d}"
+            f"_h{int(round(self.high_strength * 100)):03d}"
+        )
+
+    def apply(self, view_gradients: torch.Tensor, sample_ids: list[str], step: int) -> torch.Tensor:
+        del sample_ids, step
+        if self.sigma <= 0:
+            raise ValueError("Gaussian band blend requires sigma > 0.")
+        gradient = view_gradients.mean(dim=0)
+        low = GaussianBlendProbe(self.sigma, 1.0).apply(
+            gradient.unsqueeze(0), ["gaussian_band"] * gradient.size(0), 0
+        ) - gradient
+        high = gradient - low
+        return gradient + self.low_strength * low + self.high_strength * high
+
+
+@dataclass
 class CrossScaleGaussianProbe:
     """Compose cross-scale high-frequency replacement with weak smoothing."""
 
@@ -2331,6 +2359,15 @@ def build_probe(name: str) -> GradientProbe:
             int(sigma) / 10.0,
             int(gaussian_strength) / 100.0,
             int(patch_strength) / 100.0,
+        )
+    if name.startswith("gaussian_band_s"):
+        encoded = name.removeprefix("gaussian_band_s")
+        sigma, encoded = encoded.split("_l", 1)
+        low_strength, high_strength = encoded.split("_h", 1)
+        return GaussianBandBlendProbe(
+            int(sigma) / 10.0,
+            int(low_strength) / 100.0,
+            int(high_strength) / 100.0,
         )
     if name.startswith("gaussian_norm_blend_"):
         encoded = name.removeprefix("gaussian_norm_blend_")

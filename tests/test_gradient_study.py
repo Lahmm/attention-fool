@@ -19,6 +19,7 @@ from gradient_study import (
     FrequencyGainProbe,
     HaarWaveletShrinkProbe,
     GaussianBlendProbe,
+    GaussianBandBlendProbe,
     PatchGaussianBlendProbe,
     RawScaleTemporalGaussianProbe,
     AdaptiveGaussianProbe,
@@ -246,6 +247,13 @@ class GradientProbeTests(unittest.TestCase):
     def test_patch_gaussian_blend_preserves_shape_and_finite_values(self):
         views = torch.randn(20, 2, 3, 224, 224)
         probe = PatchGaussianBlendProbe(4.0, 0.75, 0.25)
+        result = probe.apply(views, ["a", "b"], 0)
+        self.assertEqual(result.shape, views.shape[1:])
+        self.assertTrue(torch.isfinite(result).all())
+
+    def test_gaussian_band_blend_preserves_shape_and_finite_values(self):
+        views = torch.randn(20, 2, 3, 32, 32)
+        probe = GaussianBandBlendProbe(4.0, 0.75, 0.5)
         result = probe.apply(views, ["a", "b"], 0)
         self.assertEqual(result.shape, views.shape[1:])
         self.assertTrue(torch.isfinite(result).all())
@@ -583,6 +591,7 @@ class GradientProbeTests(unittest.TestCase):
             "gaussian_blend_s10_a50",
             "raw_temporal_gaussian_p050_s10_a025",
             "patch_gaussian_s40_a075_p025",
+            "gaussian_band_s40_l075_h050",
             "gaussian_norm_blend_s10_a25",
             "adaptive_gaussian_entropy_low_q50",
             "adaptive_gaussian_freq_high_q50",
