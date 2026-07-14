@@ -261,6 +261,29 @@ bootstrap 95% CI 为 `[+0.27,+3.73]pp`，bootstrap 正向概率为 `0.9886`。
 `outputs/attack/gradient_gaussian_no_normalize_s100_seed20260713`，下一步应优先用
 至少两个新 seed 复验，再决定是否更新主线。
 
+## raw-scale 主线改为 20 steps
+
+进一步将 MI-FGSM 的步数从 10 改为 20，保持 epsilon `16/255` 不变，因此默认步长
+变为 `epsilon/20`。该实验使用 seed `20260713`、100 样本和同样的 20 actual views；
+20-step baseline 与 Gaussian candidate 的 replay digest 均为 `5c8d2c44...52919ff`。
+
+| 指标 | 10-step raw mean | 20-step raw mean | 20-step raw Gaussian |
+|---|---:|---:|---:|
+| Overall，11 黑盒 | 80.82% | 83.91% | 84.82% |
+| 黑盒 ViT 平均 | 83.43% | 86.43% | 87.43% |
+| CNN 平均 | 76.25% | 79.50% | 80.25% |
+| 白盒 ViT-B/16 | 92.00% | 93.00% | 93.00% |
+
+相对 10-step raw mean，20-step raw Gaussian 的变化为 Overall `+4.00pp`、黑盒 ViT
+`+4.00pp`、CNN `+4.00pp`、白盒 `+1.00pp`。其中仅增加步数的贡献为
+`+3.09/+3.00/+3.25/+1.00pp`（Overall/ViT/CNN/白盒），Gaussian 在同步 20-step
+baseline 上的额外贡献为 `+0.91/+1.00/+0.75/0.00pp`。Gaussian 的 Overall paired
+bootstrap 95% CI 为 `[-0.18,+2.09]pp`，正向概率为 `0.9528`，所以该结果仍需多
+seed 复验，不能单凭这一 seed 更新主线。
+
+20-step 实验目录为
+`outputs/attack/gradient_gaussian_no_normalize_s100_steps20_seed20260713`。
+
 ## 轨迹级处理补充
 
 为检验“当前梯度与 MI 累积方向的平行分量是否应放大”，增加了有状态的 trajectory probe。它只在当前梯度上做平行/正交分解，攻击内部的 MI 累积实现不变。
