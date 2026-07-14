@@ -313,3 +313,26 @@ patch DC 与 cross-scale transport 没有表现出可加性，因此不进行 10
 截至目前，patch-scale 组合和 coherence gating 均被筛除；稳定最佳仍是三 seed
 平均 Overall `+1.52pp` 的全局 cross-scale Gaussian。代码探针已通过单元测试并推送，
 但没有任何新候选满足切换主线的 3–5pp Overall 标准。
+
+### 跨样本共享梯度原型
+
+静态 Fourier/patch 变换没有达到目标后，进一步测试了“迁移共享方向也许在不同图像
+之间稳定”的假设。新增 probe 在每个攻击 step 维护一个跨样本梯度原型：第一个
+batch 使用 leave-one-out 均值，后续 batch 使用同一 step 的 EMA；原型先按当前样本
+raw 梯度的 L2 norm 缩放，再以弱权重注入。该操作只发生在 view 聚合之后，不增加
+forward、view、data-aug 或攻击预算。
+
+30 样本完整 11 黑盒筛选结果如下：
+
+| 原型范围/强度 | Δ Overall | Δ ViT | Δ CNN | Δ 白盒 |
+|---|---:|---:|---:|---:|
+| low-pass, a=0.05 | -2.12pp | -0.95pp | -4.17pp | -3.33pp |
+| low-pass, a=0.10 | -1.82pp | -1.90pp | -1.67pp | -3.33pp |
+| low-pass, a=0.20 | -3.03pp | -2.86pp | -3.33pp | -3.33pp |
+| raw, a=0.05 | -0.30pp | -0.95pp | +0.83pp | -3.33pp |
+| raw, a=0.10 | -1.52pp | -1.43pp | -1.67pp | -3.33pp |
+
+跨样本原型没有产生正向 ViT 迁移，且低频原型对 CNN 伤害明显。该结果说明当前
+有效方向主要依赖单个样本的类别/空间结构；把不同图像的梯度平均或 EMA 化会丢失
+这些必要信息。因此后续不再把跨样本 universal direction 作为主线候选，下一轮若
+继续，应只在同一样本的 view 梯度内部做保留样本结构的非线性重构。
