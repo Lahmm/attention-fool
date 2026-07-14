@@ -290,6 +290,30 @@ Gaussian 的单 seed 信号，不能替代固定 10-step 主线的结论。当�
 20-step 实验目录为
 `outputs/attack/gradient_gaussian_no_normalize_s100_steps20_seed20260713`。
 
+## 固定总 view 预算：20 steps × 5 groups × 2 views
+
+为排除“20 steps 只是使用了更多随机梯度样本”的影响，进一步固定总 view 预算：
+原始配置为 `10×10×2=200` 个 view，新的配置为
+`20×5×2=200` 个 view。100 样本、seed `20260713` 的结果如下：
+
+| 指标 | 10-step raw mean，10×2 | 20-step raw mean，5×2 | 20-step raw Gaussian，5×2 |
+|---|---:|---:|---:|
+| Overall，11 黑盒 | 80.82% | 80.64% | 80.45% |
+| 黑盒 ViT 平均 | 83.43% | 82.71% | 83.29% |
+| CNN 平均 | 76.25% | 77.00% | 75.50% |
+| 白盒 ViT-B/16 | 92.00% | 91.00% | 92.00% |
+
+在同步的 20-step、5×2 baseline 上，Gaussian 的变化为 Overall `-0.18pp`、黑盒
+ViT `+0.57pp`、CNN `-1.50pp`、白盒 `+1.00pp`；Overall paired bootstrap
+95% CI 为 `[-1.73,+1.45]pp`，正向概率为 `0.4182`。相对原始 10-step、10×2
+raw mean，20-step、5×2 raw Gaussian 的变化为 Overall `-1.36pp`、黑盒 ViT
+`-0.14pp`、CNN `-0.75pp`、白盒 `0pp`。
+
+因此，固定总 view 预算时，减少每步 view 数、增加迭代步数不能替代原始的
+`10 groups × 2 views` 聚合；该配置下 Gaussian 的 ViT 小幅正向伴随明显 CNN 损伤，
+不满足主线选择条件。实验目录为
+`outputs/attack/gradient_gaussian_no_normalize_s100_steps20_g5v2_seed20260713`。
+
 ## 轨迹级处理补充
 
 为检验“当前梯度与 MI 累积方向的平行分量是否应放大”，增加了有状态的 trajectory probe。它只在当前梯度上做平行/正交分解，攻击内部的 MI 累积实现不变。
