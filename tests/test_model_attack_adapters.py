@@ -63,6 +63,31 @@ class MainlineBudgetAndNoiseTests(unittest.TestCase):
         self.assertEqual(attacker.mainline_metadata()["feature_noise_type"],
                          "opponent_channel_rgb_projection")
 
+    def test_post_dropout_feature_noise_strength_is_independent(self):
+        torch.manual_seed(11)
+        attacker = self.make_attacker(
+            guide_aug_strength=0.2,
+            post_dropout_feature_noise_strength=0.05,
+        )
+        local_tokens = torch.randn(2, 4, 5)
+        state = AttackFeatureState(
+            local_tokens=local_tokens,
+            grid_size=(2, 2),
+            context=None,
+            rgb_projection_weight=torch.randn(5, 3, 1, 1),
+            projection_kernel=(1, 1),
+            projection_stride=(1, 1),
+            projection_padding=(0, 0),
+        )
+        noise = attacker._strict_opponent_feature_noise(state)
+        source_rms = local_tokens.square().mean(dim=(1, 2)).sqrt()
+        noise_rms = noise.square().mean(dim=(1, 2)).sqrt()
+        self.assertTrue(torch.allclose(noise_rms, 0.05 * source_rms, rtol=1e-5, atol=1e-6))
+        self.assertAlmostEqual(
+            attacker.mainline_metadata()["post_dropout_feature_noise_strength"],
+            0.05,
+        )
+
     def test_strict_projection_matches_original_vit_noise_formula(self):
         attacker = self.make_attacker(guide_aug_strength=0.2)
         local_tokens = torch.randn(1, 4, 5)

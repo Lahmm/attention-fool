@@ -147,6 +147,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-post-dropout-phase-token-noise", dest="post_dropout_phase_token_noise", action="store_false")
     parser.set_defaults(post_dropout_phase_token_noise=True)
     parser.add_argument(
+        "--post-dropout-feature-noise-strength",
+        type=float,
+        default=None,
+        help="Strength of kept-only post-dropout feature noise; omitted preserves guide-aug strength.",
+    )
+    parser.add_argument(
         "--feature-layer",
         type=int,
         default=12,
@@ -223,6 +229,7 @@ def main(args: argparse.Namespace) -> None:
         token_cls_noise_mode=args.token_cls_noise_mode,
         token_cls_noise_strength=args.token_cls_noise_strength,
         post_dropout_phase_token_noise=args.post_dropout_phase_token_noise,
+        post_dropout_feature_noise_strength=args.post_dropout_feature_noise_strength,
         feature_layer=args.feature_layer,
         patch_score_layer=args.patch_score_layer,
         gradient_postprocess=args.gradient_postprocess,
@@ -280,6 +287,11 @@ def main(args: argparse.Namespace) -> None:
             else args.guide_aug_strength
         ),
         "post_dropout_phase_token_noise": args.post_dropout_phase_token_noise,
+        "post_dropout_feature_noise_strength": (
+            args.post_dropout_feature_noise_strength
+            if args.post_dropout_feature_noise_strength is not None
+            else args.guide_aug_strength
+        ),
         "feature_layer": args.feature_layer,
         "patch_score_layer": args.patch_score_layer,
         "gradient_postprocess": args.gradient_postprocess,

@@ -75,6 +75,7 @@ class PatchScoreAttacker:
         token_cls_noise_mode: str = "gaussian",
         token_cls_noise_strength: float | None = None,
         post_dropout_phase_token_noise: bool = True,
+        post_dropout_feature_noise_strength: float | None = None,
         feature_layer: int = 12,
         patch_score_layer: str = "final",
         gradient_postprocess: str = "mean",
@@ -117,6 +118,8 @@ class PatchScoreAttacker:
                 raise ValueError("every phase shift must be (dx, dy).")
         if guide_aug_strength < 0:
             raise ValueError("guide_aug_strength must be non-negative.")
+        if post_dropout_feature_noise_strength is not None and post_dropout_feature_noise_strength < 0:
+            raise ValueError("post_dropout_feature_noise_strength must be non-negative.")
         if not 0.0 <= patch_dropout_ratio <= 1.0:
             raise ValueError("patch_dropout_ratio must be in [0, 1].")
         if patch_dropout_score_mode not in ("high", "low", "all"):
@@ -192,6 +195,11 @@ class PatchScoreAttacker:
             else self.guide_aug_strength
         )
         self.post_dropout_phase_token_noise = bool(post_dropout_phase_token_noise)
+        self.post_dropout_feature_noise_strength = (
+            float(post_dropout_feature_noise_strength)
+            if post_dropout_feature_noise_strength is not None
+            else self.guide_aug_strength
+        )
         self.feature_layer = int(feature_layer)
         self.patch_score_layer = patch_score_layer
         self.gradient_postprocess = gradient_postprocess
@@ -262,6 +270,7 @@ class PatchScoreAttacker:
             "actual_patch_drop_count": self._last_drop_count,
             "actual_patch_drop_ratio": self._last_drop_ratio,
             "feature_noise_type": self._feature_noise_type,
+            "post_dropout_feature_noise_strength": self.post_dropout_feature_noise_strength,
             "model_mean": self.model_mean.flatten().tolist(),
             "model_std": self.model_std.flatten().tolist(),
         }
@@ -661,7 +670,7 @@ class PatchScoreAttacker:
         )
         noise_rms = feature_noise.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
         self._feature_noise_type = "opponent_channel_rgb_projection"
-        return self.guide_aug_strength * feature_noise * (token_rms / noise_rms)
+        return self.post_dropout_feature_noise_strength * feature_noise * (token_rms / noise_rms)
 
     @staticmethod
     def _image_mask_to_projection_drop_mask(
