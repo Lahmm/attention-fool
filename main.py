@@ -141,7 +141,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--post-dropout-phase-token-noise", dest="post_dropout_phase_token_noise", action="store_true")
     parser.add_argument("--no-post-dropout-phase-token-noise", dest="post_dropout_phase_token_noise", action="store_false")
     parser.set_defaults(post_dropout_phase_token_noise=True)
-    parser.add_argument("--feature-layer", type=int, default=12)
+    parser.add_argument(
+        "--feature-layer",
+        type=int,
+        default=12,
+        help="Legacy patch/token-dropout layer; the generalized mainline uses each model's final semantic layer.",
+    )
     parser.add_argument(
         "--gradient-postprocess",
         choices=GRADIENT_POSTPROCESS_MODES,
@@ -270,6 +275,7 @@ def main(args: argparse.Namespace) -> None:
         "gradient_divisive_sigma": args.gradient_divisive_sigma,
         "gradient_clip_percentile": args.gradient_clip_percentile,
     }
+    params.update(attacker.mainline_metadata())
     (output_dir / "attack_params.json").write_text(
         json.dumps(params, indent=2, ensure_ascii=False),
         encoding="utf-8",

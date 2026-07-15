@@ -163,24 +163,22 @@ def run_attack(
     (output_dir / "replay_manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+    attack_params = {
+        "seed": seed,
+        "num_samples": num_samples,
+        "batch_size": batch_size,
+        "steps": steps,
+        "epsilon": 16.0 / 255.0,
+        "input_diversity_groups": input_diversity_groups,
+        "input_diversity_views_per_group": 2,
+        "actual_views": input_diversity_groups * 2,
+        "gradient_postprocess": "mean",
+        "probe": probe_name,
+        "replay_digest": manifest["event_digest"],
+    }
+    attack_params.update(attacker.mainline_metadata())
     (output_dir / "attack_params.json").write_text(
-        json.dumps(
-            {
-                "seed": seed,
-                "num_samples": num_samples,
-                "batch_size": batch_size,
-                "steps": steps,
-                "epsilon": 16.0 / 255.0,
-                "input_diversity_groups": input_diversity_groups,
-                "input_diversity_views_per_group": 2,
-                "actual_views": input_diversity_groups * 2,
-                "gradient_postprocess": "mean",
-                "probe": probe_name,
-                "replay_digest": manifest["event_digest"],
-            },
-            indent=2,
-            ensure_ascii=False,
-        ),
+        json.dumps(attack_params, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
     return all_records, manifest

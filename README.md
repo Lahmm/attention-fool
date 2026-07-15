@@ -1,6 +1,7 @@
 # Patch-Score Routing Attack
 
-本仓库实现单白盒 ViT 的 Patch-Score–Conditioned Stochastic Token Masking 攻击。
+本仓库实现 ViT、CaiT、PiT 和 Visformer 白盒源模型上的
+Patch-Score–Conditioned Stochastic Token Masking 攻击。
 默认配置是当前最强主线：
 
 ```text
@@ -93,6 +94,32 @@ python main.py \
 ```
 
 当前 post-dropout phase-pair 主线固定不叠加 DIM。
+
+## 白盒源模型适配
+
+默认主线可通过 `--whitebox-model` 选择以下源模型。所有模型都保留完整的
+score/mask、pixel dropout、phase pair、kept-only opponent-channel feature noise、
+20-view gradient mean 和 MI-FGSM 更新流程。
+
+| 模型 | score 来源 | score 网格 | opponent noise 的 RGB 投影 |
+| --- | --- | --- | --- |
+| `vit_base_patch16_224` | `blocks[11]` CLS/patch | 14×14 | `patch_embed.proj` |
+| `cait_s24_224` | `blocks[23]` patch + 最终 class-attention CLS | 14×14 | `patch_embed.proj` |
+| `pit_b_224` | `transformers[2].blocks[3]` CLS/patch | 8×8 | `patch_embed.conv` |
+| `visformer_small` | `stage3[3]` local feature + GAP pseudo-CLS | 7×7 | `stem[0]` |
+
+例如：
+
+```bash
+python main.py \
+  --whitebox-model pit_b_224 \
+  --max-attacked-samples 100 \
+  --output-dir outputs/attack/pit_mainline
+```
+
+`patch_dropout_ratio=0.3` 表示从 high/low 半区中选择 30%，即目标原生 patch
+drop 比例为 15%。由于模型网格不同，默认实际数量分别为 ViT/CaiT 29/196、
+PiT 10/64、Visformer 7/49。
 
 ## 迁移评估
 

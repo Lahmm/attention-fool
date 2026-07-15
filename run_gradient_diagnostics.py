@@ -166,6 +166,7 @@ def main(args: argparse.Namespace) -> None:
         "input_diversity_views_per_group": 2,
         "gradient_postprocess": "mean",
     }
+    params.update(attacker.mainline_metadata())
     (output_dir / "attack_params.json").write_text(
         json.dumps(params, indent=2, ensure_ascii=False),
         encoding="utf-8",

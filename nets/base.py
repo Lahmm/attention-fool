@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import torch
@@ -9,6 +10,72 @@ from utils import DEVICE
 
 
 DEFAULT_PRETRAINED = True
+
+
+@dataclass
+class PatchScoreFeatures:
+    """Architecture-neutral local/global features used for patch scoring."""
+
+    local_tokens: torch.Tensor
+    global_token: torch.Tensor
+    grid_size: tuple[int, int]
+    source_name: str
+
+    def validate(self) -> None:
+        if self.local_tokens.ndim != 3:
+            raise ValueError(
+                f"local_tokens must have shape [B,N,D], got {tuple(self.local_tokens.shape)}."
+            )
+        if self.global_token.ndim != 3 or self.global_token.size(1) != 1:
+            raise ValueError(
+                f"global_token must have shape [B,1,D], got {tuple(self.global_token.shape)}."
+            )
+        if self.local_tokens.size(0) != self.global_token.size(0):
+            raise ValueError("local and global feature batch sizes do not match.")
+        if self.local_tokens.size(2) != self.global_token.size(2):
+            raise ValueError("local and global feature dimensions do not match.")
+        if self.local_tokens.size(1) != self.grid_size[0] * self.grid_size[1]:
+            raise ValueError("local token count does not match grid_size.")
+
+
+@dataclass
+class AttackFeatureState:
+    """Opaque resumable state at a model's first RGB-projected feature map."""
+
+    local_tokens: torch.Tensor
+    grid_size: tuple[int, int]
+    context: object
+    rgb_projection_weight: torch.Tensor
+    projection_kernel: tuple[int, int]
+    projection_stride: tuple[int, int]
+    projection_padding: tuple[int, int]
+    projection_dilation: tuple[int, int] = (1, 1)
+
+    def validate(self) -> None:
+        if self.local_tokens.ndim != 3:
+            raise ValueError(
+                f"local_tokens must have shape [B,N,D], got {tuple(self.local_tokens.shape)}."
+            )
+        if self.local_tokens.size(1) != self.grid_size[0] * self.grid_size[1]:
+            raise ValueError("attack token count does not match grid_size.")
+        weight = self.rgb_projection_weight
+        if weight.ndim != 4 or weight.size(1) != 3:
+            raise ValueError("the mainline requires a first-layer RGB Conv2d projection.")
+        if weight.size(0) != self.local_tokens.size(2):
+            raise ValueError("RGB projection output channels do not match local feature channels.")
+
+
+def conv2d_attack_metadata(module: nn.Module) -> dict[str, object]:
+    """Return strict RGB projection metadata for an attack feature state."""
+    if not isinstance(module, nn.Conv2d) or module.in_channels != 3:
+        raise ValueError("the mainline requires an RGB Conv2d projection module.")
+    return {
+        "rgb_projection_weight": module.weight,
+        "projection_kernel": tuple(int(value) for value in module.kernel_size),
+        "projection_stride": tuple(int(value) for value in module.stride),
+        "projection_padding": tuple(int(value) for value in module.padding),
+        "projection_dilation": tuple(int(value) for value in module.dilation),
+    }
 
 
 def create_timm_model(model_name: str, *, num_classes: int | None, pretrained: bool) -> nn.Module:
@@ -34,6 +101,9 @@ class WhiteBoxWithHook(nn.Module):
         self.device = device if device is not None else DEVICE
         self.model_name = model_name or self.default_model_name
         self.model = create_timm_model(self.model_name, num_classes=num_classes, pretrained=pretrained)
+        config = getattr(self.model, "pretrained_cfg", {})
+        self.model_mean = tuple(float(value) for value in config.get("mean", (0.5, 0.5, 0.5)))
+        self.model_std = tuple(float(value) for value in config.get("std", (0.5, 0.5, 0.5)))
 
         self.feature_modules: list[nn.Module] = list(self._feature_modules())
         if not self.feature_modules:
@@ -70,6 +140,19 @@ class WhiteBoxWithHook(nn.Module):
 
     def _stage_modules(self) -> Iterable[nn.Module]:
         return ()
+
+    def extract_patch_score_features(self, x: torch.Tensor) -> PatchScoreFeatures:
+        raise NotImplementedError(f"patch-score extraction is not implemented for {self.model_name}.")
+
+    def prepare_attack_feature_state(self, x: torch.Tensor) -> AttackFeatureState:
+        raise NotImplementedError(f"attack feature preparation is not implemented for {self.model_name}.")
+
+    def forward_from_attack_feature_state(
+        self,
+        state: AttackFeatureState,
+        local_tokens: torch.Tensor,
+    ) -> torch.Tensor:
+        raise NotImplementedError(f"resumable attack forward is not implemented for {self.model_name}.")
 
     def _reset_caches(self) -> None:
         self.feature_tokens = [None] * len(self.feature_modules)

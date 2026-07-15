@@ -190,7 +190,16 @@ class PatchScoreAttacker:
         self.gradient_clip_percentile = float(gradient_clip_percentile)
         self.pixel_mean = torch.tensor(IMAGENET_MEAN, device=self.device).view(1, 3, 1, 1)
         self.pixel_std = torch.tensor(IMAGENET_STD, device=self.device).view(1, 3, 1, 1)
+        model_mean = getattr(model, "model_mean", IMAGENET_MEAN)
+        model_std = getattr(model, "model_std", IMAGENET_STD)
+        self.model_mean = torch.tensor(model_mean, device=self.device).view(1, 3, 1, 1)
+        self.model_std = torch.tensor(model_std, device=self.device).view(1, 3, 1, 1)
         self._patch_scores: torch.Tensor | None = None
+        self._score_grid_size: tuple[int, int] | None = None
+        self._last_drop_count = 0
+        self._last_drop_ratio = 0.0
+        self._score_source = ""
+        self._feature_noise_type = ""
         self._gradient_replay: GradientReplay | None = None
         self._actual_forward_view_count = 0
         self._gradient_diagnostics = {
@@ -211,12 +220,39 @@ class PatchScoreAttacker:
                 raise ValueError("the post-dropout phase-pair mainline does not combine with DIM.")
             if self.input_diversity_views_per_group != 2:
                 raise ValueError("the post-dropout phase-pair mainline requires two views per group.")
+            if self.patch_dropout_noise_mode != "opponent_channel_gaussian":
+                raise ValueError(
+                    "the generalized mainline strictly requires opponent-channel RGB projection noise."
+                )
+            if self.token_score_patch_noise:
+                raise ValueError(
+                    "score-layer patch noise is not supported by the strict cross-architecture mainline."
+                )
 
     def _denormalize(self, images: torch.Tensor) -> torch.Tensor:
         return images * self.pixel_std + self.pixel_mean
 
     def _normalize(self, images: torch.Tensor) -> torch.Tensor:
+        return (images - self.model_mean) / self.model_std
+
+    def _normalize_output(self, images: torch.Tensor) -> torch.Tensor:
         return (images - self.pixel_mean) / self.pixel_std
+
+    def mainline_metadata(self) -> dict[str, object]:
+        return {
+            "score_source": self._score_source,
+            "score_grid": list(self._score_grid_size) if self._score_grid_size else None,
+            "target_patch_drop_ratio": (
+                self.patch_dropout_ratio
+                if self.patch_dropout_score_mode == "all"
+                else 0.5 * self.patch_dropout_ratio
+            ),
+            "actual_patch_drop_count": self._last_drop_count,
+            "actual_patch_drop_ratio": self._last_drop_ratio,
+            "feature_noise_type": self._feature_noise_type,
+            "model_mean": self.model_mean.flatten().tolist(),
+            "model_std": self.model_std.flatten().tolist(),
+        }
 
     @staticmethod
     def _l2_normalize_view_gradients(view_gradients: torch.Tensor) -> torch.Tensor:
@@ -571,6 +607,81 @@ class PatchScoreAttacker:
         noise_rms = token_noise.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
         return self.guide_aug_strength * token_noise * (token_rms / noise_rms)
 
+    def _strict_opponent_feature_noise(self, state) -> torch.Tensor:
+        """Project the original opponent-channel construction through an RGB Conv2d."""
+        state.validate()
+        local_tokens = state.local_tokens
+        weight = state.rgb_projection_weight
+        kernel_h, kernel_w = state.projection_kernel
+        if tuple(weight.shape[2:]) != (kernel_h, kernel_w):
+            raise ValueError("RGB projection weight and attack-state kernel do not match.")
+
+        batch, count, dimension = local_tokens.shape
+        coefficients = self._randn_like(
+            torch.empty(
+                batch,
+                count,
+                3,
+                kernel_h,
+                kernel_w,
+                device=local_tokens.device,
+                dtype=local_tokens.dtype,
+            ),
+            "mainline_opponent_token",
+        )
+        luma = 0.5**0.5 * coefficients[:, :, 0:1]
+        red_green = 1.25**0.5 * coefficients[:, :, 1:2]
+        yellow_blue = 1.25**0.5 * coefficients[:, :, 2:3]
+        pixel_noise = torch.cat(
+            (
+                3**-0.5 * luma + 2**-0.5 * red_green + 6**-0.5 * yellow_blue,
+                3**-0.5 * luma - 2**-0.5 * red_green + 6**-0.5 * yellow_blue,
+                3**-0.5 * luma - 2 * 6**-0.5 * yellow_blue,
+            ),
+            dim=2,
+        ).flatten(2)
+        projection = weight.detach().to(local_tokens).reshape(dimension, -1)
+        if projection.size(1) != pixel_noise.size(2):
+            raise ValueError("opponent noise and RGB projection dimensions do not match.")
+        feature_noise = pixel_noise.matmul(projection.t())
+        token_rms = (
+            local_tokens.detach().square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
+        )
+        noise_rms = feature_noise.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
+        self._feature_noise_type = "opponent_channel_rgb_projection"
+        return self.guide_aug_strength * feature_noise * (token_rms / noise_rms)
+
+    @staticmethod
+    def _image_mask_to_projection_drop_mask(
+        image_mask: torch.Tensor,
+        state,
+    ) -> torch.Tensor:
+        """Map a pixel mask through the first RGB convolution's true receptive fields."""
+        state.validate()
+        if image_mask.ndim != 4 or image_mask.size(1) != 1:
+            raise ValueError("image_mask must have shape [B,1,H,W].")
+        kernel = torch.ones(
+            1,
+            1,
+            *state.projection_kernel,
+            device=image_mask.device,
+            dtype=image_mask.dtype,
+        )
+        kwargs = {
+            "stride": state.projection_stride,
+            "padding": state.projection_padding,
+            "dilation": state.projection_dilation,
+        }
+        dropped_area = F.conv2d(image_mask, kernel, **kwargs)
+        valid_area = F.conv2d(torch.ones_like(image_mask), kernel, **kwargs).clamp_min(1.0)
+        drop_fraction = dropped_area / valid_area
+        if tuple(drop_fraction.shape[-2:]) != state.grid_size:
+            raise ValueError(
+                "RGB receptive-field mask grid does not match the attack feature grid: "
+                f"{tuple(drop_fraction.shape[-2:])} != {state.grid_size}."
+            )
+        return drop_fraction.flatten(1).gt(0.5)
+
     def _patch_score_candidate_mask(self, scores: torch.Tensor) -> torch.Tensor:
         working_scores = scores
         if self.patch_dropout_score_noise > 0:
@@ -579,7 +690,17 @@ class PatchScoreAttacker:
                 scores, "score_noise"
             )
         if self.patch_dropout_score_quantile_jitter == 0:
-            threshold = working_scores.median(dim=1, keepdim=True).values
+            if self.patch_dropout_score_mode == "all":
+                return torch.ones_like(scores, dtype=torch.bool)
+            candidate_count = max(1, scores.size(1) // 2)
+            candidate_indices = torch.topk(
+                working_scores,
+                candidate_count,
+                dim=1,
+                largest=self.patch_dropout_score_mode == "high",
+            ).indices
+            candidate_mask = torch.zeros_like(scores, dtype=torch.bool)
+            return candidate_mask.scatter(1, candidate_indices, True)
         else:
             jitter = self.patch_dropout_score_quantile_jitter
             if self._gradient_replay is None:
@@ -615,7 +736,17 @@ class PatchScoreAttacker:
             candidates = candidate_mask[batch_index].nonzero(as_tuple=True)[0]
             if candidates.numel() == 0:
                 continue
-            count = max(1, int(round(candidates.numel() * self.patch_dropout_ratio)))
+            target_ratio = (
+                self.patch_dropout_ratio
+                if self.patch_dropout_score_mode == "all"
+                else 0.5 * self.patch_dropout_ratio
+            )
+            count = max(1, int(round(scores.size(1) * target_ratio)))
+            if candidates.numel() < count:
+                raise ValueError(
+                    "the score candidate set is smaller than the model-independent "
+                    "native-patch dropout budget."
+                )
             if self.patch_dropout_sampling_mode == "bernoulli":
                 if self._gradient_replay is None:
                     random_values = torch.rand(candidates.numel(), device=scores.device)
@@ -625,16 +756,7 @@ class PatchScoreAttacker:
                         self._gradient_replay._seed("dropout_bernoulli", self._gradient_replay.sample_ids[batch_index]),
                     )
                     random_values = torch.rand(candidates.numel(), device=scores.device, generator=generator)
-                selected_mask = random_values < self.patch_dropout_ratio
-                if not selected_mask.any():
-                    if self._gradient_replay is None:
-                        forced_index = int(torch.randint(candidates.numel(), (1,), device=scores.device))
-                    else:
-                        forced_index = self._gradient_replay.randint(
-                            candidates.numel(), "dropout_bernoulli_force", batch_index, device=scores.device
-                        )
-                    selected_mask[forced_index] = True
-                selected = candidates[selected_mask]
+                selected = candidates[torch.topk(random_values, count, largest=False).indices]
             elif self.patch_dropout_sampling_mode == "extreme":
                 order = torch.argsort(
                     scores[batch_index, candidates],
@@ -660,6 +782,12 @@ class PatchScoreAttacker:
                     )
                 selected = candidates[order[:count]]
             drop_mask[batch_index, selected] = True
+        if drop_mask.numel():
+            per_sample_counts = drop_mask.sum(dim=1)
+            if not torch.equal(per_sample_counts, per_sample_counts[:1].expand_as(per_sample_counts)):
+                raise RuntimeError("mainline patch dropout counts differ within a batch.")
+            self._last_drop_count = int(per_sample_counts[0].item())
+            self._last_drop_ratio = self._last_drop_count / drop_mask.size(1)
         return drop_mask
 
     def _score_cls_and_patches(
@@ -680,49 +808,48 @@ class PatchScoreAttacker:
             score_patches = score_patches + self._token_patch_dropout_noise(score_patches, base_model)
         return F.cosine_similarity(score_patches, score_cls.expand_as(score_patches), dim=-1)
 
-    def _compute_original_l12_drop_mask(self, pixels: torch.Tensor) -> torch.Tensor:
-        base_model = self._vit_base_model(self.model)
-        num_blocks = len(base_model.blocks)
-        score_layer = self.feature_layer if self.feature_layer >= 0 else num_blocks + self.feature_layer
-        if score_layer != num_blocks:
-            raise ValueError(f"the mainline requires feature_layer={num_blocks}, got {self.feature_layer}.")
+    def _compute_mainline_drop_mask(
+        self,
+        pixels: torch.Tensor,
+    ) -> tuple[torch.Tensor, tuple[int, int]]:
+        extract = getattr(self.model, "extract_patch_score_features", None)
+        if extract is None:
+            raise ValueError("the mainline requires a white-box patch-score adapter.")
         with torch.no_grad():
-            tokens = self._embed_vit_tokens(base_model, pixels)
-            score_tokens = self._run_vit_blocks(base_model.blocks, tokens, 0, num_blocks)
+            features = extract(self._normalize(pixels.detach()))
+            features.validate()
             scores = self._score_cls_and_patches(
-                score_tokens[:, :1],
-                score_tokens[:, 1:],
-                base_model,
+                features.global_token,
+                features.local_tokens,
+                getattr(self.model, "model", None),
             )
             candidates = self._patch_score_candidate_mask(scores)
-            return self._sample_patch_dropout_mask(scores, candidates).detach()
+            drop_mask = self._sample_patch_dropout_mask(scores, candidates).detach()
+        self._score_grid_size = features.grid_size
+        self._score_source = features.source_name
+        return drop_mask, features.grid_size
 
     @staticmethod
-    def _patch_drop_mask_to_image(drop_mask: torch.Tensor, height: int, width: int) -> torch.Tensor:
-        count = drop_mask.size(1)
-        grid = int(round(count**0.5))
-        if grid * grid != count or height % grid or width % grid:
-            raise ValueError("pixel patch dropout requires a square, divisible patch grid.")
-        return (
-            drop_mask.view(drop_mask.size(0), 1, grid, grid)
-            .to(torch.float32)
-            .repeat_interleave(height // grid, dim=-2)
-            .repeat_interleave(width // grid, dim=-1)
+    def _patch_drop_mask_to_image(
+        drop_mask: torch.Tensor,
+        grid_size: tuple[int, int],
+        height: int,
+        width: int,
+    ) -> torch.Tensor:
+        if drop_mask.size(1) != grid_size[0] * grid_size[1]:
+            raise ValueError("drop mask token count does not match its explicit grid.")
+        return F.interpolate(
+            drop_mask.view(drop_mask.size(0), 1, *grid_size).to(torch.float32),
+            size=(height, width),
+            mode="nearest",
         )
 
     @staticmethod
-    def _image_mask_to_patch_drop_mask(image_mask: torch.Tensor, count: int) -> torch.Tensor:
-        grid = int(round(count**0.5))
-        if grid * grid != count:
-            raise ValueError("expected a square patch grid.")
-        height, width = image_mask.shape[-2:]
-        if height % grid or width % grid:
-            raise ValueError("image mask is not divisible by the patch grid.")
-        pooled = F.avg_pool2d(
-            image_mask,
-            kernel_size=(height // grid, width // grid),
-            stride=(height // grid, width // grid),
-        )
+    def _image_mask_to_patch_drop_mask(
+        image_mask: torch.Tensor,
+        grid_size: tuple[int, int],
+    ) -> torch.Tensor:
+        pooled = F.adaptive_avg_pool2d(image_mask, grid_size)
         return pooled.flatten(1).gt(0.5)
 
     def _forward_vit_tokens(self, base_model, tokens: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
@@ -734,25 +861,25 @@ class PatchScoreAttacker:
         self,
         pixels: torch.Tensor,
         labels: torch.Tensor,
-        drop_mask: torch.Tensor,
+        image_mask: torch.Tensor,
     ) -> torch.Tensor:
-        base_model = self._vit_base_model(self.model)
-        tokens = self._embed_vit_tokens(base_model, pixels)
-        if tokens.size(1) != drop_mask.size(1) + 1:
-            raise ValueError("drop mask and token count do not match.")
-        cls_token, patch_tokens = tokens[:, :1], tokens[:, 1:]
+        prepare = getattr(self.model, "prepare_attack_feature_state", None)
+        resume = getattr(self.model, "forward_from_attack_feature_state", None)
+        if prepare is None or resume is None:
+            raise ValueError("the mainline requires a resumable white-box attack adapter.")
+        state = prepare(self._normalize(pixels))
+        state.validate()
+        local_tokens = state.local_tokens
         if self.post_dropout_phase_token_noise:
-            noise = self._token_patch_dropout_noise(patch_tokens, base_model)
-            patch_tokens = torch.where(
-                (~drop_mask).unsqueeze(-1),
-                patch_tokens + noise,
-                patch_tokens,
+            noise = self._strict_opponent_feature_noise(state)
+            feature_drop_mask = self._image_mask_to_projection_drop_mask(image_mask, state)
+            local_tokens = torch.where(
+                (~feature_drop_mask).unsqueeze(-1),
+                local_tokens + noise,
+                local_tokens,
             )
-        return self._forward_vit_tokens(
-            base_model,
-            torch.cat((cls_token, patch_tokens), dim=1),
-            labels,
-        )
+        logits = resume(state, local_tokens)
+        return F.cross_entropy(logits, labels)
 
     def _iter_original_score_postdrop_phase_pair(
         self,
@@ -761,24 +888,28 @@ class PatchScoreAttacker:
         for group_index in range(self.input_diversity_groups):
             if self._gradient_replay is not None:
                 self._gradient_replay.set_context(group=group_index, view=-1)
-            drop_mask = self._compute_original_l12_drop_mask(pixels)
-            image_mask = self._patch_drop_mask_to_image(drop_mask, pixels.size(-2), pixels.size(-1))
+            drop_mask, grid_size = self._compute_mainline_drop_mask(pixels)
+            image_mask = self._patch_drop_mask_to_image(
+                drop_mask,
+                grid_size,
+                pixels.size(-2),
+                pixels.size(-1),
+            )
             image_mask = image_mask.to(device=pixels.device, dtype=pixels.dtype)
             dropped_pixels = pixels * (1.0 - image_mask)
             phases = self._pick_input_diversity_phases(pixels.size(0), pixels.device)
             if self._gradient_replay is not None:
                 self._gradient_replay.set_context(view=0)
             self._actual_forward_view_count += 1
-            yield dropped_pixels, drop_mask
+            yield dropped_pixels, image_mask
             # Rebuild the shared-mask pixel branch after view A autograd frees its graph.
             dropped_pixels = pixels * (1.0 - image_mask)
             shifted_pixels = self._apply_samplewise_phase_shifts(dropped_pixels, phases)
             shifted_mask = self._apply_samplewise_phase_shifts(image_mask, phases)
-            shifted_drop_mask = self._image_mask_to_patch_drop_mask(shifted_mask, drop_mask.size(1))
             if self._gradient_replay is not None:
                 self._gradient_replay.set_context(view=1)
             self._actual_forward_view_count += 1
-            yield shifted_pixels, shifted_drop_mask
+            yield shifted_pixels, shifted_mask
 
     def _attack_loss_for_token_patch_dropout(
         self,
@@ -848,7 +979,12 @@ class PatchScoreAttacker:
             self._patch_scores,
             self._patch_score_candidate_mask(self._patch_scores),
         )
-        image_mask = self._patch_drop_mask_to_image(drop_mask, pixels.size(-2), pixels.size(-1))
+        image_mask = self._patch_drop_mask_to_image(
+            drop_mask,
+            (grid, grid),
+            pixels.size(-2),
+            pixels.size(-1),
+        )
         image_mask = image_mask.to(device=pixels.device, dtype=pixels.dtype)
         noised = torch.clamp(pixels + self._pixel_noise_like(pixels), 0.0, 1.0)
         return torch.where(image_mask > 0.5, torch.zeros_like(pixels), noised)
@@ -860,8 +996,12 @@ class PatchScoreAttacker:
 
     def _iter_attack_losses(self, pixels: torch.Tensor, labels: torch.Tensor) -> Iterator[torch.Tensor]:
         if self.attack_method == "original_score_postdrop_phase_pair":
-            for view_pixels, drop_mask in self._iter_original_score_postdrop_phase_pair(pixels):
-                yield self._attack_loss_for_original_score_postdrop_phase_view(view_pixels, labels, drop_mask)
+            for view_pixels, image_mask in self._iter_original_score_postdrop_phase_pair(pixels):
+                yield self._attack_loss_for_original_score_postdrop_phase_view(
+                    view_pixels,
+                    labels,
+                    image_mask,
+                )
             return
         if self.attack_method == "token_patch_dropout":
             for _group_index in range(self.input_diversity_groups):
@@ -1077,4 +1217,4 @@ class PatchScoreAttacker:
                 observer.close_step()
 
         self._gradient_replay = None
-        return self._normalize(adv_pixels)
+        return self._normalize_output(adv_pixels)

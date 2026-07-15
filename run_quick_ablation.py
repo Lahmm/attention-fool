@@ -193,6 +193,7 @@ def run_one_config(
         "mi_decay": config.get("mi_decay", 1.0),
         "whitebox_asr": whitebox_asr,
     }
+    params.update(attacker.mainline_metadata())
     (output_dir / "attack_params.json").write_text(
         json.dumps(params, indent=2, ensure_ascii=False),
         encoding="utf-8",
