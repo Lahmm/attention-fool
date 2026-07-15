@@ -88,6 +88,69 @@
 | DeiT-B | 84.00% | 85.33% | +1.33pp |
 | TNT-S | 85.33% | 85.67% | +0.33pp |
 | ConViT | 84.33% | 85.00% | +0.67pp |
+
+## 最后一次下采样前的 score：PiT / Visformer
+
+为检验 `8×8/7×7` 最终网格是否过粗，新增了一个只改变 score 提取位置的消融：
+
+- PiT：在最后一个 `transformers[2]` 的 pooling 前，用 `transformers[1]` 输出的
+  `16×16` 局部特征和 CLS token 计算 score，source 为
+  `transformers[1]+pre_pool`；
+- Visformer：在最后的 `patch_embed3` 前，用 stage2 输出的 `14×14` 局部特征和
+  GAP pseudo-CLS 计算 score，source 为 `stage2+pre_patch_embed3+gap`。
+
+最终分类 logits、pixel dropout、phase pair、kept-only opponent-channel noise、20
+views、MI、epsilon 和步长均未改变。由于 score 网格改变，drop 数量按相同约 15% 的
+空间比例重新取整：PiT 为 `38/256`，Visformer 为 `29/196`。
+
+两组均为 100 样本、seed `20260715`，并使用完整 13 个可加载黑盒模型（7 个 ViT、4
+个标准 CNN、2 个 adversarial CNN）；表中 ViT/CNN 均包含白盒源模型，便于与当前
+transfer_eval CSV 保持一致。
+
+| 白盒源模型 | score 网格 | Overall | Δ Overall | ViT 平均 | Δ ViT | CNN 平均 | Δ CNN | 白盒 ASR | Δ 白盒 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| PiT final（原主线） | 8×8 | 81.85% | — | 90.14% | — | 72.17% | — | 97% | — |
+| PiT pre-last-downsample | 16×16 | 81.54% | -0.31pp | 88.71% | -1.43pp | 73.17% | +1.00pp | 96% | -1pp |
+| Visformer final（原主线） | 7×7 | 72.69% | — | 79.43% | — | 64.83% | — | 99% | — |
+| Visformer pre-last-downsample | 14×14 | 74.08% | +1.38pp | 78.29% | -1.14pp | 69.17% | +4.33pp | 100% | +1pp |
+
+逐模型结果如下：
+
+| 模型 | PiT final | PiT pre | Δ | Visformer final | Visformer pre | Δ |
+|---|---:|---:|---:|---:|---:|---:|
+| LeViT-256 | 86% | 86% | 0pp | 81% | 80% | -1pp |
+| PiT-B | 97% | 96% | -1pp | 82% | 74% | -8pp |
+| DeiT-B | 90% | 88% | -2pp | 73% | 70% | -3pp |
+| TNT-S | 91% | 88% | -3pp | 80% | 81% | +1pp |
+| ConViT | 87% | 88% | +1pp | 67% | 66% | -1pp |
+| Visformer-S | 91% | 89% | -2pp | 99% | 100% | +1pp |
+| CaiT-S/24 | 89% | 86% | -3pp | 74% | 77% | +3pp |
+| Inception-v3 | 79% | 78% | -1pp | 73% | 80% | +7pp |
+| Inception-v4 | 73% | 80% | +7pp | 76% | 81% | +5pp |
+| Inception-ResNet-v2 | 73% | 76% | +3pp | 65% | 69% | +4pp |
+| ResNet-101 | 78% | 80% | +2pp | 73% | 79% | +6pp |
+| Adv Inception-v3 | 69% | 69% | 0pp | 60% | 63% | +3pp |
+| Adv Inception-ResNet-v2 | 61% | 56% | -5pp | 42% | 43% | +1pp |
+
+梯度诊断（70 个 gradient batches）为：
+
+| 白盒源模型 | score 层 | view→final cosine | sign agreement | effective rank | MI→current cosine |
+|---|---|---:|---:|---:|---:|
+| PiT | final | 0.3464 | 0.5106 | 18.4123 | 0.6049 |
+| PiT | pre-last-downsample | 0.3065 | 0.5030 | 19.2054 | 0.5955 |
+| Visformer | final | 0.4278 | 0.5433 | 16.1419 | 0.5893 |
+| Visformer | pre-last-downsample | 0.3813 | 0.5200 | 17.6171 | 0.5657 |
+
+### 结论
+
+这个实验没有支持“最后一次下采样前 score 能稳定提升 ViT 迁移”的假设：PiT 的
+ViT 平均下降 `1.43pp`，Visformer 下降 `1.14pp`。Visformer 的 Overall 增长
+`1.38pp` 几乎全部来自 CNN，CNN 平均增长 `4.33pp`；这说明更高空间分辨率的 score
+更偏向局部/卷积共享方向，而不是 ViT 跨模型共享方向。PiT 也呈现同样趋势，只是
+Overall 的 CNN 增益不足以抵消 ViT 损失。
+
+因此，最后一次下采样前的 score 可以作为解释性和 mask 粒度消融，但当前不应替换
+最终层 score 主线，也没有达到 Overall `+3–5pp` 或 ViT 定向提升目标。
 | Visformer-S | 80.33% | 84.33% | +4.00pp |
 | CaiT-S24 | 90.00% | 91.00% | +1.00pp |
 
