@@ -258,6 +258,36 @@ class RealModelMainlineSmokeTests(unittest.TestCase):
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
+    def test_feature_noise_positions_run_for_pit_and_visformer(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        for model_name in ("pit_b_224", "visformer_small"):
+            for position in ("initial", "pre_last_downsample", "final"):
+                with self.subTest(model=model_name, position=position):
+                    model = build_whitebox_model(
+                        num_classes=1000,
+                        model_name=model_name,
+                        pretrained=False,
+                        device=device,
+                    )
+                    attacker = PatchScoreAttacker(
+                        model,
+                        epsilon=1.0 / 255.0,
+                        steps=1,
+                        input_diversity_groups=1,
+                        input_diversity_views_per_group=2,
+                        post_dropout_feature_noise_type="feature_iid",
+                        post_dropout_feature_noise_position=position,
+                        device=device,
+                    )
+                    images = torch.zeros(1, 3, 224, 224, device=device)
+                    adversarial = attacker.attack_batch(images, torch.zeros(1, dtype=torch.long, device=device))
+                    self.assertTrue(torch.isfinite(adversarial).all())
+                    self.assertEqual(attacker._actual_forward_view_count, 2)
+                    del attacker, model, images, adversarial
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
 
 if __name__ == "__main__":
     unittest.main()

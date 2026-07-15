@@ -33,6 +33,20 @@ PATCH_SCORE_LAYER_MODES = (
     "final",
     "pre_last_downsample",
 )
+POST_DROPOUT_NOISE_TYPES = (
+    "none",
+    "opponent_projected",
+    "feature_iid",
+    "pixel_iid",
+    "pixel_opponent",
+    "feature_lowpass",
+    "feature_rademacher",
+)
+POST_DROPOUT_NOISE_POSITIONS = (
+    "initial",
+    "pre_last_downsample",
+    "final",
+)
 
 
 class PatchScoreAttacker:
@@ -76,6 +90,8 @@ class PatchScoreAttacker:
         token_cls_noise_strength: float | None = None,
         post_dropout_phase_token_noise: bool = True,
         post_dropout_feature_noise_strength: float | None = None,
+        post_dropout_feature_noise_type: str = "opponent_projected",
+        post_dropout_feature_noise_position: str = "initial",
         feature_layer: int = 12,
         patch_score_layer: str = "final",
         gradient_postprocess: str = "mean",
@@ -120,6 +136,16 @@ class PatchScoreAttacker:
             raise ValueError("guide_aug_strength must be non-negative.")
         if post_dropout_feature_noise_strength is not None and post_dropout_feature_noise_strength < 0:
             raise ValueError("post_dropout_feature_noise_strength must be non-negative.")
+        if post_dropout_feature_noise_type not in POST_DROPOUT_NOISE_TYPES:
+            raise ValueError(
+                "post_dropout_feature_noise_type must be one of "
+                f"{POST_DROPOUT_NOISE_TYPES}, got {post_dropout_feature_noise_type!r}."
+            )
+        if post_dropout_feature_noise_position not in POST_DROPOUT_NOISE_POSITIONS:
+            raise ValueError(
+                "post_dropout_feature_noise_position must be one of "
+                f"{POST_DROPOUT_NOISE_POSITIONS}, got {post_dropout_feature_noise_position!r}."
+            )
         if not 0.0 <= patch_dropout_ratio <= 1.0:
             raise ValueError("patch_dropout_ratio must be in [0, 1].")
         if patch_dropout_score_mode not in ("high", "low", "all"):
@@ -200,6 +226,8 @@ class PatchScoreAttacker:
             if post_dropout_feature_noise_strength is not None
             else self.guide_aug_strength
         )
+        self.post_dropout_feature_noise_type = post_dropout_feature_noise_type
+        self.post_dropout_feature_noise_position = post_dropout_feature_noise_position
         self.feature_layer = int(feature_layer)
         self.patch_score_layer = patch_score_layer
         self.gradient_postprocess = gradient_postprocess
@@ -271,6 +299,8 @@ class PatchScoreAttacker:
             "actual_patch_drop_ratio": self._last_drop_ratio,
             "feature_noise_type": self._feature_noise_type,
             "post_dropout_feature_noise_strength": self.post_dropout_feature_noise_strength,
+            "post_dropout_feature_noise_type": self.post_dropout_feature_noise_type,
+            "post_dropout_feature_noise_position": self.post_dropout_feature_noise_position,
             "model_mean": self.model_mean.flatten().tolist(),
             "model_std": self.model_std.flatten().tolist(),
         }
@@ -672,6 +702,71 @@ class PatchScoreAttacker:
         self._feature_noise_type = "opponent_channel_rgb_projection"
         return self.post_dropout_feature_noise_strength * feature_noise * (token_rms / noise_rms)
 
+    def _match_feature_noise_rms(
+        self,
+        feature_tokens: torch.Tensor,
+        raw_noise: torch.Tensor,
+        event: str,
+    ) -> torch.Tensor:
+        token_rms = feature_tokens.detach().square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
+        noise_rms = raw_noise.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
+        return self.post_dropout_feature_noise_strength * raw_noise * (token_rms / noise_rms)
+
+    def _build_post_dropout_feature_noise(
+        self,
+        feature_tokens: torch.Tensor,
+        grid_size: tuple[int, int],
+        state,
+        pixels: torch.Tensor,
+        image_mask: torch.Tensor,
+        position: str,
+    ) -> torch.Tensor:
+        noise_type = self.post_dropout_feature_noise_type
+        if noise_type == "none":
+            return torch.zeros_like(feature_tokens)
+
+        if position == "initial":
+            feature_drop_mask = self._image_mask_to_projection_drop_mask(image_mask, state)
+        else:
+            feature_drop_mask = self._image_mask_to_grid_drop_mask(image_mask, grid_size)
+
+        if noise_type == "opponent_projected":
+            if position != "initial":
+                raise ValueError("opponent_projected noise is only defined at the initial RGB projection.")
+            raw_noise = self._strict_opponent_feature_noise(state)
+        elif noise_type in ("pixel_iid", "pixel_opponent"):
+            if position != "initial":
+                raise ValueError(f"{noise_type} noise is only defined at the initial RGB projection.")
+            if noise_type == "pixel_iid":
+                pixel_noise = self._randn_like(pixels, "postdrop_pixel_iid")
+            else:
+                pixel_noise = self._opponent_channel_noise_like(pixels, "postdrop_pixel_opponent")
+            weight = state.rgb_projection_weight.detach().to(feature_tokens)
+            raw_spatial = F.conv2d(
+                pixel_noise.to(feature_tokens),
+                weight,
+                stride=state.projection_stride,
+                padding=state.projection_padding,
+                dilation=state.projection_dilation,
+            )
+            raw_noise = raw_spatial.flatten(2).transpose(1, 2)
+        elif noise_type == "feature_iid":
+            raw_noise = self._randn_like(feature_tokens, "postdrop_feature_iid")
+        elif noise_type == "feature_lowpass":
+            raw_noise = self._randn_like(feature_tokens, "postdrop_feature_lowpass")
+            batch, count, dimension = raw_noise.shape
+            height, width = grid_size
+            raw_spatial = raw_noise.transpose(1, 2).reshape(batch, dimension, height, width)
+            raw_noise = F.avg_pool2d(raw_spatial, kernel_size=3, stride=1, padding=1)
+            raw_noise = raw_noise.flatten(2).transpose(1, 2)
+        elif noise_type == "feature_rademacher":
+            raw_noise = self._randn_like(feature_tokens, "postdrop_feature_rademacher").sign()
+        else:
+            raise ValueError(f"unsupported post-dropout noise type: {noise_type!r}")
+
+        matched = self._match_feature_noise_rms(feature_tokens, raw_noise, noise_type)
+        return torch.where((~feature_drop_mask).unsqueeze(-1), matched, torch.zeros_like(matched))
+
     @staticmethod
     def _image_mask_to_projection_drop_mask(
         image_mask: torch.Tensor,
@@ -702,6 +797,14 @@ class PatchScoreAttacker:
                 f"{tuple(drop_fraction.shape[-2:])} != {state.grid_size}."
             )
         return drop_fraction.flatten(1).gt(0.5)
+
+    @staticmethod
+    def _image_mask_to_grid_drop_mask(
+        image_mask: torch.Tensor,
+        grid_size: tuple[int, int],
+    ) -> torch.Tensor:
+        pooled = F.adaptive_avg_pool2d(image_mask, grid_size)
+        return pooled.flatten(1).gt(0.5)
 
     def _patch_score_candidate_mask(self, scores: torch.Tensor) -> torch.Tensor:
         working_scores = scores
@@ -894,15 +997,42 @@ class PatchScoreAttacker:
         state = prepare(self._normalize(pixels))
         state.validate()
         local_tokens = state.local_tokens
-        if self.post_dropout_phase_token_noise:
-            noise = self._strict_opponent_feature_noise(state)
-            feature_drop_mask = self._image_mask_to_projection_drop_mask(image_mask, state)
-            local_tokens = torch.where(
-                (~feature_drop_mask).unsqueeze(-1),
-                local_tokens + noise,
+        if not self.post_dropout_phase_token_noise or self.post_dropout_feature_noise_type == "none":
+            logits = resume(state, local_tokens)
+        elif self.post_dropout_feature_noise_position == "initial":
+            noise = self._build_post_dropout_feature_noise(
                 local_tokens,
+                state.grid_size,
+                state,
+                pixels,
+                image_mask,
+                "initial",
             )
-        logits = resume(state, local_tokens)
+            logits = resume(state, local_tokens + noise)
+        else:
+            forward_with_noise = getattr(self.model, "forward_with_attack_noise", None)
+            if forward_with_noise is None:
+                raise ValueError(
+                    f"{self.model.model_name} does not support noise position "
+                    f"{self.post_dropout_feature_noise_position!r}."
+                )
+
+            def build_noise(feature_tokens, grid_size, position):
+                return self._build_post_dropout_feature_noise(
+                    feature_tokens,
+                    grid_size,
+                    state,
+                    pixels,
+                    image_mask,
+                    position,
+                )
+
+            logits = forward_with_noise(
+                state,
+                local_tokens,
+                self.post_dropout_feature_noise_position,
+                build_noise,
+            )
         return F.cross_entropy(logits, labels)
 
     def _iter_original_score_postdrop_phase_pair(

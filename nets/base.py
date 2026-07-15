@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 
 from utils import DEVICE
+
+LOCAL_HF_CACHE = Path(__file__).resolve().parents[1] / "data" / "huggingface"
+os.environ.setdefault("HF_HOME", str(LOCAL_HF_CACHE))
+os.environ.setdefault("HF_HUB_CACHE", str(LOCAL_HF_CACHE / "hub"))
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 
 DEFAULT_PRETRAINED = True

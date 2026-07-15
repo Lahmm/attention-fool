@@ -10,9 +10,12 @@ from tqdm import tqdm
 from attack import (
     ATTACK_METHODS,
     GRADIENT_POSTPROCESS_MODES,
+    POST_DROPOUT_NOISE_POSITIONS,
+    POST_DROPOUT_NOISE_TYPES,
     PATCH_SCORE_LAYER_MODES,
     PatchScoreAttacker,
 )
+from gradient_replay import GradientReplay
 from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, build_whitebox_model
 from utils import DEVICE, load_data, save_adversarial_images
 
@@ -72,12 +75,14 @@ def attack_all_samples(
     attacker: PatchScoreAttacker,
     output_dir: Path,
     max_attacked_samples: int | None,
-) -> None:
+    replay: GradientReplay | None = None,
+) -> list[str]:
     total = len(dataloader.dataset)
     limit = total if max_attacked_samples is None else min(total, max_attacked_samples)
     progress = tqdm(total=limit, desc="Attacking samples")
     attacked = 0
     saved_count = 0
+    all_sample_ids: list[str] = []
 
     for images, labels, indices in dataloader:
         if attacked >= limit:
@@ -90,7 +95,13 @@ def attack_all_samples(
             str(dataloader.dataset.samples[index]["image_name"])
             for index in indices.tolist()
         ]
-        adversarial = attacker.attack_batch(images, labels)
+        all_sample_ids.extend(filenames)
+        adversarial = attacker.attack_batch(
+            images,
+            labels,
+            replay=replay,
+            sample_ids=filenames if replay is not None else None,
+        )
         saved = save_adversarial_images(
             images=adversarial,
             output_dir=str(output_dir),
@@ -104,6 +115,7 @@ def attack_all_samples(
 
     progress.close()
     print(f"Attacked {attacked} samples and saved {saved_count} images to {output_dir}")
+    return all_sample_ids
 
 
 def parse_args() -> argparse.Namespace:
@@ -151,6 +163,16 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=None,
         help="Strength of kept-only post-dropout feature noise; omitted preserves guide-aug strength.",
+    )
+    parser.add_argument(
+        "--post-dropout-feature-noise-type",
+        choices=POST_DROPOUT_NOISE_TYPES,
+        default="opponent_projected",
+    )
+    parser.add_argument(
+        "--post-dropout-feature-noise-position",
+        choices=POST_DROPOUT_NOISE_POSITIONS,
+        default="initial",
     )
     parser.add_argument(
         "--feature-layer",
@@ -230,6 +252,8 @@ def main(args: argparse.Namespace) -> None:
         token_cls_noise_strength=args.token_cls_noise_strength,
         post_dropout_phase_token_noise=args.post_dropout_phase_token_noise,
         post_dropout_feature_noise_strength=args.post_dropout_feature_noise_strength,
+        post_dropout_feature_noise_type=args.post_dropout_feature_noise_type,
+        post_dropout_feature_noise_position=args.post_dropout_feature_noise_position,
         feature_layer=args.feature_layer,
         patch_score_layer=args.patch_score_layer,
         gradient_postprocess=args.gradient_postprocess,
@@ -241,7 +265,19 @@ def main(args: argparse.Namespace) -> None:
     )
 
     clear_directory_contents(output_dir)
-    attack_all_samples(dataloader, attacker, output_dir, args.max_attacked_samples)
+    replay = GradientReplay(args.seed) if args.seed is not None else None
+    sample_ids = attack_all_samples(
+        dataloader,
+        attacker,
+        output_dir,
+        args.max_attacked_samples,
+        replay=replay,
+    )
+    if replay is not None:
+        (output_dir / "replay_manifest.json").write_text(
+            json.dumps(replay.manifest(sample_ids), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
     (output_dir / "gradient_diagnostics.json").write_text(
         json.dumps(attacker.gradient_diagnostics_summary(), indent=2),
         encoding="utf-8",
@@ -292,6 +328,8 @@ def main(args: argparse.Namespace) -> None:
             if args.post_dropout_feature_noise_strength is not None
             else args.guide_aug_strength
         ),
+        "post_dropout_feature_noise_type": args.post_dropout_feature_noise_type,
+        "post_dropout_feature_noise_position": args.post_dropout_feature_noise_position,
         "feature_layer": args.feature_layer,
         "patch_score_layer": args.patch_score_layer,
         "gradient_postprocess": args.gradient_postprocess,

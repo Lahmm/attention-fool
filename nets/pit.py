@@ -45,11 +45,16 @@ class PiTB224WithHook(OptionalClsTokenMixin, WhiteBoxWithHook):
         state: AttackFeatureState,
         local_tokens: torch.Tensor,
         stage_count: int | None = None,
+        noise_position: str | None = None,
+        noise_builder=None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         batch, _, channels = local_tokens.shape
         height, width = state.grid_size
         spatial = local_tokens.transpose(1, 2).reshape(batch, channels, height, width)
         cls_token = state.context["cls_token"]
+        if noise_position == "initial" and noise_builder is not None:
+            local_tokens = noise_builder(local_tokens, state.grid_size, "initial")
+            spatial = local_tokens.transpose(1, 2).reshape(batch, channels, height, width)
         total_stages = len(self.model.transformers)
         if stage_count is None:
             stage_count = total_stages
@@ -57,8 +62,18 @@ class PiTB224WithHook(OptionalClsTokenMixin, WhiteBoxWithHook):
             raise ValueError(f"PiT stage_count must be in [1, {total_stages}].")
         for stage_index, transformer in enumerate(self.model.transformers):
             spatial, cls_token = transformer((spatial, cls_token))
+            if stage_index + 1 == 2 and noise_position == "pre_last_downsample" and noise_builder is not None:
+                grid_size = (int(spatial.size(-2)), int(spatial.size(-1)))
+                tokens = spatial.flatten(2).transpose(1, 2)
+                tokens = tokens + noise_builder(tokens, grid_size, "pre_last_downsample")
+                spatial = tokens.transpose(1, 2).reshape_as(spatial)
             if stage_index + 1 == stage_count:
                 break
+        if noise_position == "final" and noise_builder is not None:
+            grid_size = (int(spatial.size(-2)), int(spatial.size(-1)))
+            tokens = spatial.flatten(2).transpose(1, 2)
+            tokens = tokens + noise_builder(tokens, grid_size, "final")
+            spatial = tokens.transpose(1, 2).reshape_as(spatial)
         return spatial, cls_token
 
     def extract_patch_score_features(
@@ -95,6 +110,24 @@ class PiTB224WithHook(OptionalClsTokenMixin, WhiteBoxWithHook):
         if local_tokens.shape != state.local_tokens.shape:
             raise ValueError("replacement PiT local tokens do not match the attack state.")
         _, cls_token = self._run_transformers(state, local_tokens)
+        return self.model.forward_head(self.model.norm(cls_token))
+
+    def forward_with_attack_noise(
+        self,
+        state: AttackFeatureState,
+        local_tokens: torch.Tensor,
+        noise_position: str,
+        noise_builder,
+    ) -> torch.Tensor:
+        state.validate()
+        if local_tokens.shape != state.local_tokens.shape:
+            raise ValueError("replacement PiT local tokens do not match the attack state.")
+        spatial, cls_token = self._run_transformers(
+            state,
+            local_tokens,
+            noise_position=noise_position,
+            noise_builder=noise_builder,
+        )
         return self.model.forward_head(self.model.norm(cls_token))
 
 
