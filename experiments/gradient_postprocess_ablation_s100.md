@@ -151,6 +151,85 @@ Overall 的 CNN 增益不足以抵消 ViT 损失。
 
 因此，最后一次下采样前的 score 可以作为解释性和 mask 粒度消融，但当前不应替换
 最终层 score 主线，也没有达到 Overall `+3–5pp` 或 ViT 定向提升目标。
+
+## PiT / Visformer kept-only feature noise 消融
+
+为检验迁移性差是否由 `kept-only opponent-channel Gaussian feature noise` 引起，
+固定 final score、原始 mask、phase pair、20 views、MI、seed `20260715`、10 steps、
+epsilon `16/255` 和完整的 13 模型评估，只改变 post-dropout feature noise strength。
+score 阶段的 CLS noise、pixel mask、phase 和其他 `guide_aug_strength=0.2` 分支均保持不变。
+
+新增参数 `post_dropout_feature_noise_strength`，`0.20` 是当前主线，`0` 表示只关闭
+kept-only feature noise，不关闭其他随机增强。四档均生成独立 100 样本对抗样本并完成
+13 模型评估。
+
+### 汇总结果
+
+| 白盒源 | strength | Overall | ViT 平均 | CNN 平均 | 白盒 ASR |
+|---|---:|---:|---:|---:|---:|
+| PiT-B | 0.00 | 72.00% | 84.29% | 57.67% | 99% |
+| PiT-B | 0.05 | 74.85% | 85.43% | 62.50% | 98% |
+| PiT-B | 0.10 | 78.54% | 87.71% | 67.83% | 96% |
+| PiT-B | 0.20 | 81.85% | 90.14% | 72.17% | 97% |
+| Visformer-S | 0.00 | 63.62% | 69.29% | 57.00% | 100% |
+| Visformer-S | 0.05 | 64.23% | 70.43% | 57.00% | 100% |
+| Visformer-S | 0.10 | 67.54% | 73.57% | 60.50% | 100% |
+| Visformer-S | 0.20 | 72.85% | 79.57% | 65.00% | 99% |
+
+相对于同一白盒源的无 feature noise 配置，strength `0.20` 带来：
+
+| 白盒源 | Δ Overall | Δ ViT | Δ CNN | Δ 白盒 |
+|---|---:|---:|---:|---:|
+| PiT-B | +9.85pp | +5.86pp | +14.50pp | -2pp |
+| Visformer-S | +9.23pp | +10.29pp | +8.00pp | -1pp |
+
+### 逐模型变化：strength 0.00 → 0.20
+
+| 模型 | PiT Δ | Visformer Δ |
+|---|---:|---:|
+| LeViT-256 | +3pp | +13pp |
+| PiT-B | -2pp | +13pp |
+| DeiT-B | +13pp | +12pp |
+| TNT-S | +7pp | +12pp |
+| ConViT | +6pp | +11pp |
+| Visformer-S | 0pp | -1pp |
+| CaiT-S/24 | +14pp | +12pp |
+| Inception-v3 | +14pp | +8pp |
+| Inception-v4 | +3pp | +13pp |
+| Inception-ResNet-v2 | +15pp | +2pp |
+| ResNet-101 | +10pp | +7pp |
+| Adv Inception-v3 | +19pp | +6pp |
+| Adv Inception-ResNet-v2 | +26pp | +12pp |
+
+### 梯度诊断
+
+| 白盒 | strength | view→final cosine | sign agreement | effective rank | MI→current cosine |
+|---|---:|---:|---:|---:|---:|
+| PiT | 0.00 | 0.4584 | 0.5512 | 13.0616 | 0.5553 |
+| PiT | 0.05 | 0.4140 | 0.5383 | 15.5035 | 0.5763 |
+| PiT | 0.10 | 0.3804 | 0.5256 | 17.1441 | 0.5885 |
+| PiT | 0.20 | 0.3464 | 0.5106 | 18.4117 | 0.6049 |
+| Visformer | 0.00 | 0.5369 | 0.5764 | 10.6612 | 0.5786 |
+| Visformer | 0.05 | 0.5136 | 0.5707 | 12.0283 | 0.5820 |
+| Visformer | 0.10 | 0.4795 | 0.5603 | 13.8538 | 0.5853 |
+| Visformer | 0.20 | 0.4278 | 0.5433 | 16.1432 | 0.5893 |
+
+### 结论
+
+当前结果否定了“PiT/Visformer 的迁移性差主要是因为 feature noise 有害”这一假设。
+在两个白盒源上，feature noise strength 从 0 增加到 0.20 都带来近似单调的 Overall、
+ViT 和 CNN 提升；关闭噪声会显著损害黑盒迁移，尤其是 Visformer 的 ViT 迁移下降
+超过 `10pp`。代价是白盒 ASR 小幅下降 `1–2pp`，即该噪声牺牲少量源模型拟合，换取
+大量跨模型迁移收益。
+
+诊断上，strength 增大使 view-to-final cosine 和 sign agreement 下降、effective rank
+上升，同时 MI 累积方向与当前梯度的 cosine 上升。这说明该噪声不是简单引入有害的
+源模型偏置，而是在当前主线中提供了更多 view 梯度多样性，并改善了 MI 方向的累积。
+因此后续不应沿“去除或减弱噪声”寻找 ViT 迁移提升；若继续优化，应研究如何保留这种
+多样性，同时减少其对白盒 ASR 的损失。
+
+实验目录为 `outputs/attack/{pit_b_224,visformer_small}_noise_{s000,s005,s010,s020}_s100_seed20260715`，
+对应 CSV 为 `outputs/csv/outputs_attack_{pit_b_224,visformer_small}_noise_*_s100_seed20260715.csv`。
 | Visformer-S | 80.33% | 84.33% | +4.00pp |
 | CaiT-S24 | 90.00% | 91.00% | +1.00pp |
 
