@@ -44,23 +44,44 @@ class PiTB224WithHook(OptionalClsTokenMixin, WhiteBoxWithHook):
         self,
         state: AttackFeatureState,
         local_tokens: torch.Tensor,
+        stage_count: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         batch, _, channels = local_tokens.shape
         height, width = state.grid_size
         spatial = local_tokens.transpose(1, 2).reshape(batch, channels, height, width)
         cls_token = state.context["cls_token"]
-        spatial, cls_token = self.model.transformers((spatial, cls_token))
+        total_stages = len(self.model.transformers)
+        if stage_count is None:
+            stage_count = total_stages
+        if not 1 <= stage_count <= total_stages:
+            raise ValueError(f"PiT stage_count must be in [1, {total_stages}].")
+        for stage_index, transformer in enumerate(self.model.transformers):
+            spatial, cls_token = transformer((spatial, cls_token))
+            if stage_index + 1 == stage_count:
+                break
         return spatial, cls_token
 
-    def extract_patch_score_features(self, x: torch.Tensor) -> PatchScoreFeatures:
+    def extract_patch_score_features(
+        self,
+        x: torch.Tensor,
+        *,
+        score_layer: str = "final",
+    ) -> PatchScoreFeatures:
         state = self.prepare_attack_feature_state(x)
-        spatial, cls_token = self._run_transformers(state, state.local_tokens)
+        if score_layer == "final":
+            spatial, cls_token = self._run_transformers(state, state.local_tokens)
+            source_name = "transformers[2].blocks[3]"
+        elif score_layer == "pre_last_downsample":
+            spatial, cls_token = self._run_transformers(state, state.local_tokens, stage_count=2)
+            source_name = "transformers[1]+pre_pool"
+        else:
+            raise ValueError(f"unsupported PiT patch score layer: {score_layer!r}")
         grid_size = (int(spatial.size(-2)), int(spatial.size(-1)))
         features = PatchScoreFeatures(
             local_tokens=spatial.flatten(2).transpose(1, 2),
             global_token=cls_token[:, :1],
             grid_size=grid_size,
-            source_name="transformers[2].blocks[3]",
+            source_name=source_name,
         )
         features.validate()
         return features

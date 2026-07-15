@@ -141,7 +141,12 @@ class WhiteBoxWithHook(nn.Module):
     def _stage_modules(self) -> Iterable[nn.Module]:
         return ()
 
-    def extract_patch_score_features(self, x: torch.Tensor) -> PatchScoreFeatures:
+    def extract_patch_score_features(
+        self,
+        x: torch.Tensor,
+        *,
+        score_layer: str = "final",
+    ) -> PatchScoreFeatures:
         raise NotImplementedError(f"patch-score extraction is not implemented for {self.model_name}.")
 
     def prepare_attack_feature_state(self, x: torch.Tensor) -> AttackFeatureState:

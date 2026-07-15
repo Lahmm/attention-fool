@@ -123,6 +123,10 @@ class MainlineBudgetAndNoiseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "strictly requires opponent-channel"):
             self.make_attacker(patch_dropout_noise_mode="gaussian")
 
+    def test_patch_score_layer_rejects_unknown_mode(self):
+        with self.assertRaisesRegex(ValueError, "patch_score_layer"):
+            self.make_attacker(patch_score_layer="middle")
+
 
 @unittest.skipUnless(os.environ.get("RUN_MODEL_SMOKE") == "1", "set RUN_MODEL_SMOKE=1")
 class RealModelMainlineSmokeTests(unittest.TestCase):
@@ -131,6 +135,10 @@ class RealModelMainlineSmokeTests(unittest.TestCase):
         "cait_s24_224": ((14, 14), 29, "blocks[23]+blocks_token_only[1]"),
         "pit_b_224": ((8, 8), 10, "transformers[2].blocks[3]"),
         "visformer_small": ((7, 7), 7, "stage3[3]+gap"),
+    }
+    PRE_LAST_DOWNSAMPLE_EXPECTED = {
+        "pit_b_224": ((16, 16), "transformers[1]+pre_pool"),
+        "visformer_small": ((14, 14), "stage2+pre_patch_embed3+gap"),
     }
 
     def test_full_two_view_one_step_mainline(self):
@@ -190,6 +198,37 @@ class RealModelMainlineSmokeTests(unittest.TestCase):
                     state,
                     resumed_logits,
                 )
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+    def test_pre_last_downsample_score_features_have_expected_grids(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        for model_name, (expected_grid, expected_source) in self.PRE_LAST_DOWNSAMPLE_EXPECTED.items():
+            with self.subTest(model=model_name):
+                model = build_whitebox_model(
+                    num_classes=1000,
+                    model_name=model_name,
+                    pretrained=False,
+                    device=device,
+                )
+                attacker = PatchScoreAttacker(
+                    model,
+                    epsilon=1.0 / 255.0,
+                    steps=1,
+                    input_diversity_groups=1,
+                    input_diversity_views_per_group=2,
+                    device=device,
+                )
+                normalized = attacker._normalize(torch.zeros(1, 3, 224, 224, device=device))
+                with torch.no_grad():
+                    features = model.extract_patch_score_features(
+                        normalized,
+                        score_layer="pre_last_downsample",
+                    )
+                self.assertEqual(features.grid_size, expected_grid)
+                self.assertEqual(features.source_name, expected_source)
+                del attacker, model, normalized, features
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()

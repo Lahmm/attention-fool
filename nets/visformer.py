@@ -55,6 +55,7 @@ class VisformerSmallWithHook(WhiteBoxWithHook):
         self,
         state: AttackFeatureState,
         local_tokens: torch.Tensor,
+        stop_before_last_downsample: bool = False,
     ) -> torch.Tensor:
         batch, _, channels = local_tokens.shape
         height, width = state.grid_size
@@ -72,21 +73,40 @@ class VisformerSmallWithHook(WhiteBoxWithHook):
                 spatial = base.pos_drop(spatial + base.pos_embed2)
         spatial = base.stage2(spatial)
 
+        if stop_before_last_downsample:
+            return spatial
+
         if base.patch_embed3 is not None:
             spatial = base.patch_embed3(spatial)
             if base.pos_embed3 is not None:
                 spatial = base.pos_drop(spatial + base.pos_embed3)
         return base.stage3(spatial)
 
-    def extract_patch_score_features(self, x: torch.Tensor) -> PatchScoreFeatures:
+    def extract_patch_score_features(
+        self,
+        x: torch.Tensor,
+        *,
+        score_layer: str = "final",
+    ) -> PatchScoreFeatures:
         state = self.prepare_attack_feature_state(x)
-        spatial = self._run_stages(state, state.local_tokens)
+        if score_layer == "final":
+            spatial = self._run_stages(state, state.local_tokens)
+            source_name = "stage3[3]+gap"
+        elif score_layer == "pre_last_downsample":
+            spatial = self._run_stages(
+                state,
+                state.local_tokens,
+                stop_before_last_downsample=True,
+            )
+            source_name = "stage2+pre_patch_embed3+gap"
+        else:
+            raise ValueError(f"unsupported Visformer patch score layer: {score_layer!r}")
         local_tokens = spatial.flatten(2).transpose(1, 2)
         features = PatchScoreFeatures(
             local_tokens=local_tokens,
             global_token=local_tokens.mean(dim=1, keepdim=True),
             grid_size=(int(spatial.size(-2)), int(spatial.size(-1))),
-            source_name="stage3[3]+gap",
+            source_name=source_name,
         )
         features.validate()
         return features

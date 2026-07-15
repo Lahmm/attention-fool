@@ -7,7 +7,12 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from attack import ATTACK_METHODS, GRADIENT_POSTPROCESS_MODES, PatchScoreAttacker
+from attack import (
+    ATTACK_METHODS,
+    GRADIENT_POSTPROCESS_MODES,
+    PATCH_SCORE_LAYER_MODES,
+    PatchScoreAttacker,
+)
 from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, build_whitebox_model
 from utils import DEVICE, load_data, save_adversarial_images
 
@@ -148,6 +153,12 @@ def parse_args() -> argparse.Namespace:
         help="Legacy patch/token-dropout layer; the generalized mainline uses each model's final semantic layer.",
     )
     parser.add_argument(
+        "--patch-score-layer",
+        choices=PATCH_SCORE_LAYER_MODES,
+        default="final",
+        help="Feature location used for the mainline patch score; final preserves the current mainline.",
+    )
+    parser.add_argument(
         "--gradient-postprocess",
         choices=GRADIENT_POSTPROCESS_MODES,
         default="mean",
@@ -213,6 +224,7 @@ def main(args: argparse.Namespace) -> None:
         token_cls_noise_strength=args.token_cls_noise_strength,
         post_dropout_phase_token_noise=args.post_dropout_phase_token_noise,
         feature_layer=args.feature_layer,
+        patch_score_layer=args.patch_score_layer,
         gradient_postprocess=args.gradient_postprocess,
         gradient_consensus_lambda=args.gradient_consensus_lambda,
         gradient_smooth_sigma=args.gradient_smooth_sigma,
@@ -269,6 +281,7 @@ def main(args: argparse.Namespace) -> None:
         ),
         "post_dropout_phase_token_noise": args.post_dropout_phase_token_noise,
         "feature_layer": args.feature_layer,
+        "patch_score_layer": args.patch_score_layer,
         "gradient_postprocess": args.gradient_postprocess,
         "gradient_consensus_lambda": args.gradient_consensus_lambda,
         "gradient_smooth_sigma": args.gradient_smooth_sigma,

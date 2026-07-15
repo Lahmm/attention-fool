@@ -43,7 +43,14 @@ class CaiTS24WithHook(ClsTokenMixin, WhiteBoxWithHook):
             cls_token = block(local_tokens, cls_token)
         return local_tokens, cls_token
 
-    def extract_patch_score_features(self, x: torch.Tensor) -> PatchScoreFeatures:
+    def extract_patch_score_features(
+        self,
+        x: torch.Tensor,
+        *,
+        score_layer: str = "final",
+    ) -> PatchScoreFeatures:
+        if score_layer != "final":
+            raise ValueError(f"unsupported CaiT patch score layer: {score_layer!r}")
         state = self.prepare_attack_feature_state(x)
         local_tokens, cls_token = self._run_encoder(state.local_tokens)
         features = PatchScoreFeatures(

@@ -29,6 +29,10 @@ GRADIENT_POSTPROCESS_MODES = (
     "group_sign_mean",
     "trim_opposing",
 )
+PATCH_SCORE_LAYER_MODES = (
+    "final",
+    "pre_last_downsample",
+)
 
 
 class PatchScoreAttacker:
@@ -72,6 +76,7 @@ class PatchScoreAttacker:
         token_cls_noise_strength: float | None = None,
         post_dropout_phase_token_noise: bool = True,
         feature_layer: int = 12,
+        patch_score_layer: str = "final",
         gradient_postprocess: str = "mean",
         gradient_consensus_lambda: float = 0.2,
         gradient_smooth_sigma: float = 0.0,
@@ -128,6 +133,11 @@ class PatchScoreAttacker:
             raise ValueError("token_score_cls_mode must be learned or gaussian.")
         if token_cls_noise_mode not in ("gaussian", "mahalanobis"):
             raise ValueError("token_cls_noise_mode must be gaussian or mahalanobis.")
+        if patch_score_layer not in PATCH_SCORE_LAYER_MODES:
+            raise ValueError(
+                "patch_score_layer must be one of "
+                f"{PATCH_SCORE_LAYER_MODES}, got {patch_score_layer!r}."
+            )
         if gradient_postprocess not in GRADIENT_POSTPROCESS_MODES:
             raise ValueError(
                 "gradient_postprocess must be one of "
@@ -183,6 +193,7 @@ class PatchScoreAttacker:
         )
         self.post_dropout_phase_token_noise = bool(post_dropout_phase_token_noise)
         self.feature_layer = int(feature_layer)
+        self.patch_score_layer = patch_score_layer
         self.gradient_postprocess = gradient_postprocess
         self.gradient_consensus_lambda = float(gradient_consensus_lambda)
         self.gradient_smooth_sigma = float(gradient_smooth_sigma)
@@ -241,6 +252,7 @@ class PatchScoreAttacker:
     def mainline_metadata(self) -> dict[str, object]:
         return {
             "score_source": self._score_source,
+            "patch_score_layer": self.patch_score_layer,
             "score_grid": list(self._score_grid_size) if self._score_grid_size else None,
             "target_patch_drop_ratio": (
                 self.patch_dropout_ratio
@@ -816,7 +828,10 @@ class PatchScoreAttacker:
         if extract is None:
             raise ValueError("the mainline requires a white-box patch-score adapter.")
         with torch.no_grad():
-            features = extract(self._normalize(pixels.detach()))
+            features = extract(
+                self._normalize(pixels.detach()),
+                score_layer=self.patch_score_layer,
+            )
             features.validate()
             scores = self._score_cls_and_patches(
                 features.global_token,

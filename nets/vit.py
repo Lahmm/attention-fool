@@ -39,7 +39,14 @@ class ViTWithHook(ClsTokenMixin, WhiteBoxWithHook):
         state.validate()
         return state
 
-    def extract_patch_score_features(self, x: torch.Tensor) -> PatchScoreFeatures:
+    def extract_patch_score_features(
+        self,
+        x: torch.Tensor,
+        *,
+        score_layer: str = "final",
+    ) -> PatchScoreFeatures:
+        if score_layer != "final":
+            raise ValueError(f"unsupported ViT patch score layer: {score_layer!r}")
         state = self.prepare_attack_feature_state(x)
         tokens = torch.cat((state.context["prefix_tokens"], state.local_tokens), dim=1)
         tokens = self.model.blocks(tokens)
