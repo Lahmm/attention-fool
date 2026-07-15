@@ -16,6 +16,7 @@ from attack import (
     PatchScoreAttacker,
 )
 from gradient_replay import GradientReplay
+from gradient_study import build_probe
 from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, build_whitebox_model
 from utils import DEVICE, load_data, save_adversarial_images
 
@@ -76,6 +77,7 @@ def attack_all_samples(
     output_dir: Path,
     max_attacked_samples: int | None,
     replay: GradientReplay | None = None,
+    probe=None,
 ) -> list[str]:
     total = len(dataloader.dataset)
     limit = total if max_attacked_samples is None else min(total, max_attacked_samples)
@@ -101,6 +103,7 @@ def attack_all_samples(
             labels,
             replay=replay,
             sample_ids=filenames if replay is not None else None,
+            probe=probe,
         )
         saved = save_adversarial_images(
             images=adversarial,
@@ -192,6 +195,11 @@ def parse_args() -> argparse.Namespace:
         default="mean",
     )
     parser.add_argument("--gradient-consensus-lambda", type=float, default=0.2)
+    parser.add_argument(
+        "--gradient-study-probe",
+        default=None,
+        help="Optional named gradient probe applied after view aggregation and before MI accumulation.",
+    )
     parser.add_argument("--gradient-smooth-sigma", type=float, default=0.0)
     parser.add_argument("--gradient-divisive-sigma", type=float, default=0.0)
     parser.add_argument("--gradient-clip-percentile", type=float, default=0.0)
@@ -263,6 +271,7 @@ def main(args: argparse.Namespace) -> None:
         gradient_clip_percentile=args.gradient_clip_percentile,
         device=DEVICE,
     )
+    probe = build_probe(args.gradient_study_probe, model=model) if args.gradient_study_probe else None
 
     clear_directory_contents(output_dir)
     replay = GradientReplay(args.seed) if args.seed is not None else None
@@ -272,6 +281,7 @@ def main(args: argparse.Namespace) -> None:
         output_dir,
         args.max_attacked_samples,
         replay=replay,
+        probe=probe,
     )
     if replay is not None:
         (output_dir / "replay_manifest.json").write_text(
@@ -334,6 +344,7 @@ def main(args: argparse.Namespace) -> None:
         "patch_score_layer": args.patch_score_layer,
         "gradient_postprocess": args.gradient_postprocess,
         "gradient_consensus_lambda": args.gradient_consensus_lambda,
+        "gradient_study_probe": probe.name if probe is not None else None,
         "gradient_smooth_sigma": args.gradient_smooth_sigma,
         "gradient_divisive_sigma": args.gradient_divisive_sigma,
         "gradient_clip_percentile": args.gradient_clip_percentile,
