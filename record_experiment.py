@@ -20,9 +20,10 @@ MODEL_COLS = [
     "inception_v4",
     "inception_resnet_v2",
     "resnet101",
+    "inception_v3_adv",
+    "inception_resnet_v2_adv",
     "inception_v3_adv_3",
     "inception_v3_adv_4",
-    "inception_resnet_v2_adv",
 ]
 VIT_MODEL_COLS = set(MODEL_COLS[:7])
 CNN_MODEL_COLS = set(MODEL_COLS[7:])

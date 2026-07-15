@@ -30,8 +30,7 @@ DEFAULT_CNN_BLACK_BOX_MODELS = [
     "inception_v4",
     "inception_resnet_v2",
     "resnet101",
-    "inception_v3_adv_3",
-    "inception_v3_adv_4",
+    "inception_v3_adv",
     "inception_resnet_v2_adv",
 ]
 DEFAULT_BLACK_BOX_MODELS = DEFAULT_VIT_BLACK_BOX_MODELS + DEFAULT_CNN_BLACK_BOX_MODELS
@@ -53,17 +52,20 @@ MODEL_ALIASES = {
     "ResNet-101": "resnet101",
     "Inc-v3-adv-3": "inception_v3_adv_3",
     "Inc-v3-adv-4": "inception_v3_adv_4",
+    "Inc-v3-adv": "inception_v3_adv",
     "IncRes-v2-adv": "inception_resnet_v2_adv",
+}
+HF_ADVERSARIAL_MODELS = {
+    "inception_v3_adv": "inception_v3.tf_adv_in1k",
+    "inception_resnet_v2_adv": "inception_resnet_v2.tf_ens_adv_in1k",
 }
 ADVERSARIAL_MODEL_BASES = {
     "inception_v3_adv_3": "inception_v3",
     "inception_v3_adv_4": "inception_v3",
-    "inception_resnet_v2_adv": "inception_resnet_v2",
 }
 ADVERSARIAL_CHECKPOINT_ENVS = {
     "inception_v3_adv_3": "INC_V3_ADV_3_CHECKPOINT",
     "inception_v3_adv_4": "INC_V3_ADV_4_CHECKPOINT",
-    "inception_resnet_v2_adv": "INCRES_V2_ADV_CHECKPOINT",
 }
 
 
@@ -139,7 +141,9 @@ def _load_adversarial_checkpoint(model, model_name: str) -> None:
 
 def build_black_box_model(model_name: str):
     resolved_name = resolve_model_name(model_name)
-    if resolved_name in ADVERSARIAL_MODEL_BASES:
+    if resolved_name in HF_ADVERSARIAL_MODELS:
+        model = timm.create_model(HF_ADVERSARIAL_MODELS[resolved_name], pretrained=True)
+    elif resolved_name in ADVERSARIAL_MODEL_BASES:
         model = timm.create_model(ADVERSARIAL_MODEL_BASES[resolved_name], pretrained=False)
         _load_adversarial_checkpoint(model, resolved_name)
     else:
@@ -274,6 +278,14 @@ def configure_eval_runtime(use_tf32: bool) -> None:
 
 def infer_exp_name(image_dir: Path) -> str:
     return image_dir.name or "transfer_eval"
+
+
+def read_attack_params_for_recording(attack_params_path: Path) -> str:
+    """Read attack metadata without consuming the reproducibility artifact."""
+    try:
+        return attack_params_path.read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return ""
 
 
 def evaluate(
@@ -444,11 +456,9 @@ def main(
         # Include attack parameters if available alongside the images
         attack_params_path = resolved_image_dir / "attack_params.json"
         if attack_params_path.exists():
-            try:
-                record_params["attack_params"] = attack_params_path.read_text(encoding="utf-8")
-                attack_params_path.unlink()
-            except (OSError, ValueError):
-                record_params["attack_params"] = ""
+            record_params["attack_params"] = read_attack_params_for_recording(
+                attack_params_path
+            )
         csv_path = record_results(
             repo_path=repo_path,
             exp_name=exp_name or infer_exp_name(image_dir_path),

@@ -130,3 +130,10 @@ python transfer_eval.py \
 ```
 
 攻击目录会保存 `attack_params.json`，迁移评估结果记录到 `outputs/csv`。
+
+默认全量迁移评估使用 Hugging Face/timm 可复现的 13 个模型：7 个 Transformer、
+4 个标准 CNN，以及 `inception_v3.tf_adv_in1k` 和
+`inception_resnet_v2.tf_ens_adv_in1k` 两个对抗训练 CNN。可通过设置 `HF_HOME`
+将全部权重固定缓存到本地目录，缓存完成后可配合 `HF_HUB_OFFLINE=1` 离线复现。
+旧的 Inc-v3 ens3/ens4 名称仍支持外部 checkpoint，但 Hugging Face 当前没有与其
+精确对应的权重，因此不再纳入默认全量集合。
