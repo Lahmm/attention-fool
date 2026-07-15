@@ -5,6 +5,11 @@ import os
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+LOCAL_HF_CACHE = Path(__file__).resolve().parent / "data" / "huggingface"
+os.environ.setdefault("HF_HOME", str(LOCAL_HF_CACHE))
+os.environ.setdefault("HF_HUB_CACHE", str(LOCAL_HF_CACHE / "hub"))
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 import timm
 import torch
 from PIL import Image
@@ -15,11 +20,6 @@ from tqdm import tqdm
 
 from record_experiment import record_results
 from utils import DEVICE
-
-LOCAL_HF_CACHE = Path(__file__).resolve().parent / "data" / "huggingface"
-os.environ.setdefault("HF_HOME", str(LOCAL_HF_CACHE))
-os.environ.setdefault("HF_HUB_CACHE", str(LOCAL_HF_CACHE / "hub"))
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 DEFAULT_VIT_BLACK_BOX_MODELS = [
     "levit_256",
