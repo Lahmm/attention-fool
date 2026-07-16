@@ -144,9 +144,61 @@ class MainlineBudgetAndNoiseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "RGB Conv2d"):
             attacker._strict_opponent_feature_noise(state)
 
-    def test_generalized_mainline_rejects_non_opponent_noise(self):
-        with self.assertRaisesRegex(ValueError, "strictly requires opponent-channel"):
-            self.make_attacker(patch_dropout_noise_mode="gaussian")
+    def test_both_retained_noises_are_rms_matched(self):
+        local_tokens = torch.randn(2, 4, 5)
+        state = AttackFeatureState(
+            local_tokens=local_tokens,
+            grid_size=(2, 2),
+            context=None,
+            rgb_projection_weight=torch.randn(5, 3, 1, 1),
+            projection_kernel=(1, 1),
+            projection_stride=(1, 1),
+            projection_padding=(0, 0),
+        )
+        image_mask = torch.zeros(2, 1, 2, 2)
+        expected_rms = 0.2 * local_tokens.square().mean(dim=(1, 2)).sqrt()
+
+        for noise_type in ("gaussian", "opponent_projected"):
+            with self.subTest(noise_type=noise_type):
+                attacker = self.make_attacker(
+                    post_dropout_feature_noise_type=noise_type,
+                )
+                noise = attacker._build_post_dropout_feature_noise(
+                    local_tokens,
+                    state,
+                    image_mask,
+                )
+                actual_rms = noise.square().mean(dim=(1, 2)).sqrt()
+                self.assertTrue(
+                    torch.allclose(actual_rms, expected_rms, rtol=1e-5, atol=1e-6)
+                )
+
+    def test_both_retained_noises_are_kept_only(self):
+        local_tokens = torch.randn(1, 4, 5)
+        state = AttackFeatureState(
+            local_tokens=local_tokens,
+            grid_size=(2, 2),
+            context=None,
+            rgb_projection_weight=torch.randn(5, 3, 1, 1),
+            projection_kernel=(1, 1),
+            projection_stride=(1, 1),
+            projection_padding=(0, 0),
+        )
+        image_mask = torch.zeros(1, 1, 2, 2)
+        image_mask[:, :, 0, 0] = 1.0
+
+        for noise_type in ("gaussian", "opponent_projected"):
+            with self.subTest(noise_type=noise_type):
+                attacker = self.make_attacker(
+                    post_dropout_feature_noise_type=noise_type,
+                )
+                noise = attacker._build_post_dropout_feature_noise(
+                    local_tokens,
+                    state,
+                    image_mask,
+                )
+                self.assertTrue(torch.equal(noise[:, 0], torch.zeros_like(noise[:, 0])))
+                self.assertGreater(float(noise[:, 1:].abs().sum()), 0.0)
 
     def test_patch_score_layer_rejects_unknown_mode(self):
         with self.assertRaisesRegex(ValueError, "patch_score_layer"):
@@ -161,108 +213,13 @@ class RealModelMainlineSmokeTests(unittest.TestCase):
         "pit_b_224": ((8, 8), 10, "transformers[2].blocks[3]"),
         "visformer_small": ((7, 7), 7, "stage3[3]+gap"),
     }
-    PRE_LAST_DOWNSAMPLE_EXPECTED = {
-        "pit_b_224": ((16, 16), "transformers[1]+pre_pool"),
-        "visformer_small": ((14, 14), "stage2+pre_patch_embed3+gap"),
-    }
 
     def test_full_two_view_one_step_mainline(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         for model_name, (grid_size, drop_count, score_source) in self.EXPECTED.items():
-            with self.subTest(model=model_name):
-                torch.manual_seed(7)
-                model = build_whitebox_model(
-                    num_classes=1000,
-                    model_name=model_name,
-                    pretrained=False,
-                    device=device,
-                )
-                attacker = PatchScoreAttacker(
-                    model,
-                    epsilon=1.0 / 255.0,
-                    steps=1,
-                    input_diversity_groups=1,
-                    input_diversity_views_per_group=2,
-                    input_diversity_phase_shift_set=((4, 4),),
-                    device=device,
-                )
-                images = torch.zeros(1, 3, 224, 224)
-                normalized = attacker._normalize(attacker._denormalize(images.to(device)))
-                with torch.no_grad():
-                    direct_logits = model(normalized)
-                    state = model.prepare_attack_feature_state(normalized)
-                    resumed_logits = model.forward_from_attack_feature_state(
-                        state,
-                        state.local_tokens,
-                    )
-                self.assertTrue(torch.equal(direct_logits, resumed_logits))
-                adversarial = attacker.attack_batch(images, torch.zeros(1, dtype=torch.long))
-                metadata = attacker.mainline_metadata()
-
-                self.assertEqual(metadata["score_grid"], list(grid_size))
-                self.assertEqual(metadata["actual_patch_drop_count"], drop_count)
-                self.assertEqual(metadata["score_source"], score_source)
-                self.assertEqual(metadata["feature_noise_type"],
-                                 "opponent_channel_rgb_projection")
-                self.assertTrue(torch.isfinite(adversarial).all())
-                clean_pixels = attacker._denormalize(images.to(device))
-                adv_pixels = attacker._denormalize(adversarial)
-                self.assertLessEqual(
-                    float((adv_pixels - clean_pixels).abs().max()),
-                    1.0 / 255.0 + 1e-6,
-                )
-
-                del (
-                    attacker,
-                    model,
-                    adversarial,
-                    clean_pixels,
-                    adv_pixels,
-                    normalized,
-                    direct_logits,
-                    state,
-                    resumed_logits,
-                )
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-
-    def test_pre_last_downsample_score_features_have_expected_grids(self):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        for model_name, (expected_grid, expected_source) in self.PRE_LAST_DOWNSAMPLE_EXPECTED.items():
-            with self.subTest(model=model_name):
-                model = build_whitebox_model(
-                    num_classes=1000,
-                    model_name=model_name,
-                    pretrained=False,
-                    device=device,
-                )
-                attacker = PatchScoreAttacker(
-                    model,
-                    epsilon=1.0 / 255.0,
-                    steps=1,
-                    input_diversity_groups=1,
-                    input_diversity_views_per_group=2,
-                    device=device,
-                )
-                normalized = attacker._normalize(torch.zeros(1, 3, 224, 224, device=device))
-                with torch.no_grad():
-                    features = model.extract_patch_score_features(
-                        normalized,
-                        score_layer="pre_last_downsample",
-                    )
-                self.assertEqual(features.grid_size, expected_grid)
-                self.assertEqual(features.source_name, expected_source)
-                del attacker, model, normalized, features
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-
-    def test_feature_noise_positions_run_for_pit_and_visformer(self):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        for model_name in ("pit_b_224", "visformer_small"):
-            for position in ("initial", "pre_last_downsample", "final"):
-                with self.subTest(model=model_name, position=position):
+            for noise_type in ("gaussian", "opponent_projected"):
+                with self.subTest(model=model_name, noise=noise_type):
+                    torch.manual_seed(7)
                     model = build_whitebox_model(
                         num_classes=1000,
                         model_name=model_name,
@@ -275,19 +232,102 @@ class RealModelMainlineSmokeTests(unittest.TestCase):
                         steps=1,
                         input_diversity_groups=1,
                         input_diversity_views_per_group=2,
-                        post_dropout_feature_noise_type="feature_iid",
-                        post_dropout_feature_noise_position=position,
+                        input_diversity_phase_shift_set=((4, 4),),
+                        post_dropout_feature_noise_type=noise_type,
                         device=device,
                     )
-                    images = torch.zeros(1, 3, 224, 224, device=device)
-                    adversarial = attacker.attack_batch(images, torch.zeros(1, dtype=torch.long, device=device))
+                    images = torch.zeros(1, 3, 224, 224)
+                    normalized = attacker._normalize(attacker._denormalize(images.to(device)))
+                    with torch.no_grad():
+                        direct_logits = model(normalized)
+                        state = model.prepare_attack_feature_state(normalized)
+                        resumed_logits = model.forward_from_attack_feature_state(
+                            state,
+                            state.local_tokens,
+                        )
+                    self.assertTrue(torch.equal(direct_logits, resumed_logits))
+                    adversarial = attacker.attack_batch(
+                        images,
+                        torch.zeros(1, dtype=torch.long),
+                    )
+                    metadata = attacker.mainline_metadata()
+
+                    self.assertEqual(metadata["score_grid"], list(grid_size))
+                    self.assertEqual(metadata["actual_patch_drop_count"], drop_count)
+                    self.assertEqual(metadata["score_source"], score_source)
+                    expected_noise = (
+                        "feature_iid_gaussian"
+                        if noise_type == "gaussian"
+                        else "opponent_channel_rgb_projection"
+                    )
+                    self.assertEqual(metadata["feature_noise_type"], expected_noise)
                     self.assertTrue(torch.isfinite(adversarial).all())
-                    self.assertEqual(attacker._actual_forward_view_count, 2)
-                    del attacker, model, images, adversarial
+                    clean_pixels = attacker._denormalize(images.to(device))
+                    adv_pixels = attacker._denormalize(adversarial)
+                    self.assertLessEqual(
+                        float((adv_pixels - clean_pixels).abs().max()),
+                        1.0 / 255.0 + 1e-6,
+                    )
+
+                    del (
+                        attacker,
+                        model,
+                        adversarial,
+                        clean_pixels,
+                        adv_pixels,
+                        normalized,
+                        direct_logits,
+                        state,
+                        resumed_logits,
+                    )
                     gc.collect()
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
 
+    def test_retained_control_attacks_run_on_vit(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = build_whitebox_model(
+            num_classes=1000,
+            model_name="vit_base_patch16_224",
+            pretrained=False,
+            device=device,
+        )
+        images = torch.zeros(1, 3, 224, 224)
+        labels = torch.zeros(1, dtype=torch.long)
+        configs = (
+            {
+                "attack_method": "patch_dropout",
+                "guide_aug_copies": 1,
+                "feature_layer": -1,
+            },
+            {
+                "attack_method": "token_patch_dropout",
+                "input_diversity_groups": 1,
+                "input_diversity_views_per_group": 1,
+            },
+            {
+                "attack_method": "none",
+                "input_diversity": True,
+                "nesterov": True,
+                "ti_sigma": 1.0,
+            },
+        )
+        for config in configs:
+            with self.subTest(attack_method=config["attack_method"]):
+                attacker = PatchScoreAttacker(
+                    model,
+                    epsilon=1.0 / 255.0,
+                    steps=1,
+                    gaussian_alpha=0.0,
+                    device=device,
+                    **config,
+                )
+                adversarial = attacker.attack_batch(images, labels)
+                self.assertTrue(torch.isfinite(adversarial).all())
+        del attacker, adversarial, model, images, labels
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 if __name__ == "__main__":
     unittest.main()

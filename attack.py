@@ -10,7 +10,6 @@ from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
 
 if TYPE_CHECKING:
     from gradient_replay import GradientReplay
-    from gradient_study import GradientProbe
 
 
 ATTACK_METHODS = (
@@ -19,33 +18,10 @@ ATTACK_METHODS = (
     "token_patch_dropout",
     "original_score_postdrop_phase_pair",
 )
-GRADIENT_POSTPROCESS_MODES = (
-    "mean",
-    "view_l2_mean",
-    "sign_consensus",
-    "sign_consensus_transport",
-    "vwm",
-    "group_l2_mean",
-    "group_sign_mean",
-    "trim_opposing",
-)
-PATCH_SCORE_LAYER_MODES = (
-    "final",
-    "pre_last_downsample",
-)
+PATCH_SCORE_LAYER_MODES = ("final",)
 POST_DROPOUT_NOISE_TYPES = (
-    "none",
+    "gaussian",
     "opponent_projected",
-    "feature_iid",
-    "pixel_iid",
-    "pixel_opponent",
-    "feature_lowpass",
-    "feature_rademacher",
-)
-POST_DROPOUT_NOISE_POSITIONS = (
-    "initial",
-    "pre_last_downsample",
-    "final",
 )
 
 
@@ -91,14 +67,10 @@ class PatchScoreAttacker:
         post_dropout_phase_token_noise: bool = True,
         post_dropout_feature_noise_strength: float | None = None,
         post_dropout_feature_noise_type: str = "opponent_projected",
-        post_dropout_feature_noise_position: str = "initial",
         feature_layer: int = 12,
         patch_score_layer: str = "final",
-        gradient_postprocess: str = "mean",
-        gradient_consensus_lambda: float = 0.2,
-        gradient_smooth_sigma: float = 0.0,
-        gradient_divisive_sigma: float = 0.0,
-        gradient_clip_percentile: float = 0.0,
+        gaussian_sigma: float = 4.0,
+        gaussian_alpha: float = 0.75,
         device: torch.device | None = None,
     ) -> None:
         if epsilon < 0:
@@ -141,11 +113,6 @@ class PatchScoreAttacker:
                 "post_dropout_feature_noise_type must be one of "
                 f"{POST_DROPOUT_NOISE_TYPES}, got {post_dropout_feature_noise_type!r}."
             )
-        if post_dropout_feature_noise_position not in POST_DROPOUT_NOISE_POSITIONS:
-            raise ValueError(
-                "post_dropout_feature_noise_position must be one of "
-                f"{POST_DROPOUT_NOISE_POSITIONS}, got {post_dropout_feature_noise_position!r}."
-            )
         if not 0.0 <= patch_dropout_ratio <= 1.0:
             raise ValueError("patch_dropout_ratio must be in [0, 1].")
         if patch_dropout_score_mode not in ("high", "low", "all"):
@@ -167,19 +134,12 @@ class PatchScoreAttacker:
                 "patch_score_layer must be one of "
                 f"{PATCH_SCORE_LAYER_MODES}, got {patch_score_layer!r}."
             )
-        if gradient_postprocess not in GRADIENT_POSTPROCESS_MODES:
-            raise ValueError(
-                "gradient_postprocess must be one of "
-                f"{GRADIENT_POSTPROCESS_MODES}, got {gradient_postprocess!r}."
-            )
-        if not 0.0 <= gradient_consensus_lambda <= 1.0:
-            raise ValueError("gradient_consensus_lambda must be in [0, 1].")
-        if gradient_smooth_sigma < 0:
-            raise ValueError("gradient_smooth_sigma must be non-negative.")
-        if gradient_divisive_sigma < 0:
-            raise ValueError("gradient_divisive_sigma must be non-negative.")
-        if not 0.0 <= gradient_clip_percentile <= 0.5:
-            raise ValueError("gradient_clip_percentile must be in [0, 0.5].")
+        if gaussian_sigma < 0:
+            raise ValueError("gaussian_sigma must be non-negative.")
+        if gaussian_alpha < 0:
+            raise ValueError("gaussian_alpha must be non-negative.")
+        if gaussian_alpha > 0 and gaussian_sigma == 0:
+            raise ValueError("gaussian_sigma must be positive when gaussian_alpha is enabled.")
 
         self.model = model
         self.model.eval()
@@ -227,14 +187,10 @@ class PatchScoreAttacker:
             else self.guide_aug_strength
         )
         self.post_dropout_feature_noise_type = post_dropout_feature_noise_type
-        self.post_dropout_feature_noise_position = post_dropout_feature_noise_position
         self.feature_layer = int(feature_layer)
         self.patch_score_layer = patch_score_layer
-        self.gradient_postprocess = gradient_postprocess
-        self.gradient_consensus_lambda = float(gradient_consensus_lambda)
-        self.gradient_smooth_sigma = float(gradient_smooth_sigma)
-        self.gradient_divisive_sigma = float(gradient_divisive_sigma)
-        self.gradient_clip_percentile = float(gradient_clip_percentile)
+        self.gaussian_sigma = float(gaussian_sigma)
+        self.gaussian_alpha = float(gaussian_alpha)
         self.pixel_mean = torch.tensor(IMAGENET_MEAN, device=self.device).view(1, 3, 1, 1)
         self.pixel_std = torch.tensor(IMAGENET_STD, device=self.device).view(1, 3, 1, 1)
         model_mean = getattr(model, "model_mean", IMAGENET_MEAN)
@@ -256,21 +212,12 @@ class PatchScoreAttacker:
             "mi_cumulative_cosine": [],
         }
         self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
-        self._spatial_kernel = (
-            self._build_ti_kernel(self.gradient_smooth_sigma)
-            if self.gradient_smooth_sigma > 0
-            else None
-        )
 
         if self.attack_method == "original_score_postdrop_phase_pair":
             if self.input_diversity:
                 raise ValueError("the post-dropout phase-pair mainline does not combine with DIM.")
             if self.input_diversity_views_per_group != 2:
                 raise ValueError("the post-dropout phase-pair mainline requires two views per group.")
-            if self.patch_dropout_noise_mode != "opponent_channel_gaussian":
-                raise ValueError(
-                    "the generalized mainline strictly requires opponent-channel RGB projection noise."
-                )
             if self.token_score_patch_noise:
                 raise ValueError(
                     "score-layer patch noise is not supported by the strict cross-architecture mainline."
@@ -300,121 +247,23 @@ class PatchScoreAttacker:
             "feature_noise_type": self._feature_noise_type,
             "post_dropout_feature_noise_strength": self.post_dropout_feature_noise_strength,
             "post_dropout_feature_noise_type": self.post_dropout_feature_noise_type,
-            "post_dropout_feature_noise_position": self.post_dropout_feature_noise_position,
+            "post_dropout_feature_noise_position": "initial",
+            "gaussian_sigma": self.gaussian_sigma,
+            "gaussian_alpha": self.gaussian_alpha,
             "model_mean": self.model_mean.flatten().tolist(),
             "model_std": self.model_std.flatten().tolist(),
         }
 
     @staticmethod
-    def _l2_normalize_view_gradients(view_gradients: torch.Tensor) -> torch.Tensor:
-        """Normalize each view and sample independently over C/H/W."""
-        if view_gradients.ndim != 5:
-            raise ValueError(
-                "view_gradients must have shape [num_views, batch, channels, height, width]."
-            )
-        norms = view_gradients.flatten(start_dim=2).norm(p=2, dim=2, keepdim=True)
-        return view_gradients / norms.clamp_min(1e-12).view(*norms.shape[:2], 1, 1, 1)
-
-    @classmethod
-    def _aggregate_gradients(
-        cls,
-        view_gradients: torch.Tensor,
-        gradient_postprocess: str = "mean",
-        gradient_consensus_lambda: float = 0.2,
-    ) -> torch.Tensor:
-        """Aggregate independent view gradients before the existing grad pipeline.
-
-        The default is intentionally the exact stack-and-mean operation used by the
-        original mainline. All other modes normalize views independently first.
-        """
-        if gradient_postprocess not in GRADIENT_POSTPROCESS_MODES:
-            raise ValueError(
-                "gradient_postprocess must be one of "
-                f"{GRADIENT_POSTPROCESS_MODES}, got {gradient_postprocess!r}."
-            )
-        if not 0.0 <= gradient_consensus_lambda <= 1.0:
-            raise ValueError("gradient_consensus_lambda must be in [0, 1].")
+    def _aggregate_gradients(view_gradients: torch.Tensor) -> torch.Tensor:
+        """Return the raw mean over all actual model views."""
         if view_gradients.ndim != 5:
             raise ValueError(
                 "view_gradients must have shape [num_views, batch, channels, height, width]."
             )
         if view_gradients.size(0) == 0:
             raise ValueError("view_gradients must contain at least one view.")
-
-        mean_gradient = view_gradients.mean(dim=0)
-        if gradient_postprocess == "mean":
-            return mean_gradient
-
-        normalized = cls._l2_normalize_view_gradients(view_gradients)
-        l2_mean = normalized.mean(dim=0)
-        if gradient_postprocess == "view_l2_mean":
-            return l2_mean
-
-        sign_consensus = torch.sign(torch.sign(normalized).mean(dim=0))
-        if gradient_postprocess == "sign_consensus":
-            return sign_consensus
-        if gradient_postprocess == "sign_consensus_transport":
-            return (1.0 - gradient_consensus_lambda) * mean_gradient + gradient_consensus_lambda * sign_consensus
-
-        # Variance-weighted mean: weight each coordinate inversely by
-        # its coefficient of variation across views.  Coordinates where
-        # views agree (low σ/|μ|) get higher weight than coordinates
-        # where views disagree (high σ/|μ|).
-        if gradient_postprocess == "vwm":
-            view_std = view_gradients.std(dim=0)  # [B, C, H, W]
-            mean_abs = mean_gradient.abs().clamp_min(1e-12)
-            cv = view_std / mean_abs  # coefficient of variation per coordinate
-            weights = 1.0 / (1.0 + cv)  # [B, C, H, W]
-            return (mean_gradient * weights) / weights.mean().clamp_min(1e-12)
-
-        # Group-L2-mean: normalize each group's contribution independently
-        # before cross-group averaging.  Each group (2 views sharing a
-        # dropout mask) gets equal weight, preventing any single mask
-        # scenario from dominating the ensemble.
-        if gradient_postprocess == "group_l2_mean":
-            V = view_gradients.size(0)
-            if V % 2 != 0:
-                raise ValueError("group_l2_mean requires an even number of views.")
-            num_groups = V // 2
-            grouped = view_gradients.view(num_groups, 2, *view_gradients.shape[1:])
-            group_means = grouped.mean(dim=1)  # [G, B, C, H, W]
-            group_norms = group_means.flatten(2).norm(p=2, dim=2, keepdim=True)  # [G, B, 1]
-            normalized_groups = group_means / group_norms.clamp_min(1e-12).view(
-                num_groups, -1, 1, 1, 1
-            )
-            return normalized_groups.mean(dim=0)  # [B, C, H, W]
-
-        # Group-sign-mean: take sign of each group's mean, then average.
-        # Within-group opposition causes the mean to be small, but its SIGN
-        # captures the net direction.  Averaging per-group signs gives each
-        # dropout mask scenario equal directional weight.
-        if gradient_postprocess == "group_sign_mean":
-            V = view_gradients.size(0)
-            num_groups = V // 2
-            grouped = view_gradients.view(num_groups, 2, *view_gradients.shape[1:])
-            group_signs = grouped.mean(dim=1).sign()  # [G, B, C, H, W]
-            return group_signs.float().mean(dim=0)  # [B, C, H, W]
-
-        # Trim-opposing: exclude groups where the two views most strongly
-        # oppose each other.  gradient_consensus_lambda controls the fraction
-        # of groups to trim (e.g., 0.2 = trim bottom 20% = 2/10 groups).
-        if gradient_postprocess == "trim_opposing":
-            V = view_gradients.size(0)
-            num_groups = V // 2
-            grouped = view_gradients.view(num_groups, 2, *view_gradients.shape[1:])
-            # Per-group cosine between the two views
-            g_flat = grouped.flatten(3)  # [G, 2, B, D]
-            g_flat = g_flat / g_flat.norm(p=2, dim=3, keepdim=True).clamp_min(1e-12)
-            group_cos = (g_flat[:, 0] * g_flat[:, 1]).sum(dim=2)  # [G, B]
-            mean_group_cos = group_cos.mean(dim=1)  # [G]
-            trim_count = max(1, int(num_groups * gradient_consensus_lambda))
-            _, trim_indices = torch.topk(mean_group_cos, trim_count, largest=False)
-            keep_mask = torch.ones(num_groups, device=view_gradients.device, dtype=torch.bool)
-            keep_mask[trim_indices] = False
-            group_means = grouped.mean(dim=1)  # [G, B, C, H, W]
-            return group_means[keep_mask].mean(dim=0)  # [B, C, H, W]
-
-        return (1.0 - gradient_consensus_lambda) * mean_gradient + gradient_consensus_lambda * sign_consensus
+        return view_gradients.mean(dim=0)
 
     def _record_gradient_diagnostics(
         self,
@@ -474,6 +323,33 @@ class PatchScoreAttacker:
         padding = kernel.size(-1) // 2
         padded = F.pad(grad, (padding, padding, padding, padding), mode="reflect")
         return F.conv2d(padded, kernel, groups=grad.size(1))
+
+    def _apply_gaussian_residual(self, grad: torch.Tensor) -> torch.Tensor:
+        """Add a channel-wise Gaussian-smoothed residual without rescaling it."""
+        if self.gaussian_alpha == 0:
+            return grad
+        radius = max(1, int(round(3 * self.gaussian_sigma)))
+        axis = torch.arange(
+            -radius,
+            radius + 1,
+            device=grad.device,
+            dtype=grad.dtype,
+        )
+        kernel_1d = torch.exp(-0.5 * (axis / self.gaussian_sigma).square())
+        kernel_1d = kernel_1d / kernel_1d.sum()
+        kernel = (kernel_1d[:, None] @ kernel_1d[None, :]).view(
+            1,
+            1,
+            2 * radius + 1,
+            2 * radius + 1,
+        )
+        kernel = kernel.repeat(grad.size(1), 1, 1, 1)
+        smoothed = F.conv2d(
+            F.pad(grad, (radius, radius, radius, radius), mode="reflect"),
+            kernel,
+            groups=grad.size(1),
+        )
+        return grad + self.gaussian_alpha * smoothed
 
     def _input_diversity(self, pixels: torch.Tensor) -> torch.Tensor:
         if not self.input_diversity:
@@ -715,56 +591,26 @@ class PatchScoreAttacker:
     def _build_post_dropout_feature_noise(
         self,
         feature_tokens: torch.Tensor,
-        grid_size: tuple[int, int],
         state,
-        pixels: torch.Tensor,
         image_mask: torch.Tensor,
-        position: str,
     ) -> torch.Tensor:
-        noise_type = self.post_dropout_feature_noise_type
-        if noise_type == "none":
-            return torch.zeros_like(feature_tokens)
-
-        if position == "initial":
-            feature_drop_mask = self._image_mask_to_projection_drop_mask(image_mask, state)
-        else:
-            feature_drop_mask = self._image_mask_to_grid_drop_mask(image_mask, grid_size)
-
-        if noise_type == "opponent_projected":
-            if position != "initial":
-                raise ValueError("opponent_projected noise is only defined at the initial RGB projection.")
+        """Build one of the two retained kept-only noises at the RGB projection."""
+        feature_drop_mask = self._image_mask_to_projection_drop_mask(image_mask, state)
+        if self.post_dropout_feature_noise_type == "opponent_projected":
             raw_noise = self._strict_opponent_feature_noise(state)
-        elif noise_type in ("pixel_iid", "pixel_opponent"):
-            if position != "initial":
-                raise ValueError(f"{noise_type} noise is only defined at the initial RGB projection.")
-            if noise_type == "pixel_iid":
-                pixel_noise = self._randn_like(pixels, "postdrop_pixel_iid")
-            else:
-                pixel_noise = self._opponent_channel_noise_like(pixels, "postdrop_pixel_opponent")
-            weight = state.rgb_projection_weight.detach().to(feature_tokens)
-            raw_spatial = F.conv2d(
-                pixel_noise.to(feature_tokens),
-                weight,
-                stride=state.projection_stride,
-                padding=state.projection_padding,
-                dilation=state.projection_dilation,
-            )
-            raw_noise = raw_spatial.flatten(2).transpose(1, 2)
-        elif noise_type == "feature_iid":
-            raw_noise = self._randn_like(feature_tokens, "postdrop_feature_iid")
-        elif noise_type == "feature_lowpass":
-            raw_noise = self._randn_like(feature_tokens, "postdrop_feature_lowpass")
-            batch, count, dimension = raw_noise.shape
-            height, width = grid_size
-            raw_spatial = raw_noise.transpose(1, 2).reshape(batch, dimension, height, width)
-            raw_noise = F.avg_pool2d(raw_spatial, kernel_size=3, stride=1, padding=1)
-            raw_noise = raw_noise.flatten(2).transpose(1, 2)
-        elif noise_type == "feature_rademacher":
-            raw_noise = self._randn_like(feature_tokens, "postdrop_feature_rademacher").sign()
+        elif self.post_dropout_feature_noise_type == "gaussian":
+            self._feature_noise_type = "feature_iid_gaussian"
+            raw_noise = self._randn_like(feature_tokens, "mainline_feature_gaussian")
         else:
-            raise ValueError(f"unsupported post-dropout noise type: {noise_type!r}")
+            raise ValueError(
+                f"unsupported post-dropout noise type: {self.post_dropout_feature_noise_type!r}"
+            )
 
-        matched = self._match_feature_noise_rms(feature_tokens, raw_noise, noise_type)
+        matched = self._match_feature_noise_rms(
+            feature_tokens,
+            raw_noise,
+            self.post_dropout_feature_noise_type,
+        )
         return torch.where((~feature_drop_mask).unsqueeze(-1), matched, torch.zeros_like(matched))
 
     @staticmethod
@@ -797,14 +643,6 @@ class PatchScoreAttacker:
                 f"{tuple(drop_fraction.shape[-2:])} != {state.grid_size}."
             )
         return drop_fraction.flatten(1).gt(0.5)
-
-    @staticmethod
-    def _image_mask_to_grid_drop_mask(
-        image_mask: torch.Tensor,
-        grid_size: tuple[int, int],
-    ) -> torch.Tensor:
-        pooled = F.adaptive_avg_pool2d(image_mask, grid_size)
-        return pooled.flatten(1).gt(0.5)
 
     def _patch_score_candidate_mask(self, scores: torch.Tensor) -> torch.Tensor:
         working_scores = scores
@@ -971,14 +809,6 @@ class PatchScoreAttacker:
             mode="nearest",
         )
 
-    @staticmethod
-    def _image_mask_to_patch_drop_mask(
-        image_mask: torch.Tensor,
-        grid_size: tuple[int, int],
-    ) -> torch.Tensor:
-        pooled = F.adaptive_avg_pool2d(image_mask, grid_size)
-        return pooled.flatten(1).gt(0.5)
-
     def _forward_vit_tokens(self, base_model, tokens: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         tokens = self._run_vit_blocks(base_model.blocks, tokens, 0, len(base_model.blocks))
         logits = base_model.forward_head(base_model.norm(tokens))
@@ -997,42 +827,15 @@ class PatchScoreAttacker:
         state = prepare(self._normalize(pixels))
         state.validate()
         local_tokens = state.local_tokens
-        if not self.post_dropout_phase_token_noise or self.post_dropout_feature_noise_type == "none":
+        if not self.post_dropout_phase_token_noise:
             logits = resume(state, local_tokens)
-        elif self.post_dropout_feature_noise_position == "initial":
+        else:
             noise = self._build_post_dropout_feature_noise(
                 local_tokens,
-                state.grid_size,
                 state,
-                pixels,
                 image_mask,
-                "initial",
             )
             logits = resume(state, local_tokens + noise)
-        else:
-            forward_with_noise = getattr(self.model, "forward_with_attack_noise", None)
-            if forward_with_noise is None:
-                raise ValueError(
-                    f"{self.model.model_name} does not support noise position "
-                    f"{self.post_dropout_feature_noise_position!r}."
-                )
-
-            def build_noise(feature_tokens, grid_size, position):
-                return self._build_post_dropout_feature_noise(
-                    feature_tokens,
-                    grid_size,
-                    state,
-                    pixels,
-                    image_mask,
-                    position,
-                )
-
-            logits = forward_with_noise(
-                state,
-                local_tokens,
-                self.post_dropout_feature_noise_position,
-                build_noise,
-            )
         return F.cross_entropy(logits, labels)
 
     def _iter_original_score_postdrop_phase_pair(
@@ -1177,10 +980,6 @@ class PatchScoreAttacker:
         self,
         pixels: torch.Tensor,
         labels: torch.Tensor,
-        observer: "GradientObserver | None" = None,
-        probe: "GradientProbe | None" = None,
-        sample_ids: list[str] | None = None,
-        step_index: int = 0,
     ) -> torch.Tensor:
         gradients = []
         for loss in self._iter_attack_losses(pixels, labels):
@@ -1188,88 +987,16 @@ class PatchScoreAttacker:
         if not gradients:
             raise RuntimeError("no attack losses were generated.")
         view_gradients = torch.stack(gradients, dim=0)
-        if observer is not None:
-            observer.record_raw_views(view_gradients)
-        if probe is None:
-            aggregated = self._aggregate_gradients(
-                view_gradients,
-                gradient_postprocess=self.gradient_postprocess,
-                gradient_consensus_lambda=self.gradient_consensus_lambda,
-            )
-        else:
-            if sample_ids is None:
-                raise ValueError("sample_ids are required for gradient probes.")
-            aggregated = probe.apply(view_gradients, sample_ids, step_index)
-            if observer is not None:
-                observer.record_probe(view_gradients.mean(dim=0), aggregated, probe.name)
-        if observer is not None:
-            observer.record_aggregated(aggregated)
+        aggregated = self._aggregate_gradients(view_gradients)
         self._record_gradient_diagnostics(view_gradients, aggregated)
         return aggregated
-
-    def _apply_divisive_normalization(self, grad: torch.Tensor) -> torch.Tensor:
-        """Local divisive normalization: suppress peaks, amplify diffuse signal.
-
-        grad_out = grad / (1 + blur(|grad|, sigma))
-        where blur is a 2D Gaussian with per-channel groups.
-
-        This reduces spatial concentration (spatial Gini) and extreme values
-        (kurtosis), both of which correlate with poor transferability.
-        """
-        sigma = self.gradient_divisive_sigma
-        if sigma <= 0:
-            return grad
-        # Build Gaussian kernel (same as TI kernel)
-        radius = int(3 * sigma)
-        axis = torch.arange(-radius, radius + 1, dtype=torch.float32, device=grad.device)
-        gauss_1d = torch.exp(-0.5 * (axis / sigma).square())
-        gauss_1d = gauss_1d / gauss_1d.sum()
-        kernel_2d = (gauss_1d[:, None] @ gauss_1d[None, :]).view(1, 1, 2 * radius + 1, 2 * radius + 1)
-        kernel = kernel_2d.to(grad.device, grad.dtype).repeat(grad.size(1), 1, 1, 1)
-        padding = radius
-        abs_grad = grad.abs()
-        padded_abs = F.pad(abs_grad, (padding, padding, padding, padding), mode="reflect")
-        local_scale = F.conv2d(padded_abs, kernel, groups=grad.size(1))
-        return grad / (1.0 + local_scale)
-
-    def _apply_percentile_clip(self, grad: torch.Tensor) -> torch.Tensor:
-        """Soft-clip extreme gradient values to reduce kurtosis.
-
-        Values beyond the given percentile are smoothly squashed toward the
-        threshold, reducing the impact of outlier gradient coordinates.
-        """
-        pct = self.gradient_clip_percentile
-        if pct <= 0:
-            return grad
-        flat = grad.flatten(1)  # [B, D]
-        lower = flat.kthvalue(max(1, int(flat.size(1) * pct)), dim=1, keepdim=True).values
-        upper = flat.kthvalue(min(flat.size(1), int(flat.size(1) * (1.0 - pct))), dim=1, keepdim=True).values
-        # Soft clip: tanh-like squashing beyond thresholds
-        # For values > upper: upper + (val - upper) / (1 + (val - upper) / scale)
-        # For values < lower: lower - (lower - val) / (1 + (lower - val) / scale)
-        scale = (upper - lower).clamp_min(1e-8) * 0.5
-        upper_mask = flat > upper
-        lower_mask = flat < lower
-        flat = torch.where(
-            upper_mask,
-            upper + (flat - upper) / (1.0 + (flat - upper).abs() / scale),
-            flat,
-        )
-        flat = torch.where(
-            lower_mask,
-            lower - (lower - flat) / (1.0 + (lower - flat).abs() / scale),
-            flat,
-        )
-        return flat.view_as(grad)
 
     def attack_batch(
         self,
         images: torch.Tensor,
         labels: torch.Tensor,
-        observer: "GradientObserver | None" = None,
         replay: "GradientReplay | None" = None,
         sample_ids: list[str] | None = None,
-        probe: "GradientProbe | None" = None,
     ) -> torch.Tensor:
         if replay is not None:
             if sample_ids is None or len(sample_ids) != images.size(0):
@@ -1294,27 +1021,9 @@ class PatchScoreAttacker:
 
             self._compute_generic_patch_scores(grad_pixels)
             grad_pixels = grad_pixels.detach().requires_grad_(True)
-            gradient = self._smooth_grad(
-                self._attack_grad(
-                    grad_pixels,
-                    labels,
-                    observer=observer,
-                    probe=probe,
-                    sample_ids=sample_ids,
-                    step_index=step_index,
-                )
-            )
-            if self._spatial_kernel is not None:
-                ti_saved = self._ti_kernel
-                self._ti_kernel = self._spatial_kernel
-                gradient = self._smooth_grad(gradient)
-                self._ti_kernel = ti_saved
-
-            # Gradient post-processing: divisive normalization reduces spatial
-            # concentration; percentile clipping reduces kurtosis.  Both are
-            # motivated by per-sample correlation with transfer success.
-            gradient = self._apply_divisive_normalization(gradient)
-            gradient = self._apply_percentile_clip(gradient)
+            gradient = self._attack_grad(grad_pixels, labels)
+            gradient = self._apply_gaussian_residual(gradient)
+            gradient = self._smooth_grad(gradient)
 
             expected_views = (
                 self.guide_aug_copies
@@ -1332,25 +1041,11 @@ class PatchScoreAttacker:
             # still sign-based and is projected back into the epsilon ball
             # below, so removing per-step normalization only changes the
             # relative weighting of gradients in the MI accumulator.
-            if observer is not None:
-                observer.record_gradient(gradient)
-                observer.record_pre_momentum(momentum, gradient)
             if self.use_momentum:
                 momentum = self.decay * momentum + gradient
                 update = momentum
             else:
                 update = gradient
-
-            # Optional direction-only processing after MI accumulation.  A
-            # probe may precondition the update used by sign() without
-            # changing the stored MI state, view aggregation, step size, or
-            # projection path.
-            if probe is not None:
-                apply_update = getattr(probe, "apply_update", None)
-                if apply_update is not None:
-                    if sample_ids is None:
-                        raise ValueError("sample_ids are required for update probes.")
-                    update = apply_update(update, gradient, sample_ids, step_index)
 
             with torch.no_grad():
                 self._gradient_diagnostics["mi_cumulative_cosine"].append(
@@ -1359,16 +1054,9 @@ class PatchScoreAttacker:
                     else 1.0
                 )
 
-            if observer is not None:
-                observer.record_momentum(momentum)
-                observer.record_sign_update(update.sign())
-
             adv_pixels = adv_pixels + self.step_size * update.sign()
             delta = torch.clamp(adv_pixels - clean_pixels, -self.epsilon, self.epsilon)
             adv_pixels = torch.clamp(clean_pixels + delta, 0.0, 1.0).detach()
-
-            if observer is not None:
-                observer.close_step()
 
         self._gradient_replay = None
         return self._normalize_output(adv_pixels)

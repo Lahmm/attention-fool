@@ -4,7 +4,6 @@ import torch
 
 from .base import (
     AttackFeatureState,
-    ClsTokenMixin,
     DEFAULT_PRETRAINED,
     PatchScoreFeatures,
     WhiteBoxWithHook,
@@ -16,7 +15,7 @@ from .base import (
 DEFAULT_MODEL_NAME = "vit_base_patch16_224"
 
 
-class ViTWithHook(ClsTokenMixin, WhiteBoxWithHook):
+class ViTWithHook(WhiteBoxWithHook):
     default_model_name = DEFAULT_MODEL_NAME
 
     def _feature_modules(self):
@@ -79,6 +78,3 @@ def build_vit_model(
     device=None,
 ) -> ViTWithHook:
     return ViTWithHook(model_name=model_name, num_classes=num_classes, pretrained=pretrained, device=device)
-
-
-ViTWithAttn = ViTWithHook

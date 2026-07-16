@@ -6,7 +6,7 @@ from .base import DEFAULT_PRETRAINED, WhiteBoxWithHook
 from .cait import CaiTS24WithHook, build_cait_s24_model
 from .pit import PiTB224WithHook, build_pit_b_224_model
 from .visformer import VisformerSmallWithHook, build_visformer_small_model
-from .vit import DEFAULT_MODEL_NAME, ViTWithAttn, ViTWithHook, build_vit_model
+from .vit import DEFAULT_MODEL_NAME, ViTWithHook, build_vit_model
 
 
 WHITEBOX_MODEL_CHOICES = (

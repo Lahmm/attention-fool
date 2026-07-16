@@ -1,0 +1,150 @@
+import sys
+import unittest
+
+import torch
+
+from attack import ATTACK_METHODS, PatchScoreAttacker
+from main import parse_args
+
+
+class DummyModel:
+    model_mean = (0.5, 0.5, 0.5)
+    model_std = (0.5, 0.5, 0.5)
+
+    def eval(self):
+        return self
+
+
+def make_attacker(**kwargs):
+    return PatchScoreAttacker(model=DummyModel(), device=torch.device("cpu"), **kwargs)
+
+
+class AttackPipelineTests(unittest.TestCase):
+    def test_raw_view_mean_keeps_all_twenty_gradients(self):
+        attacker = make_attacker()
+        pixels = torch.zeros(2, 3, 2, 2, requires_grad=True)
+        losses = [(pixels * float(index + 1)).sum() for index in range(20)]
+        attacker._iter_attack_losses = lambda _pixels, _labels: iter(losses)
+
+        actual = attacker._attack_grad(pixels, torch.zeros(2, dtype=torch.long))
+
+        self.assertEqual(
+            attacker.input_diversity_groups * attacker.input_diversity_views_per_group,
+            20,
+        )
+        self.assertTrue(torch.equal(actual, torch.full_like(pixels, 10.5)))
+
+    def test_gaussian_residual_is_identity_when_disabled(self):
+        attacker = make_attacker(gaussian_alpha=0.0)
+        gradient = torch.randn(2, 3, 16, 16)
+        self.assertTrue(torch.equal(attacker._apply_gaussian_residual(gradient), gradient))
+
+    def test_gaussian_residual_retains_original_and_adds_smooth_component(self):
+        attacker = make_attacker(gaussian_sigma=1.0, gaussian_alpha=0.75)
+        gradient = torch.zeros(1, 3, 15, 15)
+        gradient[:, :, 7, 7] = 1.0
+
+        result = attacker._apply_gaussian_residual(gradient)
+
+        self.assertGreater(float(result[0, 0, 7, 7]), 1.0)
+        self.assertGreater(float(result[0, 0, 7, 6]), 0.0)
+        self.assertTrue(torch.equal(result[:, 0], result[:, 1]))
+
+    def test_attack_batch_projects_to_epsilon_ball(self):
+        attacker = make_attacker(
+            steps=1,
+            epsilon=0.1,
+            step_size=0.2,
+            use_momentum=False,
+            gaussian_alpha=0.0,
+        )
+        attacker._compute_generic_patch_scores = lambda _pixels: None
+
+        def raw_gradient(pixels, _labels):
+            attacker._actual_forward_view_count = 20
+            return torch.full_like(pixels, 2.0)
+
+        attacker._attack_grad = raw_gradient
+        images = torch.zeros(1, 3, 2, 2)
+        adversarial = attacker.attack_batch(images, torch.zeros(1, dtype=torch.long))
+        clean_pixels = attacker._denormalize(images)
+        adversarial_pixels = attacker._denormalize(adversarial)
+        self.assertLessEqual(
+            float((adversarial_pixels - clean_pixels).abs().max()),
+            0.1 + 1e-6,
+        )
+
+    def test_retained_attack_methods_and_cli_defaults(self):
+        self.assertEqual(
+            set(ATTACK_METHODS),
+            {"none", "patch_dropout", "token_patch_dropout", "original_score_postdrop_phase_pair"},
+        )
+        old_argv = sys.argv
+        sys.argv = ["main.py", "--dim", "--ni", "--ti-sigma", "1.0"]
+        try:
+            args = parse_args()
+        finally:
+            sys.argv = old_argv
+
+        self.assertEqual(args.max_attacked_samples, 1000)
+        self.assertTrue(args.dim)
+        self.assertTrue(args.ni)
+        self.assertEqual(args.ti_sigma, 1.0)
+        self.assertEqual(args.gaussian_sigma, 4.0)
+        self.assertEqual(args.gaussian_alpha, 0.75)
+        self.assertEqual(args.post_dropout_feature_noise_type, "opponent_projected")
+
+    def test_dim_and_ti_keep_image_shape(self):
+        attacker = make_attacker(
+            attack_method="none",
+            input_diversity=True,
+            ti_sigma=1.0,
+            gaussian_alpha=0.0,
+        )
+        pixels = torch.randn(2, 3, 16, 16)
+        self.assertEqual(attacker._input_diversity(pixels).shape, pixels.shape)
+        self.assertEqual(attacker._smooth_grad(pixels).shape, pixels.shape)
+
+    def test_none_patch_and_token_dropout_paths_keep_expected_view_counts(self):
+        pixels = torch.zeros(1, 3, 4, 4)
+        labels = torch.zeros(1, dtype=torch.long)
+
+        none_attacker = make_attacker(attack_method="none", gaussian_alpha=0.0)
+        none_attacker._attack_loss_for_pixels = lambda view, _labels: view.sum()
+        self.assertEqual(len(list(none_attacker._iter_attack_losses(pixels, labels))), 1)
+        self.assertEqual(none_attacker._actual_forward_view_count, 1)
+
+        patch_attacker = make_attacker(
+            attack_method="patch_dropout",
+            guide_aug_copies=3,
+            gaussian_alpha=0.0,
+        )
+        patch_attacker._patch_dropout_pixels = lambda view: view
+        patch_attacker._attack_loss_for_pixels = lambda view, _labels: view.sum()
+        self.assertEqual(len(list(patch_attacker._iter_attack_losses(pixels, labels))), 3)
+        self.assertEqual(patch_attacker._actual_forward_view_count, 3)
+
+        token_attacker = make_attacker(
+            attack_method="token_patch_dropout",
+            input_diversity_groups=2,
+            input_diversity_views_per_group=2,
+            input_diversity_phase_shift_set=((1, 1),),
+            gaussian_alpha=0.0,
+        )
+        token_attacker._attack_loss_for_token_patch_dropout = (
+            lambda view, _labels: view.sum()
+        )
+        self.assertEqual(len(list(token_attacker._iter_attack_losses(pixels, labels))), 4)
+        self.assertEqual(token_attacker._actual_forward_view_count, 4)
+
+    def test_invalid_mainline_configuration_is_rejected(self):
+        with self.assertRaises(ValueError):
+            make_attacker(input_diversity_groups=11, input_diversity_views_per_group=2)
+        with self.assertRaises(ValueError):
+            make_attacker(gaussian_sigma=0.0, gaussian_alpha=0.75)
+        with self.assertRaises(ValueError):
+            make_attacker(nesterov=True, use_momentum=False)
+
+
+if __name__ == "__main__":
+    unittest.main()

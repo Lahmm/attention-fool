@@ -4,7 +4,6 @@ import torch
 
 from .base import (
     AttackFeatureState,
-    ClsTokenMixin,
     DEFAULT_PRETRAINED,
     PatchScoreFeatures,
     WhiteBoxWithHook,
@@ -16,7 +15,7 @@ from .base import (
 DEFAULT_MODEL_NAME = "cait_s24_224"
 
 
-class CaiTS24WithHook(ClsTokenMixin, WhiteBoxWithHook):
+class CaiTS24WithHook(WhiteBoxWithHook):
     default_model_name = DEFAULT_MODEL_NAME
 
     def _feature_modules(self):
