@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 from pathlib import Path
+
+LOCAL_HF_CACHE = Path(__file__).resolve().parent / "data" / "huggingface"
+os.environ.setdefault("HF_HOME", str(LOCAL_HF_CACHE))
+os.environ.setdefault("HF_HUB_CACHE", str(LOCAL_HF_CACHE / "hub"))
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 from tqdm import tqdm
 
