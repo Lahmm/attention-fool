@@ -275,17 +275,17 @@ patch-score 和 Grad-CAM 都可以产生一张“哪些 patch 更重要”的图
 
 #### 6.6.1 两种方法的本质区别
 
-当前 patch-score 对第 (n) 个 patch 的定义是：
+当前 patch-score 对第 $n$ 个 patch 的定义是：
 
 \[
 s_n = \cos(x_n, g),
 \]
 
-其中 (x_n) 是最终语义层的局部 patch 表示，(g) 是 global/CLS 表示。它衡量的是：
+其中 $x_n$ 是最终语义层的局部 patch 表示，$g$ 是 global/CLS 表示。它衡量的是：
 
 > 这个局部 patch 的语义方向与模型当前整体表示有多接近。
 
-标准 Grad-CAM 则针对某个指定类别 logit (y^c)，使用该类别对中间激活的梯度：
+标准 Grad-CAM 则针对某个指定类别 logit $y^c$，使用该类别对中间激活的梯度：
 
 \[
 \alpha_k^c = \frac{1}{N}\sum_n \frac{\partial y^c}{\partial x_{n,k}},
@@ -326,9 +326,9 @@ h_n^c = \operatorname{ReLU}\left(\sum_k \alpha_k^c x_{n,k}\right).
 
 由于当前四个白盒源模型不是统一 CNN，主比较不应把 CNN 原生 Grad-CAM 与 Transformer 的 patch-score 直接混在一起。建议实现一个**统一 token Grad-CAM-style baseline**：
 
-1. 使用与 patch-score 相同的最终语义局部 token (X\in\mathbb{R}^{N\times D})。
+1. 使用与 patch-score 相同的最终语义局部 token $X\in\mathbb{R}^{N\times D}$。
 2. 选择一个明确的类别 logit，主实验使用真实类别 logit；在干净样本预测正确的子集上，同时报告预测类别 logit版本。
-3. 保留 (\partial y^c/\partial X)，按 patch 维度做 Grad-CAM 的通道权重聚合。
+3. 保留 $\partial y^c/\partial X$，按 patch 维度做 Grad-CAM 的通道权重聚合。
 4. 对得到的 patch heatmap 使用标准 ReLU 版本作为主结果，并将 signed heatmap 作为消融。
 5. 将 heatmap 重新映射到同一个 patch 网格，采用与 patch-score 完全相同的候选集比例、drop 数量和随机采样策略。
 
