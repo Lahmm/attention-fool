@@ -33,6 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--models", type=str, default="vit_base_patch16_224,cait_s24_224,pit_b_224,visformer_small")
     parser.add_argument("--splits", type=int, default=32)
     parser.add_argument("--calibration-size", type=int, default=32)
+    parser.add_argument("--selection-metric", choices=("loss", "logit"), default="loss")
     parser.add_argument("--seed", type=int, default=20260717)
     return parser.parse_args()
 
@@ -96,6 +97,7 @@ def analyze_model(
     output_root: Path,
     split_count: int,
     calibration_size: int,
+    selection_metric: str,
     seed: int,
 ) -> dict[str, object]:
     rows = read_rows(input_root / model / "route_per_image_raw.csv")
@@ -121,11 +123,11 @@ def analyze_model(
         rng.shuffle(shuffled)
         calibration = shuffled[:calibration_size]
         evaluation = shuffled[calibration_size:]
-        calibration_loss = {
-            strategy: mean_delta(data, calibration, strategy, "loss")
+        calibration_delta = {
+            strategy: mean_delta(data, calibration, strategy, selection_metric)
             for strategy in CANDIDATES
         }
-        selected = max(CANDIDATES, key=lambda strategy: calibration_loss[strategy])
+        selected = max(CANDIDATES, key=lambda strategy: calibration_delta[strategy])
         eval_loss = mean_delta(data, evaluation, selected, "loss")
         eval_logit = mean_delta(data, evaluation, selected, "logit")
         split_rows.append({
@@ -134,10 +136,11 @@ def analyze_model(
             "calibration_size": len(calibration),
             "evaluation_size": len(evaluation),
             "selected_strategy": selected,
-            "calibration_loss_delta": calibration_loss[selected],
-            "calibration_loss_delta_high": calibration_loss["high_score_extreme"],
-            "calibration_loss_delta_low": calibration_loss["low_score_extreme"],
-            "calibration_loss_delta_deviation": calibration_loss["score_deviation_extreme"],
+            "calibration_selection_metric": selection_metric,
+            "calibration_selected_delta": calibration_delta[selected],
+            "calibration_delta_high": calibration_delta["high_score_extreme"],
+            "calibration_delta_low": calibration_delta["low_score_extreme"],
+            "calibration_delta_deviation": calibration_delta["score_deviation_extreme"],
             "evaluation_loss_delta_vs_random": eval_loss,
             "evaluation_logit_delta_vs_random": eval_logit,
         })
@@ -155,6 +158,7 @@ def analyze_model(
         "calibration_size": calibration_size,
         "candidate_strategies": list(CANDIDATES),
         "baseline_strategy": BASELINE,
+        "selection_metric": selection_metric,
         "selected_strategy_counts": selected_counts,
         "selected_strategy_frequency": {
             strategy: count / split_count for strategy, count in selected_counts.items()
@@ -189,6 +193,7 @@ def main() -> None:
             output_root=args.output_root,
             split_count=args.splits,
             calibration_size=args.calibration_size,
+            selection_metric=args.selection_metric,
             seed=args.seed + model_index,
         )
         for model_index, model in enumerate(models)
