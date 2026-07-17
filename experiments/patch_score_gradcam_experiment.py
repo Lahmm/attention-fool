@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-batch", type=int, default=8)
     parser.add_argument("--route-repeats", type=int, default=4)
     parser.add_argument("--drop-ratio", type=float, default=0.15)
-    parser.add_argument("--target-mode", choices=("predicted", "true"), default="predicted")
+    parser.add_argument("--target-mode", choices=("predicted", "true", "non_predicted"), default="predicted")
     parser.add_argument("--seed", type=int, default=20260717)
     parser.add_argument("--image-dir", type=Path, default=REPO_ROOT / "data" / "clean_resized_images")
     parser.add_argument("--annotations", type=Path, default=REPO_ROOT / "data" / "image_name_to_class_id_and_name.json")
@@ -60,6 +60,23 @@ def load_samples(image_dir: Path, annotations_path: Path, limit: int):
     pixels = torch.stack([to_tensor(Image.open(path).convert("RGB")) for _, path, _ in selected])
     labels = torch.tensor([label for _, _, label in selected], dtype=torch.long)
     return [name for name, _, _ in selected], pixels, labels
+
+
+def capture_gradcam_activation(model, normalized: torch.Tensor):
+    """Capture the input to the final feature block, which remains logit-connected."""
+    captured_input: dict[str, torch.Tensor] = {}
+
+    def pre_hook(_module, inputs):
+        captured_input["value"] = inputs[0]
+
+    handle = model.feature_modules[-1].register_forward_pre_hook(pre_hook)
+    try:
+        logits, captured = model(normalized, return_tokens=True)
+    finally:
+        handle.remove()
+    if "value" not in captured_input:
+        raise RuntimeError("failed to capture the final block input for Grad-CAM")
+    return logits, captured, captured_input["value"]
 
 
 def row_spearman(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
@@ -138,25 +155,31 @@ def main() -> None:
         pixels = pixels_cpu[batch_start:batch_end].to(device)
         labels = labels_cpu[batch_start:batch_end].to(device)
         normalized = model_normalize(model, pixels)
-        logits_graph, captured = model(normalized, return_tokens=True)
-        target = logits_graph.argmax(dim=1) if args.target_mode == "predicted" else labels
+        logits_graph, captured, gradcam_activation = capture_gradcam_activation(model, normalized)
+        predicted = logits_graph.argmax(dim=1)
+        if args.target_mode == "predicted":
+            target = predicted
+        elif args.target_mode == "true":
+            target = labels
+        else:
+            target = (predicted + 1) % logits_graph.size(1)
         target_logits = logits_graph.gather(1, target[:, None]).sum()
-        full_gradient = torch.autograd.grad(target_logits, captured[-1], retain_graph=False)[0].detach()
+        full_gradient = torch.autograd.grad(target_logits, gradcam_activation, retain_graph=False)[0].detach()
         with torch.no_grad():
             clean_features = extract_features(model, normalized)
             patch_score_map = cosine_scores(clean_features)
             clean_logits = logits_graph.detach()
-        if captured[-1].ndim == 4:
-            local = captured[-1].flatten(2).transpose(1, 2).detach()
+        if gradcam_activation.ndim == 4:
+            local = gradcam_activation.flatten(2).transpose(1, 2).detach()
             gradient_local = full_gradient.flatten(2).transpose(1, 2)
-            grid_size = (captured[-1].size(-2), captured[-1].size(-1))
+            grid_size = (gradcam_activation.size(-2), gradcam_activation.size(-1))
         elif model.model_name.startswith(("vit_", "pit_")):
-            local = captured[-1][:, 1:].detach()
+            local = gradcam_activation[:, 1:].detach()
             gradient_local = full_gradient[:, 1:]
             side = int(round(local.size(1) ** 0.5))
             grid_size = (side, side)
         else:
-            local = captured[-1].detach()
+            local = gradcam_activation.detach()
             gradient_local = full_gradient
             side = int(round(local.size(1) ** 0.5))
             grid_size = (side, side)
@@ -241,7 +264,7 @@ def main() -> None:
             "drop_ratio": args.drop_ratio,
             "target_mode": args.target_mode,
             "score_layer": "final",
-            "gradcam": "token Grad-CAM ReLU on final local-token activation",
+            "gradcam": "token Grad-CAM ReLU on logit-connected final-block input activation",
             "seed": args.seed,
         },
         "map": {

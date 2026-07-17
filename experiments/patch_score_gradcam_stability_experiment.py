@@ -38,6 +38,7 @@ def main() -> None:
     parser.add_argument("--models", type=str, default=",".join(WHITEBOX_MODEL_CHOICES))
     parser.add_argument("--samples", type=int, default=64)
     parser.add_argument("--sample-batch", type=int, default=8)
+    parser.add_argument("--target-mode", choices=("predicted", "true", "non_predicted"), default="predicted")
     parser.add_argument("--seed", type=int, default=20260717)
     parser.add_argument("--image-dir", type=Path, default=REPO_ROOT / "data" / "clean_resized_images")
     parser.add_argument("--annotations", type=Path, default=REPO_ROOT / "data" / "image_name_to_class_id_and_name.json")
@@ -58,8 +59,8 @@ def main() -> None:
             end = min(len(names), start + args.sample_batch)
             pixels = pixels_cpu[start:end].to(device)
             labels = labels_cpu[start:end].to(device)
-            clean_maps, _, _ = source_maps(model, pixels, labels)
-            flipped_maps, _, _ = source_maps(model, torch.flip(pixels, dims=[3]), labels)
+            clean_maps, _, _ = source_maps(model, pixels, labels, args.target_mode)
+            flipped_maps, _, _ = source_maps(model, torch.flip(pixels, dims=[3]), labels, args.target_mode)
             for selector in SELECTORS:
                 clean = clean_maps[selector]
                 flipped_back = unflip_patch_map(flipped_maps[selector])
@@ -87,7 +88,7 @@ def main() -> None:
         if device.type == "cuda":
             torch.cuda.empty_cache()
     output = {
-        "config": {"models": models, "samples": len(names), "sample_batch": args.sample_batch, "view": "horizontal flip, map unflipped before comparison", "seed": args.seed},
+        "config": {"models": models, "samples": len(names), "sample_batch": args.sample_batch, "target_mode": args.target_mode, "view": "horizontal flip, map unflipped before comparison", "seed": args.seed},
         "results": summaries,
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)

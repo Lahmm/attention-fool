@@ -20,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from nets import WHITEBOX_MODEL_CHOICES, build_whitebox_model
+from patch_score_gradcam_experiment import capture_gradcam_activation
 from patch_score_mechanism_experiment import (
     cosine_scores,
     extract_features,
@@ -41,6 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-batch", type=int, default=8)
     parser.add_argument("--route-repeats", type=int, default=4)
     parser.add_argument("--drop-ratio", type=float, default=0.15)
+    parser.add_argument("--target-mode", choices=("predicted", "true", "non_predicted"), default="predicted")
     parser.add_argument("--seed", type=int, default=20260717)
     parser.add_argument("--image-dir", type=Path, default=REPO_ROOT / "data" / "clean_resized_images")
     parser.add_argument("--annotations", type=Path, default=REPO_ROOT / "data" / "image_name_to_class_id_and_name.json")
@@ -65,26 +67,34 @@ def load_samples(image_dir: Path, annotations_path: Path, limit: int):
     return [name for name, _, _ in selected], pixels, labels
 
 
-def source_maps(model, pixels: torch.Tensor, labels: torch.Tensor):
+def source_maps(model, pixels: torch.Tensor, labels: torch.Tensor, target_mode: str = "predicted"):
     normalized = model_normalize(model, pixels)
-    logits_graph, captured = model(normalized, return_tokens=True)
-    target = logits_graph.argmax(dim=1)
+    logits_graph, captured, gradcam_activation = capture_gradcam_activation(model, normalized)
+    predicted = logits_graph.argmax(dim=1)
+    if target_mode == "predicted":
+        target = predicted
+    elif target_mode == "true":
+        target = labels
+    elif target_mode == "non_predicted":
+        target = (predicted + 1) % logits_graph.size(1)
+    else:
+        raise ValueError(target_mode)
     target_logits = logits_graph.gather(1, target[:, None]).sum()
-    full_gradient = torch.autograd.grad(target_logits, captured[-1], retain_graph=False)[0].detach()
+    full_gradient = torch.autograd.grad(target_logits, gradcam_activation, retain_graph=False)[0].detach()
     with torch.no_grad():
         features = extract_features(model, normalized)
         patch_score = cosine_scores(features)
-    if captured[-1].ndim == 4:
-        local = captured[-1].flatten(2).transpose(1, 2).detach()
+    if gradcam_activation.ndim == 4:
+        local = gradcam_activation.flatten(2).transpose(1, 2).detach()
         gradient_local = full_gradient.flatten(2).transpose(1, 2)
-        grid_size = (captured[-1].size(-2), captured[-1].size(-1))
+        grid_size = (gradcam_activation.size(-2), gradcam_activation.size(-1))
     elif model.model_name.startswith(("vit_", "pit_")):
-        local = captured[-1][:, 1:].detach()
+        local = gradcam_activation[:, 1:].detach()
         gradient_local = full_gradient[:, 1:]
         side = int(round(local.size(1) ** 0.5))
         grid_size = (side, side)
     else:
-        local = captured[-1].detach()
+        local = gradcam_activation.detach()
         gradient_local = full_gradient
         side = int(round(local.size(1) ** 0.5))
         grid_size = (side, side)
@@ -98,7 +108,7 @@ def source_maps(model, pixels: torch.Tensor, labels: torch.Tensor):
         "random_uniform": patch_score.detach(),
     }
     image_patch_masks = patch_masks(grid_size, pixels.size(-2), pixels.size(-1), pixels.device)
-    del normalized, logits_graph, captured, features, patch_score, local, gradient_local, alpha, signed
+    del normalized, logits_graph, captured, gradcam_activation, features, patch_score, local, gradient_local, alpha, signed
     return maps, image_patch_masks.cpu(), grid_size
 
 
@@ -182,7 +192,7 @@ def main() -> None:
             end = min(len(names), start + args.sample_batch)
             pixels = pixels_cpu[start:end].to(device)
             labels = labels_cpu[start:end].to(device)
-            maps, image_patch_masks, grid_size = source_maps(source_model, pixels, labels)
+            maps, image_patch_masks, grid_size = source_maps(source_model, pixels, labels, args.target_mode)
             drop_count = max(1, int(round(grid_size[0] * grid_size[1] * args.drop_ratio)))
             for selector in SELECTORS:
                 selector_masks = masks_from_map(
@@ -216,6 +226,7 @@ def main() -> None:
             "sample_batch": args.sample_batch,
             "route_repeats": args.route_repeats,
             "drop_ratio": args.drop_ratio,
+            "target_mode": args.target_mode,
             "mask_source": "source-model final local-token map",
             "gradcam_variants": ["relu", "signed", "abs"],
             "seed": args.seed,
