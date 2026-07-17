@@ -269,6 +269,139 @@ all-patch sampling
 
 这可以判断方法是在寻找稳定的语义证据，还是只是在制造随机遮挡。
 
+### 6.6 Patch-score 与 Grad-CAM：为什么主线不用 Grad-CAM 选区域
+
+patch-score 和 Grad-CAM 都可以产生一张“哪些 patch 更重要”的图，但它们回答的不是同一个问题。后续工作必须把 Grad-CAM 纳入比较，否则“为什么使用 patch-score 而不是 Grad-CAM”这一方法选择缺少依据。
+
+#### 6.6.1 两种方法的本质区别
+
+当前 patch-score 对第 (n) 个 patch 的定义是：
+
+\[
+s_n = \cos(x_n, g),
+\]
+
+其中 (x_n) 是最终语义层的局部 patch 表示，(g) 是 global/CLS 表示。它衡量的是：
+
+> 这个局部 patch 的语义方向与模型当前整体表示有多接近。
+
+标准 Grad-CAM 则针对某个指定类别 logit (y^c)，使用该类别对中间激活的梯度：
+
+\[
+\alpha_k^c = \frac{1}{N}\sum_n \frac{\partial y^c}{\partial x_{n,k}},
+\qquad
+h_n^c = \operatorname{ReLU}\left(\sum_k \alpha_k^c x_{n,k}\right).
+\]
+
+它衡量的是：
+
+> 该局部激活对指定类别输出的梯度敏感性有多大。
+
+因此，patch-score 是**表示关系/语义相关性信号**，Grad-CAM 是**类别条件下的梯度敏感性信号**。前者回答“哪些 patch 融入了当前整体语义”，后者回答“哪些 patch 对某个类别 logit 的局部变化更敏感”。高 patch-score 不能未经验证地等同于因果重要性；同样，Grad-CAM 的高响应也不自动意味着该区域是跨模型稳定的攻击路由。
+
+#### 6.6.2 为什么主线优先使用 patch-score
+
+主线选择 patch-score 的理由应当是可检验的设计取舍，而不是简单声称 Grad-CAM 不好：
+
+| 比较维度 | Patch-score | Grad-CAM |
+|---|---|---|
+| 核心信号 | global-local 表示相似度 | 类别 logit 对局部激活的梯度 |
+| 类别依赖 | 路由阶段不需要指定类别梯度 | 必须选择预测类、真实类或目标类 |
+| 计算方式 | 一次无梯度语义特征提取即可 | 需要额外反向传播或保留激活梯度 |
+| 空间位置 | 直接使用模型原生 patch/token 网格 | 通常依赖特定层和 Grad-CAM 适配方式 |
+| 适配范围 | ViT、CaiT、PiT、Visformer 共用 global/local 接口 | CNN 最自然；不同 token 架构需要额外定义 |
+| 选择倾向 | 更接近整体语义、可能更分散 | 更偏向指定类别的局部敏感区域、可能更集中 |
+| 迁移假设 | 路由模型当前语义证据，强调跨架构表示一致性 | 路由源模型对指定类别的梯度解释，可能更源模型/类别特定 |
+| 随机性 | 可在高分候选集内随机采样，形成稳定但不固定的路由 | 热力图通常由当前类别和梯度确定，天然较确定 |
+
+这里的“优先使用 patch-score”有三个研究动机：
+
+1. **类别无关的路由阶段。** patch-score 只使用模型已经形成的 global/local 语义表示，不在选择区域时绑定某一个类别梯度；这更符合迁移攻击中寻找跨模型共享判别证据的目标。
+2. **跨架构的统一性。** 四个白盒源模型都能提供原生局部 token 网格和全局表示，而 Grad-CAM 需要为不同架构定义激活层、梯度聚合方式和正值处理规则。
+3. **表示路由与梯度优化解耦。** patch-score 不预先消耗攻击梯度，也不把“用于解释的类别梯度”直接当作“用于更新图像的攻击梯度”，因此更容易分析 patch 选择本身的作用。
+
+这些只是方法假设，不是预先写死的结论。Grad-CAM 可能在源模型上的类别 logit 删除实验中更具因果性；如果它同时在跨视图、跨架构和迁移稳定性上也更好，就应当诚实地修改主线，而不是为了维护叙事而忽略结果。
+
+#### 6.6.3 公平的 Grad-CAM 对照定义
+
+由于当前四个白盒源模型不是统一 CNN，主比较不应把 CNN 原生 Grad-CAM 与 Transformer 的 patch-score 直接混在一起。建议实现一个**统一 token Grad-CAM-style baseline**：
+
+1. 使用与 patch-score 相同的最终语义局部 token (X\in\mathbb{R}^{N\times D})。
+2. 选择一个明确的类别 logit，主实验使用真实类别 logit；在干净样本预测正确的子集上，同时报告预测类别 logit版本。
+3. 保留 (\partial y^c/\partial X)，按 patch 维度做 Grad-CAM 的通道权重聚合。
+4. 对得到的 patch heatmap 使用标准 ReLU 版本作为主结果，并将 signed heatmap 作为消融。
+5. 将 heatmap 重新映射到同一个 patch 网格，采用与 patch-score 完全相同的候选集比例、drop 数量和随机采样策略。
+
+这样比较的是“表示相似度选择器”和“类别梯度选择器”，而不是同时混入层位置、空间分辨率和 drop 预算差异。CNN 原生 Grad-CAM 可以作为补充实验，但不应取代这一统一 token 对照。
+
+#### 6.6.4 Grad-CAM 对比实验计划
+
+**阶段 A：区域图本身的比较。** 对同一批干净图像、同一白盒模型和同一最终局部 token，生成 patch-score map 与 token Grad-CAM map，记录：
+
+- Spearman/Kendall 的 patch 排名相关性；
+- top-5%、10%、15%、30% 区域的 overlap/IoU；
+- map entropy、集中度、连通性和空间覆盖率；
+- 不同随机 seed、phase shift、攻击迭代步之间的 map 稳定性；
+- 不同白盒架构之间的区域 overlap。
+
+目的不是看两张图“像不像”，而是区分两种信号是在定位相同证据，还是在定位不同性质的区域。
+
+**阶段 B：区域的因果/忠实性比较。** 对两种 map 分别做单 patch 和 top-k patch occlusion，比较：
+
+- 真实类别 logit 下降；
+- cross-entropy loss 增幅；
+- global feature cosine change；
+- 最终预测改变率；
+- deletion/insertion curve 及其面积。
+
+这一阶段允许 Grad-CAM 在类别条件的源模型忠实性上占优。相反，如果 patch-score 的高分区域虽然不一定造成最大的单类 logit 下降，却在不同类别、视图和架构下更稳定，就能支持“语义路由而非单类敏感性”的方法定位。
+
+**阶段 C：固定优化器的选择器替换实验。** 只替换 patch 选择器，固定：
+
+```text
+同一图像、标签、seed、epsilon、steps、drop 数量
+同一 opponent-channel noise、RMS、initial projection 和 kept-only mask
+同一 phase pair、20 views、raw mean、Gaussian residual 和 MI-FGSM
+```
+
+至少比较：
+
+| 路由器 | 噪声 | 目的 |
+|---|---|---|
+| Random | opponent-channel | 隔离 patch-score 的作用 |
+| Patch-score | opponent-channel | 当前主线 |
+| Grad-CAM-style | opponent-channel | 直接回答“为什么不用 Grad-CAM” |
+| Patch-score | feature IID Gaussian | 隔离 opponent-channel 的作用 |
+| Grad-CAM-style | feature IID Gaussian | 检查选择器与噪声是否交互 |
+
+Patch-score 和 Grad-CAM-style 都使用相同的 top-half candidate + 15% drop 规则作为主协议，并另行报告 deterministic top-k 版本，避免把“选择信号差异”和“随机采样差异”混为一谈。
+
+**阶段 D：机制与迁移稳定性分析。** 将 ASR 放在机制指标之后，重点比较：
+
+- source loss/logit 变化；
+- global/local feature change；
+- mask 的跨视图和跨步稳定性；
+- 20 个视图梯度的 cosine、sign agreement、effective rank；
+- 跨白盒模型的区域和梯度一致性；
+- 额外反向传播的时间、显存和实现复杂度；
+- 最后再报告 Transformer/CNN transfer ASR。
+
+#### 6.6.5 预期结果与文章结论规则
+
+建议预先记录以下可证伪假设：
+
+- **H4（信号差异）：** Patch-score map 更接近 global semantic evidence，Grad-CAM map 更接近指定类别的梯度敏感区域；二者只部分重合。
+- **H5（稳定性取舍）：** Grad-CAM 可能在 source-class occlusion 上更强，但 patch-score 在无类别路由、跨视图和跨架构稳定性上更好。
+- **H6（主线选择）：** 在固定 opponent-channel noise 后，patch-score 的优势应首先体现在区域稳定性、特征/梯度结构和跨架构一致性，而不是只体现为单一 ASR 数字。
+
+最终允许出现三种结论：
+
+1. patch-score 在忠实性略弱但稳定性和迁移性更强，支持当前主线；
+2. Grad-CAM 在所有关键指标上更强，主线需要改为 Grad-CAM 或混合路由；
+3. 二者各有优势，可以形成“Grad-CAM 负责类别忠实性、patch-score 负责跨架构语义路由”的混合方法。
+
+无论哪种结果，都比预先假设 patch-score 必然优于 Grad-CAM 更能建立可信的 motivation。
+
 ## 7. 第二优先级：验证 opponent-channel noise 的结构价值
 
 ### 7.1 基础噪声对照
