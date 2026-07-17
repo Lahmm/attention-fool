@@ -315,6 +315,11 @@ h_n^c = \operatorname{ReLU}\left(\sum_k \alpha_k^c x_{n,k}\right).
 
 因此，patch-score 是**表示关系/语义相关性信号**，Grad-CAM 是**类别条件下的梯度敏感性信号**。前者回答“哪些 patch 融入了当前整体语义”，后者回答“哪些 patch 对某个类别 logit 的局部变化更敏感”。高 patch-score 不能未经验证地等同于因果重要性；同样，Grad-CAM 的高响应也不自动意味着该区域是跨模型稳定的攻击路由。
 
+这里必须区分两个概念：
+
+1. **同一坐标系**：两种方法使用相同的局部 activation、相同 patch 网格、相同 top-k/候选比例和相同 mask 评估；这只保证空间比较公平。
+2. **同一显著性标准**：两种方法都根据同一种量来判断 patch 是否显著；这一点并不成立。patch-score 依据 global-local 表示对齐，Grad-CAM 依据指定类别 logit 的梯度响应。它们可以在同一坐标系上比较，但不应被说成使用同一套 saliency criterion。
+
 #### 6.6.2 为什么主线优先使用 patch-score
 
 主线选择 patch-score 的理由应当是可检验的设计取舍，而不是简单声称 Grad-CAM 不好：
@@ -340,7 +345,13 @@ h_n^c = \operatorname{ReLU}\left(\sum_k \alpha_k^c x_{n,k}\right).
 
 #### 6.6.3 公平的 Grad-CAM 对照定义
 
-由于当前四个白盒源模型不是统一 CNN，主比较不应把 CNN 原生 Grad-CAM 与 Transformer 的 patch-score 直接混在一起。建议实现一个**统一 token Grad-CAM-style baseline**：
+由于当前四个白盒源模型不是统一 CNN，主比较不应把 CNN 原生 Grad-CAM 与 Transformer 的 patch-score 直接混在一起。建议实现一个**统一 token Grad-CAM-style baseline**。这里要分成两个实验协议：
+
+**协议 A：同一 activation 的显著性标准比较。** 选择同一个 logit-connected local activation $X_l$，patch-score 和 Grad-CAM 都在这个 $X_l$ 上计算。这样回答“表示对齐标准”和“类别梯度标准”是否选中了相同区域。
+
+**协议 B：各自生产实现的路由效果比较。** patch-score 使用主线 final semantic output，Grad-CAM 使用其 logit-connected activation；这样可以比较各自实际可用的 selector，但不能把结果解释为“同一标准下谁更显著”。ViT/PiT 的 final output patch gradient 为零时，不能静默地把 Grad-CAM 回退层结果与 final-output patch-score 当作同层显著性结论。
+
+统一 token Grad-CAM-style baseline 的具体定义为：
 
 1. 使用与 patch-score 相同的最终语义局部 token $X\in\mathbb{R}^{N\times D}$。
 2. 选择一个明确的类别 logit，主实验使用真实类别 logit；在干净样本预测正确的子集上，同时报告预测类别 logit版本。
@@ -402,7 +413,7 @@ Patch-score 和 Grad-CAM-style 都使用相同的 top-half candidate + 15% drop 
 - 额外反向传播的时间、显存和实现复杂度；
 - 最后再报告 Transformer/CNN transfer ASR。
 
-**当前实测结果（64 张图像、15% drop，修正版 logit-connected final-block activation）。** 四个模型上的 source route 平均真实类 logit drop 如下：
+**当前实测结果的边界（64 张图像、15% drop，协议 B）。** 四个模型上的 source route 平均真实类 logit drop 如下。这些数字说明不同 selector 的下游删除效果，但不是“是否使用同一显著性标准”的答案；协议 A 需要单独运行。
 
 | 模型 | Random | Patch-score | Grad-CAM ReLU | Grad-CAM signed | Grad-CAM abs |
 |---|---:|---:|---:|---:|---:|
@@ -411,9 +422,9 @@ Patch-score 和 Grad-CAM-style 都使用相同的 top-half candidate + 15% drop 
 | PiT-B | 0.211 | 0.188 | 0.293 | 0.309 | 0.272 |
 | Visformer-S | -0.002 | -0.012 | 0.013 | -0.013 | -0.010 |
 
-修正版跨架构 source→target 矩阵的平均 logit drop 为：Patch-score 0.150（非对角 0.175），Grad-CAM ReLU 0.178（非对角 0.190），signed 0.176（非对角 0.193），abs 0.163（非对角 0.186），Random 0.146（非对角 0.166）。因此当前数据不支持“patch-score 比 Grad-CAM 更忠实、更稳定或更可迁移”的结论。
+修正版跨架构 source→target 矩阵的平均 logit drop 为：Patch-score 0.150（非对角 0.175），Grad-CAM ReLU 0.178（非对角 0.190），signed 0.176（非对角 0.193），abs 0.163（非对角 0.186），Random 0.146（非对角 0.166）。这仍然只是协议 B 的路由效果，不应被外推成两种方法在同一显著性标准下的优劣。
 
-跨视图水平翻转稳定性同样没有形成 patch-score 优势：ViT 上 patch-score 的 rank Spearman/half-IoU 为 0.866/0.778，Grad-CAM ReLU 为 0.832/0.776；CaiT 为 0.743/0.671 对 0.747/0.733；PiT 为 0.769/0.695 对 0.891/0.812；Visformer 为 0.658/0.597 对 0.965/0.889。标准 ReLU 的 zero fraction 已在修正版中单独检查，不再把全零图的假稳定性计入结论。
+跨视图水平翻转稳定性同样属于协议 B：ViT 上 patch-score 的 rank Spearman/half-IoU 为 0.866/0.778，Grad-CAM ReLU 为 0.832/0.776；CaiT 为 0.743/0.671 对 0.747/0.733；PiT 为 0.769/0.695 对 0.891/0.812；Visformer 为 0.658/0.597 对 0.965/0.889。标准 ReLU 的 zero fraction 已在修正版中单独检查，不再把全零图的假稳定性计入结论。
 
 非预测类 Grad-CAM control 说明类别依赖是真实差异：ViT 的 signed logit drop 从预测类的 0.129 降至非预测类的 0.088，CaiT ReLU 从 0.087 降至 0.046；PiT 仍为 0.223--0.247，Visformer 的 signed 方向由 -0.013 变为 +0.032。patch-score map 不随 target class 改变。由此，当前可保留的主线定位应是：patch-score 是不需要指定类别梯度、也不消耗额外反向传播的 representation-based stochastic routing；它不是 Grad-CAM 的因果替代品。若实验允许类别梯度并以 source deletion 为目标，应把 Grad-CAM 或 score∩Grad-CAM hybrid 作为更强 selector 对照，不能隐藏这一事实。
 
