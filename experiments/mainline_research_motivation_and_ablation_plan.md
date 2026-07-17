@@ -349,6 +349,8 @@ h_n^c = \operatorname{ReLU}\left(\sum_k \alpha_k^c x_{n,k}\right).
 
 **协议 A：同一 activation 的显著性标准比较。** 选择同一个 logit-connected local activation $X_l$，patch-score 和 Grad-CAM 都在这个 $X_l$ 上计算。这样回答“表示对齐标准”和“类别梯度标准”是否选中了相同区域。
 
+**协议 A 实测结果（64 张图像）。** 在同一 activation 上，patch-score 与 Grad-CAM ReLU 的 rank Spearman/top-half IoU 为：ViT 0.489/0.557，CaiT 0.011/0.359，PiT -0.148/0.320，Visformer 0.757/0.738；Grad-CAM signed 的对应 Spearman 为 0.510、0.033、-0.169、0.771。结果说明二者在不同架构上可能部分重合，但不是同一套显著性标准：CaiT/PiT 的排名几乎不一致，ViT/Visformer 也只是部分重合。
+
 **协议 B：各自生产实现的路由效果比较。** patch-score 使用主线 final semantic output，Grad-CAM 使用其 logit-connected activation；这样可以比较各自实际可用的 selector，但不能把结果解释为“同一标准下谁更显著”。ViT/PiT 的 final output patch gradient 为零时，不能静默地把 Grad-CAM 回退层结果与 final-output patch-score 当作同层显著性结论。
 
 统一 token Grad-CAM-style baseline 的具体定义为：
