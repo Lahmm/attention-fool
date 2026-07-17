@@ -42,6 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", choices=WHITEBOX_MODEL_CHOICES, default="vit_base_patch16_224")
     parser.add_argument("--samples", type=int, default=64)
+    parser.add_argument("--sample-batch", type=int, default=8)
     parser.add_argument("--route-repeats", type=int, default=8)
     parser.add_argument("--occlusion-chunk", type=int, default=32)
     parser.add_argument("--seed", type=int, default=20260717)
@@ -241,32 +242,110 @@ def write_rows(path: Path, rows: list[dict[str, object]]) -> None:
 
 def main() -> None:
     args = parse_args()
-    if args.samples <= 0 or args.route_repeats <= 0:
-        raise ValueError("samples and route-repeats must be positive")
+    if args.samples <= 0 or args.route_repeats <= 0 or args.sample_batch <= 0:
+        raise ValueError("samples, sample-batch, and route-repeats must be positive")
     random.seed(args.seed)
     torch.manual_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    names, pixels, labels = load_samples(args.image_dir, args.annotations, args.samples)
-    pixels = pixels.to(device)
-    labels = labels.to(device)
+    names, pixels_cpu, labels_cpu = load_samples(args.image_dir, args.annotations, args.samples)
 
     model = build_whitebox_model(num_classes=1000, model_name=args.model, pretrained=True, device=device)
     model.eval()
-    with torch.no_grad():
-        features = extract_features(model, pixels)
-        scores = cosine_scores(features)
-        clean_logits = get_logits(model, pixels)
-    grid_size = features.grid_size
-    image_masks = patch_masks(grid_size, pixels.size(-2), pixels.size(-1), device)
-    correct = clean_logits.argmax(dim=1).eq(labels)
-
-    logit_drop, loss_increase = single_patch_occlusion(
-        model,
-        pixels,
-        labels,
-        image_masks,
-        args.occlusion_chunk,
+    score_batches: list[torch.Tensor] = []
+    correct_batches: list[torch.Tensor] = []
+    logit_drop_batches: list[torch.Tensor] = []
+    loss_increase_batches: list[torch.Tensor] = []
+    grid_size: tuple[int, int] | None = None
+    score_source = ""
+    route_rows: list[dict[str, object]] = []
+    stability_values: dict[str, list[torch.Tensor]] = {}
+    strategies = (
+        "high_score_stochastic",
+        "low_score_stochastic",
+        "random_uniform",
+        "high_score_extreme",
+        "low_score_extreme",
     )
+
+    for batch_start in range(0, len(names), args.sample_batch):
+        batch_end = min(len(names), batch_start + args.sample_batch)
+        pixels = pixels_cpu[batch_start:batch_end].to(device)
+        labels = labels_cpu[batch_start:batch_end].to(device)
+        with torch.no_grad():
+            features = extract_features(model, pixels)
+            scores = cosine_scores(features)
+            clean_logits = get_logits(model, pixels)
+        if grid_size is None:
+            grid_size = features.grid_size
+            score_source = features.source_name
+        elif grid_size != features.grid_size:
+            raise RuntimeError("patch grid changed across sample batches")
+        image_masks = patch_masks(grid_size, pixels.size(-2), pixels.size(-1), device)
+        correct = clean_logits.argmax(dim=1).eq(labels)
+        logit_drop, loss_increase = single_patch_occlusion(
+            model,
+            pixels,
+            labels,
+            image_masks,
+            args.occlusion_chunk,
+        )
+        score_batches.append(scores.cpu())
+        correct_batches.append(correct.cpu())
+        logit_drop_batches.append(logit_drop.cpu())
+        loss_increase_batches.append(loss_increase.cpu())
+
+        masks_by_repeat: dict[str, list[torch.Tensor]] = {strategy: [] for strategy in strategies}
+        for strategy_index, strategy in enumerate(strategies):
+            stability_values.setdefault(strategy, [])
+            for repeat in range(args.route_repeats):
+                generator = torch.Generator().manual_seed(
+                    args.seed + 100000 * batch_start + 1000 * strategy_index + repeat
+                )
+                mask = build_route_masks(scores.detach().cpu(), strategy, 0.15, generator).to(device)
+                masks_by_repeat[strategy].append(mask.detach().cpu())
+                route_logit_drop, route_loss_increase, prediction_changed = evaluate_masked_logits(
+                    model,
+                    pixels,
+                    labels,
+                    mask,
+                    image_masks,
+                )
+                selected_scores = scores.masked_select(mask).reshape(scores.size(0), -1)
+                route_rows.append(
+                    {
+                        "model": args.model,
+                        "sample_start": batch_start,
+                        "sample_count": batch_end - batch_start,
+                        "strategy": strategy,
+                        "repeat": repeat,
+                        "clean_correct_rate": float(correct.float().mean().cpu()),
+                        "route_logit_drop_mean": float(route_logit_drop.mean().cpu()),
+                        "route_loss_increase_mean": float(route_loss_increase.mean().cpu()),
+                        "route_prediction_change_rate": float(prediction_changed.float().mean().cpu()),
+                        "selected_score_mean": float(selected_scores.mean().cpu()),
+                        "selected_score_std": float(selected_scores.std(unbiased=False).cpu()),
+                        "all_score_mean": float(scores.mean().cpu()),
+                        "all_score_std": float(scores.std(unbiased=False).cpu()),
+                    }
+                )
+        for strategy, masks in masks_by_repeat.items():
+            for left_index in range(len(masks)):
+                for right_index in range(left_index):
+                    left = masks[left_index]
+                    right = masks[right_index]
+                    intersection = (left & right).sum(dim=1).float()
+                    union = (left | right).sum(dim=1).float().clamp_min(1.0)
+                    stability_values[strategy].append(intersection / union)
+        del pixels, labels, features, scores, clean_logits, image_masks
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
+    scores = torch.cat(score_batches, dim=0)
+    correct = torch.cat(correct_batches, dim=0)
+    logit_drop = torch.cat(logit_drop_batches, dim=0)
+    loss_increase = torch.cat(loss_increase_batches, dim=0)
+    if grid_size is None:
+        raise RuntimeError("no samples were processed")
     pearson_logit, spearman_logit = row_correlation(scores, logit_drop)
     pearson_loss, spearman_loss = row_correlation(scores, loss_increase)
 
@@ -290,67 +369,23 @@ def main() -> None:
             )
     write_rows(output_dir / "single_patch_raw.csv", raw_rows)
 
-    route_rows: list[dict[str, object]] = []
-    stability_masks: dict[str, list[torch.Tensor]] = {}
-    strategies = (
-        "high_score_stochastic",
-        "low_score_stochastic",
-        "random_uniform",
-        "high_score_extreme",
-        "low_score_extreme",
-    )
-    for strategy_index, strategy in enumerate(strategies):
-        stability_masks[strategy] = []
-        for repeat in range(args.route_repeats):
-            generator = torch.Generator().manual_seed(args.seed + 1000 * strategy_index + repeat)
-            mask = build_route_masks(scores.detach().cpu(), strategy, 0.15, generator).to(device)
-            stability_masks[strategy].append(mask.detach().cpu())
-            route_logit_drop, route_loss_increase, prediction_changed = evaluate_masked_logits(
-                model,
-                pixels,
-                labels,
-                mask,
-                image_masks,
-            )
-            selected_scores = scores.masked_select(mask).reshape(scores.size(0), -1)
-            route_rows.append(
-                {
-                    "model": args.model,
-                    "strategy": strategy,
-                    "repeat": repeat,
-                    "clean_correct_rate": float(correct.float().mean().cpu()),
-                    "route_logit_drop_mean": float(route_logit_drop.mean().cpu()),
-                    "route_loss_increase_mean": float(route_loss_increase.mean().cpu()),
-                    "route_prediction_change_rate": float(prediction_changed.float().mean().cpu()),
-                    "selected_score_mean": float(selected_scores.mean().cpu()),
-                    "selected_score_std": float(selected_scores.std(unbiased=False).cpu()),
-                    "all_score_mean": float(scores.mean().cpu()),
-                    "all_score_std": float(scores.std(unbiased=False).cpu()),
-                }
-            )
     write_rows(output_dir / "route_raw.csv", route_rows)
 
-    stability: dict[str, float] = {}
-    for strategy, masks in stability_masks.items():
-        pairwise: list[torch.Tensor] = []
-        for left_index in range(len(masks)):
-            for right_index in range(left_index):
-                left = masks[left_index]
-                right = masks[right_index]
-                intersection = (left & right).sum(dim=1).float()
-                union = (left | right).sum(dim=1).float().clamp_min(1.0)
-                pairwise.append(intersection / union)
-        stability[strategy] = float(torch.cat(pairwise).mean()) if pairwise else 1.0
+    stability = {
+        strategy: float(torch.cat(values).mean()) if values else 1.0
+        for strategy, values in stability_values.items()
+    }
 
     summary = {
         "config": {
             "model": args.model,
             "samples": len(names),
+            "sample_batch": args.sample_batch,
             "route_repeats": args.route_repeats,
             "occlusion_chunk": args.occlusion_chunk,
             "seed": args.seed,
             "device": str(device),
-            "score_source": features.source_name,
+            "score_source": score_source,
             "score_grid": list(grid_size),
             "drop_ratio": 0.15,
             "drop_count": max(1, round(scores.size(1) * 0.15)),
