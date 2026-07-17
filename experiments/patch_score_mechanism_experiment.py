@@ -17,6 +17,7 @@ import argparse
 import csv
 import json
 import random
+import sys
 from pathlib import Path
 
 import torch
@@ -24,12 +25,17 @@ import torch.nn.functional as F
 from PIL import Image
 from torchvision.transforms import ToTensor
 
+# Allow direct execution as `python experiments/patch_score_mechanism_experiment.py`.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from nets import WHITEBOX_MODEL_CHOICES, build_whitebox_model
 
 
-DEFAULT_IMAGE_DIR = Path(__file__).resolve().parents[1] / "data" / "clean_resized_images"
-DEFAULT_ANNOTATIONS = Path(__file__).resolve().parents[1] / "data" / "image_name_to_class_id_and_name.json"
-DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[1] / "outputs" / "research" / "patch_score"
+DEFAULT_IMAGE_DIR = REPO_ROOT / "data" / "clean_resized_images"
+DEFAULT_ANNOTATIONS = REPO_ROOT / "data" / "image_name_to_class_id_and_name.json"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "outputs" / "research" / "patch_score"
 
 
 def parse_args() -> argparse.Namespace:
