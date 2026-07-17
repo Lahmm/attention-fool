@@ -359,7 +359,7 @@ def main() -> None:
                     "model": args.model,
                     "sample_index": sample_index,
                     "image_name": name,
-                    "label": int(labels[sample_index].cpu()),
+                    "label": int(labels_cpu[sample_index].cpu()),
                     "clean_correct": bool(correct[sample_index].cpu()),
                     "patch_index": patch_index,
                     "patch_score": float(scores[sample_index, patch_index].cpu()),
