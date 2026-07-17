@@ -238,6 +238,8 @@ all-patch sampling
 
 **扩大样本与指标敏感性复核。** 在 128 张图像、64 次 64/64 交叉拟合中，CaiT 的评估 logit 增量为 +0.0535（95% CI [0.0445, 0.0625]），PiT 为 +0.0923（[0.0817, 0.1029]），均为正；Visformer 的评估 logit 增量为 +0.0113（[0.0072, 0.0154]）。ViT 在 256 张图像、64 次 128/128 交叉拟合中为 +0.1203（[0.1141, 0.1266]）。但 Visformer 的 CE loss 增量为 -0.00394（[−0.0060, −0.0019]），按 logit 校准时仍为 -0.00365（[−0.0058, −0.0015]）。因此主机制诊断应把真实类 logit drop 作为直接证据削弱指标，同时把 CE loss 作为独立的架构敏感性指标；不能为了统一叙事而删除这一不一致结果。
 
+**表示/梯度响应诊断（64 张图像、15% drop）。** 对同一批 route 记录 global feature shift、kept-local feature shift 和 clean/masked 梯度 cosine。ViT 的 high-score extreme 相对 random 产生更大的 global shift（0.0094 vs. 0.0080）和 kept-local shift（0.0705 vs. 0.0637），梯度 cosine 为 0.104；CaiT 的 low-score extreme 同时带来更大的 global shift（0.0355 vs. 0.0199）和 logit drop（0.0595 vs. 0.0321）；PiT 的 low-score extreme 带来最大的 kept-local shift（0.1461 vs. 0.1308）和 logit drop（0.2818 vs. 0.1900）。Visformer 的 global shift 在 route 间接近，但 low-score extreme 的 logit drop 仍高于 random（0.0655 vs. -0.0030）。这些结果支持“路由改变证据表达路径”的机制解释，但不支持所有架构共享同一梯度方向或同一 loss 响应。
+
 ### 6.3 比较不同 score 层
 
 当前主线使用最终语义层，但需要验证这一选择：
@@ -250,6 +252,8 @@ all-patch sampling
 ```
 
 如果最终层最有效，可以支持“最终语义层更适合作为判别证据路由器”的论点。如果中间层更有效，应相应调整文章 motivation，而不是预先假定最终层一定正确。
+
+**层位实验结果（64 张图像、15% drop）。** 层位的最强输出效应具有明显架构依赖：ViT 的 final high-score logit drop 为 0.127，高于 random 的 0.099；CaiT 的 early high-score 为 0.428，高于 final 的 0.054；PiT 的 early low-score 为 0.688，高于 final 的 0.282；Visformer 的 early random 本身达到 1.027，而 final low-score 为 0.066、高于 final random 的 -0.021。因而不能把“final layer 在所有架构上最具因果性”写成结论。当前主线采用 final layer 的理由应限定为：它提供跨架构最统一的 global/local 语义接口，且与本文“语义路由”而非低层遮挡敏感性相匹配；early/mid 层结果作为层位消融和潜在增强方向报告。
 
 ### 6.4 扫描 drop budget
 
@@ -278,6 +282,8 @@ all-patch sampling
 - high-score 区域是否集中在主体、边缘或纹理区域。
 
 这可以判断方法是在寻找稳定的语义证据，还是只是在制造随机遮挡。
+
+**当前稳定性结果。** 在 64 张图像、15% drop、4 次重复中，deterministic extreme route 的同策略 mask IoU 恒为 1；随机候选 route 的 IoU 约为 0.078--0.089，而 random uniform 也约为 0.078--0.089。这个结果说明 score 候选集具有可复现性，但候选集内采样仍保留了位置随机性。需要注意：这是同一张图像、同一 score map 下的重复稳定性，不等于跨模型或跨视图的语义定位一致性；后者仍需 Grad-CAM/多视图实验补充。
 
 ### 6.6 Patch-score 与 Grad-CAM：为什么主线不用 Grad-CAM 选区域
 
