@@ -117,7 +117,7 @@ global-local similarity
 
 ### H1：可校准语义路由假设
 
-在相同 drop budget 下，经过独立校准的 patch-score tail routing 比 random drop 更能改变模型的判别性特征和输出；有效方向可以依赖架构，不应预先写死为高分。
+在相同 drop budget 下，经过独立校准的 patch-score tail routing 比 random drop 更能改变真实类别的直接 logit 证据和判别性特征；有效方向可以依赖架构，不应预先写死为高分。CE loss 作为包含全体类别竞争的次级指标，需要单独报告，不能默认与真实类 logit drop 同方向。
 
 需要验证的证据包括：
 
@@ -235,6 +235,8 @@ all-patch sampling
 新增一个预先定义的 **polarity calibration** 协议：在校准子集上只根据 loss increase 在 high-score extreme、low-score extreme 和 score-deviation extreme 三个候选中选择路由方向，然后在未参与选择的评估子集上与 random drop 比较。该协议把“哪一侧是有效方向”从事后叙事变成可检验的模型适配问题。
 
 **第一轮交叉拟合结果（32 次随机半分、每次 32/32，15% drop）。** 在四个模型上，校准选择的 tail 在评估半区相对 random 的 loss increase 均为正：ViT-B/16 +0.0118（95% CI [0.0089, 0.0148]），CaiT-S24 +0.0118（[0.0079, 0.0158]），PiT-B +0.0178（[0.0161, 0.0195]），Visformer-S +0.0146（[0.0103, 0.0188]）。被选择的方向并不统一：ViT 选择 high-score extreme 的频率为 96.9%，PiT 选择 low-score extreme 为 100%，CaiT 和 Visformer 则分别以 low-score/deviation tail 为主。这支持“score 可用于语义路由，但路由极性需要校准”的较弱且更准确的 motivation。
+
+**扩大样本与指标敏感性复核。** 在 128 张图像、64 次 64/64 交叉拟合中，CaiT 的评估 logit 增量为 +0.0535（95% CI [0.0445, 0.0625]），PiT 为 +0.0923（[0.0817, 0.1029]），均为正；Visformer 的评估 logit 增量为 +0.0113（[0.0072, 0.0154]）。ViT 在 256 张图像、64 次 128/128 交叉拟合中为 +0.1203（[0.1141, 0.1266]）。但 Visformer 的 CE loss 增量为 -0.00394（[−0.0060, −0.0019]），按 logit 校准时仍为 -0.00365（[−0.0058, −0.0015]）。因此主机制诊断应把真实类 logit drop 作为直接证据削弱指标，同时把 CE loss 作为独立的架构敏感性指标；不能为了统一叙事而删除这一不一致结果。
 
 ### 6.3 比较不同 score 层
 
@@ -651,7 +653,7 @@ ASR 应作为“机制是否具有迁移价值”的最终验证，而不是后�
 
 ```text
 1. patch-score 提供了可解释的 global-local 语义路由坐标，但不应被过度解释为单 patch 因果重要性；
-2. 在独立校准后，选择合适 score tail 能够比 random drop 更稳定地改变模型输出，且路由极性具有架构依赖性；
+2. 在独立校准后，选择合适 score tail 能够比 random drop 更稳定地削弱真实类 logit 证据，且路由极性具有架构依赖性；CE loss 的收益需要按架构单独报告；
 3. opponent-channel noise 确实具有不同于 Gaussian 的颜色/特征结构；
 4. 两个机制分别作用于证据集合重组和剩余证据表达，二者组合具有可解释的互补性。
 ```
