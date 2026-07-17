@@ -44,6 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--samples", type=int, default=64)
     parser.add_argument("--sample-batch", type=int, default=8)
     parser.add_argument("--route-repeats", type=int, default=8)
+    parser.add_argument("--drop-ratios", type=str, default="0.05,0.10,0.15,0.20")
     parser.add_argument("--occlusion-chunk", type=int, default=32)
     parser.add_argument("--seed", type=int, default=20260717)
     parser.add_argument("--image-dir", type=Path, default=DEFAULT_IMAGE_DIR)
@@ -249,6 +250,9 @@ def write_rows(path: Path, rows: list[dict[str, object]]) -> None:
 
 def main() -> None:
     args = parse_args()
+    drop_ratios = tuple(float(item.strip()) for item in args.drop_ratios.split(",") if item.strip())
+    if not drop_ratios or any(not 0.0 < ratio <= 1.0 for ratio in drop_ratios):
+        raise ValueError("drop-ratios must contain values in (0, 1]")
     if args.samples <= 0 or args.route_repeats <= 0 or args.sample_batch <= 0:
         raise ValueError("samples, sample-batch, and route-repeats must be positive")
     random.seed(args.seed)
@@ -303,48 +307,57 @@ def main() -> None:
         logit_drop_batches.append(logit_drop.cpu())
         loss_increase_batches.append(loss_increase.cpu())
 
-        masks_by_repeat: dict[str, list[torch.Tensor]] = {strategy: [] for strategy in strategies}
-        for strategy_index, strategy in enumerate(strategies):
-            stability_values.setdefault(strategy, [])
-            for repeat in range(args.route_repeats):
-                generator = torch.Generator().manual_seed(
-                    args.seed + 100000 * batch_start + 1000 * strategy_index + repeat
-                )
-                mask = build_route_masks(scores.detach().cpu(), strategy, 0.15, generator).to(device)
-                masks_by_repeat[strategy].append(mask.detach().cpu())
-                route_logit_drop, route_loss_increase, prediction_changed = evaluate_masked_logits(
-                    model,
-                    pixels,
-                    labels,
-                    mask,
-                    image_masks,
-                )
-                selected_scores = scores.masked_select(mask).reshape(scores.size(0), -1)
-                route_rows.append(
-                    {
-                        "model": args.model,
-                        "sample_start": batch_start,
-                        "sample_count": batch_end - batch_start,
-                        "strategy": strategy,
-                        "repeat": repeat,
-                        "clean_correct_rate": float(correct.float().mean().cpu()),
-                        "route_logit_drop_mean": float(route_logit_drop.mean().cpu()),
-                        "route_loss_increase_mean": float(route_loss_increase.mean().cpu()),
-                        "route_prediction_change_rate": float(prediction_changed.float().mean().cpu()),
-                        "selected_score_mean": float(selected_scores.mean().cpu()),
-                        "selected_score_std": float(selected_scores.std(unbiased=False).cpu()),
-                        "all_score_mean": float(scores.mean().cpu()),
-                        "all_score_std": float(scores.std(unbiased=False).cpu()),
-                    }
-                )
-        for strategy, masks in masks_by_repeat.items():
-            for left_index in range(len(masks)):
-                for right_index in range(left_index):
-                    left = masks[left_index]
-                    right = masks[right_index]
-                    intersection = (left & right).sum(dim=1).float()
-                    union = (left | right).sum(dim=1).float().clamp_min(1.0)
-                    stability_values[strategy].append(intersection / union)
+        for ratio_index, drop_ratio in enumerate(drop_ratios):
+            masks_by_repeat: dict[str, list[torch.Tensor]] = {strategy: [] for strategy in strategies}
+            for strategy_index, strategy in enumerate(strategies):
+                stability_key = f"{strategy}@{drop_ratio:g}"
+                stability_values.setdefault(stability_key, [])
+                for repeat in range(args.route_repeats):
+                    generator = torch.Generator().manual_seed(
+                        args.seed
+                        + 100000 * batch_start
+                        + 10000 * ratio_index
+                        + 1000 * strategy_index
+                        + repeat
+                    )
+                    mask = build_route_masks(
+                        scores.detach().cpu(), strategy, drop_ratio, generator
+                    ).to(device)
+                    masks_by_repeat[strategy].append(mask.detach().cpu())
+                    route_logit_drop, route_loss_increase, prediction_changed = evaluate_masked_logits(
+                        model,
+                        pixels,
+                        labels,
+                        mask,
+                        image_masks,
+                    )
+                    selected_scores = scores.masked_select(mask).reshape(scores.size(0), -1)
+                    route_rows.append(
+                        {
+                            "model": args.model,
+                            "sample_start": batch_start,
+                            "sample_count": batch_end - batch_start,
+                            "strategy": strategy,
+                            "drop_ratio": drop_ratio,
+                            "repeat": repeat,
+                            "clean_correct_rate": float(correct.float().mean().cpu()),
+                            "route_logit_drop_mean": float(route_logit_drop.mean().cpu()),
+                            "route_loss_increase_mean": float(route_loss_increase.mean().cpu()),
+                            "route_prediction_change_rate": float(prediction_changed.float().mean().cpu()),
+                            "selected_score_mean": float(selected_scores.mean().cpu()),
+                            "selected_score_std": float(selected_scores.std(unbiased=False).cpu()),
+                            "all_score_mean": float(scores.mean().cpu()),
+                            "all_score_std": float(scores.std(unbiased=False).cpu()),
+                        }
+                    )
+            for strategy, masks in masks_by_repeat.items():
+                for left_index in range(len(masks)):
+                    for right_index in range(left_index):
+                        left = masks[left_index]
+                        right = masks[right_index]
+                        intersection = (left & right).sum(dim=1).float()
+                        union = (left | right).sum(dim=1).float().clamp_min(1.0)
+                        stability_values[f"{strategy}@{drop_ratio:g}"].append(intersection / union)
         del pixels, labels, features, scores, clean_logits, image_masks
         if device.type == "cuda":
             torch.cuda.empty_cache()
@@ -396,8 +409,10 @@ def main() -> None:
             "device": str(device),
             "score_source": score_source,
             "score_grid": list(grid_size),
-            "drop_ratio": 0.15,
-            "drop_count": max(1, round(scores.size(1) * 0.15)),
+            "drop_ratios": list(drop_ratios),
+            "drop_counts": {
+                str(ratio): max(1, round(scores.size(1) * ratio)) for ratio in drop_ratios
+            },
         },
         "clean_accuracy": float(correct.float().mean().cpu()),
         "score_vs_single_patch_occlusion": {
