@@ -161,10 +161,17 @@ def build_route_masks(
             selected = random_selection(candidates, drop_count, generator)
         elif strategy == "random_uniform":
             selected = random_selection(torch.arange(count), drop_count, generator)
+        elif strategy == "score_deviation_stochastic":
+            deviation = (scores[index] - scores[index].median()).abs()
+            candidates = deviation.topk(max(1, count // 2)).indices
+            selected = random_selection(candidates, drop_count, generator)
         elif strategy == "high_score_extreme":
             selected = scores[index].topk(drop_count).indices
         elif strategy == "low_score_extreme":
             selected = scores[index].topk(drop_count, largest=False).indices
+        elif strategy == "score_deviation_extreme":
+            deviation = (scores[index] - scores[index].median()).abs()
+            selected = deviation.topk(drop_count).indices
         else:
             raise ValueError(f"unknown routing strategy: {strategy}")
         masks[index, selected] = True
@@ -263,8 +270,10 @@ def main() -> None:
         "high_score_stochastic",
         "low_score_stochastic",
         "random_uniform",
+        "score_deviation_stochastic",
         "high_score_extreme",
         "low_score_extreme",
+        "score_deviation_extreme",
     )
 
     for batch_start in range(0, len(names), args.sample_batch):
