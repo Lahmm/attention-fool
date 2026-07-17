@@ -344,7 +344,7 @@ h_n^c = \operatorname{ReLU}\left(\sum_k \alpha_k^c x_{n,k}\right).
 
 1. 使用与 patch-score 相同的最终语义局部 token $X\in\mathbb{R}^{N\times D}$。
 2. 选择一个明确的类别 logit，主实验使用真实类别 logit；在干净样本预测正确的子集上，同时报告预测类别 logit版本。
-3. 保留 $\partial y^c/\partial X$，按 patch 维度做 Grad-CAM 的通道权重聚合。
+3. 保留 $\partial y^c/\partial X$，按 patch 维度做 Grad-CAM 的通道权重聚合；如果 final block 的输出 patch token 对 logit 梯度为零，则回退到该 final block 的输入 activation，保证 baseline 使用的是 logit-connected 的局部激活，而不是退化的零梯度图。
 4. 对得到的 patch heatmap 使用标准 ReLU 版本作为主结果，并将 signed heatmap 作为消融。
 5. 将 heatmap 重新映射到同一个 patch 网格，采用与 patch-score 完全相同的候选集比例、drop 数量和随机采样策略。
 
@@ -402,6 +402,21 @@ Patch-score 和 Grad-CAM-style 都使用相同的 top-half candidate + 15% drop 
 - 额外反向传播的时间、显存和实现复杂度；
 - 最后再报告 Transformer/CNN transfer ASR。
 
+**当前实测结果（64 张图像、15% drop，修正版 logit-connected final-block activation）。** 四个模型上的 source route 平均真实类 logit drop 如下：
+
+| 模型 | Random | Patch-score | Grad-CAM ReLU | Grad-CAM signed | Grad-CAM abs |
+|---|---:|---:|---:|---:|---:|
+| ViT-B/16 | 0.090 | 0.092 | 0.122 | 0.129 | 0.091 |
+| CaiT-S24 | 0.047 | 0.031 | 0.087 | 0.084 | 0.021 |
+| PiT-B | 0.211 | 0.188 | 0.293 | 0.309 | 0.272 |
+| Visformer-S | -0.002 | -0.012 | 0.013 | -0.013 | -0.010 |
+
+修正版跨架构 source→target 矩阵的平均 logit drop 为：Patch-score 0.150（非对角 0.175），Grad-CAM ReLU 0.178（非对角 0.190），signed 0.176（非对角 0.193），abs 0.163（非对角 0.186），Random 0.146（非对角 0.166）。因此当前数据不支持“patch-score 比 Grad-CAM 更忠实、更稳定或更可迁移”的结论。
+
+跨视图水平翻转稳定性同样没有形成 patch-score 优势：ViT 上 patch-score 的 rank Spearman/half-IoU 为 0.866/0.778，Grad-CAM ReLU 为 0.832/0.776；CaiT 为 0.743/0.671 对 0.747/0.733；PiT 为 0.769/0.695 对 0.891/0.812；Visformer 为 0.658/0.597 对 0.965/0.889。标准 ReLU 的 zero fraction 已在修正版中单独检查，不再把全零图的假稳定性计入结论。
+
+非预测类 Grad-CAM control 说明类别依赖是真实差异：ViT 的 signed logit drop 从预测类的 0.129 降至非预测类的 0.088，CaiT ReLU 从 0.087 降至 0.046；PiT 仍为 0.223--0.247，Visformer 的 signed 方向由 -0.013 变为 +0.032。patch-score map 不随 target class 改变。由此，当前可保留的主线定位应是：patch-score 是不需要指定类别梯度、也不消耗额外反向传播的 representation-based stochastic routing；它不是 Grad-CAM 的因果替代品。若实验允许类别梯度并以 source deletion 为目标，应把 Grad-CAM 或 score∩Grad-CAM hybrid 作为更强 selector 对照，不能隐藏这一事实。
+
 #### 6.6.5 预期结果与文章结论规则
 
 建议预先记录以下可证伪假设：
@@ -409,6 +424,8 @@ Patch-score 和 Grad-CAM-style 都使用相同的 top-half candidate + 15% drop 
 - **H4（信号差异）：** Patch-score map 更接近 global semantic evidence，Grad-CAM map 更接近指定类别的梯度敏感区域；二者只部分重合。
 - **H5（稳定性取舍）：** Grad-CAM 可能在 source-class occlusion 上更强，但 patch-score 在无类别路由、跨视图和跨架构稳定性上更好。
 - **H6（主线选择）：** 在固定 opponent-channel noise 后，patch-score 的优势应首先体现在区域稳定性、特征/梯度结构和跨架构一致性，而不是只体现为单一 ASR 数字。
+
+上述 H5/H6 的“patch-score 稳定性/迁移性更强”版本目前没有得到支持；文章应改写为“两种 selector 的信号职责不同，Grad-CAM 更适合类别条件的忠实删除，patch-score 更适合类别无关、梯度解耦的路由协议”。
 
 最终允许出现三种结论：
 
