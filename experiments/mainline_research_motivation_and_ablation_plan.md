@@ -39,11 +39,11 @@ local patch token
 patch-score = similarity(local patch, global representation)
 ```
 
-直观上，高分 patch 的局部表示更贴近模型当前的整体判别语义。因此，攻击先从高分 patch 中构造候选集，再从候选集中随机抽取少量位置进行 drop。
+直观上，patch-score 给出了局部表示相对于当前整体语义的几何坐标。高分尾、低分尾以及偏离中位数的极端 patch 可能对应不同的路由作用，不能预先把其中某一侧固定解释成“因果重要 patch”。因此，攻击先构造 score-tail 候选集，再从候选集中随机抽取少量位置进行 drop；尾部方向由独立校准数据决定，或作为机制消融显式比较。
 
 这使 patch-score 不再只是一个排序步骤，而可以被解释为：
 
-> 一个把有限攻击预算路由到模型判别性语义证据上的模型感知信息瓶颈。
+> 一个把有限攻击预算路由到模型语义表示空间不同区域的模型感知信息瓶颈。
 
 不过，高 score 目前首先表示语义相关性，不应未经验证地直接等同于因果重要性。后续必须检查高分 patch 是否真的比低分 patch 更能改变 loss、logit、全局表示和模型预测。
 
@@ -84,7 +84,7 @@ opponent noise：扰动剩余证据的颜色表达和局部表征
 
 ### Observation 2：攻击应优先擦除模型正在使用的语义证据
 
-最终层 global token 可以看作模型当前的整体判别语义，local patch token 则表示各个局部区域。二者的相似度可以作为局部区域与当前整体语义之间的相关性信号：
+最终层 global token 可以看作模型当前的整体语义，local patch token 则表示各个局部区域。二者的相似度可以作为局部区域与当前整体语义之间的相关性坐标，而不是未经验证的因果重要性分数：
 
 ```text
 global-local similarity
@@ -93,7 +93,7 @@ global-local similarity
 → targeted evidence erasure
 ```
 
-这构成 patch-score-guided patch drop 的 motivation。
+因此，patch-score-guided patch drop 的 motivation 不是假设“高分必然最重要”，而是利用这一个具有表示语义的坐标，把有限预算路由到可解释的 score tail，并通过校准或对照实验确定哪一侧更适合切断当前模型的证据路径。
 
 ### Observation 3：只擦除部分证据后，模型可能利用剩余冗余证据恢复判断
 
@@ -111,20 +111,20 @@ global-local similarity
 
 当前方法可以被表述为：
 
-> 模型的分类决策依赖一组分布不均匀的局部语义证据。我们首先利用最终语义层的 global-local 相似度定位模型当前依赖的高相关 patch，并进行选择性 patch drop，切断主要判别证据；随后，在保留的局部证据上施加 RGB opponent-channel 随机噪声，并通过首层 RGB projection 映射到模型特征空间，破坏模型对剩余证据的稳定表达。前者负责证据选择，后者负责证据表达扰动，二者构成互补的攻击机制。
+> 模型的分类决策依赖一组分布不均匀的局部语义证据。我们首先利用最终语义层的 global-local 相似度建立可解释的 patch-score 坐标，并通过独立校准选择合适的 score tail，对相应区域进行选择性 patch drop，切断一部分语义证据路径；随后，在保留的局部证据上施加 RGB opponent-channel 随机噪声，并通过首层 RGB projection 映射到模型特征空间，破坏模型对剩余证据的稳定表达。前者负责语义路由与证据集合重组，后者负责剩余证据的表达扰动，二者构成互补的攻击机制。
 
 ## 4. 三个核心研究假设
 
-### H1：语义路由假设
+### H1：可校准语义路由假设
 
-在相同 drop budget 下，patch-score 引导的 drop 比 random drop 更能改变模型的判别性特征和输出。
+在相同 drop budget 下，经过独立校准的 patch-score tail routing 比 random drop 更能改变模型的判别性特征和输出；有效方向可以依赖架构，不应预先写死为高分。
 
 需要验证的证据包括：
 
-- 高分 patch 被遮挡后 source loss 增幅更大；
+- 被校准选中的 score tail 被遮挡后 source loss 增幅更大；
 - 真实类别 logit 下降更多；
 - global feature 改变量更大；
-- score 与单 patch occlusion importance 存在相关性；
+- score 与单 patch occlusion importance 的关系被明确报告，即使相关性弱，也不把 score 解释成单 patch 因果重要性；
 - 该效果在不同白盒架构中具有一致性。
 
 ### H2：颜色结构假设
@@ -208,6 +208,8 @@ patch-score 与真实 occlusion importance 的相关性
 
 这是最关键的基础实验。如果二者没有关系，就不能直接把高 score 写成“因果重要性”，而应该更谨慎地称为“语义相关性路由信号”。
 
+**第一轮结果（64 张干净图像、四个白盒架构、最终语义层）。** 当前实现已经完成单 patch 遮挡实验。score 与单 patch 真实类别 logit drop 的 Spearman 相关系数均值分别为：ViT-B/16 -0.033、CaiT-S24 -0.051、PiT-B +0.018、Visformer-S -0.069；与 loss increase 的对应均值为 -0.019、-0.042、+0.006、-0.045。也就是说，当前证据不支持“高 score 等于单 patch 因果重要性”的强主张。后续文章应把这一结果作为方法边界：patch-score 是表示关系的路由坐标，而不是逐 patch 的忠实因果解释器。
+
 ### 6.2 比较不同 patch 路由策略
 
 在完全相同的 drop 数量下比较：
@@ -216,7 +218,7 @@ patch-score 与真实 occlusion importance 的相关性
 high-score drop
 low-score drop
 random drop
-score-weighted drop
+score-deviation drop
 extreme top-score drop
 all-patch sampling
 ```
@@ -229,6 +231,10 @@ all-patch sampling
 - patch mask 的空间位置；
 - 梯度方向和梯度稳定性；
 - 跨白盒架构的一致性。
+
+新增一个预先定义的 **polarity calibration** 协议：在校准子集上只根据 loss increase 在 high-score extreme、low-score extreme 和 score-deviation extreme 三个候选中选择路由方向，然后在未参与选择的评估子集上与 random drop 比较。该协议把“哪一侧是有效方向”从事后叙事变成可检验的模型适配问题。
+
+**第一轮交叉拟合结果（32 次随机半分、每次 32/32，15% drop）。** 在四个模型上，校准选择的 tail 在评估半区相对 random 的 loss increase 均为正：ViT-B/16 +0.0118（95% CI [0.0089, 0.0148]），CaiT-S24 +0.0118（[0.0079, 0.0158]），PiT-B +0.0178（[0.0161, 0.0195]），Visformer-S +0.0146（[0.0103, 0.0188]）。被选择的方向并不统一：ViT 选择 high-score extreme 的频率为 96.9%，PiT 选择 low-score extreme 为 100%，CaiT 和 Visformer 则分别以 low-score/deviation tail 为主。这支持“score 可用于语义路由，但路由极性需要校准”的较弱且更准确的 motivation。
 
 ### 6.3 比较不同 score 层
 
@@ -257,6 +263,8 @@ all-patch sampling
 - drop 过多后是否失去选择性；
 - 当前 15% 是否存在机制上的最佳区间；
 - 不同模型 patch 网格下是否需要按 patch 数量校准。
+
+目前 64 张图像的预算扫描显示，ViT 在 10%--20% drop 时 high-score extreme 相对随机更有效，PiT 在 10%--20% 时 low-score extreme 更有效，Visformer 的 low-score extreme 更稳定，CaiT 在中高预算下 high/low 均可能有效但 loss 指标更偏向 low-score extreme。因此，15% 可以作为统一主协议，但必须同时报告 tail polarity 与 calibration 规则，不能把 high-score-only 结果泛化到所有架构。
 
 ### 6.5 分析 mask 稳定性
 
@@ -622,7 +630,7 @@ ASR 应作为“机制是否具有迁移价值”的最终验证，而不是后�
 依次介绍：
 
 1. final-layer patch-score routing；
-2. stochastic high-score patch drop；
+2. calibrated score-tail stochastic patch drop；
 3. kept-only opponent-channel noise；
 4. initial RGB projection；
 5. 多视图梯度估计和 MI-FGSM 优化。
@@ -642,10 +650,10 @@ ASR 应作为“机制是否具有迁移价值”的最终验证，而不是后�
 后续工作真正需要证明的不是“某个配置又提高了几个百分点 ASR”，而是以下四点：
 
 ```text
-1. 高分 patch 确实更接近模型的判别性语义证据；
-2. opponent-channel noise 确实具有不同于 Gaussian 的颜色/特征结构；
-3. 两个机制分别作用于证据选择和证据表达；
-4. 二者组合具有可解释的互补性。
+1. patch-score 提供了可解释的 global-local 语义路由坐标，但不应被过度解释为单 patch 因果重要性；
+2. 在独立校准后，选择合适 score tail 能够比 random drop 更稳定地改变模型输出，且路由极性具有架构依赖性；
+3. opponent-channel noise 确实具有不同于 Gaussian 的颜色/特征结构；
+4. 两个机制分别作用于证据集合重组和剩余证据表达，二者组合具有可解释的互补性。
 ```
 
 只要这四点被实验验证，文章的 motivation、method 和实验结论就能够形成闭环，ASR 则作为方法具有迁移价值的最终佐证。
