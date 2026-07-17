@@ -269,6 +269,7 @@ def main() -> None:
     grid_size: tuple[int, int] | None = None
     score_source = ""
     route_rows: list[dict[str, object]] = []
+    route_per_image_rows: list[dict[str, object]] = []
     stability_values: dict[str, list[torch.Tensor]] = {}
     strategies = (
         "high_score_stochastic",
@@ -350,6 +351,23 @@ def main() -> None:
                             "all_score_std": float(scores.std(unbiased=False).cpu()),
                         }
                     )
+                    for local_index in range(batch_end - batch_start):
+                        route_per_image_rows.append(
+                            {
+                                "model": args.model,
+                                "sample_index": batch_start + local_index,
+                                "image_name": names[batch_start + local_index],
+                                "label": int(labels_cpu[batch_start + local_index]),
+                                "clean_correct": bool(correct[local_index]),
+                                "strategy": strategy,
+                                "drop_ratio": drop_ratio,
+                                "repeat": repeat,
+                                "route_logit_drop": float(route_logit_drop[local_index].cpu()),
+                                "route_loss_increase": float(route_loss_increase[local_index].cpu()),
+                                "route_prediction_changed": bool(prediction_changed[local_index].cpu()),
+                                "selected_score_mean": float(selected_scores[local_index].mean().cpu()),
+                            }
+                        )
             for strategy, masks in masks_by_repeat.items():
                 for left_index in range(len(masks)):
                     for right_index in range(left_index):
@@ -392,6 +410,7 @@ def main() -> None:
     write_rows(output_dir / "single_patch_raw.csv", raw_rows)
 
     write_rows(output_dir / "route_raw.csv", route_rows)
+    write_rows(output_dir / "route_per_image_raw.csv", route_per_image_rows)
 
     stability = {
         strategy: float(torch.cat(values).mean()) if values else 1.0
