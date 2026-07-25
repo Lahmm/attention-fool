@@ -21,6 +21,7 @@ from attack import (
 )
 from gradient_replay import GradientReplay
 from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, build_whitebox_model
+from routing_config import FrozenRoutingConfig, file_sha256
 from utils import DEVICE, load_data, save_adversarial_images
 
 
@@ -79,18 +80,33 @@ def attack_all_samples(
     attacker: PatchScoreAttacker,
     output_dir: Path,
     max_attacked_samples: int | None,
+    sample_offset: int = 0,
     replay: GradientReplay | None = None,
 ) -> list[str]:
     total = len(dataloader.dataset)
-    limit = total if max_attacked_samples is None else min(total, max_attacked_samples)
+    if sample_offset < 0 or sample_offset >= total:
+        raise ValueError(f"sample_offset must be in [0, {total}), got {sample_offset}.")
+    available = total - sample_offset
+    limit = available if max_attacked_samples is None else min(available, max_attacked_samples)
     progress = tqdm(total=limit, desc="Attacking samples")
     attacked = 0
     saved_count = 0
+    seen = 0
     all_sample_ids: list[str] = []
 
     for images, labels, indices in dataloader:
         if attacked >= limit:
             break
+        batch_end = seen + images.size(0)
+        if batch_end <= sample_offset:
+            seen = batch_end
+            continue
+        if seen < sample_offset:
+            start = sample_offset - seen
+            images = images[start:]
+            labels = labels[start:]
+            indices = indices[start:]
+        seen = batch_end
         remaining = limit - attacked
         images = images[:remaining]
         labels = labels[:remaining]
@@ -127,6 +143,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--attack-method", choices=ATTACK_METHODS, default="original_score_postdrop_phase_pair")
     parser.add_argument("--whitebox-model", choices=WHITEBOX_MODEL_CHOICES, default=DEFAULT_MODEL_NAME)
     parser.add_argument("--max-attacked-samples", type=int, default=1000)
+    parser.add_argument(
+        "--sample-offset",
+        type=int,
+        default=0,
+        help="Skip this many sorted annotated samples before attacking.",
+    )
     parser.add_argument("--epsilon", type=float, default=16.0 / 255.0)
     parser.add_argument("--step-size", type=float, default=None)
     parser.add_argument("--steps", type=int, default=10)
@@ -209,6 +231,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--prefetch-factor", type=int, default=4)
     parser.add_argument("--output-dir", default="outputs/attack/patch_score_routing")
+    parser.add_argument(
+        "--routing-config",
+        type=Path,
+        default=None,
+        help="Frozen global-polarity/model-layer calibration JSON.",
+    )
     return parser.parse_args()
 
 
@@ -227,6 +255,13 @@ def main(args: argparse.Namespace) -> None:
         num_workers=args.num_workers,
         prefetch_factor=args.prefetch_factor,
     )
+    routing_config = None
+    routing_config_sha256 = None
+    if args.routing_config is not None:
+        routing_config = FrozenRoutingConfig.load(args.routing_config)
+        routing_config_sha256 = file_sha256(args.routing_config)
+        args.patch_score_layer = routing_config.layer_for(args.whitebox_model)
+        args.patch_dropout_score_mode = routing_config.global_polarity
     model = build_whitebox_model(num_classes=num_classes, model_name=args.whitebox_model)
     attacker = PatchScoreAttacker(
         model=model,
@@ -277,6 +312,7 @@ def main(args: argparse.Namespace) -> None:
         attacker,
         output_dir,
         args.max_attacked_samples,
+        sample_offset=args.sample_offset,
         replay=replay,
     )
     if replay is not None:
@@ -293,6 +329,7 @@ def main(args: argparse.Namespace) -> None:
         "attack_method": args.attack_method,
         "whitebox_model": args.whitebox_model,
         "max_attacked_samples": args.max_attacked_samples,
+        "sample_offset": args.sample_offset,
         "epsilon": args.epsilon,
         "step_size": args.step_size if args.step_size is not None else args.epsilon / args.steps,
         "steps": args.steps,
@@ -340,6 +377,8 @@ def main(args: argparse.Namespace) -> None:
         "patch_score_layer": args.patch_score_layer,
         "patch_selector": args.patch_selector,
         "gradcam_target_mode": args.gradcam_target_mode,
+        "routing_config": str(args.routing_config) if args.routing_config is not None else None,
+        "routing_config_sha256": routing_config_sha256,
         "gradient_postprocess": "mean",
         "gaussian_sigma": args.gaussian_sigma,
         "gaussian_alpha": args.gaussian_alpha,

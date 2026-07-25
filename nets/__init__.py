@@ -16,6 +16,13 @@ WHITEBOX_MODEL_CHOICES = (
     "visformer_small",
 )
 
+PATCH_SCORE_LAYER_CANDIDATES = {
+    "vit_base_patch16_224": tuple(ViTWithHook._PATCH_SCORE_LAYERS),
+    "cait_s24_224": tuple(CaiTS24WithHook._PATCH_SCORE_LAYERS),
+    "pit_b_224": tuple(PiTB224WithHook._PATCH_SCORE_LAYERS),
+    "visformer_small": tuple(VisformerSmallWithHook._PATCH_SCORE_LAYERS),
+}
+
 
 def build_whitebox_model(
     num_classes: int,

@@ -1,10 +1,13 @@
+from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 import torch
+from torch.utils.data import DataLoader, Dataset
 
 from attack import ATTACK_METHODS, PATCH_SELECTORS, PatchScoreAttacker
-from main import parse_args
+from main import attack_all_samples, parse_args
 
 
 class DummyModel:
@@ -13,6 +16,26 @@ class DummyModel:
 
     def eval(self):
         return self
+
+
+class IndexedDataset(Dataset):
+    def __init__(self):
+        self.samples = [{"image_name": f"image_{index}.png"} for index in range(6)]
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, index):
+        return torch.zeros(3, 2, 2), 0, index
+
+
+class RecordingAttacker:
+    def __init__(self):
+        self.ids = []
+
+    def attack_batch(self, images, _labels, replay=None, sample_ids=None):
+        self.ids.extend(sample_ids or [])
+        return images
 
 
 def make_attacker(**kwargs):
@@ -93,6 +116,7 @@ class AttackPipelineTests(unittest.TestCase):
         self.assertEqual(args.gaussian_sigma, 4.0)
         self.assertEqual(args.gaussian_alpha, 0.75)
         self.assertEqual(args.post_dropout_feature_noise_type, "opponent_projected")
+        self.assertEqual(args.sample_offset, 0)
         self.assertEqual(args.patch_selector, "patch_score")
         self.assertEqual(args.gradcam_target_mode, "true")
         self.assertEqual(
@@ -150,6 +174,21 @@ class AttackPipelineTests(unittest.TestCase):
             make_attacker(gaussian_sigma=0.0, gaussian_alpha=0.75)
         with self.assertRaises(ValueError):
             make_attacker(nesterov=True, use_momentum=False)
+
+    def test_attack_sample_offset_is_disjoint_and_exact(self):
+        dataloader = DataLoader(IndexedDataset(), batch_size=4, shuffle=False)
+        attacker = RecordingAttacker()
+        with tempfile.TemporaryDirectory() as directory:
+            ids = attack_all_samples(
+                dataloader,
+                attacker,
+                Path(directory),
+                max_attacked_samples=2,
+                sample_offset=3,
+                replay=object(),
+            )
+        self.assertEqual(ids, ["image_3.png", "image_4.png"])
+        self.assertEqual(attacker.ids, ids)
 
 
 if __name__ == "__main__":
