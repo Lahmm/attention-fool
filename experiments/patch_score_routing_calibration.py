@@ -51,7 +51,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--sample-seed", type=int, default=20260717)
     parser.add_argument("--attack-seed", type=int, default=20260716)
-    parser.add_argument("--image-ids-sha256", default="pending")
+    parser.add_argument(
+        "--image-ids-sha256",
+        help="Required with --results; copy sample_ids_sha256 from a calibration replay manifest.",
+    )
     return parser.parse_args()
 
 
@@ -269,6 +272,15 @@ def main() -> None:
         print(f"wrote {len(rows)} pre-registered calibration rows to {args.write_template}")
         print(f"wrote executable job manifest to {manifest_path}")
         return
+    if args.image_ids_sha256 is None:
+        raise ValueError(
+            "--image-ids-sha256 is required with --results; copy it from a calibration "
+            "replay_manifest.json."
+        )
+    if len(args.image_ids_sha256) != 64 or any(
+        character not in "0123456789abcdefABCDEF" for character in args.image_ids_sha256
+    ):
+        raise ValueError("--image-ids-sha256 must be a 64-character hexadecimal SHA-256.")
     results = read_results(args.results)
     config, summary = select_config(
         results,

@@ -111,10 +111,14 @@ class GradientReplay:
         )
 
     def manifest(self, sample_ids: list[str]) -> dict[str, object]:
+        canonical_sample_ids = json.dumps(
+            list(sample_ids), ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
         return {
             "version": self.VERSION,
             "master_seed": self.master_seed,
             "sample_ids": list(sample_ids),
+            "sample_ids_sha256": hashlib.sha256(canonical_sample_ids).hexdigest(),
             "event_count": self._event_count,
             "event_digest": self._event_hasher.hexdigest(),
             "phase_events": self._phase_events,

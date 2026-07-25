@@ -5,13 +5,14 @@
 1. **Patch-score 引导的 patch drop：扰动应该放在哪里？**
 2. **RGB opponent-channel 随机噪声：保留信息应该如何被扰动？**
 
-前者负责空间选择，后者负责扰动形态。核心假设是：对模型正在使用的语义证据做选择性擦除，同时对剩余证据施加具有颜色结构的随机扰动，比无差别 patch dropout 或无结构 feature Gaussian 更能打破模型对局部证据的稳定依赖。
+前者负责空间选择，后者负责扰动形态。核心假设是：patch-score 提供一个 label-free、gradient-independent 的 global/local 表示路由坐标；drop 该坐标中的候选位置并扰动剩余证据，可能重组源模型的梯度路径并增加跨模型共享成分。它不是单 patch 因果显著性定义。
 
 默认主线为：
 
 ```text
-final-layer patch score
-→ high-score candidate stochastic pixel patch dropout
+architecture-calibrated patch-score layer
+→ one globally frozen high/low polarity
+→ score-tail candidate stochastic pixel patch dropout
 → original / phase-shifted view pair
 → kept-only feature noise at the initial RGB projection
 → raw 20-view gradient mean
@@ -33,9 +34,11 @@ pip install -r requirements.txt
 
 ### Patch-score 路由：从随机删 patch 变成语义选择性删 patch
 
-普通 patch dropout 只控制删多少，不回答删哪里。当前方法从白盒模型最终语义层提取 global token 和 local patch token，用二者余弦相似度得到 patch-score。高分 patch 被视为更贴近当前全局判别证据的局部区域；攻击从高分候选区域中随机抽取少量 patch，并把 mask 映射回像素空间。
+普通 patch dropout 只控制删多少，不回答删哪里。当前方法在预注册候选层提取 global representation 和 local patch tokens，用二者余弦相似度得到 patch-score。攻击从统一的 high 或 low score-tail 候选区随机抽取少量 patch，并把 mask 映射回像素空间。每个架构可以通过独立校准选择不同层，但四个架构必须冻结同一极性。
 
-后续研究应把它当作一个**语义信息瓶颈路由器**来分析：高分区域是否更直接支撑当前类别判断？相同 drop budget 下，score-guided drop 是否产生不同的特征响应、注意力变化和梯度结构？候选集内的随机性是否能减少对白盒模型固定位置的过拟合？最终语义层的 score 是否能在 ViT、CaiT、PiT、Visformer 之间保持一致的含义？
+研究把它当作一个**语义路由器**来分析：相同 native token ratio 下，不同层的 score-guided drop 是否重组 kept-token 表示、多视图梯度和跨模型梯度？哪一层能产生更高的 held-out transfer ASR？最终层只是对照，不是预设答案。clean logit、单 patch occlusion 和 source feature change 只作为边界诊断，不能用于选层。
+
+完整的冻结规则、Grad-CAM 对照和实验命令见 [候选层路由论文协议](experiments/patch_score_routing_layer_story_and_protocol.md)。
 
 ### RGB opponent-channel noise：从各向同性噪声变成颜色结构扰动
 
@@ -47,16 +50,19 @@ pip install -r requirements.txt
 
 ### 其他组件的定位
 
-phase-shifted view pair、20-view raw gradient mean、Gaussian gradient residual 和 MI-FGSM 是稳定梯度估计和完成优化的支撑组件，不应喧宾夺主。ASR 继续作为迁移性验证指标，但不再是本项目后续唯一或首要的优化目标；优先级应是机制证据、可解释消融、跨架构一致性，以及让 motivation、method 和 claim 彼此闭环。
+phase-shifted view pair、20-view raw gradient mean、Gaussian gradient residual 和 MI-FGSM 是稳定梯度估计和完成优化的支撑组件，不应喧宾夺主。最终有效性指标是 target-clean-correct transfer ASR；直接机制证据包括跨模型 gradient cosine、sign agreement、held-out target one-step response 和多视图 effective rank。
 
 ## 默认主线
 
 ```bash
 python main.py \
   --whitebox-model vit_base_patch16_224 \
+  --routing-config outputs/research/routing_calibration/frozen_routing.json \
   --seed 20260716 \
   --output-dir outputs/attack/vit_mainline
 ```
+
+论文 production run 必须提供已冻结 routing config；不提供时保留的 final/high 行为只用于复现历史实验。
 
 默认设置为 1000 样本、`epsilon=16/255`、10 steps、10 groups × 2 views、约 15%
 实际 patch drop、kept-only opponent-projected RGB 噪声，以及：
@@ -118,14 +124,16 @@ python main.py \
 默认 phase-pair 主线不与 DIM 叠加。所有 group/view 配置仍受每步最多 20 次实际
 model view 的限制。
 
-## 白盒模型
+## 白盒模型与候选路由层
 
-| 模型 | score 来源 | score 网格 | 默认实际 drop |
-| --- | --- | --- | --- |
-| `vit_base_patch16_224` | `blocks[11]` CLS/patch | 14×14 | 29/196 |
-| `cait_s24_224` | `blocks[23]` + class-attention CLS | 14×14 | 29/196 |
-| `pit_b_224` | `transformers[2].blocks[3]` | 8×8 | 10/64 |
-| `visformer_small` | `stage3[3]` + GAP pseudo-CLS | 7×7 | 7/49 |
+| 模型 | 预注册候选层 | global 表示 |
+| --- | --- | --- |
+| `vit_base_patch16_224` | block 3/6/9/12 | CLS |
+| `cait_s24_224` | block 6/12/18/24 GAP；block24 class | GAP / class-attention CLS |
+| `pit_b_224` | stage1 b3；stage2 b3/b6；stage3 b2/b4 | CLS |
+| `visformer_small` | stage1 b4/b7；stage2 b4；stage3 b2/b4 | GAP |
+
+跨层公平性固定 native token ratio：候选集为一半 tokens，实际 drop 约 15%。生产配置由 128 张独立校准图冻结，然后在不重选参数的 500 张测试图上运行 selector suite。
 
 ## 迁移评估
 
