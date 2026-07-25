@@ -18,6 +18,14 @@ DEFAULT_MODEL_NAME = "cait_s24_224"
 class CaiTS24WithHook(WhiteBoxWithHook):
     default_model_name = DEFAULT_MODEL_NAME
 
+    _PATCH_SCORE_LAYERS = {
+        "block6_gap": 6,
+        "block12_gap": 12,
+        "block18_gap": 18,
+        "block24_gap": 24,
+        "block24_class": 24,
+    }
+
     def _feature_modules(self):
         return sequential_modules(getattr(self.model, "blocks", None))
 
@@ -35,6 +43,9 @@ class CaiTS24WithHook(WhiteBoxWithHook):
         state.validate()
         return state
 
+    def patch_score_layer_candidates(self) -> tuple[str, ...]:
+        return tuple(self._PATCH_SCORE_LAYERS)
+
     def _run_encoder(self, local_tokens: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         local_tokens = self.model.blocks(local_tokens)
         cls_token = self.model.cls_token.expand(local_tokens.size(0), -1, -1)
@@ -48,15 +59,35 @@ class CaiTS24WithHook(WhiteBoxWithHook):
         *,
         score_layer: str = "final",
     ) -> PatchScoreFeatures:
-        if score_layer != "final":
-            raise ValueError(f"unsupported CaiT patch score layer: {score_layer!r}")
+        canonical = "block24_class" if score_layer == "final" else score_layer
+        if canonical not in self._PATCH_SCORE_LAYERS:
+            raise ValueError(
+                f"unsupported CaiT patch score layer: {score_layer!r}; "
+                f"choose from {self.patch_score_layer_candidates()} or 'final'."
+            )
         state = self.prepare_attack_feature_state(x)
-        local_tokens, cls_token = self._run_encoder(state.local_tokens)
+        local_tokens = state.local_tokens
+        block_count = self._PATCH_SCORE_LAYERS[canonical]
+        for block in self.model.blocks[:block_count]:
+            local_tokens = block(local_tokens)
+        if canonical == "block24_class":
+            cls_token = self.model.cls_token.expand(local_tokens.size(0), -1, -1)
+            for block in self.model.blocks_token_only:
+                cls_token = block(local_tokens, cls_token)
+            global_token = cls_token
+            global_mode = "class_attention_cls"
+            source_name = "blocks[23]+blocks_token_only[1]"
+        else:
+            global_token = local_tokens.mean(dim=1, keepdim=True)
+            global_mode = "gap"
+            source_name = f"blocks[{block_count - 1}]+gap"
         features = PatchScoreFeatures(
             local_tokens=local_tokens,
-            global_token=cls_token,
+            global_token=global_token,
             grid_size=state.grid_size,
-            source_name="blocks[23]+blocks_token_only[1]",
+            source_name=source_name,
+            layer_id=canonical,
+            global_mode=global_mode,
         )
         features.validate()
         return features

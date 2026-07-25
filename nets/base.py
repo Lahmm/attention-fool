@@ -21,12 +21,21 @@ DEFAULT_PRETRAINED = True
 
 @dataclass
 class PatchScoreFeatures:
-    """Architecture-neutral local/global features used for patch scoring."""
+    """Architecture-neutral local/global features used for patch scoring.
+
+    ``layer_id`` is the stable public identifier accepted by the attack and
+    experiment CLIs.  ``source_name`` remains a human-readable description of
+    the concrete module(s), while ``global_mode`` makes it explicit whether
+    the global representation came from a learned token, CaiT class
+    attention, or global average pooling.
+    """
 
     local_tokens: torch.Tensor
     global_token: torch.Tensor
     grid_size: tuple[int, int]
     source_name: str
+    layer_id: str = "final"
+    global_mode: str = "cls"
 
     def validate(self) -> None:
         if self.local_tokens.ndim != 3:
@@ -43,6 +52,13 @@ class PatchScoreFeatures:
             raise ValueError("local and global feature dimensions do not match.")
         if self.local_tokens.size(1) != self.grid_size[0] * self.grid_size[1]:
             raise ValueError("local token count does not match grid_size.")
+        if not self.layer_id:
+            raise ValueError("layer_id must be non-empty.")
+        if self.global_mode not in {"cls", "class_attention_cls", "gap"}:
+            raise ValueError(
+                "global_mode must be cls, class_attention_cls, or gap, got "
+                f"{self.global_mode!r}."
+            )
 
 
 @dataclass
@@ -137,6 +153,15 @@ class WhiteBoxWithHook(nn.Module):
         score_layer: str = "final",
     ) -> PatchScoreFeatures:
         raise NotImplementedError(f"patch-score extraction is not implemented for {self.model_name}.")
+
+    def patch_score_layer_candidates(self) -> tuple[str, ...]:
+        """Return pre-registered, canonical routing checkpoints.
+
+        ``final`` is intentionally an alias rather than a candidate: callers
+        that scan layers should not accidentally evaluate the same endpoint
+        twice.
+        """
+        return ("final",)
 
     def prepare_attack_feature_state(self, x: torch.Tensor) -> AttackFeatureState:
         raise NotImplementedError(f"attack feature preparation is not implemented for {self.model_name}.")

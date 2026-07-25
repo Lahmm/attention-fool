@@ -18,6 +18,14 @@ DEFAULT_MODEL_NAME = "visformer_small"
 class VisformerSmallWithHook(WhiteBoxWithHook):
     default_model_name = DEFAULT_MODEL_NAME
 
+    _PATCH_SCORE_LAYERS = {
+        "stage1_block4": (1, 4),
+        "stage1_block7": (1, 7),
+        "stage2_block4": (2, 4),
+        "stage3_block2": (3, 2),
+        "stage3_block4": (3, 4),
+    }
+
     def _feature_modules(self):
         modules = []
         modules.extend(sequential_modules(getattr(self.model, "stage1", None)))
@@ -39,6 +47,36 @@ class VisformerSmallWithHook(WhiteBoxWithHook):
         )
         state.validate()
         return state
+
+    def patch_score_layer_candidates(self) -> tuple[str, ...]:
+        return tuple(self._PATCH_SCORE_LAYERS)
+
+    def _run_to_checkpoint(
+        self,
+        state: AttackFeatureState,
+        target_stage: int,
+        target_block_count: int,
+    ) -> torch.Tensor:
+        batch, _, channels = state.local_tokens.shape
+        height, width = state.grid_size
+        spatial = state.local_tokens.transpose(1, 2).reshape(batch, channels, height, width)
+        base = self.model
+        stages = (
+            (base.patch_embed1, base.pos_embed1, base.stage1),
+            (base.patch_embed2, base.pos_embed2, base.stage2),
+            (base.patch_embed3, base.pos_embed3, base.stage3),
+        )
+        for stage_index, (patch_embed, pos_embed, blocks) in enumerate(stages, start=1):
+            if patch_embed is not None:
+                spatial = patch_embed(spatial)
+                if pos_embed is not None:
+                    spatial = base.pos_drop(spatial + pos_embed)
+            block_count = target_block_count if stage_index == target_stage else len(blocks)
+            for block in blocks[:block_count]:
+                spatial = block(spatial)
+            if stage_index == target_stage:
+                return spatial
+        raise RuntimeError("Visformer routing checkpoint was not reached.")
 
     def _run_stages(
         self,
@@ -74,16 +112,23 @@ class VisformerSmallWithHook(WhiteBoxWithHook):
         *,
         score_layer: str = "final",
     ) -> PatchScoreFeatures:
+        canonical = "stage3_block4" if score_layer == "final" else score_layer
+        if canonical not in self._PATCH_SCORE_LAYERS:
+            raise ValueError(
+                f"unsupported Visformer patch score layer: {score_layer!r}; "
+                f"choose from {self.patch_score_layer_candidates()} or 'final'."
+            )
+        target_stage, target_block_count = self._PATCH_SCORE_LAYERS[canonical]
         state = self.prepare_attack_feature_state(x)
-        if score_layer != "final":
-            raise ValueError(f"unsupported Visformer patch score layer: {score_layer!r}")
-        spatial = self._run_stages(state, state.local_tokens)
+        spatial = self._run_to_checkpoint(state, target_stage, target_block_count)
         local_tokens = spatial.flatten(2).transpose(1, 2)
         features = PatchScoreFeatures(
             local_tokens=local_tokens,
             global_token=local_tokens.mean(dim=1, keepdim=True),
             grid_size=(int(spatial.size(-2)), int(spatial.size(-1))),
-            source_name="stage3[3]+gap",
+            source_name=f"stage{target_stage}[{target_block_count - 1}]+gap",
+            layer_id=canonical,
+            global_mode="gap",
         )
         features.validate()
         return features

@@ -18,6 +18,14 @@ DEFAULT_MODEL_NAME = "pit_b_224"
 class PiTB224WithHook(WhiteBoxWithHook):
     default_model_name = DEFAULT_MODEL_NAME
 
+    _PATCH_SCORE_LAYERS = {
+        "stage1_block3": (0, 3),
+        "stage2_block3": (1, 3),
+        "stage2_block6": (1, 6),
+        "stage3_block2": (2, 2),
+        "stage3_block4": (2, 4),
+    }
+
     def _feature_modules(self):
         return nested_stage_blocks(getattr(self.model, "transformers", ()))
 
@@ -35,6 +43,30 @@ class PiTB224WithHook(WhiteBoxWithHook):
         )
         state.validate()
         return state
+
+    def patch_score_layer_candidates(self) -> tuple[str, ...]:
+        return tuple(self._PATCH_SCORE_LAYERS)
+
+    @staticmethod
+    def _run_stage_to_block(
+        stage,
+        spatial: torch.Tensor,
+        cls_token: torch.Tensor,
+        block_count: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if stage.pool is not None:
+            spatial, cls_token = stage.pool(spatial, cls_token)
+        batch, channels, height, width = spatial.shape
+        prefix_count = cls_token.size(1)
+        tokens = torch.cat((cls_token, spatial.flatten(2).transpose(1, 2)), dim=1)
+        tokens = stage.norm(tokens)
+        for block in stage.blocks[:block_count]:
+            tokens = block(tokens)
+        cls_token = tokens[:, :prefix_count]
+        spatial = tokens[:, prefix_count:].transpose(1, 2).reshape(
+            batch, channels, height, width
+        )
+        return spatial, cls_token
 
     def _run_transformers(
         self,
@@ -55,16 +87,33 @@ class PiTB224WithHook(WhiteBoxWithHook):
         *,
         score_layer: str = "final",
     ) -> PatchScoreFeatures:
+        canonical = "stage3_block4" if score_layer == "final" else score_layer
+        if canonical not in self._PATCH_SCORE_LAYERS:
+            raise ValueError(
+                f"unsupported PiT patch score layer: {score_layer!r}; "
+                f"choose from {self.patch_score_layer_candidates()} or 'final'."
+            )
+        target_stage, target_block_count = self._PATCH_SCORE_LAYERS[canonical]
         state = self.prepare_attack_feature_state(x)
-        if score_layer != "final":
-            raise ValueError(f"unsupported PiT patch score layer: {score_layer!r}")
-        spatial, cls_token = self._run_transformers(state, state.local_tokens)
+        batch, _, channels = state.local_tokens.shape
+        height, width = state.grid_size
+        spatial = state.local_tokens.transpose(1, 2).reshape(batch, channels, height, width)
+        cls_token = state.context["cls_token"]
+        for stage_index, stage in enumerate(self.model.transformers):
+            block_count = target_block_count if stage_index == target_stage else len(stage.blocks)
+            spatial, cls_token = self._run_stage_to_block(
+                stage, spatial, cls_token, block_count
+            )
+            if stage_index == target_stage:
+                break
         grid_size = (int(spatial.size(-2)), int(spatial.size(-1)))
         features = PatchScoreFeatures(
             local_tokens=spatial.flatten(2).transpose(1, 2),
             global_token=cls_token[:, :1],
             grid_size=grid_size,
-            source_name="transformers[2].blocks[3]",
+            source_name=f"transformers[{target_stage}].blocks[{target_block_count - 1}]",
+            layer_id=canonical,
+            global_mode="cls",
         )
         features.validate()
         return features

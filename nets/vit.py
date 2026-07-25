@@ -18,6 +18,13 @@ DEFAULT_MODEL_NAME = "vit_base_patch16_224"
 class ViTWithHook(WhiteBoxWithHook):
     default_model_name = DEFAULT_MODEL_NAME
 
+    _PATCH_SCORE_LAYERS = {
+        "block3": 3,
+        "block6": 6,
+        "block9": 9,
+        "block12": 12,
+    }
+
     def _feature_modules(self):
         return sequential_modules(getattr(self.model, "blocks", None))
 
@@ -38,22 +45,33 @@ class ViTWithHook(WhiteBoxWithHook):
         state.validate()
         return state
 
+    def patch_score_layer_candidates(self) -> tuple[str, ...]:
+        return tuple(self._PATCH_SCORE_LAYERS)
+
     def extract_patch_score_features(
         self,
         x: torch.Tensor,
         *,
         score_layer: str = "final",
     ) -> PatchScoreFeatures:
-        if score_layer != "final":
-            raise ValueError(f"unsupported ViT patch score layer: {score_layer!r}")
+        canonical = "block12" if score_layer == "final" else score_layer
+        if canonical not in self._PATCH_SCORE_LAYERS:
+            raise ValueError(
+                f"unsupported ViT patch score layer: {score_layer!r}; "
+                f"choose from {self.patch_score_layer_candidates()} or 'final'."
+            )
         state = self.prepare_attack_feature_state(x)
         tokens = torch.cat((state.context["prefix_tokens"], state.local_tokens), dim=1)
-        tokens = self.model.blocks(tokens)
+        block_count = self._PATCH_SCORE_LAYERS[canonical]
+        for block in self.model.blocks[:block_count]:
+            tokens = block(tokens)
         features = PatchScoreFeatures(
             local_tokens=tokens[:, -state.local_tokens.size(1):],
             global_token=tokens[:, :1],
             grid_size=state.grid_size,
-            source_name="blocks[11]",
+            source_name=f"blocks[{block_count - 1}]",
+            layer_id=canonical,
+            global_mode="cls",
         )
         features.validate()
         return features
