@@ -113,12 +113,13 @@ class FrequencyPairAttacker(PatchScoreAttacker):
     def _iter_original_score_postdrop_phase_pair(
         self,
         pixels: torch.Tensor,
+        labels: torch.Tensor | None = None,
     ) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
         """Yield a shared-mask low/high pair without touching mainline code."""
         for group_index in range(self.input_diversity_groups):
             if self._gradient_replay is not None:
                 self._gradient_replay.set_context(group=group_index, view=-1)
-            drop_mask, grid_size = self._compute_mainline_drop_mask(pixels)
+            drop_mask, grid_size = self._compute_mainline_drop_mask(pixels, labels)
             image_mask = self._patch_drop_mask_to_image(
                 drop_mask,
                 grid_size,

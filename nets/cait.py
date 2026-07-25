@@ -5,6 +5,7 @@ import torch
 from .base import (
     AttackFeatureState,
     DEFAULT_PRETRAINED,
+    PatchScoreActivationCapture,
     PatchScoreFeatures,
     WhiteBoxWithHook,
     conv2d_attack_metadata,
@@ -45,6 +46,25 @@ class CaiTS24WithHook(WhiteBoxWithHook):
 
     def patch_score_layer_candidates(self) -> tuple[str, ...]:
         return tuple(self._PATCH_SCORE_LAYERS)
+
+    def patch_score_activation_capture(self, score_layer: str):
+        canonical = "block24_class" if score_layer == "final" else score_layer
+        if canonical not in self._PATCH_SCORE_LAYERS:
+            raise ValueError(f"unsupported CaiT patch score layer: {score_layer!r}")
+        block_count = self._PATCH_SCORE_LAYERS[canonical]
+        if block_count < len(self.model.blocks):
+            return PatchScoreActivationCapture(
+                module=self.model.blocks[block_count],
+                hook_type="input",
+                source_name=(
+                    f"blocks[{block_count}] input (=blocks[{block_count - 1}] output)"
+                ),
+            )
+        return PatchScoreActivationCapture(
+            module=self.model.blocks[block_count - 1],
+            hook_type="output",
+            source_name=f"blocks[{block_count - 1}] output",
+        )
 
     def _run_encoder(self, local_tokens: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         local_tokens = self.model.blocks(local_tokens)

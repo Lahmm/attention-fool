@@ -19,6 +19,13 @@ ATTACK_METHODS = (
     "original_score_postdrop_phase_pair",
 )
 PATCH_SCORE_LAYER_MODES = ("final",)
+PATCH_SELECTORS = (
+    "patch_score",
+    "gradcam_relu",
+    "random",
+    "deviation",
+    "no_drop",
+)
 POST_DROPOUT_NOISE_TYPES = (
     "gaussian",
     "opponent_projected",
@@ -69,6 +76,8 @@ class PatchScoreAttacker:
         post_dropout_feature_noise_type: str = "opponent_projected",
         feature_layer: int = 12,
         patch_score_layer: str = "final",
+        patch_selector: str = "patch_score",
+        gradcam_target_mode: str = "true",
         gaussian_sigma: float = 4.0,
         gaussian_alpha: float = 0.75,
         device: torch.device | None = None,
@@ -129,11 +138,20 @@ class PatchScoreAttacker:
             raise ValueError("token_score_cls_mode must be learned or gaussian.")
         if token_cls_noise_mode not in ("gaussian", "mahalanobis"):
             raise ValueError("token_cls_noise_mode must be gaussian or mahalanobis.")
-        if patch_score_layer not in PATCH_SCORE_LAYER_MODES:
+        available_layers = tuple(
+            getattr(model, "patch_score_layer_candidates", lambda: ())()
+        )
+        if patch_score_layer not in ("final", *available_layers):
             raise ValueError(
-                "patch_score_layer must be one of "
-                f"{PATCH_SCORE_LAYER_MODES}, got {patch_score_layer!r}."
+                "patch_score_layer must be 'final' or one of the model's registered "
+                f"checkpoints {available_layers}, got {patch_score_layer!r}."
             )
+        if patch_selector not in PATCH_SELECTORS:
+            raise ValueError(
+                f"patch_selector must be one of {PATCH_SELECTORS}, got {patch_selector!r}."
+            )
+        if gradcam_target_mode not in ("true", "predicted"):
+            raise ValueError("gradcam_target_mode must be true or predicted.")
         if gaussian_sigma < 0:
             raise ValueError("gaussian_sigma must be non-negative.")
         if gaussian_alpha < 0:
@@ -189,6 +207,8 @@ class PatchScoreAttacker:
         self.post_dropout_feature_noise_type = post_dropout_feature_noise_type
         self.feature_layer = int(feature_layer)
         self.patch_score_layer = patch_score_layer
+        self.patch_selector = patch_selector
+        self.gradcam_target_mode = gradcam_target_mode
         self.gaussian_sigma = float(gaussian_sigma)
         self.gaussian_alpha = float(gaussian_alpha)
         self.pixel_mean = torch.tensor(IMAGENET_MEAN, device=self.device).view(1, 3, 1, 1)
@@ -202,6 +222,10 @@ class PatchScoreAttacker:
         self._last_drop_count = 0
         self._last_drop_ratio = 0.0
         self._score_source = ""
+        self._resolved_score_layer = ""
+        self._score_global_mode = ""
+        self._gradcam_activation_source = ""
+        self._gradcam_zero_fraction: list[float] = []
         self._feature_noise_type = ""
         self._gradient_replay: GradientReplay | None = None
         self._actual_forward_view_count = 0
@@ -236,9 +260,21 @@ class PatchScoreAttacker:
         return {
             "score_source": self._score_source,
             "patch_score_layer": self.patch_score_layer,
+            "resolved_patch_score_layer": self._resolved_score_layer,
+            "score_global_mode": self._score_global_mode,
+            "patch_selector": self.patch_selector,
+            "gradcam_target_mode": self.gradcam_target_mode,
+            "gradcam_activation_source": self._gradcam_activation_source or None,
+            "gradcam_zero_fraction": (
+                sum(self._gradcam_zero_fraction) / len(self._gradcam_zero_fraction)
+                if self._gradcam_zero_fraction
+                else None
+            ),
             "score_grid": list(self._score_grid_size) if self._score_grid_size else None,
             "target_patch_drop_ratio": (
-                self.patch_dropout_ratio
+                0.0
+                if self.patch_selector == "no_drop"
+                else self.patch_dropout_ratio
                 if self.patch_dropout_score_mode == "all"
                 else 0.5 * self.patch_dropout_ratio
             ),
@@ -686,6 +722,101 @@ class PatchScoreAttacker:
             return working_scores < threshold
         return torch.ones_like(scores, dtype=torch.bool)
 
+    @staticmethod
+    def _deviation_candidate_mask(scores: torch.Tensor) -> torch.Tensor:
+        deviation = (scores - scores.median(dim=1, keepdim=True).values).abs()
+        candidate_count = max(1, scores.size(1) // 2)
+        indices = deviation.topk(candidate_count, dim=1).indices
+        return torch.zeros_like(scores, dtype=torch.bool).scatter(1, indices, True)
+
+    @staticmethod
+    def _top_candidate_mask(scores: torch.Tensor) -> torch.Tensor:
+        candidate_count = max(1, scores.size(1) // 2)
+        indices = scores.topk(candidate_count, dim=1).indices
+        return torch.zeros_like(scores, dtype=torch.bool).scatter(1, indices, True)
+
+    @staticmethod
+    def _local_activation_for_grid(
+        activation: torch.Tensor,
+        grid_size: tuple[int, int],
+    ) -> torch.Tensor:
+        patch_count = grid_size[0] * grid_size[1]
+        if activation.ndim == 4:
+            local = activation.flatten(2).transpose(1, 2)
+        elif activation.ndim == 3:
+            if activation.size(1) < patch_count:
+                raise ValueError(
+                    "Grad-CAM activation has fewer tokens than the routing grid."
+                )
+            local = activation[:, -patch_count:]
+        else:
+            raise ValueError(
+                f"unsupported Grad-CAM activation shape: {tuple(activation.shape)}."
+            )
+        if local.size(1) != patch_count:
+            raise ValueError("Grad-CAM activation does not match the routing grid.")
+        return local
+
+    def _gradcam_scores(
+        self,
+        pixels: torch.Tensor,
+        labels: torch.Tensor,
+        features,
+    ) -> torch.Tensor:
+        """Return a true/predicted-class Grad-CAM map at the routing checkpoint."""
+        capture_getter = getattr(self.model, "patch_score_activation_capture", None)
+        if capture_getter is None:
+            raise ValueError("Grad-CAM routing requires a checkpoint activation module adapter.")
+        capture = capture_getter(self.patch_score_layer)
+        capture.validate()
+        self._gradcam_activation_source = capture.source_name
+        captured: dict[str, torch.Tensor] = {}
+
+        def output_hook(_module, _inputs, output):
+            value = output[0] if isinstance(output, (tuple, list)) else output
+            if not isinstance(value, torch.Tensor):
+                raise ValueError("Grad-CAM checkpoint did not produce a tensor activation.")
+            captured["activation"] = value
+
+        def input_hook(_module, inputs):
+            value = inputs[0]
+            if not isinstance(value, torch.Tensor):
+                raise ValueError("Grad-CAM checkpoint did not receive a tensor activation.")
+            captured["activation"] = value
+
+        handle = (
+            capture.module.register_forward_pre_hook(input_hook)
+            if capture.hook_type == "input"
+            else capture.module.register_forward_hook(output_hook)
+        )
+        try:
+            logits = self.model(self._normalize(pixels))
+        finally:
+            handle.remove()
+        if "activation" not in captured:
+            raise RuntimeError("failed to capture the Grad-CAM routing activation.")
+        target = labels if self.gradcam_target_mode == "true" else logits.argmax(dim=1)
+        activation = captured["activation"]
+        target_logits = logits.gather(1, target[:, None]).sum()
+        gradient = torch.autograd.grad(
+            target_logits,
+            activation,
+            retain_graph=False,
+            create_graph=False,
+        )[0]
+        local = self._local_activation_for_grid(activation, features.grid_size)
+        gradient_local = self._local_activation_for_grid(gradient, features.grid_size)
+        alpha = gradient_local.mean(dim=1)
+        scores = F.relu((local * alpha[:, None]).sum(dim=2)).detach()
+        zero_fraction = scores.abs().sum(dim=1).eq(0).float()
+        self._gradcam_zero_fraction.append(float(zero_fraction.mean().cpu()))
+        if bool(zero_fraction.any()):
+            raise RuntimeError(
+                "Grad-CAM produced an all-zero map for at least one sample at "
+                f"{capture.source_name}; refusing an arbitrary top-k mask."
+            )
+        return scores
+
     def _sample_patch_dropout_mask(
         self,
         scores: torch.Tensor,
@@ -773,6 +904,7 @@ class PatchScoreAttacker:
     def _compute_mainline_drop_mask(
         self,
         pixels: torch.Tensor,
+        labels: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, tuple[int, int]]:
         extract = getattr(self.model, "extract_patch_score_features", None)
         if extract is None:
@@ -783,12 +915,40 @@ class PatchScoreAttacker:
                 score_layer=self.patch_score_layer,
             )
             features.validate()
-            scores = self._score_cls_and_patches(
-                features.global_token,
-                features.local_tokens,
-                getattr(self.model, "model", None),
+        self._resolved_score_layer = features.layer_id
+        self._score_global_mode = features.global_mode
+        if self.patch_selector == "no_drop":
+            drop_mask = torch.zeros(
+                features.local_tokens.size(0),
+                features.local_tokens.size(1),
+                device=pixels.device,
+                dtype=torch.bool,
             )
-            candidates = self._patch_score_candidate_mask(scores)
+            self._last_drop_count = 0
+            self._last_drop_ratio = 0.0
+        else:
+            with torch.no_grad():
+                patch_scores = self._score_cls_and_patches(
+                    features.global_token,
+                    features.local_tokens,
+                    getattr(self.model, "model", None),
+                )
+            if self.patch_selector == "gradcam_relu":
+                if labels is None:
+                    raise ValueError("Grad-CAM routing requires labels.")
+                scores = self._gradcam_scores(pixels, labels, features)
+                # Grad-CAM always drops its high-saliency half.  The globally
+                # frozen patch-score polarity does not redefine Grad-CAM.
+                candidates = self._top_candidate_mask(scores)
+            elif self.patch_selector == "random":
+                scores = patch_scores
+                candidates = torch.ones_like(scores, dtype=torch.bool)
+            elif self.patch_selector == "deviation":
+                scores = patch_scores
+                candidates = self._deviation_candidate_mask(scores)
+            else:
+                scores = patch_scores
+                candidates = self._patch_score_candidate_mask(scores)
             drop_mask = self._sample_patch_dropout_mask(scores, candidates).detach()
         self._score_grid_size = features.grid_size
         self._score_source = features.source_name
@@ -841,11 +1001,12 @@ class PatchScoreAttacker:
     def _iter_original_score_postdrop_phase_pair(
         self,
         pixels: torch.Tensor,
+        labels: torch.Tensor | None = None,
     ) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
         for group_index in range(self.input_diversity_groups):
             if self._gradient_replay is not None:
                 self._gradient_replay.set_context(group=group_index, view=-1)
-            drop_mask, grid_size = self._compute_mainline_drop_mask(pixels)
+            drop_mask, grid_size = self._compute_mainline_drop_mask(pixels, labels)
             image_mask = self._patch_drop_mask_to_image(
                 drop_mask,
                 grid_size,
@@ -953,7 +1114,9 @@ class PatchScoreAttacker:
 
     def _iter_attack_losses(self, pixels: torch.Tensor, labels: torch.Tensor) -> Iterator[torch.Tensor]:
         if self.attack_method == "original_score_postdrop_phase_pair":
-            for view_pixels, image_mask in self._iter_original_score_postdrop_phase_pair(pixels):
+            for view_pixels, image_mask in self._iter_original_score_postdrop_phase_pair(
+                pixels, labels
+            ):
                 yield self._attack_loss_for_original_score_postdrop_phase_view(
                     view_pixels,
                     labels,

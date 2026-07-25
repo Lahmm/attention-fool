@@ -7,7 +7,7 @@ import torch
 
 from attack import PatchScoreAttacker
 from nets import build_whitebox_model
-from nets.base import AttackFeatureState
+from nets.base import AttackFeatureState, PatchScoreFeatures
 
 
 class DummyModel:
@@ -16,6 +16,43 @@ class DummyModel:
 
     def eval(self):
         return self
+
+
+class TinyGradCamModel(torch.nn.Module):
+    model_mean = (0.0, 0.0, 0.0)
+    model_std = (1.0, 1.0, 1.0)
+
+    def __init__(self):
+        super().__init__()
+        self.model_name = "tiny"
+        self.conv = torch.nn.Conv2d(3, 2, 1, bias=False)
+        self.head = torch.nn.Linear(2, 2, bias=False)
+        with torch.no_grad():
+            self.conv.weight.fill_(0.5)
+            self.head.weight.copy_(torch.tensor([[1.0, 0.5], [-0.5, -1.0]]))
+
+    def patch_score_layer_candidates(self):
+        return ("tiny",)
+
+    def patch_score_activation_capture(self, _score_layer):
+        from nets.base import PatchScoreActivationCapture
+
+        return PatchScoreActivationCapture(self.conv, "output", "conv output")
+
+    def extract_patch_score_features(self, x, *, score_layer="final"):
+        activation = self.conv(x)
+        local = activation.flatten(2).transpose(1, 2)
+        return PatchScoreFeatures(
+            local_tokens=local,
+            global_token=local.mean(dim=1, keepdim=True),
+            grid_size=activation.shape[-2:],
+            source_name="conv+gap",
+            layer_id="tiny",
+            global_mode="gap",
+        )
+
+    def forward(self, x):
+        return self.head(self.conv(x).mean(dim=(2, 3)))
 
 
 class MainlineBudgetAndNoiseTests(unittest.TestCase):
@@ -203,6 +240,50 @@ class MainlineBudgetAndNoiseTests(unittest.TestCase):
     def test_patch_score_layer_rejects_unknown_mode(self):
         with self.assertRaisesRegex(ValueError, "patch_score_layer"):
             self.make_attacker(patch_score_layer="middle")
+
+    def test_registered_nonfinal_layer_is_accepted(self):
+        attacker = PatchScoreAttacker(
+            TinyGradCamModel(),
+            patch_score_layer="tiny",
+            steps=1,
+            input_diversity_groups=1,
+            input_diversity_views_per_group=2,
+            device=torch.device("cpu"),
+        )
+        self.assertEqual(attacker.patch_score_layer, "tiny")
+
+    def test_selector_masks_share_the_native_budget(self):
+        pixels = torch.ones(1, 3, 2, 2, requires_grad=True)
+        labels = torch.zeros(1, dtype=torch.long)
+        for selector in ("patch_score", "gradcam_relu", "random", "deviation"):
+            with self.subTest(selector=selector):
+                attacker = PatchScoreAttacker(
+                    TinyGradCamModel(),
+                    patch_score_layer="tiny",
+                    patch_selector=selector,
+                    patch_dropout_ratio=0.3,
+                    steps=1,
+                    input_diversity_groups=1,
+                    input_diversity_views_per_group=2,
+                    device=torch.device("cpu"),
+                )
+                mask, grid = attacker._compute_mainline_drop_mask(pixels, labels)
+                self.assertEqual(grid, (2, 2))
+                self.assertEqual(int(mask.sum()), 1)
+                self.assertEqual(attacker.mainline_metadata()["patch_selector"], selector)
+
+        no_drop = PatchScoreAttacker(
+            TinyGradCamModel(),
+            patch_score_layer="tiny",
+            patch_selector="no_drop",
+            steps=1,
+            input_diversity_groups=1,
+            input_diversity_views_per_group=2,
+            device=torch.device("cpu"),
+        )
+        mask, _ = no_drop._compute_mainline_drop_mask(pixels, labels)
+        self.assertEqual(int(mask.sum()), 0)
+        self.assertEqual(no_drop.mainline_metadata()["target_patch_drop_ratio"], 0.0)
 
 
 @unittest.skipUnless(os.environ.get("RUN_MODEL_SMOKE") == "1", "set RUN_MODEL_SMOKE=1")

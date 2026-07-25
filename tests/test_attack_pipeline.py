@@ -3,7 +3,7 @@ import unittest
 
 import torch
 
-from attack import ATTACK_METHODS, PatchScoreAttacker
+from attack import ATTACK_METHODS, PATCH_SELECTORS, PatchScoreAttacker
 from main import parse_args
 
 
@@ -93,6 +93,12 @@ class AttackPipelineTests(unittest.TestCase):
         self.assertEqual(args.gaussian_sigma, 4.0)
         self.assertEqual(args.gaussian_alpha, 0.75)
         self.assertEqual(args.post_dropout_feature_noise_type, "opponent_projected")
+        self.assertEqual(args.patch_selector, "patch_score")
+        self.assertEqual(args.gradcam_target_mode, "true")
+        self.assertEqual(
+            set(PATCH_SELECTORS),
+            {"patch_score", "gradcam_relu", "random", "deviation", "no_drop"},
+        )
 
     def test_dim_and_ti_keep_image_shape(self):
         attacker = make_attacker(

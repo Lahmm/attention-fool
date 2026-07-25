@@ -58,7 +58,9 @@ class FrequencyPairAttackTests(unittest.TestCase):
         attacker = make_attacker()
         pixels = torch.rand(1, 3, 8, 8, requires_grad=True)
         drop_mask = torch.tensor([[True, False, False, False]])
-        attacker._compute_mainline_drop_mask = lambda _pixels: (drop_mask, (2, 2))
+        attacker._compute_mainline_drop_mask = (
+            lambda _pixels, _labels=None: (drop_mask, (2, 2))
+        )
 
         views = list(attacker._iter_original_score_postdrop_phase_pair(pixels))
 

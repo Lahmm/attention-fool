@@ -15,8 +15,8 @@ from tqdm import tqdm
 
 from attack import (
     ATTACK_METHODS,
+    PATCH_SELECTORS,
     POST_DROPOUT_NOISE_TYPES,
-    PATCH_SCORE_LAYER_MODES,
     PatchScoreAttacker,
 )
 from gradient_replay import GradientReplay
@@ -181,9 +181,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--patch-score-layer",
-        choices=PATCH_SCORE_LAYER_MODES,
         default="final",
-        help="Feature location used for the mainline patch score; final preserves the current mainline.",
+        help="Registered routing checkpoint for the selected white-box model.",
+    )
+    parser.add_argument("--patch-selector", choices=PATCH_SELECTORS, default="patch_score")
+    parser.add_argument(
+        "--gradcam-target-mode",
+        choices=("true", "predicted"),
+        default="true",
+        help="Class target used only by the Grad-CAM selector.",
     )
     parser.add_argument(
         "--gaussian-sigma",
@@ -257,6 +263,8 @@ def main(args: argparse.Namespace) -> None:
         post_dropout_feature_noise_type=args.post_dropout_feature_noise_type,
         feature_layer=args.feature_layer,
         patch_score_layer=args.patch_score_layer,
+        patch_selector=args.patch_selector,
+        gradcam_target_mode=args.gradcam_target_mode,
         gaussian_sigma=args.gaussian_sigma,
         gaussian_alpha=args.gaussian_alpha,
         device=DEVICE,
@@ -330,6 +338,8 @@ def main(args: argparse.Namespace) -> None:
         "post_dropout_feature_noise_position": "initial",
         "feature_layer": args.feature_layer,
         "patch_score_layer": args.patch_score_layer,
+        "patch_selector": args.patch_selector,
+        "gradcam_target_mode": args.gradcam_target_mode,
         "gradient_postprocess": "mean",
         "gaussian_sigma": args.gaussian_sigma,
         "gaussian_alpha": args.gaussian_alpha,
