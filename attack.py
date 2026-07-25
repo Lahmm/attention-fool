@@ -1154,6 +1154,61 @@ class PatchScoreAttacker:
         self._record_gradient_diagnostics(view_gradients, aggregated)
         return aggregated
 
+    def probe_attack_gradients(
+        self,
+        pixels: torch.Tensor,
+        labels: torch.Tensor,
+        *,
+        replay: "GradientReplay | None" = None,
+        sample_ids: list[str] | None = None,
+        step_index: int = 0,
+    ) -> dict[str, torch.Tensor]:
+        """Run one production gradient step without updating the image.
+
+        This is the mechanism-diagnostic interface: it returns every actual
+        augmentation-view gradient, their raw mean, and the fully processed
+        direction immediately before MI accumulation.  Inputs are raw pixels
+        in ``[0, 1]`` rather than repository-normalized image tensors.
+        """
+        if replay is not None:
+            if sample_ids is None or len(sample_ids) != pixels.size(0):
+                raise ValueError("sample_ids must match pixels when replay is enabled.")
+            replay.begin_batch(sample_ids)
+            replay.set_context(step=step_index, group=-1, view=-1)
+        self._gradient_replay = replay
+        self._actual_forward_view_count = 0
+        probe_pixels = pixels.to(self.device).detach().requires_grad_(True)
+        labels = labels.to(self.device)
+        gradients = [
+            torch.autograd.grad(loss, probe_pixels, retain_graph=False)[0]
+            for loss in self._iter_attack_losses(probe_pixels, labels)
+        ]
+        if not gradients:
+            self._gradient_replay = None
+            raise RuntimeError("no attack losses were generated for the gradient probe.")
+        view_gradients = torch.stack(gradients, dim=0)
+        raw_mean = self._aggregate_gradients(view_gradients)
+        self._record_gradient_diagnostics(view_gradients, raw_mean)
+        processed = self._smooth_grad(self._apply_gaussian_residual(raw_mean))
+        expected_views = (
+            self.guide_aug_copies
+            if self.attack_method == "patch_dropout"
+            else self.input_diversity_groups * self.input_diversity_views_per_group
+            if self.attack_method in ("token_patch_dropout", "original_score_postdrop_phase_pair")
+            else 1
+        )
+        if self._actual_forward_view_count != expected_views:
+            self._gradient_replay = None
+            raise RuntimeError(
+                f"view count mismatch: {self._actual_forward_view_count} != {expected_views}."
+            )
+        self._gradient_replay = None
+        return {
+            "view_gradients": view_gradients.detach(),
+            "raw_mean": raw_mean.detach(),
+            "processed": processed.detach(),
+        }
+
     def attack_batch(
         self,
         images: torch.Tensor,

@@ -97,6 +97,22 @@ class AttackPipelineTests(unittest.TestCase):
             0.1 + 1e-6,
         )
 
+    def test_gradient_probe_returns_views_raw_mean_and_processed_direction(self):
+        attacker = make_attacker(
+            attack_method="none",
+            gaussian_alpha=0.0,
+            use_momentum=False,
+        )
+        attacker._attack_loss_for_pixels = lambda pixels, _labels: (2.0 * pixels).sum()
+        pixels = torch.zeros(2, 3, 4, 4)
+        result = attacker.probe_attack_gradients(
+            pixels,
+            torch.zeros(2, dtype=torch.long),
+        )
+        self.assertEqual(result["view_gradients"].shape, (1, 2, 3, 4, 4))
+        self.assertTrue(torch.equal(result["raw_mean"], torch.full_like(pixels, 2.0)))
+        self.assertTrue(torch.equal(result["processed"], result["raw_mean"]))
+
     def test_retained_attack_methods_and_cli_defaults(self):
         self.assertEqual(
             set(ATTACK_METHODS),
