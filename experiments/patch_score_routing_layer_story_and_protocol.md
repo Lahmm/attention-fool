@@ -165,7 +165,15 @@ python experiments/patch_score_routing_calibration.py \
   --write-template outputs/research/routing_calibration/results.csv
 ```
 
-命令同时生成 `results.csv.manifest.json`。执行其中 38 个固定 attack job，并完成其对应的 114 个 off-diagonal source-target evaluation，把 ASR 填回模板后冻结配置：
+命令同时生成 `results.csv.manifest.json`。执行其中 38 个固定 attack job 后，用 paired evaluator 自动完成 114 个 off-diagonal source-target evaluation；其 ASR 分母只包含 target-clean-correct 样本：
+
+```bash
+python experiments/patch_score_routing_calibration_eval.py \
+  --manifest outputs/research/routing_calibration/results.manifest.json \
+  --output-results outputs/research/routing_calibration/results.csv
+```
+
+从 `results.summary.json` 读取 `sample_ids_sha256`，然后冻结配置：
 
 ```bash
 python experiments/patch_score_routing_calibration.py \
