@@ -150,6 +150,8 @@ true-class Grad-CAM + selected layer
 
 `final_layer` 直接检验“是否必须最后一层”。Grad-CAM 条件只替换 selector，不改变 candidate ratio、drop ratio、opponent noise、phase pairs、20-view aggregation、Gaussian residual、MI-FGSM、epsilon、steps、seed 或图像。
 
+若某个样本的 true-class ReLU Grad-CAM 为全零，说明该图没有可用的正显著性排序。为保持统一 drop budget，该样本显式回退到 sample-keyed random ranking，并单独报告 `gradcam_zero_fraction`；不得把固定索引的任意 top-k 当成 Grad-CAM 区域。
+
 ASR 分母只包含各 target 在 clean image 上预测正确的样本。报告每 source-target ASR、每 source 的 per-image target macro，以及 selected 对 Grad-CAM 的 paired bootstrap 95% CI。
 
 ### E6：opponent-channel 的正交消融

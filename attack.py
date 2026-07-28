@@ -78,6 +78,7 @@ class PatchScoreAttacker:
         patch_score_layer: str = "final",
         patch_selector: str = "patch_score",
         gradcam_target_mode: str = "true",
+        gradcam_zero_policy: str = "error",
         gaussian_sigma: float = 4.0,
         gaussian_alpha: float = 0.75,
         device: torch.device | None = None,
@@ -152,6 +153,8 @@ class PatchScoreAttacker:
             )
         if gradcam_target_mode not in ("true", "predicted"):
             raise ValueError("gradcam_target_mode must be true or predicted.")
+        if gradcam_zero_policy not in ("error", "random"):
+            raise ValueError("gradcam_zero_policy must be error or random.")
         if gaussian_sigma < 0:
             raise ValueError("gaussian_sigma must be non-negative.")
         if gaussian_alpha < 0:
@@ -209,6 +212,7 @@ class PatchScoreAttacker:
         self.patch_score_layer = patch_score_layer
         self.patch_selector = patch_selector
         self.gradcam_target_mode = gradcam_target_mode
+        self.gradcam_zero_policy = gradcam_zero_policy
         self.gaussian_sigma = float(gaussian_sigma)
         self.gaussian_alpha = float(gaussian_alpha)
         self.pixel_mean = torch.tensor(IMAGENET_MEAN, device=self.device).view(1, 3, 1, 1)
@@ -264,6 +268,7 @@ class PatchScoreAttacker:
             "score_global_mode": self._score_global_mode,
             "patch_selector": self.patch_selector,
             "gradcam_target_mode": self.gradcam_target_mode,
+            "gradcam_zero_policy": self.gradcam_zero_policy,
             "gradcam_activation_source": self._gradcam_activation_source or None,
             "gradcam_zero_fraction": (
                 sum(self._gradcam_zero_fraction) / len(self._gradcam_zero_fraction)
@@ -811,10 +816,17 @@ class PatchScoreAttacker:
         zero_fraction = scores.abs().sum(dim=1).eq(0).float()
         self._gradcam_zero_fraction.append(float(zero_fraction.mean().cpu()))
         if bool(zero_fraction.any()):
-            raise RuntimeError(
-                "Grad-CAM produced an all-zero map for at least one sample at "
-                f"{capture.source_name}; refusing an arbitrary top-k mask."
-            )
+            if self.gradcam_zero_policy == "error":
+                raise RuntimeError(
+                    "Grad-CAM produced an all-zero map for at least one sample at "
+                    f"{capture.source_name}; use the explicit random zero-map policy "
+                    "to preserve the matched drop budget."
+                )
+            # ReLU Grad-CAM contains no ranking information for these samples.
+            # A sample-keyed random ranking preserves the exact candidate/drop
+            # budget without silently changing the saliency definition.
+            fallback = self._randn_like(scores, "gradcam_zero_random_ranking")
+            scores = torch.where(zero_fraction[:, None].bool(), fallback, scores)
         return scores
 
     def _sample_patch_dropout_mask(

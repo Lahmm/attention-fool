@@ -42,6 +42,9 @@ class SelectorSuiteTests(unittest.TestCase):
         gradcam = next(job for job in manifest["jobs"] if job["condition"] == "gradcam_relu")
         self.assertEqual(gradcam["selector"], "gradcam_relu")
         self.assertIn("--gradcam-target-mode", gradcam["attack_command"])
+        self.assertIn("--gradcam-zero-policy", gradcam["attack_command"])
+        zero_policy_index = gradcam["attack_command"].index("--gradcam-zero-policy")
+        self.assertEqual(gradcam["attack_command"][zero_policy_index + 1], "random")
 
     def test_summary_uses_only_clean_correct_and_is_paired(self):
         rows = []

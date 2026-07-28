@@ -214,6 +214,15 @@ def parse_args() -> argparse.Namespace:
         help="Class target used only by the Grad-CAM selector.",
     )
     parser.add_argument(
+        "--gradcam-zero-policy",
+        choices=("error", "random"),
+        default="error",
+        help=(
+            "Explicit handling for all-zero ReLU Grad-CAM maps. The fair selector suite "
+            "uses sample-keyed random ranking to preserve the matched drop budget."
+        ),
+    )
+    parser.add_argument(
         "--gaussian-sigma",
         type=float,
         default=4.0,
@@ -300,6 +309,7 @@ def main(args: argparse.Namespace) -> None:
         patch_score_layer=args.patch_score_layer,
         patch_selector=args.patch_selector,
         gradcam_target_mode=args.gradcam_target_mode,
+        gradcam_zero_policy=args.gradcam_zero_policy,
         gaussian_sigma=args.gaussian_sigma,
         gaussian_alpha=args.gaussian_alpha,
         device=DEVICE,
@@ -377,6 +387,7 @@ def main(args: argparse.Namespace) -> None:
         "patch_score_layer": args.patch_score_layer,
         "patch_selector": args.patch_selector,
         "gradcam_target_mode": args.gradcam_target_mode,
+        "gradcam_zero_policy": args.gradcam_zero_policy,
         "routing_config": str(args.routing_config) if args.routing_config is not None else None,
         "routing_config_sha256": routing_config_sha256,
         "gradient_postprocess": "mean",

@@ -115,7 +115,12 @@ def condition_command(
             selector,
         ]
         if condition == "gradcam_relu":
-            command += ["--gradcam-target-mode", "true"]
+            command += [
+                "--gradcam-target-mode",
+                "true",
+                "--gradcam-zero-policy",
+                "random",
+            ]
     return {
         "source_model": source,
         "condition": condition,

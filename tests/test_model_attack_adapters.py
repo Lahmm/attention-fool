@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import torch
 
 from attack import PatchScoreAttacker
+from gradient_replay import GradientReplay
 from nets import build_whitebox_model
 from nets.base import AttackFeatureState, PatchScoreFeatures
 
@@ -284,6 +285,34 @@ class MainlineBudgetAndNoiseTests(unittest.TestCase):
         mask, _ = no_drop._compute_mainline_drop_mask(pixels, labels)
         self.assertEqual(int(mask.sum()), 0)
         self.assertEqual(no_drop.mainline_metadata()["target_patch_drop_ratio"], 0.0)
+
+    def test_zero_gradcam_uses_explicit_replayed_random_ranking(self):
+        pixels = torch.ones(1, 3, 2, 2, requires_grad=True)
+        labels = torch.ones(1, dtype=torch.long)
+        masks = []
+        for _ in range(2):
+            attacker = PatchScoreAttacker(
+                TinyGradCamModel(),
+                patch_score_layer="tiny",
+                patch_selector="gradcam_relu",
+                gradcam_zero_policy="random",
+                patch_dropout_ratio=0.3,
+                steps=1,
+                input_diversity_groups=1,
+                input_diversity_views_per_group=2,
+                device=torch.device("cpu"),
+            )
+            replay = GradientReplay(17)
+            replay.begin_batch(["sample"])
+            replay.set_context(step=0, group=0, view=-1)
+            attacker._gradient_replay = replay
+            mask, _ = attacker._compute_mainline_drop_mask(pixels, labels)
+            masks.append(mask)
+            metadata = attacker.mainline_metadata()
+            self.assertEqual(metadata["gradcam_zero_policy"], "random")
+            self.assertEqual(metadata["gradcam_zero_fraction"], 1.0)
+            self.assertEqual(int(mask.sum()), 1)
+        self.assertTrue(torch.equal(masks[0], masks[1]))
 
 
 @unittest.skipUnless(os.environ.get("RUN_MODEL_SMOKE") == "1", "set RUN_MODEL_SMOKE=1")

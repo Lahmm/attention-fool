@@ -135,6 +135,7 @@ class AttackPipelineTests(unittest.TestCase):
         self.assertEqual(args.sample_offset, 0)
         self.assertEqual(args.patch_selector, "patch_score")
         self.assertEqual(args.gradcam_target_mode, "true")
+        self.assertEqual(args.gradcam_zero_policy, "error")
         self.assertEqual(
             set(PATCH_SELECTORS),
             {"patch_score", "gradcam_relu", "random", "deviation", "no_drop"},
