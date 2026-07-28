@@ -72,6 +72,9 @@ class SelectorSuiteTests(unittest.TestCase):
         comparison = summary["patch_score_vs_gradcam"][source]
         self.assertEqual(comparison["difference"], 1.0)
         self.assertTrue(comparison["noninferior_at_1pp"])
+        random_comparison = summary["patch_score_vs_random"][source]
+        self.assertEqual(random_comparison["difference"], 1.0)
+        self.assertEqual(random_comparison["paired_count"], 3)
 
 
 if __name__ == "__main__":

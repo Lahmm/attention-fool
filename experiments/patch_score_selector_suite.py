@@ -224,15 +224,15 @@ def read_results(path: Path):
 
 def bootstrap_difference(
     selected: dict[str, float],
-    gradcam: dict[str, float],
+    baseline: dict[str, float],
     *,
     repeats: int,
     seed: int,
 ):
-    common = sorted(set(selected) & set(gradcam))
+    common = sorted(set(selected) & set(baseline))
     if not common:
-        raise ValueError("selected and Grad-CAM have no paired clean-correct images.")
-    differences = [selected[key] - gradcam[key] for key in common]
+        raise ValueError("selected and baseline have no paired clean-correct images.")
+    differences = [selected[key] - baseline[key] for key in common]
     point = sum(differences) / len(differences)
     generator = random.Random(seed)
     values = []
@@ -277,6 +277,7 @@ def summarize(rows, *, bootstrap_repeats: int, seed: int):
                         row["image_name"], []
                     ).append(value)
     macro = {}
+    selected_vs_random = {}
     noninferiority = {}
     for source in WHITEBOX_MODEL_CHOICES:
         macro[source] = {}
@@ -291,6 +292,14 @@ def summarize(rows, *, bootstrap_repeats: int, seed: int):
             image: sum(values) / len(values)
             for image, values in per_image_macro.get((source, "selected"), {}).items()
         }
+        random_baseline = {
+            image: sum(values) / len(values)
+            for image, values in per_image_macro.get((source, "random"), {}).items()
+        }
+        if selected and random_baseline:
+            selected_vs_random[source] = bootstrap_difference(
+                selected, random_baseline, repeats=bootstrap_repeats, seed=seed
+            )
         gradcam = {
             image: sum(values) / len(values)
             for image, values in per_image_macro.get((source, "gradcam_relu"), {}).items()
@@ -304,6 +313,7 @@ def summarize(rows, *, bootstrap_repeats: int, seed: int):
     return {
         "per_target": results,
         "per_source_macro": macro,
+        "patch_score_vs_random": selected_vs_random,
         "patch_score_vs_gradcam": noninferiority,
         "asr_denominator": "target-clean-correct images only",
         "noninferiority_margin": -0.01,
