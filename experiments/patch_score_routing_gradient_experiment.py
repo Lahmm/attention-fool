@@ -246,12 +246,13 @@ def main() -> None:
                 labels = labels_cpu[start:end].to(device)
                 batch_names = names[start:end]
 
-                # A replayed group-zero mask provides the route-only
-                # representation diagnostic.  The production probe below
-                # independently executes all 10 groups and 20 views.
+                # Reconstruct the exact clean-fixed production mask for the
+                # route-only representation diagnostic.  The production
+                # probe uses the same sample-keyed replay context before it
+                # executes all 10 groups and 20 views.
                 mask_replay = GradientReplay(args.seed)
                 mask_replay.begin_batch(batch_names)
-                mask_replay.set_context(step=0, group=0, view=-1)
+                mask_replay.set_context(step=-1, group=-1, view=-1)
                 attacker._gradient_replay = mask_replay
                 drop_mask, grid_size = attacker._compute_mainline_drop_mask(pixels, labels)
                 attacker._gradient_replay = None
@@ -395,6 +396,9 @@ def main() -> None:
             "epsilon": args.epsilon,
             "steps": args.steps,
             "views": 20,
+            "patch_mask_policy": "clean_fixed_per_attack",
+            "patch_mask_reference": "clean_pixels",
+            "token_score_cls_noise": True,
             "opponent_strength": 0.2,
             "gaussian_sigma": 4.0,
             "gaussian_alpha": 0.75,
