@@ -52,6 +52,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-seed", type=int, default=20260717)
     parser.add_argument("--attack-seed", type=int, default=20260716)
     parser.add_argument(
+        "--attack-output-root",
+        type=Path,
+        default=Path("outputs/attack/routing_calibration"),
+        help="Root for generated adversarial images; use a new root for a new protocol.",
+    )
+    parser.add_argument(
         "--image-ids-sha256",
         help="Required with --results; copy sample_ids_sha256 from a calibration replay manifest.",
     )
@@ -86,14 +92,18 @@ def write_csv(path: Path, rows: list[dict[str, object]]) -> None:
         writer.writerows(rows)
 
 
-def build_manifest(*, samples: int, sample_offset: int, attack_seed: int) -> dict[str, object]:
+def build_manifest(
+    *,
+    samples: int,
+    sample_offset: int,
+    attack_seed: int,
+    attack_output_root: Path = Path("outputs/attack/routing_calibration"),
+) -> dict[str, object]:
     jobs = []
     for source in WHITEBOX_MODEL_CHOICES:
         for polarity in POLARITIES:
             for layer in PATCH_SCORE_LAYER_CANDIDATES[source]:
-                output_dir = (
-                    Path("outputs/attack/routing_calibration") / source / polarity / layer
-                )
+                output_dir = attack_output_root / source / polarity / layer
                 attack_command = [
                     "python",
                     "main.py",
@@ -146,6 +156,9 @@ def build_manifest(*, samples: int, sample_offset: int, attack_seed: int) -> dic
             "attack_seed": attack_seed,
             "selectors": ["patch_score"],
             "target_models": list(WHITEBOX_MODEL_CHOICES),
+            "patch_mask_policy": "clean_fixed_per_attack",
+            "patch_mask_reference": "clean_pixels",
+            "token_score_cls_noise": True,
         },
         "jobs": jobs,
     }
@@ -263,6 +276,7 @@ def main() -> None:
                     samples=args.samples,
                     sample_offset=args.sample_offset,
                     attack_seed=args.attack_seed,
+                    attack_output_root=args.attack_output_root,
                 ),
                 indent=2,
                 ensure_ascii=False,

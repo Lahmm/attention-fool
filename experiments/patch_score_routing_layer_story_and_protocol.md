@@ -85,9 +85,11 @@ epsilon = 16/255
 steps = 10
 MI decay = 1
 10 groups × 2 original/phase views = 20 views/step
+clean image 上选择一次 exact patch mask，所有 steps/groups/views 固定复用
+token_score_cls_noise = true，仅在首次 clean-mask 选择时采样
 opponent_projected noise = 0.2 RMS，initial RGB projection，kept-only
 Gaussian gradient residual: sigma = 4, alpha = 0.75
-same image IDs, seed, phase choices, mask replay and optimizer
+same image IDs, seed, phase choices, fixed-mask selection and optimizer
 ```
 
 主线的两个核心机制保持职责分离：patch-score 决定在哪里重组语义证据，opponent-channel noise 决定如何扰动保留下来的证据。phase pair、多视图聚合、Gaussian residual 和 MI-FGSM 均为固定支撑组件。

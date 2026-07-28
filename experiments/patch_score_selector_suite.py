@@ -46,6 +46,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--samples", type=int, default=500)
     parser.add_argument("--sample-offset", type=int, default=0)
     parser.add_argument("--seed", type=int, default=20260716)
+    parser.add_argument(
+        "--attack-output-root",
+        type=Path,
+        default=Path("outputs/attack/selector_suite"),
+        help="Root for generated adversarial images; use a new root for a new protocol.",
+    )
     parser.add_argument("--bootstrap-repeats", type=int, default=10000)
     parser.add_argument(
         "--output-summary",
@@ -63,11 +69,12 @@ def condition_command(
     samples: int,
     sample_offset: int,
     seed: int,
+    attack_output_root: Path = Path("outputs/attack/selector_suite"),
 ):
     layer = config.layer_for(source)
     polarity = config.global_polarity
     opposite = "low" if polarity == "high" else "high"
-    output_dir = Path("outputs/attack/selector_suite") / source / condition
+    output_dir = attack_output_root / source / condition
     command = [
         "python",
         "main.py",
@@ -139,12 +146,20 @@ def build_manifest(
     samples: int,
     sample_offset: int,
     seed: int,
+    attack_output_root: Path = Path("outputs/attack/selector_suite"),
 ):
     if samples <= 0 or sample_offset < 0:
         raise ValueError("samples must be positive and sample_offset non-negative.")
     jobs = [
         condition_command(
-            source, condition, config, config_path, samples, sample_offset, seed
+            source,
+            condition,
+            config,
+            config_path,
+            samples,
+            sample_offset,
+            seed,
+            attack_output_root,
         )
         for source in WHITEBOX_MODEL_CHOICES
         for condition in CONDITIONS
@@ -163,6 +178,9 @@ def build_manifest(
             "steps": 10,
             "views": 20,
             "phase_pairs": True,
+            "patch_mask_policy": "clean_fixed_per_attack",
+            "patch_mask_reference": "clean_pixels",
+            "token_score_cls_noise": True,
             "opponent_noise": "initial_projection_kept_only_strength_0.2",
             "gaussian_residual": {"sigma": 4.0, "alpha": 0.75},
         },
@@ -302,6 +320,7 @@ def main() -> None:
             samples=args.samples,
             sample_offset=args.sample_offset,
             seed=args.seed,
+            attack_output_root=args.attack_output_root,
         )
         args.write_manifest.parent.mkdir(parents=True, exist_ok=True)
         args.write_manifest.write_text(
