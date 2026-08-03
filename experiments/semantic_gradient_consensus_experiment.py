@@ -89,6 +89,7 @@ DEFAULT_LAYERS = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mode", choices=("probe", "attack"), default="probe")
     parser.add_argument("--source", choices=WHITEBOX_MODEL_CHOICES, required=True)
     parser.add_argument("--targets", default="auto")
     parser.add_argument("--samples", type=int, default=64)
@@ -115,6 +116,11 @@ def parse_args() -> argparse.Namespace:
         "--layers",
         default="default",
         help="default or comma-separated source-model semantic checkpoints",
+    )
+    parser.add_argument(
+        "--attack-conditions",
+        default="opponent_baseline,shuffled_semantic,final_semantic_residual",
+        help="comma-separated conditions for --mode attack",
     )
     return parser.parse_args()
 
@@ -261,6 +267,7 @@ def _opponent_gradient(
     sample_ids: list[str],
     seed: int,
     groups: int,
+    step_index: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Return raw and Gaussian-processed 20-view opponent gradients.
 
@@ -276,7 +283,7 @@ def _opponent_gradient(
         for group in range(groups):
             phase = PHASES[group % len(PHASES)]
             for view in range(2):
-                replay.set_context(step=0, group=group, view=view)
+                replay.set_context(step=step_index, group=group, view=view)
                 view_pixels = phase_shift(probe, *phase) if view else probe
                 state = model.prepare_attack_feature_state(normalize(model, view_pixels))
                 local = state.local_tokens + attacker._strict_opponent_feature_noise(state)
@@ -607,6 +614,231 @@ def run_source(args: argparse.Namespace) -> None:
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
 
+def _attack_one_condition(
+    model,
+    attacker: PatchScoreAttacker,
+    pixels: torch.Tensor,
+    labels: torch.Tensor,
+    sample_ids: list[str],
+    layers: list[str],
+    args: argparse.Namespace,
+    condition: str,
+) -> torch.Tensor:
+    """Run the iterative single-source attack for one condition.
+
+    The opponent branch is regenerated with the same replay keys at every
+    step across conditions.  The semantic branch is recomputed from the
+    current adversarial image without noise; it never sees the opponent
+    feature perturbation.
+    """
+    clean = pixels.detach()
+    adversarial = clean.clone()
+    momentum = torch.zeros_like(adversarial)
+    for step_index in range(args.steps):
+        raw_opponent, _, _ = _opponent_gradient(
+            model,
+            attacker,
+            adversarial,
+            labels,
+            sample_ids,
+            args.seed,
+            args.groups,
+            step_index=step_index,
+        )
+        if condition == "opponent_baseline":
+            raw = raw_opponent
+        else:
+            semantic_layers, _ = _semantic_gradients(
+                model,
+                adversarial,
+                [layers[-1]],
+                tuple(args.semantic_phase),
+            )
+            semantic = semantic_layers[:, 0]
+            if condition == "shuffled_semantic":
+                semantic = _spatially_shuffle_gradient(
+                    semantic, sample_ids, args.seed + step_index
+                )
+            residual = _orthogonal_residual(semantic, raw_opponent)
+            raw = raw_opponent + args.semantic_lambda * residual
+        processed = attacker._apply_gaussian_residual(raw).detach()
+        momentum = momentum + processed
+        with torch.no_grad():
+            adversarial = adversarial + (args.epsilon / args.steps) * momentum.sign()
+            delta = torch.clamp(adversarial - clean, -args.epsilon, args.epsilon)
+            adversarial = torch.clamp(clean + delta, 0.0, 1.0).detach()
+        if step_index == 0 or step_index + 1 == args.steps:
+            print(
+                f"[{args.source}] {condition} step {step_index + 1}/{args.steps}",
+                flush=True,
+            )
+    return adversarial.cpu()
+
+
+def run_attack(args: argparse.Namespace) -> None:
+    if args.groups * 2 != 20:
+        raise ValueError("E6 requires groups=10 and exactly 20 opponent views")
+    conditions = [item.strip() for item in args.attack_conditions.split(",") if item.strip()]
+    invalid = set(conditions) - set(CONDITIONS)
+    if invalid:
+        raise ValueError(f"unknown attack conditions: {sorted(invalid)}")
+    if not conditions:
+        raise ValueError("at least one attack condition is required")
+    names, pixels_cpu, labels_cpu = load_samples(
+        args.image_dir, args.annotations, args.sample_offset, args.samples
+    )
+    layers = _layer_ids(args.source, args.layers)
+    targets = (
+        [name for name in WHITEBOX_MODEL_CHOICES if name != args.source]
+        if args.targets == "auto"
+        else [item.strip() for item in args.targets.split(",") if item.strip()]
+    )
+    if args.source in targets or set(targets) - set(WHITEBOX_MODEL_CHOICES):
+        raise ValueError("targets must be registered models other than source")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    source_model = build_whitebox_model(1000, args.source, pretrained=True, device=device).eval()
+    _freeze_model(source_model)
+    attacker = make_attacker(source_model, args)
+    adversarial_by_condition: dict[str, torch.Tensor] = {condition: None for condition in conditions}
+    for condition in conditions:
+        generated = []
+        for start in range(0, args.samples, args.batch_size):
+            end = min(args.samples, start + args.batch_size)
+            generated.append(
+                _attack_one_condition(
+                    source_model,
+                    attacker,
+                    pixels_cpu[start:end].to(device),
+                    labels_cpu[start:end].to(device),
+                    names[start:end],
+                    layers,
+                    args,
+                    condition,
+                )
+            )
+            if (start // args.batch_size) % 16 == 0:
+                print(
+                    f"[{args.source}] generated {condition} {end}/{args.samples}",
+                    flush=True,
+                )
+        adversarial_by_condition[condition] = torch.cat(generated)
+    del source_model
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+    rows: list[dict[str, object]] = []
+    for target_name in targets:
+        print(f"[{args.source}] attack evaluation target {target_name}", flush=True)
+        target_model = build_whitebox_model(1000, target_name, pretrained=True, device=device).eval()
+        _freeze_model(target_model)
+        for start in range(0, args.samples, max(args.batch_size, 8)):
+            end = min(args.samples, start + max(args.batch_size, 8))
+            clean = pixels_cpu[start:end].to(device)
+            labels = labels_cpu[start:end].to(device)
+            with torch.no_grad():
+                clean_pred = target_model(normalize(target_model, clean)).argmax(dim=1)
+                for condition in conditions:
+                    adversarial = adversarial_by_condition[condition][start:end].to(device)
+                    adv_pred = target_model(normalize(target_model, adversarial)).argmax(dim=1)
+                    for local_index, sample_index in enumerate(range(start, end)):
+                        clean_correct = bool(clean_pred[local_index].eq(labels[local_index]).cpu())
+                        adv_correct = bool(adv_pred[local_index].eq(labels[local_index]).cpu())
+                        rows.append(
+                            {
+                                "source_model": args.source,
+                                "target_model": target_name,
+                                "condition": condition,
+                                "sample_index": sample_index,
+                                "image_name": names[sample_index],
+                                "label": int(labels[local_index].cpu()),
+                                "clean_correct": clean_correct,
+                                "adv_correct": adv_correct,
+                                "all_success": not adv_correct,
+                                "clean_correct_success": clean_correct and not adv_correct,
+                            }
+                        )
+        del target_model
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
+    summary: dict[str, object] = {
+        "protocol": {
+            "experiment": "E6_decoupled_semantic_gradient_full_attack",
+            "source": args.source,
+            "targets": targets,
+            "samples": args.samples,
+            "sample_offset": args.sample_offset,
+            "conditions": conditions,
+            "steps": args.steps,
+            "epsilon": args.epsilon,
+            "semantic_phase": list(args.semantic_phase),
+            "semantic_branch": "noise_free_final_global_consistency_gradient",
+            "opponent_branch": "20_view_all_token_rgb_opponent_noise_CE_gradient",
+            "patch_drop": False,
+            "whitebox_ensemble": False,
+            "semantic_lambda": args.semantic_lambda,
+            "gaussian_sigma": args.gaussian_sigma,
+            "gaussian_alpha": args.gaussian_alpha,
+        },
+        "target_mean": {},
+        "paired_asr_deltas": {},
+    }
+    for target_name in targets:
+        summary["target_mean"][target_name] = {}
+        for condition in conditions:
+            selected = [
+                row for row in rows
+                if row["target_model"] == target_name and row["condition"] == condition
+            ]
+            clean_correct = torch.tensor([bool(row["clean_correct"]) for row in selected])
+            all_success = torch.tensor([bool(row["all_success"]) for row in selected])
+            conditional_success = torch.tensor(
+                [bool(row["clean_correct_success"]) for row in selected]
+            )
+            eligible = clean_correct.sum().item()
+            summary["target_mean"][target_name][condition] = {
+                "clean_accuracy": float(clean_correct.float().mean()),
+                "all_asr": float(all_success.float().mean()),
+                "clean_correct_eligible": int(eligible),
+                "clean_correct_conditional_asr": (
+                    float(conditional_success.sum() / eligible) if eligible else 0.0
+                ),
+            }
+    baseline = "opponent_baseline"
+    for condition in conditions:
+        if condition == baseline:
+            continue
+        summary["paired_asr_deltas"][condition] = {}
+        for target_name in targets:
+            current = {
+                int(row["sample_index"]): float(bool(row["all_success"]))
+                for row in rows
+                if row["target_model"] == target_name and row["condition"] == condition
+            }
+            base = {
+                int(row["sample_index"]): float(bool(row["all_success"]))
+                for row in rows
+                if row["target_model"] == target_name and row["condition"] == baseline
+            }
+            delta = torch.tensor(
+                [current[index] - base[index] for index in current if index in base],
+                dtype=torch.float32,
+            )
+            summary["paired_asr_deltas"][condition][target_name] = {
+                "mean_all_asr_delta": float(delta.mean()),
+                "ci95": bootstrap_ci(delta, seed=args.seed + 5000),
+                "positive_fraction": float(delta.gt(0).float().mean()),
+                "comparisons": int(delta.numel()),
+            }
+    output_dir = args.output_dir / args.source
+    output_dir.mkdir(parents=True, exist_ok=True)
+    write_csv(output_dir / "full_attack_metrics.csv", rows)
+    (output_dir / "full_attack_summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+
 def main() -> None:
     args = parse_args()
     if args.samples <= 1 or args.batch_size <= 0 or args.steps <= 0:
@@ -615,7 +847,10 @@ def main() -> None:
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
-    run_source(args)
+    if args.mode == "probe":
+        run_source(args)
+    else:
+        run_attack(args)
 
 
 if __name__ == "__main__":
