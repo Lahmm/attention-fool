@@ -10,9 +10,8 @@
 默认主线为：
 
 ```text
-architecture-calibrated patch-score layer
-→ one globally frozen high/low polarity
-→ score-tail candidate stochastic pixel patch dropout
+final-layer global/local patch score on the current adversarial image
+→ high-score-tail candidate stochastic pixel patch dropout per step/group
 → original / phase-shifted view pair
 → kept-only feature noise at the initial RGB projection
 → raw 20-view gradient mean
@@ -34,7 +33,7 @@ pip install -r requirements.txt
 
 ### Patch-score 路由：从随机删 patch 变成语义选择性删 patch
 
-普通 patch dropout 只控制删多少，不回答删哪里。当前方法在预注册候选层提取 global representation 和 local patch tokens，用二者余弦相似度得到 patch-score。攻击从统一的 high 或 low score-tail 候选区随机抽取少量 patch，并把 mask 映射回像素空间。每个架构可以通过独立校准选择不同层，但四个架构必须冻结同一极性。
+普通 patch dropout 只控制删多少，不回答删哪里。当前动态主线在每个攻击 step 的每个 group 上，对当前对抗图像提取 final-layer global representation 和 local patch tokens，用二者余弦相似度得到 patch-score。攻击从 high-score-tail 候选区随机抽取少量 patch，并把 mask 映射回像素空间。同一 group 的 original/phase 两条 view 共用这一个 mask；不同 group 和不同 step 重新计算 score 并重新采样 mask。
 
 研究把它当作一个**语义路由器**来分析：相同 native token ratio 下，不同层的 score-guided drop 是否重组 kept-token 表示、多视图梯度和跨模型梯度？哪一层能产生更高的 held-out transfer ASR？最终层只是对照，不是预设答案。clean logit、单 patch occlusion 和 source feature change 只作为边界诊断，不能用于选层。
 
@@ -57,12 +56,11 @@ phase-shifted view pair、20-view raw gradient mean、Gaussian gradient residual
 ```bash
 python main.py \
   --whitebox-model vit_base_patch16_224 \
-  --routing-config outputs/research/routing_calibration/frozen_routing.json \
   --seed 20260716 \
   --output-dir outputs/attack/vit_mainline
 ```
 
-论文 production run 必须提供已冻结 routing config；不提供时保留的 final/high 行为只用于复现历史实验。
+默认 production run 使用历史动态-mask的 `final/high` 行为。`--routing-config` 仍可用于冻结层实验，但不再定义默认生产主线。
 
 默认设置为 1000 样本、`epsilon=16/255`、10 steps、10 groups × 2 views、约 15%
 实际 patch drop、kept-only opponent-projected RGB 噪声，以及：
@@ -133,7 +131,7 @@ model view 的限制。
 | `pit_b_224` | stage1 b3；stage2 b3/b6；stage3 b2/b4 | CLS |
 | `visformer_small` | stage1 b4/b7；stage2 b4；stage3 b2/b4 | GAP |
 
-跨层公平性固定 native token ratio：候选集为一半 tokens，实际 drop 约 15%。生产配置由 128 张独立校准图冻结，然后在不重选参数的 500 张测试图上运行 selector suite。
+跨层公平性固定 native token ratio：候选集为一半 tokens，实际 drop 约 15%。128图校准和500图selector suite属于已完成的固定-mask历史研究协议，不再覆盖当前动态-mask生产主线。
 
 ## 迁移评估
 

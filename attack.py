@@ -231,8 +231,6 @@ class PatchScoreAttacker:
         self._gradcam_activation_source = ""
         self._gradcam_zero_fraction: list[float] = []
         self._feature_noise_type = ""
-        self._fixed_mainline_drop_mask: torch.Tensor | None = None
-        self._fixed_mainline_grid_size: tuple[int, int] | None = None
         self._gradient_replay: GradientReplay | None = None
         self._actual_forward_view_count = 0
         self._gradient_diagnostics = {
@@ -291,9 +289,11 @@ class PatchScoreAttacker:
             "post_dropout_feature_noise_strength": self.post_dropout_feature_noise_strength,
             "post_dropout_feature_noise_type": self.post_dropout_feature_noise_type,
             "post_dropout_feature_noise_position": "initial",
-            "patch_mask_policy": "clean_fixed_per_attack",
-            "patch_mask_reference": "clean_pixels",
-            "patch_mask_selections_per_attack": 1,
+            "patch_mask_policy": "dynamic_current_adversarial_per_step_group",
+            "patch_mask_reference": "current_attack_pixels",
+            "patch_mask_selections_per_step": self.input_diversity_groups,
+            "patch_mask_selections_per_attack": self.steps * self.input_diversity_groups,
+            "patch_mask_pair_sharing": "within_group_original_phase_pair",
             "gaussian_sigma": self.gaussian_sigma,
             "gaussian_alpha": self.gaussian_alpha,
             "model_mean": self.model_mean.flatten().tolist(),
@@ -971,42 +971,6 @@ class PatchScoreAttacker:
         self._score_source = features.source_name
         return drop_mask, features.grid_size
 
-    def _clear_fixed_mainline_drop_mask(self) -> None:
-        self._fixed_mainline_drop_mask = None
-        self._fixed_mainline_grid_size = None
-
-    def _initialize_fixed_mainline_drop_mask(
-        self,
-        clean_pixels: torch.Tensor,
-        labels: torch.Tensor | None,
-    ) -> None:
-        """Select the exact native-patch mask once from the clean input."""
-        if self.attack_method != "original_score_postdrop_phase_pair":
-            return
-        if self._fixed_mainline_drop_mask is not None:
-            raise RuntimeError("the fixed mainline mask was initialized more than once.")
-        drop_mask, grid_size = self._compute_mainline_drop_mask(clean_pixels, labels)
-        self._fixed_mainline_drop_mask = drop_mask.detach()
-        self._fixed_mainline_grid_size = grid_size
-
-    def _fixed_mainline_mask(
-        self,
-        pixels: torch.Tensor,
-        labels: torch.Tensor | None,
-    ) -> tuple[torch.Tensor, tuple[int, int]]:
-        # Direct view/probe callers may not enter through attack_batch.  Their
-        # first input is therefore treated as the clean reference and cached
-        # before any group is emitted.
-        if self._fixed_mainline_drop_mask is None:
-            self._initialize_fixed_mainline_drop_mask(pixels.detach(), labels)
-        drop_mask = self._fixed_mainline_drop_mask
-        grid_size = self._fixed_mainline_grid_size
-        if drop_mask is None or grid_size is None:
-            raise RuntimeError("the fixed mainline mask was not initialized.")
-        if drop_mask.size(0) != pixels.size(0):
-            raise ValueError("the fixed mainline mask batch does not match the attack batch.")
-        return drop_mask, grid_size
-
     @staticmethod
     def _patch_drop_mask_to_image(
         drop_mask: torch.Tensor,
@@ -1056,12 +1020,13 @@ class PatchScoreAttacker:
         pixels: torch.Tensor,
         labels: torch.Tensor | None = None,
     ) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
-        # One exact mask is selected from the clean image before the attack
-        # loop and reused by every group at every iterative attack step.
-        drop_mask, grid_size = self._fixed_mainline_mask(pixels, labels)
         for group_index in range(self.input_diversity_groups):
             if self._gradient_replay is not None:
                 self._gradient_replay.set_context(group=group_index, view=-1)
+            # Historical dynamic mainline: score the current adversarial state
+            # and sample a fresh mask independently for every step/group.  The
+            # original and phase-shifted views below share only this group mask.
+            drop_mask, grid_size = self._compute_mainline_drop_mask(pixels, labels)
             image_mask = self._patch_drop_mask_to_image(
                 drop_mask,
                 grid_size,
@@ -1229,17 +1194,12 @@ class PatchScoreAttacker:
             if sample_ids is None or len(sample_ids) != pixels.size(0):
                 raise ValueError("sample_ids must match pixels when replay is enabled.")
             replay.begin_batch(sample_ids)
-            replay.set_context(step=-1, group=-1, view=-1)
+            replay.set_context(step=step_index, group=-1, view=-1)
         self._gradient_replay = replay
-        self._clear_fixed_mainline_drop_mask()
         self._actual_forward_view_count = 0
         probe_pixels = pixels.to(self.device).detach().requires_grad_(True)
         labels = labels.to(self.device)
         try:
-            if self.attack_method == "original_score_postdrop_phase_pair":
-                self._initialize_fixed_mainline_drop_mask(probe_pixels.detach(), labels)
-            if replay is not None:
-                replay.set_context(step=step_index, group=-1, view=-1)
             gradients = [
                 torch.autograd.grad(loss, probe_pixels, retain_graph=False)[0]
                 for loss in self._iter_attack_losses(probe_pixels, labels)
@@ -1267,7 +1227,6 @@ class PatchScoreAttacker:
                 "processed": processed.detach(),
             }
         finally:
-            self._clear_fixed_mainline_drop_mask()
             self._gradient_replay = None
 
     def attack_batch(
@@ -1287,16 +1246,7 @@ class PatchScoreAttacker:
         clean_pixels = self._denormalize(images).detach()
         adv_pixels = clean_pixels.clone()
         momentum = torch.zeros_like(adv_pixels)
-        self._clear_fixed_mainline_drop_mask()
         try:
-            if self.attack_method == "original_score_postdrop_phase_pair":
-                # The exact score/random/Grad-CAM mask is selected once from
-                # the unperturbed input.  No iterative adversarial state and
-                # no augmentation view can change it afterwards.
-                if replay is not None:
-                    replay.set_context(step=-1, group=-1, view=-1)
-                self._initialize_fixed_mainline_drop_mask(clean_pixels, labels)
-
             for step_index in range(self.steps):
                 if replay is not None:
                     replay.set_context(step=step_index, group=-1, view=-1)
@@ -1348,5 +1298,4 @@ class PatchScoreAttacker:
 
             return self._normalize_output(adv_pixels)
         finally:
-            self._clear_fixed_mainline_drop_mask()
             self._gradient_replay = None

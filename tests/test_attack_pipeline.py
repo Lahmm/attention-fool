@@ -75,7 +75,6 @@ class AttackPipelineTests(unittest.TestCase):
 
     def test_attack_batch_projects_to_epsilon_ball(self):
         attacker = make_attacker(
-            attack_method="none",
             steps=1,
             epsilon=0.1,
             step_size=0.2,
@@ -85,7 +84,7 @@ class AttackPipelineTests(unittest.TestCase):
         attacker._compute_generic_patch_scores = lambda _pixels: None
 
         def raw_gradient(pixels, _labels):
-            attacker._actual_forward_view_count = 1
+            attacker._actual_forward_view_count = 20
             return torch.full_like(pixels, 2.0)
 
         attacker._attack_grad = raw_gradient
@@ -98,7 +97,7 @@ class AttackPipelineTests(unittest.TestCase):
             0.1 + 1e-6,
         )
 
-    def test_mainline_selects_one_clean_mask_for_all_steps_groups_and_views(self):
+    def test_mainline_selects_dynamic_mask_for_every_step_and_group(self):
         for selector in ("patch_score", "random"):
             with self.subTest(selector=selector):
                 attacker = make_attacker(
@@ -110,33 +109,45 @@ class AttackPipelineTests(unittest.TestCase):
                     use_momentum=False,
                     gaussian_alpha=0.0,
                 )
-                clean_mask = torch.tensor([[True, False, False, False]])
+                masks = (
+                    torch.tensor([[True, False, False, False]]),
+                    torch.tensor([[False, True, False, False]]),
+                )
                 score_inputs = []
                 view_masks = []
 
-                def select_once(pixels, _labels=None):
+                def select_dynamic(pixels, _labels=None):
+                    mask = masks[len(score_inputs) % len(masks)]
                     score_inputs.append(pixels.detach().clone())
-                    return clean_mask, (2, 2)
+                    return mask, (2, 2)
 
                 def view_loss(pixels, _labels, image_mask):
                     view_masks.append(image_mask.detach().clone())
                     return pixels.sum()
 
-                attacker._compute_mainline_drop_mask = select_once
+                attacker._compute_mainline_drop_mask = select_dynamic
                 attacker._attack_loss_for_original_score_postdrop_phase_view = view_loss
                 images = torch.zeros(1, 3, 2, 2)
-                expected_clean = attacker._denormalize(images)
-
                 attacker.attack_batch(images, torch.zeros(1, dtype=torch.long))
 
-                self.assertEqual(len(score_inputs), 1)
-                self.assertTrue(torch.equal(score_inputs[0], expected_clean))
+                self.assertEqual(len(score_inputs), 3 * 2)
+                for step_index in range(3):
+                    first = score_inputs[2 * step_index]
+                    second = score_inputs[2 * step_index + 1]
+                    self.assertTrue(torch.equal(first, second))
                 self.assertEqual(len(view_masks), 3 * 2 * 2)
-                self.assertTrue(all(torch.equal(mask, view_masks[0]) for mask in view_masks))
-                self.assertIsNone(attacker._fixed_mainline_drop_mask)
+                for group_index in range(3 * 2):
+                    original = view_masks[2 * group_index]
+                    phase = view_masks[2 * group_index + 1]
+                    self.assertTrue(torch.equal(original, phase))
+                    self.assertTrue(torch.equal(original, masks[group_index % 2].view(1, 1, 2, 2)))
                 self.assertEqual(
                     attacker.mainline_metadata()["patch_mask_policy"],
-                    "clean_fixed_per_attack",
+                    "dynamic_current_adversarial_per_step_group",
+                )
+                self.assertEqual(
+                    attacker.mainline_metadata()["patch_mask_selections_per_attack"],
+                    3 * 2,
                 )
 
     def test_gradient_probe_returns_views_raw_mean_and_processed_direction(self):
