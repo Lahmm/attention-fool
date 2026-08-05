@@ -2,8 +2,10 @@
 
 This experiment retains the historical dynamic mainline's 10 x 2 stochastic
 gradient estimator, opponent-projected initial-feature noise, Gaussian
-residual option, and MI-FGSM update.  It deliberately removes patch scoring,
-patch selection, patch dropping, routing layers, and phase shifts.
+residual option, and MI-FGSM update.  By default, every shuffle-view input
+gradient is L2-matched to its paired original-view gradient before averaging.
+It deliberately removes patch scoring, patch selection, patch dropping,
+routing layers, and phase shifts.
 
 For every sample, attack step, and augmentation group, the two views are:
 
@@ -43,7 +45,13 @@ SHUFFLE_GRID = (14, 14)
 class PatchShufflePairAttacker(PatchScoreAttacker):
     """MI-FGSM with an original view and an independently patch-shuffled view."""
 
-    def __init__(self, *args, shuffle_grid: tuple[int, int] = SHUFFLE_GRID, **kwargs) -> None:
+    def __init__(
+        self,
+        *args,
+        shuffle_grid: tuple[int, int] = SHUFFLE_GRID,
+        shuffle_gradient_norm_match: bool = True,
+        **kwargs,
+    ) -> None:
         if "attack_method" in kwargs:
             raise ValueError("PatchShufflePairAttacker fixes its isolated attack method internally.")
         if tuple(shuffle_grid) != SHUFFLE_GRID:
@@ -63,10 +71,13 @@ class PatchShufflePairAttacker(PatchScoreAttacker):
             raise ValueError("patch-shuffle feature-noise strength must be positive.")
 
         self.shuffle_grid = SHUFFLE_GRID
+        self.shuffle_gradient_norm_match = bool(shuffle_gradient_norm_match)
         self._shuffle_patch_size: tuple[int, int] | None = None
         self._shuffle_pair_diagnostics = {
             "original_shuffle_gradient_cosine": [],
             "shuffle_to_original_gradient_norm_ratio": [],
+            "applied_shuffle_gradient_l2_scale": [],
+            "post_scale_shuffle_to_original_gradient_norm_ratio": [],
         }
 
     def _sample_patch_permutation(
@@ -184,6 +195,54 @@ class PatchShufflePairAttacker(PatchScoreAttacker):
         for view_pixels in self._iter_patch_shuffle_pair(pixels):
             yield self._attack_loss_for_patch_shuffle_view(view_pixels, labels)
 
+    def _norm_match_shuffle_gradients(
+        self,
+        view_gradients: torch.Tensor,
+    ) -> torch.Tensor:
+        """Match each shuffle gradient's L2 norm to its paired original gradient."""
+        if view_gradients.ndim != 5:
+            raise ValueError(
+                "view_gradients must have shape [num_views,batch,channels,height,width]."
+            )
+        if view_gradients.size(0) != self._expected_view_count():
+            raise ValueError("patch-shuffle norm matching received an invalid view count.")
+        original = view_gradients[0::2]
+        shuffled = view_gradients[1::2]
+        original_norm = original.flatten(2).norm(dim=-1)
+        shuffled_norm = shuffled.flatten(2).norm(dim=-1).clamp_min(1e-12)
+        scale = (original_norm / shuffled_norm).detach()
+        matched_shuffled = shuffled * scale[..., None, None, None]
+        return torch.stack((original, matched_shuffled), dim=1).reshape_as(view_gradients)
+
+    def _aggregate_patch_shuffle_gradients(
+        self,
+        view_gradients: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the historical raw mean and the production aggregation."""
+        raw_mean = self._aggregate_gradients(view_gradients)
+        if not self.shuffle_gradient_norm_match:
+            return raw_mean, raw_mean
+        matched_views = self._norm_match_shuffle_gradients(view_gradients)
+        return raw_mean, self._aggregate_gradients(matched_views)
+
+    def _attack_grad(
+        self,
+        pixels: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> torch.Tensor:
+        gradients = [
+            torch.autograd.grad(loss, pixels, retain_graph=False)[0]
+            for loss in self._iter_attack_losses(pixels, labels)
+        ]
+        if len(gradients) != self._expected_view_count():
+            raise RuntimeError(
+                f"view count mismatch: {len(gradients)} != {self._expected_view_count()}."
+            )
+        view_gradients = torch.stack(gradients, dim=0)
+        _, aggregated = self._aggregate_patch_shuffle_gradients(view_gradients)
+        self._record_gradient_diagnostics(view_gradients, aggregated)
+        return aggregated
+
     def _record_gradient_diagnostics(
         self,
         view_gradients: torch.Tensor,
@@ -196,13 +255,28 @@ class PatchShufflePairAttacker(PatchScoreAttacker):
             original = view_gradients[0::2].flatten(2)
             shuffled = view_gradients[1::2].flatten(2)
             pair_cosine = F.cosine_similarity(original, shuffled, dim=-1)
-            norm_ratio = shuffled.norm(dim=-1) / original.norm(dim=-1).clamp_min(1e-12)
+            original_norm = original.norm(dim=-1).clamp_min(1e-12)
+            shuffled_norm = shuffled.norm(dim=-1).clamp_min(1e-12)
+            norm_ratio = shuffled_norm / original_norm
+            norm_match_scale = original_norm / shuffled_norm
+            applied_scale = (
+                norm_match_scale
+                if self.shuffle_gradient_norm_match
+                else torch.ones_like(norm_match_scale)
+            )
+            matched_ratio = shuffled_norm * applied_scale / original_norm
             self._shuffle_pair_diagnostics["original_shuffle_gradient_cosine"].append(
                 float(pair_cosine.mean().cpu())
             )
             self._shuffle_pair_diagnostics[
                 "shuffle_to_original_gradient_norm_ratio"
             ].append(float(norm_ratio.mean().cpu()))
+            self._shuffle_pair_diagnostics["applied_shuffle_gradient_l2_scale"].append(
+                float(applied_scale.mean().cpu())
+            )
+            self._shuffle_pair_diagnostics[
+                "post_scale_shuffle_to_original_gradient_norm_ratio"
+            ].append(float(matched_ratio.mean().cpu()))
 
     def gradient_diagnostics_summary(self) -> dict[str, float | int]:
         summary = super().gradient_diagnostics_summary()
@@ -242,12 +316,14 @@ class PatchShufflePairAttacker(PatchScoreAttacker):
                     f"view count mismatch: {len(gradients)} != {self._expected_view_count()}."
                 )
             view_gradients = torch.stack(gradients, dim=0)
-            raw_mean = self._aggregate_gradients(view_gradients)
-            self._record_gradient_diagnostics(view_gradients, raw_mean)
-            processed = self._smooth_grad(self._apply_gaussian_residual(raw_mean))
+            raw_mean, aggregated = self._aggregate_patch_shuffle_gradients(view_gradients)
+            self._record_gradient_diagnostics(view_gradients, aggregated)
+            processed = self._smooth_grad(self._apply_gaussian_residual(aggregated))
             return {
                 "view_gradients": view_gradients.detach(),
                 "raw_mean": raw_mean.detach(),
+                "aggregated": aggregated.detach(),
+                "norm_matched_mean": aggregated.detach(),
                 "processed": processed.detach(),
             }
         finally:
@@ -335,7 +411,14 @@ class PatchShufflePairAttacker(PatchScoreAttacker):
             "feature_noise_scope": "all_initial_local_tokens",
             "post_dropout_feature_noise_type": self.post_dropout_feature_noise_type,
             "post_dropout_feature_noise_strength": self.post_dropout_feature_noise_strength,
-            "gradient_aggregation": "raw_arithmetic_mean",
+            "shuffle_gradient_norm_match": self.shuffle_gradient_norm_match,
+            "shuffle_gradient_norm": "per_sample_per_group_input_l2",
+            "shuffle_gradient_norm_anchor": "paired_original_view",
+            "gradient_aggregation": (
+                "pairwise_shuffle_l2_match_then_arithmetic_mean"
+                if self.shuffle_gradient_norm_match
+                else "raw_arithmetic_mean"
+            ),
             "gaussian_sigma": self.gaussian_sigma,
             "gaussian_alpha": self.gaussian_alpha,
             "model_mean": self.model_mean.flatten().tolist(),
@@ -362,6 +445,19 @@ def parse_args() -> argparse.Namespace:
         default="opponent_projected",
     )
     parser.add_argument("--post-dropout-feature-noise-strength", type=float, default=0.2)
+    parser.add_argument(
+        "--shuffle-gradient-norm-match",
+        dest="shuffle_gradient_norm_match",
+        action="store_true",
+        help="Match every shuffle-view input-gradient L2 norm to its paired original view.",
+    )
+    parser.add_argument(
+        "--no-shuffle-gradient-norm-match",
+        dest="shuffle_gradient_norm_match",
+        action="store_false",
+        help="Reproduce the historical unbalanced raw arithmetic mean.",
+    )
+    parser.set_defaults(shuffle_gradient_norm_match=True)
     parser.add_argument("--gaussian-sigma", type=float, default=4.0)
     parser.add_argument("--gaussian-alpha", type=float, default=0.75)
     parser.add_argument("--image-dir", default="data/clean_resized_images")
@@ -411,6 +507,7 @@ def main(args: argparse.Namespace) -> None:
         post_dropout_phase_token_noise=True,
         post_dropout_feature_noise_strength=args.post_dropout_feature_noise_strength,
         post_dropout_feature_noise_type=args.post_dropout_feature_noise_type,
+        shuffle_gradient_norm_match=args.shuffle_gradient_norm_match,
         gaussian_sigma=args.gaussian_sigma,
         gaussian_alpha=args.gaussian_alpha,
         device=DEVICE,

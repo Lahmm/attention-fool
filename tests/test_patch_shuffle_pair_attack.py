@@ -171,6 +171,50 @@ class PatchShufflePairAttackTests(unittest.TestCase):
         self.assertEqual(metadata["patch_drop"], "disabled")
         self.assertEqual(metadata["phase_shift"], "disabled")
         self.assertEqual(metadata["feature_noise_scope"], "all_initial_local_tokens")
+        self.assertTrue(metadata["shuffle_gradient_norm_match"])
+        self.assertEqual(
+            metadata["gradient_aggregation"],
+            "pairwise_shuffle_l2_match_then_arithmetic_mean",
+        )
+
+    def test_shuffle_gradients_are_l2_matched_to_each_paired_original(self):
+        attacker = make_attacker(input_diversity_groups=2)
+        view_gradients = torch.tensor(
+            [
+                [[[[3.0, 4.0]]]],
+                [[[[0.0, 10.0]]]],
+                [[[[0.0, 2.0]]]],
+                [[[[6.0, 8.0]]]],
+            ]
+        )
+
+        matched = attacker._norm_match_shuffle_gradients(view_gradients)
+        original_norm = matched[0::2].flatten(2).norm(dim=-1)
+        shuffle_norm = matched[1::2].flatten(2).norm(dim=-1)
+        raw_mean, aggregated = attacker._aggregate_patch_shuffle_gradients(view_gradients)
+
+        self.assertTrue(torch.equal(matched[0::2], view_gradients[0::2]))
+        self.assertTrue(torch.allclose(shuffle_norm, original_norm))
+        self.assertTrue(torch.equal(raw_mean, view_gradients.mean(dim=0)))
+        self.assertTrue(torch.equal(aggregated, matched.mean(dim=0)))
+        self.assertFalse(torch.equal(aggregated, raw_mean))
+
+    def test_norm_matching_can_be_disabled_to_reproduce_raw_mean(self):
+        attacker = make_attacker(
+            input_diversity_groups=1,
+            shuffle_gradient_norm_match=False,
+        )
+        view_gradients = torch.tensor(
+            [
+                [[[[3.0, 4.0]]]],
+                [[[[0.0, 10.0]]]],
+            ]
+        )
+
+        raw_mean, aggregated = attacker._aggregate_patch_shuffle_gradients(view_gradients)
+
+        self.assertTrue(torch.equal(aggregated, raw_mean))
+        self.assertEqual(attacker.mainline_metadata()["gradient_aggregation"], "raw_arithmetic_mean")
 
     def test_attack_projects_complete_output_to_epsilon_ball(self):
         attacker = make_attacker(
@@ -195,10 +239,14 @@ class PatchShufflePairAttackTests(unittest.TestCase):
             0.1 + 1e-6,
         )
 
-    def test_raw_and_gaussian_processed_gradients_are_both_available(self):
+    def test_raw_norm_matched_and_gaussian_processed_gradients_are_available(self):
         pixels = torch.rand(1, 3, 28, 28)
         labels = torch.zeros(1, dtype=torch.long)
-        raw = make_attacker(input_diversity_groups=1, gaussian_alpha=0.0)
+        raw = make_attacker(
+            input_diversity_groups=1,
+            gaussian_alpha=0.0,
+            shuffle_gradient_norm_match=False,
+        )
         raw_result = raw.probe_attack_gradients(
             pixels,
             labels,
@@ -206,6 +254,17 @@ class PatchShufflePairAttackTests(unittest.TestCase):
             sample_ids=["sample"],
         )
         self.assertTrue(torch.equal(raw_result["processed"], raw_result["raw_mean"]))
+
+        matched = make_attacker(input_diversity_groups=1, gaussian_alpha=0.0)
+        matched_result = matched.probe_attack_gradients(
+            pixels,
+            labels,
+            replay=GradientReplay(31),
+            sample_ids=["sample"],
+        )
+        self.assertTrue(
+            torch.equal(matched_result["processed"], matched_result["norm_matched_mean"])
+        )
 
         gaussian = make_attacker(
             input_diversity_groups=1,
@@ -218,7 +277,7 @@ class PatchShufflePairAttackTests(unittest.TestCase):
             replay=GradientReplay(31),
             sample_ids=["sample"],
         )
-        expected = gaussian._apply_gaussian_residual(gaussian_result["raw_mean"])
+        expected = gaussian._apply_gaussian_residual(gaussian_result["norm_matched_mean"])
         self.assertTrue(torch.allclose(gaussian_result["processed"], expected))
 
     def test_invalid_grid_or_disabled_noise_is_rejected(self):
