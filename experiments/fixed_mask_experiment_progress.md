@@ -1,5 +1,9 @@
 # Fixed-mask routing experiment final report
 
+> **Historical result archive.** The fixed-mask executable pipeline has been
+> removed from the streamlined project. Formal summaries, manifests, and this
+> report remain preserved; this protocol is not the production mask policy.
+
 Completed at `2026-07-29T10:39:38Z`. The full fixed-clean-mask experiment is
 finished: 38 routing-calibration attacks, 114 off-diagonal calibration
 evaluations, four H2 routing/gradient jobs, Grad-CAM Protocol A on all four

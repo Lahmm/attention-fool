@@ -18,12 +18,9 @@ ATTACK_METHODS = (
     "token_patch_dropout",
     "original_score_postdrop_phase_pair",
 )
-PATCH_SCORE_LAYER_MODES = ("final",)
 PATCH_SELECTORS = (
     "patch_score",
-    "gradcam_relu",
     "random",
-    "deviation",
     "no_drop",
 )
 POST_DROPOUT_NOISE_TYPES = (
@@ -52,8 +49,7 @@ class PatchScoreAttacker:
         guide_aug_copies: int = 20,
         input_diversity_groups: int = 10,
         input_diversity_views_per_group: int = 2,
-        input_diversity_phase_shift: tuple[int, int] = (0, 0),
-        input_diversity_phase_shift_set: tuple[tuple[int, int], ...] | None = (
+        input_diversity_phase_shift_set: tuple[tuple[int, int], ...] = (
             (4, 4),
             (8, 8),
             (12, 12),
@@ -77,8 +73,6 @@ class PatchScoreAttacker:
         feature_layer: int = 12,
         patch_score_layer: str = "final",
         patch_selector: str = "patch_score",
-        gradcam_target_mode: str = "true",
-        gradcam_zero_policy: str = "error",
         gaussian_sigma: float = 4.0,
         gaussian_alpha: float = 0.75,
         device: torch.device | None = None,
@@ -107,13 +101,10 @@ class PatchScoreAttacker:
         total_views = input_diversity_groups * input_diversity_views_per_group
         if total_views > 20:
             raise ValueError(f"actual input-diversity views must be <= 20, got {total_views}.")
-        if len(input_diversity_phase_shift) != 2:
-            raise ValueError("input_diversity_phase_shift must be (dx, dy).")
-        if input_diversity_phase_shift_set is not None:
-            if not input_diversity_phase_shift_set:
-                raise ValueError("input_diversity_phase_shift_set cannot be empty.")
-            if any(len(shift) != 2 for shift in input_diversity_phase_shift_set):
-                raise ValueError("every phase shift must be (dx, dy).")
+        if not input_diversity_phase_shift_set:
+            raise ValueError("input_diversity_phase_shift_set cannot be empty.")
+        if any(len(shift) != 2 for shift in input_diversity_phase_shift_set):
+            raise ValueError("every phase shift must be (dx, dy).")
         if guide_aug_strength < 0:
             raise ValueError("guide_aug_strength must be non-negative.")
         if post_dropout_feature_noise_strength is not None and post_dropout_feature_noise_strength < 0:
@@ -151,10 +142,6 @@ class PatchScoreAttacker:
             raise ValueError(
                 f"patch_selector must be one of {PATCH_SELECTORS}, got {patch_selector!r}."
             )
-        if gradcam_target_mode not in ("true", "predicted"):
-            raise ValueError("gradcam_target_mode must be true or predicted.")
-        if gradcam_zero_policy not in ("error", "random"):
-            raise ValueError("gradcam_zero_policy must be error or random.")
         if gaussian_sigma < 0:
             raise ValueError("gaussian_sigma must be non-negative.")
         if gaussian_alpha < 0:
@@ -178,11 +165,9 @@ class PatchScoreAttacker:
         self.guide_aug_copies = int(guide_aug_copies)
         self.input_diversity_groups = int(input_diversity_groups)
         self.input_diversity_views_per_group = int(input_diversity_views_per_group)
-        self.input_diversity_phase_shift = tuple(int(value) for value in input_diversity_phase_shift)
-        self.input_diversity_phase_shift_set = (
-            tuple(tuple(int(value) for value in shift) for shift in input_diversity_phase_shift_set)
-            if input_diversity_phase_shift_set is not None
-            else None
+        self.input_diversity_phase_shift_set = tuple(
+            tuple(int(value) for value in shift)
+            for shift in input_diversity_phase_shift_set
         )
         self.guide_aug_strength = float(guide_aug_strength)
         self.patch_dropout_ratio = float(patch_dropout_ratio)
@@ -211,8 +196,6 @@ class PatchScoreAttacker:
         self.feature_layer = int(feature_layer)
         self.patch_score_layer = patch_score_layer
         self.patch_selector = patch_selector
-        self.gradcam_target_mode = gradcam_target_mode
-        self.gradcam_zero_policy = gradcam_zero_policy
         self.gaussian_sigma = float(gaussian_sigma)
         self.gaussian_alpha = float(gaussian_alpha)
         self.pixel_mean = torch.tensor(IMAGENET_MEAN, device=self.device).view(1, 3, 1, 1)
@@ -228,8 +211,6 @@ class PatchScoreAttacker:
         self._score_source = ""
         self._resolved_score_layer = ""
         self._score_global_mode = ""
-        self._gradcam_activation_source = ""
-        self._gradcam_zero_fraction: list[float] = []
         self._feature_noise_type = ""
         self._gradient_replay: GradientReplay | None = None
         self._actual_forward_view_count = 0
@@ -267,14 +248,6 @@ class PatchScoreAttacker:
             "resolved_patch_score_layer": self._resolved_score_layer,
             "score_global_mode": self._score_global_mode,
             "patch_selector": self.patch_selector,
-            "gradcam_target_mode": self.gradcam_target_mode,
-            "gradcam_zero_policy": self.gradcam_zero_policy,
-            "gradcam_activation_source": self._gradcam_activation_source or None,
-            "gradcam_zero_fraction": (
-                sum(self._gradcam_zero_fraction) / len(self._gradcam_zero_fraction)
-                if self._gradcam_zero_fraction
-                else None
-            ),
             "score_grid": list(self._score_grid_size) if self._score_grid_size else None,
             "target_patch_drop_ratio": (
                 0.0
@@ -434,8 +407,6 @@ class PatchScoreAttacker:
         ]
 
     def _pick_input_diversity_phase(self) -> tuple[int, int]:
-        if self.input_diversity_phase_shift_set is None:
-            return self.input_diversity_phase_shift
         index = int(torch.randint(len(self.input_diversity_phase_shift_set), (1,)).item())
         return self.input_diversity_phase_shift_set[index]
 
@@ -443,20 +414,17 @@ class PatchScoreAttacker:
         if self._gradient_replay is None:
             phase = self._pick_input_diversity_phase()
             return [phase] * batch_size
-        if self.input_diversity_phase_shift_set is None:
-            phases = [self.input_diversity_phase_shift] * batch_size
-        else:
-            phases = [
-                self.input_diversity_phase_shift_set[
-                    self._gradient_replay.randint(
-                        len(self.input_diversity_phase_shift_set),
-                        "phase",
-                        index,
-                        device=device,
-                    )
-                ]
-                for index in range(batch_size)
+        phases = [
+            self.input_diversity_phase_shift_set[
+                self._gradient_replay.randint(
+                    len(self.input_diversity_phase_shift_set),
+                    "phase",
+                    index,
+                    device=device,
+                )
             ]
+            for index in range(batch_size)
+        ]
         for index, phase in enumerate(phases):
             self._gradient_replay.record_phase(index, phase)
         return phases
@@ -732,108 +700,6 @@ class PatchScoreAttacker:
             return working_scores < threshold
         return torch.ones_like(scores, dtype=torch.bool)
 
-    @staticmethod
-    def _deviation_candidate_mask(scores: torch.Tensor) -> torch.Tensor:
-        deviation = (scores - scores.median(dim=1, keepdim=True).values).abs()
-        candidate_count = max(1, scores.size(1) // 2)
-        indices = deviation.topk(candidate_count, dim=1).indices
-        return torch.zeros_like(scores, dtype=torch.bool).scatter(1, indices, True)
-
-    @staticmethod
-    def _top_candidate_mask(scores: torch.Tensor) -> torch.Tensor:
-        candidate_count = max(1, scores.size(1) // 2)
-        indices = scores.topk(candidate_count, dim=1).indices
-        return torch.zeros_like(scores, dtype=torch.bool).scatter(1, indices, True)
-
-    @staticmethod
-    def _local_activation_for_grid(
-        activation: torch.Tensor,
-        grid_size: tuple[int, int],
-    ) -> torch.Tensor:
-        patch_count = grid_size[0] * grid_size[1]
-        if activation.ndim == 4:
-            local = activation.flatten(2).transpose(1, 2)
-        elif activation.ndim == 3:
-            if activation.size(1) < patch_count:
-                raise ValueError(
-                    "Grad-CAM activation has fewer tokens than the routing grid."
-                )
-            local = activation[:, -patch_count:]
-        else:
-            raise ValueError(
-                f"unsupported Grad-CAM activation shape: {tuple(activation.shape)}."
-            )
-        if local.size(1) != patch_count:
-            raise ValueError("Grad-CAM activation does not match the routing grid.")
-        return local
-
-    def _gradcam_scores(
-        self,
-        pixels: torch.Tensor,
-        labels: torch.Tensor,
-        features,
-    ) -> torch.Tensor:
-        """Return a true/predicted-class Grad-CAM map at the routing checkpoint."""
-        capture_getter = getattr(self.model, "patch_score_activation_capture", None)
-        if capture_getter is None:
-            raise ValueError("Grad-CAM routing requires a checkpoint activation module adapter.")
-        capture = capture_getter(self.patch_score_layer)
-        capture.validate()
-        self._gradcam_activation_source = capture.source_name
-        captured: dict[str, torch.Tensor] = {}
-
-        def output_hook(_module, _inputs, output):
-            value = output[0] if isinstance(output, (tuple, list)) else output
-            if not isinstance(value, torch.Tensor):
-                raise ValueError("Grad-CAM checkpoint did not produce a tensor activation.")
-            captured["activation"] = value
-
-        def input_hook(_module, inputs):
-            value = inputs[0]
-            if not isinstance(value, torch.Tensor):
-                raise ValueError("Grad-CAM checkpoint did not receive a tensor activation.")
-            captured["activation"] = value
-
-        handle = (
-            capture.module.register_forward_pre_hook(input_hook)
-            if capture.hook_type == "input"
-            else capture.module.register_forward_hook(output_hook)
-        )
-        try:
-            logits = self.model(self._normalize(pixels))
-        finally:
-            handle.remove()
-        if "activation" not in captured:
-            raise RuntimeError("failed to capture the Grad-CAM routing activation.")
-        target = labels if self.gradcam_target_mode == "true" else logits.argmax(dim=1)
-        activation = captured["activation"]
-        target_logits = logits.gather(1, target[:, None]).sum()
-        gradient = torch.autograd.grad(
-            target_logits,
-            activation,
-            retain_graph=False,
-            create_graph=False,
-        )[0]
-        local = self._local_activation_for_grid(activation, features.grid_size)
-        gradient_local = self._local_activation_for_grid(gradient, features.grid_size)
-        alpha = gradient_local.mean(dim=1)
-        scores = F.relu((local * alpha[:, None]).sum(dim=2)).detach()
-        zero_fraction = scores.abs().sum(dim=1).eq(0).float()
-        self._gradcam_zero_fraction.append(float(zero_fraction.mean().cpu()))
-        if bool(zero_fraction.any()):
-            if self.gradcam_zero_policy == "error":
-                raise RuntimeError(
-                    "Grad-CAM produced an all-zero map for at least one sample at "
-                    f"{capture.source_name}; use the explicit random zero-map policy "
-                    "to preserve the matched drop budget."
-                )
-            # ReLU Grad-CAM contains no ranking information for these samples.
-            # A sample-keyed random ranking preserves the exact candidate/drop
-            # budget without silently changing the saliency definition.
-            fallback = self._randn_like(scores, "gradcam_zero_random_ranking")
-            scores = torch.where(zero_fraction[:, None].bool(), fallback, scores)
-        return scores
-
     def _sample_patch_dropout_mask(
         self,
         scores: torch.Tensor,
@@ -921,7 +787,6 @@ class PatchScoreAttacker:
     def _compute_mainline_drop_mask(
         self,
         pixels: torch.Tensor,
-        labels: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, tuple[int, int]]:
         extract = getattr(self.model, "extract_patch_score_features", None)
         if extract is None:
@@ -950,19 +815,9 @@ class PatchScoreAttacker:
                     features.local_tokens,
                     getattr(self.model, "model", None),
                 )
-            if self.patch_selector == "gradcam_relu":
-                if labels is None:
-                    raise ValueError("Grad-CAM routing requires labels.")
-                scores = self._gradcam_scores(pixels, labels, features)
-                # Grad-CAM always drops its high-saliency half.  The globally
-                # frozen patch-score polarity does not redefine Grad-CAM.
-                candidates = self._top_candidate_mask(scores)
-            elif self.patch_selector == "random":
+            if self.patch_selector == "random":
                 scores = patch_scores
                 candidates = torch.ones_like(scores, dtype=torch.bool)
-            elif self.patch_selector == "deviation":
-                scores = patch_scores
-                candidates = self._deviation_candidate_mask(scores)
             else:
                 scores = patch_scores
                 candidates = self._patch_score_candidate_mask(scores)
@@ -1026,7 +881,7 @@ class PatchScoreAttacker:
             # Historical dynamic mainline: score the current adversarial state
             # and sample a fresh mask independently for every step/group.  The
             # original and phase-shifted views below share only this group mask.
-            drop_mask, grid_size = self._compute_mainline_drop_mask(pixels, labels)
+            drop_mask, grid_size = self._compute_mainline_drop_mask(pixels)
             image_mask = self._patch_drop_mask_to_image(
                 drop_mask,
                 grid_size,

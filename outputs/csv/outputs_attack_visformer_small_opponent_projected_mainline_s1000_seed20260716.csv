@@ -1,0 +1,85 @@
+exp_name,timestamp,git_head,adv_dir,adv_image_count,avg,avg_vit,avg_cnn,image_dir,prefix,model_name,batch_size,num_workers,prefetch_factor,amp,tf32,num_images,attack_params,levit_256,pit_b_224,deit_base_patch16_224,tnt_s_patch16_224,convit_base,visformer_small,cait_s24_224,inception_v3,inception_v4,inception_resnet_v2,resnet101,inception_v3_adv,inception_resnet_v2_adv
+visformer_small_opponent_projected_mainline_s1000_seed20260716,2026-07-16 11:41:41,c3008c19,outputs/attack/visformer_small_opponent_projected_mainline_s1000_seed20260716,1000,0.7522307692307693,0.8054285714285714,0.6901666666666667,outputs/attack/visformer_small_opponent_projected_mainline_s1000_seed20260716,adv_,"levit_256,pit_b_224,deit_base_patch16_224,tnt_s_patch16_224,convit_base,visformer_small,cait_s24_224,inception_v3,inception_v4,inception_resnet_v2,resnet101,inception_v3_adv,inception_resnet_v2_adv",256,8,4,True,True,1000,"{
+  ""attack_method"": ""original_score_postdrop_phase_pair"",
+  ""whitebox_model"": ""visformer_small"",
+  ""max_attacked_samples"": 1000,
+  ""epsilon"": 0.06274509803921569,
+  ""step_size"": 0.006274509803921568,
+  ""steps"": 10,
+  ""seed"": 20260716,
+  ""mi"": true,
+  ""mi_decay"": 1.0,
+  ""ni"": false,
+  ""ti_sigma"": 0.0,
+  ""dim"": false,
+  ""dim_resize_range"": [
+    0.85,
+    1.0
+  ],
+  ""guide_aug_copies"": 20,
+  ""input_diversity_groups"": 10,
+  ""input_diversity_views_per_group"": 2,
+  ""input_diversity_total_views"": 20,
+  ""input_diversity_phase_shift"": [
+    0,
+    0
+  ],
+  ""input_diversity_phase_shift_set"": [
+    [
+      4,
+      4
+    ],
+    [
+      8,
+      8
+    ],
+    [
+      12,
+      12
+    ]
+  ],
+  ""guide_aug_strength"": 0.2,
+  ""patch_dropout_ratio"": 0.3,
+  ""patch_dropout_score_mode"": ""high"",
+  ""patch_dropout_sampling_mode"": ""random"",
+  ""patch_dropout_score_quantile_jitter"": 0.0,
+  ""patch_dropout_score_noise"": 0.0,
+  ""patch_dropout_noise_mode"": ""opponent_channel_gaussian"",
+  ""token_cls_noise"": false,
+  ""token_score_cls_noise"": true,
+  ""token_score_cls_mode"": ""learned"",
+  ""token_score_patch_noise"": false,
+  ""token_cls_noise_mode"": ""gaussian"",
+  ""token_cls_noise_strength"": 0.2,
+  ""post_dropout_phase_token_noise"": true,
+  ""post_dropout_feature_noise_strength"": 0.2,
+  ""post_dropout_feature_noise_type"": ""opponent_projected"",
+  ""post_dropout_feature_noise_position"": ""initial"",
+  ""feature_layer"": 12,
+  ""patch_score_layer"": ""final"",
+  ""gradient_postprocess"": ""mean"",
+  ""gradient_consensus_lambda"": 0.2,
+  ""gradient_study_probe"": null,
+  ""gradient_smooth_sigma"": 0.0,
+  ""gradient_divisive_sigma"": 0.0,
+  ""gradient_clip_percentile"": 0.0,
+  ""score_source"": ""stage3[3]+gap"",
+  ""score_grid"": [
+    7,
+    7
+  ],
+  ""target_patch_drop_ratio"": 0.15,
+  ""actual_patch_drop_count"": 7,
+  ""actual_patch_drop_ratio"": 0.14285714285714285,
+  ""feature_noise_type"": ""opponent_channel_rgb_projection"",
+  ""model_mean"": [
+    0.48500001430511475,
+    0.4560000002384186,
+    0.4059999883174896
+  ],
+  ""model_std"": [
+    0.2290000021457672,
+    0.2240000069141388,
+    0.22499999403953552
+  ]
+}",0.832,0.8240000000000001,0.738,0.8,0.698,0.997,0.749,0.78,0.778,0.708,0.766,0.646,0.46299999999999997

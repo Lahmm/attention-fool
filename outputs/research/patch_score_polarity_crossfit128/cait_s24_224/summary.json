@@ -1,0 +1,34 @@
+{
+  "model": "cait_s24_224",
+  "images": 128,
+  "splits": 64,
+  "calibration_size": 64,
+  "candidate_strategies": [
+    "high_score_extreme",
+    "low_score_extreme",
+    "score_deviation_extreme"
+  ],
+  "baseline_strategy": "random_uniform",
+  "selected_strategy_counts": {
+    "high_score_extreme": 15,
+    "low_score_extreme": 5,
+    "score_deviation_extreme": 44
+  },
+  "selected_strategy_frequency": {
+    "high_score_extreme": 0.234375,
+    "low_score_extreme": 0.078125,
+    "score_deviation_extreme": 0.6875
+  },
+  "evaluation_loss_delta_mean": 0.02264790877370615,
+  "evaluation_loss_delta_ci95": [
+    0.016552228670993797,
+    0.0287435888764185
+  ],
+  "evaluation_loss_delta_positive_fraction": 0.953125,
+  "evaluation_logit_delta_mean": 0.053491952014155686,
+  "evaluation_logit_delta_ci95": [
+    0.044452205128931194,
+    0.06253169889938018
+  ],
+  "evaluation_logit_delta_positive_fraction": 0.96875
+}

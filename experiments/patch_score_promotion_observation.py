@@ -10,7 +10,6 @@ horizontal flip.
 from __future__ import annotations
 
 import argparse
-import csv
 import itertools
 import json
 import math
@@ -25,11 +24,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from experiments.patch_score_routing_gradient_experiment import (
+from experiments.semantic_forward_utils import (
+    bootstrap_ci,
+    common_map,
     load_samples,
     normalize,
-    rank_rows,
+    rank_norm,
     row_spearman,
+    top_mask,
+    write_csv,
+    write_json,
 )
 from nets import PATCH_SCORE_LAYER_CANDIDATES, WHITEBOX_MODEL_CHOICES, build_whitebox_model
 
@@ -72,22 +76,6 @@ def cosine_scores(features) -> torch.Tensor:
     )
 
 
-def common_map(scores: torch.Tensor, grid: tuple[int, int], common_grid: int) -> torch.Tensor:
-    maps = scores.reshape(scores.size(0), 1, *grid)
-    return F.interpolate(maps, size=(common_grid, common_grid), mode="area").flatten(1)
-
-
-def rank_norm(values: torch.Tensor) -> torch.Tensor:
-    ranks = rank_rows(values)
-    return ranks / max(1, values.size(1) - 1)
-
-
-def top_mask(values: torch.Tensor, ratio: float) -> torch.Tensor:
-    count = max(1, int(round(values.size(1) * ratio)))
-    indices = values.topk(count, dim=1).indices
-    return torch.zeros_like(values, dtype=torch.bool).scatter(1, indices, True)
-
-
 def row_iou(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
     intersection = (left & right).sum(dim=1).float()
     union = (left | right).sum(dim=1).float()
@@ -98,14 +86,6 @@ def row_pearson(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
     left = left.float() - left.float().mean(dim=1, keepdim=True)
     right = right.float() - right.float().mean(dim=1, keepdim=True)
     return F.cosine_similarity(left, right, dim=1)
-
-
-def bootstrap_ci(values: torch.Tensor, *, seed: int, repeats: int = 10000) -> list[float]:
-    values = values.float().cpu()
-    generator = torch.Generator().manual_seed(seed)
-    indices = torch.randint(values.numel(), (repeats, values.numel()), generator=generator)
-    means = values[indices].mean(dim=1)
-    return [float(value) for value in torch.quantile(means, torch.tensor([0.025, 0.975]))]
 
 
 def mean(value: torch.Tensor) -> float:
@@ -322,10 +302,7 @@ def main() -> None:
         })
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    with (args.output_dir / "per_image.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(per_image_rows[0]))
-        writer.writeheader()
-        writer.writerows(per_image_rows)
+    write_csv(args.output_dir / "per_image.csv", per_image_rows)
     torch.save(
         {
             "names": names,
@@ -359,9 +336,7 @@ def main() -> None:
         "cross_model_summary": cross_model_summary,
         "metadata": metadata,
     }
-    (args.output_dir / "summary.json").write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    write_json(args.output_dir / "summary.json", payload)
     print(json.dumps(payload, indent=2, ensure_ascii=False))
 
 

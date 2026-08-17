@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 from pathlib import Path
 import random
@@ -16,8 +15,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from experiments.patch_score_promotion_observation import bootstrap_ci, common_map, rank_norm, top_mask
-from experiments.patch_score_routing_gradient_experiment import load_samples, normalize
+from experiments.semantic_forward_utils import (
+    bootstrap_ci,
+    common_map,
+    load_samples,
+    normalize,
+    rank_norm,
+    top_mask,
+    write_csv,
+    write_json,
+)
 from nets import build_whitebox_model
 
 
@@ -229,11 +236,7 @@ def main() -> None:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    with (args.output_dir / "per_image.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
+    write_csv(args.output_dir / "per_image.csv", rows)
     output = {
         "protocol": {
             "samples": args.samples,
@@ -244,9 +247,7 @@ def main() -> None:
         },
         "results": summaries,
     }
-    (args.output_dir / "summary.json").write_text(
-        json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    write_json(args.output_dir / "summary.json", output)
     print(json.dumps(output, indent=2, ensure_ascii=False))
 
 

@@ -2,25 +2,44 @@
 
 - The assistant may use terminal commands in this repository except `rm` and commands that delete the Git repository.
 - After each completed modification to the current repository contents, the assistant should initiate a `git push`.
-- The assistant is allowed to use `git push` to push the change to remote repo
+- The assistant is allowed to use `git push` to push the change to the remote repository.
 
-## Research direction memory
+## Current research mainline
 
-- The current mainline is a research method centered on two mechanisms: **patch-score-guided patch drop** and **RGB opponent-channel random noise**.
-- The production mainline is restored to the historical dynamic-mask `original_score_postdrop_phase_pair` behavior: at every attack step and every augmentation group, recompute final-layer patch scores on the current adversarial pixels and sample a fresh high-tail mask; only the original/phase views inside that group share the mask. With 10 steps and 10 groups this is 100 mask selections per image. The completed fixed-clean-mask selector suite remains historical boundary evidence and must not be described as the current production mask policy.
-- The primary goal is to develop a self-consistent paper motivation and mechanism analysis around these two points, not to keep stacking unrelated attack modules. For attack effectiveness, prioritize **transferable-gradient quality and transfer ASR**; do not substitute source-model clean-logit suppression for those objectives.
-- Patch-score is the semantic routing mechanism: it is defined by the global/local representation relationship and provides a label-free, gradient-independent semantic coordinate for deciding **where** to perturb. It is not defined as a per-patch causal explainer, and future discussion should not make causal importance a main motivation, selection rule, or proof obligation. The innovation claim must come from representation-based semantic routing and its transfer effect, not merely from lacking causal semantics.
-- RGB opponent-channel noise is the structured perturbation mechanism: it answers **how** to perturb kept evidence by sampling luminance, red-green, and yellow-blue directions in RGB and projecting them through the model's initial RGB projection. Future work should compare it with RGB Gaussian and feature IID Gaussian, isolate the three color directions, test injection position, kept-only versus other masks, and study RMS matching.
-- The intended conceptual story is: patch-score identifies high-level semantic routing positions whose disruption can reshape the attack gradient, while opponent-channel noise perturbs how the remaining evidence is represented. Their complementarity should be validated by transferable-gradient diagnostics and transfer ASR, not by maximizing the damage to clean source classification.
-- Phase pairs, multi-view gradient averaging, Gaussian gradient residual, MI/NI/DIM/TI, and transfer ASR are supporting mechanisms or validation tools. They should be held fixed or used as controlled ablations while the two core mechanisms are analyzed.
-- Transfer ASR is the final effectiveness metric, together with direct diagnostics of cross-model gradient alignment, sign agreement, one-step held-out target response, and full iterative transfer. ASR should not be tuned blindly, but it is not merely a secondary sanity check when the claim is improved transferability.
-- When proposing future experiments, prefer mechanism-driven ablations and interpretable diagnostics over blind ASR tuning. Keep the motivation, method, ablations, and claims aligned; do not claim Gaussian-residual results for models that were not actually run.
-- Keep the dedicated comparison with Grad-CAM, but do not force both methods into one classification-saliency narrative. Treat patch-score as a label-free, gradient-independent global/local representation routing signal and Grad-CAM as a class-conditioned gradient-sensitivity signal. Compare map rank/overlap, label dependence, architecture adaptation, computational cost, transferable gradients, and transfer behavior. Clean-class deletion may be reported only as a boundary diagnostic, not as the principal criterion for either method.
-- Use a fair unified token Grad-CAM-style baseline on the same final local-token layer, with matched candidate ratios, drop counts, seeds, opponent-channel noise, phase pairs, view aggregation, and optimizer. Do not claim patch-score is superior in advance; use Grad-CAM as a necessary baseline and revise the motivation if results contradict the hypothesis.
-- Historical boundary evidence: on 64 images across ViT-B/16, CaiT-S24, PiT-B, and Visformer-S, single-patch score/occlusion Spearman correlations were near zero or negative. This is consistent with patch-score not being a causal saliency definition, but it is not a central result for the paper. Keep `experiments/patch_score_mechanism_experiment.py` reproducible without using it to motivate the method.
-- Historical high/low/deviation/random clean-mask studies and cross-fitted polarity calibration remain reproducible via `experiments/analyze_patch_score_polarity.py`. Their held-out source-logit/CE results do **not** determine which route produces transferable gradients and must not be used to select the production tail, justify high-score routing, or claim transfer improvement. If route polarity is compared again, hold the attack pipeline fixed and evaluate cross-model gradient quality and transfer ASR.
-- Historical early/mid/final results in `experiments/patch_score_layer_experiment.py` measure source clean-output sensitivity and do **not** identify the best attack layer. Do not use their logit-drop ranking to choose a layer. Any future layer study must first characterize the semantic meaning and maturity of each layer's global/CLS representation, then compare production-style routing using cross-model gradient alignment, held-out target response, and full transfer ASR under matched image-space drop budgets.
-- `experiments/patch_score_route_response_experiment.py` records useful feature-response observations, but a large source feature change or low clean/masked source-gradient cosine is not evidence of transferability by itself. Connect every gradient-disruption claim to target-model alignment or transfer ASR.
-- Corrected Grad-CAM comparison is now implemented in `experiments/patch_score_gradcam_experiment.py`, `experiments/patch_score_gradcam_transfer_experiment.py`, and `experiments/patch_score_gradcam_stability_experiment.py`. Distinguish same coordinate system from same saliency criterion: patch-score uses global-local representation alignment, while Grad-CAM uses target-class gradient sensitivity. The current route/transfer results use each method's logit-connected production activation (protocol B), so they do not answer whether both methods use the same saliency standard. A required follow-up is protocol A: compute both maps on exactly the same local activation and compare rank/overlap directly. Do not claim patch-score superiority; its defensible distinction remains label-free, gradient-independent routing.
-- Protocol A is implemented in `experiments/patch_score_same_activation_experiment.py` and completed on 64 images. On the same logit-connected activation, patch-score vs Grad-CAM ReLU rank Spearman/top-half IoU were ViT 0.489/0.557, CaiT 0.011/0.359, PiT -0.148/0.320, and Visformer 0.757/0.738. Treat this as direct evidence that the two criteria are distinct but partially overlapping, not as a selector winner result.
-- The low/high-frequency view-pair experiment in `experiments/frequency_pair_attack.py` is a failed isolated branch and must not be merged into the mainline. On 500 ViT-source images it reached 59.48% average transfer ASR with feature Gaussian and 60.63% with opponent noise, versus 76.91% for the same-seed original/phase opponent mainline. Preserve the code/report only for reproducibility unless the user explicitly requests deletion; do not spend mainline research effort extending it.
+- The paper mainline has exactly two core mechanisms: **patch-score-guided patch drop** and **RGB opponent-channel random noise**. Do not stack unrelated attack modules onto the main claim.
+- Production uses the dynamic-mask `original_score_postdrop_phase_pair` behavior. At every attack step and augmentation group, recompute final-layer patch scores on current adversarial pixels and sample a fresh high-tail mask. Only the original/phase pair within that group shares the mask. The default 10 steps × 10 groups produces 100 mask selections per image.
+- Patch-score is a label-free, gradient-independent global/local representation routing coordinate for deciding **where** to perturb. It is not a per-patch causal explainer.
+- Opponent-channel noise decides **how** to perturb kept evidence: sample luminance, red-green, and yellow-blue RGB directions, project through the initial RGB projection, and RMS-match in feature space.
+- Validate complementarity with transferable-gradient diagnostics and target-clean-correct transfer ASR. Clean source-logit suppression, clean deletion, and source feature drift are boundary diagnostics only.
+- Phase pairs, raw multi-view mean, Gaussian residual, MI/NI/DIM/TI, and the `none`/pixel-drop/token-drop paths are supporting mechanisms or controlled ablations.
+
+## Retained executable scope
+
+- Attack: `main.py`, `attack.py`, `gradient_replay.py`, `transfer_eval.py`.
+- Attack methods: `original_score_postdrop_phase_pair`, `none`, `patch_dropout`, `token_patch_dropout`.
+- Mainline selectors: `patch_score`, `random`, `no_drop`.
+- Model adapters: `nets/`.
+- Forward semantic evidence:
+  - `experiments/patch_score_layer_semantic_maturity_experiment.py`
+  - `experiments/patch_score_promotion_observation.py`
+  - `experiments/patch_score_promotion_mixing_experiment.py`
+  - `experiments/patch_score_same_activation_experiment.py`
+  - `experiments/semantic_equivalent_route_experiment.py`
+  - shared helpers in `experiments/semantic_forward_utils.py`
+
+Do not reintroduce archived selector calibration, clean-output selection, semantic gradient weighting, frequency pair, or patch shuffle code without an explicit new user request and a mechanism-driven rationale.
+
+## Semantic evidence boundaries
+
+- Four architectures show early-to-late global/local semantic maturation and patch-rank reorganization.
+- Late token mixing is a shared boundary involved in semantic promotion.
+- Phase/noise views can preserve global semantics while changing local routing.
+- Cross-model commonality is a functional routing pattern, not a universal spatial mask.
+- Protocol A on the same logit-connected activation found patch-score versus Grad-CAM ReLU rank Spearman/top-half IoU of ViT 0.489/0.557, CaiT 0.011/0.359, PiT -0.148/0.320, and Visformer 0.757/0.738. This establishes distinct but partially overlapping criteria, not a selector winner.
+
+## Archived evidence
+
+- Removed experiment code is represented by formal artifacts and conclusions under `results/` and force-tracked `outputs/research/` paths.
+- Historical fixed-clean-mask, causality, polarity, clean-layer, route-response, Grad-CAM Protocol B, semantic-gradient E4-E10, frequency-pair, and patch-shuffle results are boundary evidence only.
+- The frequency-pair branch reached 59.48% average transfer ASR with feature Gaussian and 60.63% with opponent noise on 500 ViT-source images, versus 76.91% for the same-seed original/phase opponent mainline.
+- Do not claim Gaussian-residual results for models whose completed provenance has not been audited.

@@ -1,0 +1,124 @@
+{
+  "config": {
+    "models": [
+      "vit_base_patch16_224",
+      "cait_s24_224",
+      "pit_b_224",
+      "visformer_small"
+    ],
+    "samples": 64,
+    "sample_batch": 8,
+    "view": "horizontal flip, map unflipped before comparison",
+    "seed": 20260717
+  },
+  "results": {
+    "vit_base_patch16_224": {
+      "patch_score": {
+        "rank_spearman_mean": 0.8661952018737793,
+        "top_half_iou_mean": 0.7783508896827698,
+        "flipped_zero_fraction": 0.0
+      },
+      "gradcam_relu": {
+        "rank_spearman_mean": 1.0,
+        "top_half_iou_mean": 1.0,
+        "flipped_zero_fraction": 1.0
+      },
+      "gradcam_signed": {
+        "rank_spearman_mean": 1.0,
+        "top_half_iou_mean": 1.0,
+        "flipped_zero_fraction": 1.0
+      },
+      "gradcam_abs": {
+        "rank_spearman_mean": 1.0,
+        "top_half_iou_mean": 1.0,
+        "flipped_zero_fraction": 1.0
+      },
+      "random_uniform": {
+        "rank_spearman_mean": 0.8661952018737793,
+        "top_half_iou_mean": 0.7783508896827698,
+        "flipped_zero_fraction": 0.0
+      }
+    },
+    "cait_s24_224": {
+      "patch_score": {
+        "rank_spearman_mean": 0.7431213855743408,
+        "top_half_iou_mean": 0.6714738011360168,
+        "flipped_zero_fraction": 0.0
+      },
+      "gradcam_relu": {
+        "rank_spearman_mean": 0.8015557527542114,
+        "top_half_iou_mean": 0.7630609273910522,
+        "flipped_zero_fraction": 0.0
+      },
+      "gradcam_signed": {
+        "rank_spearman_mean": 0.7901368737220764,
+        "top_half_iou_mean": 0.7162942290306091,
+        "flipped_zero_fraction": 0.0
+      },
+      "gradcam_abs": {
+        "rank_spearman_mean": 0.6816360354423523,
+        "top_half_iou_mean": 0.6393041610717773,
+        "flipped_zero_fraction": 0.0
+      },
+      "random_uniform": {
+        "rank_spearman_mean": 0.7431213855743408,
+        "top_half_iou_mean": 0.6714738011360168,
+        "flipped_zero_fraction": 0.0
+      }
+    },
+    "pit_b_224": {
+      "patch_score": {
+        "rank_spearman_mean": 0.7687993049621582,
+        "top_half_iou_mean": 0.6945623159408569,
+        "flipped_zero_fraction": 0.0
+      },
+      "gradcam_relu": {
+        "rank_spearman_mean": 0.9999999403953552,
+        "top_half_iou_mean": 1.0,
+        "flipped_zero_fraction": 1.0
+      },
+      "gradcam_signed": {
+        "rank_spearman_mean": 0.9999999403953552,
+        "top_half_iou_mean": 1.0,
+        "flipped_zero_fraction": 1.0
+      },
+      "gradcam_abs": {
+        "rank_spearman_mean": 0.9999999403953552,
+        "top_half_iou_mean": 1.0,
+        "flipped_zero_fraction": 1.0
+      },
+      "random_uniform": {
+        "rank_spearman_mean": 0.7687993049621582,
+        "top_half_iou_mean": 0.6945623159408569,
+        "flipped_zero_fraction": 0.0
+      }
+    },
+    "visformer_small": {
+      "patch_score": {
+        "rank_spearman_mean": 0.6578953862190247,
+        "top_half_iou_mean": 0.5965210795402527,
+        "flipped_zero_fraction": 0.0
+      },
+      "gradcam_relu": {
+        "rank_spearman_mean": 0.9662324786186218,
+        "top_half_iou_mean": 0.8958974480628967,
+        "flipped_zero_fraction": 0.0
+      },
+      "gradcam_signed": {
+        "rank_spearman_mean": 0.9662388563156128,
+        "top_half_iou_mean": 0.8958974480628967,
+        "flipped_zero_fraction": 0.0
+      },
+      "gradcam_abs": {
+        "rank_spearman_mean": 0.965790867805481,
+        "top_half_iou_mean": 0.8958974480628967,
+        "flipped_zero_fraction": 0.0
+      },
+      "random_uniform": {
+        "rank_spearman_mean": 0.6578953862190247,
+        "top_half_iou_mean": 0.5965210795402527,
+        "flipped_zero_fraction": 0.0
+      }
+    }
+  }
+}

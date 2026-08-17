@@ -1,0 +1,85 @@
+{
+  "status": "paused_after_selector_job_5",
+  "recorded_at_utc": "2026-07-28T14:54:11Z",
+  "protocol": {
+    "patch_mask_policy": "clean_fixed_per_attack",
+    "patch_mask_reference": "clean_pixels",
+    "token_score_cls_noise": true,
+    "selector_samples_per_job": 500,
+    "selector_job_count": 28,
+    "manifest": "outputs/research/selector_suite_fixed_mask/manifest.json",
+    "manifest_sha256": "fa5c8a5251b45c051367ea9d9dc1385fddc22f728460da8b5f16ce0e5eb5b61e",
+    "routing_config": "outputs/research/routing_calibration_fixed_mask/frozen_routing.json",
+    "routing_config_sha256": "412d3c22a9dcb6697660618cb423ddb4750290b6ff3bcd63e4f7ead4b5f57114"
+  },
+  "completed_stages": {
+    "routing_calibration_attacks": 38,
+    "routing_calibration_eval_rows": 114,
+    "frozen_global_polarity": "high",
+    "frozen_layers": {
+      "vit_base_patch16_224": "block6",
+      "cait_s24_224": "block24_gap",
+      "pit_b_224": "stage3_block2",
+      "visformer_small": "stage3_block2"
+    },
+    "h2_gradient_sources": 4,
+    "gradcam_protocol_a": true
+  },
+  "completed_selector_jobs": [
+    {
+      "index": 1,
+      "source": "vit_base_patch16_224",
+      "condition": "selected",
+      "saved_images": 500
+    },
+    {
+      "index": 2,
+      "source": "vit_base_patch16_224",
+      "condition": "opposite",
+      "saved_images": 500
+    },
+    {
+      "index": 3,
+      "source": "vit_base_patch16_224",
+      "condition": "deviation",
+      "saved_images": 500
+    },
+    {
+      "index": 4,
+      "source": "vit_base_patch16_224",
+      "condition": "random",
+      "saved_images": 500
+    },
+    {
+      "index": 5,
+      "source": "vit_base_patch16_224",
+      "condition": "no_drop",
+      "saved_images": 500
+    }
+  ],
+  "next_selector_job": {
+    "index": 6,
+    "source": "vit_base_patch16_224",
+    "condition": "final_layer"
+  },
+  "remaining_work": {
+    "selector_jobs": "6-28 (23 jobs)",
+    "selector_attack_images": 11500,
+    "transfer_targets": 13,
+    "paired_statistics": [
+      "selected-minus-random bootstrap 95% CI",
+      "patch-score-versus-Grad-CAM comparison"
+    ],
+    "final_outputs": [
+      "outputs/research/selector_suite_fixed_mask/per_image.csv",
+      "outputs/research/selector_suite_fixed_mask/summary.json",
+      "outputs/research/selector_suite_fixed_mask/pipeline_complete.json"
+    ]
+  },
+  "runtime": {
+    "primary_selector_orchestrator_stopped": true,
+    "automatic_finalizer_stopped": true,
+    "gpu_expected_idle": true,
+    "partial_sixth_job_created": false
+  }
+}

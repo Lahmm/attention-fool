@@ -1,0 +1,1700 @@
+{
+  "per_target": {
+    "vit_base_patch16_224": {
+      "levit_256": {
+        "selected": {
+          "asr": 0.751004016064257,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.7068273092369478,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.7289156626506024,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.7309236947791165,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.7530120481927711,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.6887550200803213,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.7329317269076305,
+          "clean_correct_count": 498
+        }
+      },
+      "pit_b_224": {
+        "selected": {
+          "asr": 0.6987951807228916,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.6626506024096386,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.6947791164658634,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.6686746987951807,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.7831325301204819,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.6385542168674698,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.6767068273092369,
+          "clean_correct_count": 498
+        }
+      },
+      "deit_base_patch16_224": {
+        "selected": {
+          "asr": 0.7449799196787149,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.7028112449799196,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.7389558232931727,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.7168674698795181,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.8052208835341366,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.6907630522088354,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.7329317269076305,
+          "clean_correct_count": 498
+        }
+      },
+      "tnt_s_patch16_224": {
+        "selected": {
+          "asr": 0.7439516129032258,
+          "clean_correct_count": 496
+        },
+        "opposite": {
+          "asr": 0.7217741935483871,
+          "clean_correct_count": 496
+        },
+        "deviation": {
+          "asr": 0.7439516129032258,
+          "clean_correct_count": 496
+        },
+        "random": {
+          "asr": 0.7318548387096774,
+          "clean_correct_count": 496
+        },
+        "no_drop": {
+          "asr": 0.7883064516129032,
+          "clean_correct_count": 496
+        },
+        "final_layer": {
+          "asr": 0.6995967741935484,
+          "clean_correct_count": 496
+        },
+        "gradcam_relu": {
+          "asr": 0.7278225806451613,
+          "clean_correct_count": 496
+        }
+      },
+      "convit_base": {
+        "selected": {
+          "asr": 0.7243460764587525,
+          "clean_correct_count": 497
+        },
+        "opposite": {
+          "asr": 0.676056338028169,
+          "clean_correct_count": 497
+        },
+        "deviation": {
+          "asr": 0.6921529175050302,
+          "clean_correct_count": 497
+        },
+        "random": {
+          "asr": 0.6981891348088531,
+          "clean_correct_count": 497
+        },
+        "no_drop": {
+          "asr": 0.7987927565392354,
+          "clean_correct_count": 497
+        },
+        "final_layer": {
+          "asr": 0.7002012072434608,
+          "clean_correct_count": 497
+        },
+        "gradcam_relu": {
+          "asr": 0.7022132796780685,
+          "clean_correct_count": 497
+        }
+      },
+      "visformer_small": {
+        "selected": {
+          "asr": 0.7128514056224899,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.6967871485943775,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.7068273092369478,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.678714859437751,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.7751004016064257,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.6586345381526104,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.6807228915662651,
+          "clean_correct_count": 498
+        }
+      },
+      "cait_s24_224": {
+        "selected": {
+          "asr": 0.82,
+          "clean_correct_count": 500
+        },
+        "opposite": {
+          "asr": 0.796,
+          "clean_correct_count": 500
+        },
+        "deviation": {
+          "asr": 0.818,
+          "clean_correct_count": 500
+        },
+        "random": {
+          "asr": 0.792,
+          "clean_correct_count": 500
+        },
+        "no_drop": {
+          "asr": 0.87,
+          "clean_correct_count": 500
+        },
+        "final_layer": {
+          "asr": 0.79,
+          "clean_correct_count": 500
+        },
+        "gradcam_relu": {
+          "asr": 0.806,
+          "clean_correct_count": 500
+        }
+      },
+      "inception_v3": {
+        "selected": {
+          "asr": 0.6544715447154471,
+          "clean_correct_count": 492
+        },
+        "opposite": {
+          "asr": 0.6280487804878049,
+          "clean_correct_count": 492
+        },
+        "deviation": {
+          "asr": 0.6646341463414634,
+          "clean_correct_count": 492
+        },
+        "random": {
+          "asr": 0.6402439024390244,
+          "clean_correct_count": 492
+        },
+        "no_drop": {
+          "asr": 0.7195121951219512,
+          "clean_correct_count": 492
+        },
+        "final_layer": {
+          "asr": 0.5934959349593496,
+          "clean_correct_count": 492
+        },
+        "gradcam_relu": {
+          "asr": 0.6321138211382114,
+          "clean_correct_count": 492
+        }
+      },
+      "inception_v4": {
+        "selected": {
+          "asr": 0.6108870967741935,
+          "clean_correct_count": 496
+        },
+        "opposite": {
+          "asr": 0.5987903225806451,
+          "clean_correct_count": 496
+        },
+        "deviation": {
+          "asr": 0.6229838709677419,
+          "clean_correct_count": 496
+        },
+        "random": {
+          "asr": 0.5887096774193549,
+          "clean_correct_count": 496
+        },
+        "no_drop": {
+          "asr": 0.6693548387096774,
+          "clean_correct_count": 496
+        },
+        "final_layer": {
+          "asr": 0.5362903225806451,
+          "clean_correct_count": 496
+        },
+        "gradcam_relu": {
+          "asr": 0.6149193548387096,
+          "clean_correct_count": 496
+        }
+      },
+      "inception_resnet_v2": {
+        "selected": {
+          "asr": 0.6044176706827309,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.5823293172690763,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.606425702811245,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.5963855421686747,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.6867469879518072,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.5301204819277109,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.5903614457831325,
+          "clean_correct_count": 498
+        }
+      },
+      "resnet101": {
+        "selected": {
+          "asr": 0.6068548387096774,
+          "clean_correct_count": 496
+        },
+        "opposite": {
+          "asr": 0.5907258064516129,
+          "clean_correct_count": 496
+        },
+        "deviation": {
+          "asr": 0.6209677419354839,
+          "clean_correct_count": 496
+        },
+        "random": {
+          "asr": 0.6149193548387096,
+          "clean_correct_count": 496
+        },
+        "no_drop": {
+          "asr": 0.717741935483871,
+          "clean_correct_count": 496
+        },
+        "final_layer": {
+          "asr": 0.5584677419354839,
+          "clean_correct_count": 496
+        },
+        "gradcam_relu": {
+          "asr": 0.6149193548387096,
+          "clean_correct_count": 496
+        }
+      },
+      "inception_v3_adv": {
+        "selected": {
+          "asr": 0.6161616161616161,
+          "clean_correct_count": 495
+        },
+        "opposite": {
+          "asr": 0.593939393939394,
+          "clean_correct_count": 495
+        },
+        "deviation": {
+          "asr": 0.6222222222222222,
+          "clean_correct_count": 495
+        },
+        "random": {
+          "asr": 0.6080808080808081,
+          "clean_correct_count": 495
+        },
+        "no_drop": {
+          "asr": 0.6565656565656566,
+          "clean_correct_count": 495
+        },
+        "final_layer": {
+          "asr": 0.5636363636363636,
+          "clean_correct_count": 495
+        },
+        "gradcam_relu": {
+          "asr": 0.6282828282828283,
+          "clean_correct_count": 495
+        }
+      },
+      "inception_resnet_v2_adv": {
+        "selected": {
+          "asr": 0.5651302605210421,
+          "clean_correct_count": 499
+        },
+        "opposite": {
+          "asr": 0.5571142284569138,
+          "clean_correct_count": 499
+        },
+        "deviation": {
+          "asr": 0.5811623246492986,
+          "clean_correct_count": 499
+        },
+        "random": {
+          "asr": 0.5571142284569138,
+          "clean_correct_count": 499
+        },
+        "no_drop": {
+          "asr": 0.6492985971943888,
+          "clean_correct_count": 499
+        },
+        "final_layer": {
+          "asr": 0.5090180360721442,
+          "clean_correct_count": 499
+        },
+        "gradcam_relu": {
+          "asr": 0.5651302605210421,
+          "clean_correct_count": 499
+        }
+      }
+    },
+    "cait_s24_224": {
+      "levit_256": {
+        "selected": {
+          "asr": 0.8293172690763052,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.8232931726907631,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.8192771084337349,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.8172690763052208,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.8333333333333334,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.8253012048192772,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.8253012048192772,
+          "clean_correct_count": 498
+        }
+      },
+      "pit_b_224": {
+        "selected": {
+          "asr": 0.7991967871485943,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.7550200803212851,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.785140562248996,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.7690763052208835,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.8333333333333334,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.7811244979919679,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.7951807228915663,
+          "clean_correct_count": 498
+        }
+      },
+      "deit_base_patch16_224": {
+        "selected": {
+          "asr": 0.8293172690763052,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.8052208835341366,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.8192771084337349,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.8052208835341366,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.857429718875502,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.8232931726907631,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.8293172690763052,
+          "clean_correct_count": 498
+        }
+      },
+      "tnt_s_patch16_224": {
+        "selected": {
+          "asr": 0.8326612903225806,
+          "clean_correct_count": 496
+        },
+        "opposite": {
+          "asr": 0.842741935483871,
+          "clean_correct_count": 496
+        },
+        "deviation": {
+          "asr": 0.8387096774193549,
+          "clean_correct_count": 496
+        },
+        "random": {
+          "asr": 0.8407258064516129,
+          "clean_correct_count": 496
+        },
+        "no_drop": {
+          "asr": 0.8608870967741935,
+          "clean_correct_count": 496
+        },
+        "final_layer": {
+          "asr": 0.8387096774193549,
+          "clean_correct_count": 496
+        },
+        "gradcam_relu": {
+          "asr": 0.8528225806451613,
+          "clean_correct_count": 496
+        }
+      },
+      "convit_base": {
+        "selected": {
+          "asr": 0.8189134808853119,
+          "clean_correct_count": 497
+        },
+        "opposite": {
+          "asr": 0.8088531187122736,
+          "clean_correct_count": 497
+        },
+        "deviation": {
+          "asr": 0.8088531187122736,
+          "clean_correct_count": 497
+        },
+        "random": {
+          "asr": 0.7947686116700201,
+          "clean_correct_count": 497
+        },
+        "no_drop": {
+          "asr": 0.8410462776659959,
+          "clean_correct_count": 497
+        },
+        "final_layer": {
+          "asr": 0.8169014084507042,
+          "clean_correct_count": 497
+        },
+        "gradcam_relu": {
+          "asr": 0.8289738430583501,
+          "clean_correct_count": 497
+        }
+      },
+      "visformer_small": {
+        "selected": {
+          "asr": 0.8273092369477911,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.8132530120481928,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.8152610441767069,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.7931726907630522,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.8453815261044176,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.8132530120481928,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.8313253012048193,
+          "clean_correct_count": 498
+        }
+      },
+      "cait_s24_224": {
+        "selected": {
+          "asr": 0.97,
+          "clean_correct_count": 500
+        },
+        "opposite": {
+          "asr": 0.966,
+          "clean_correct_count": 500
+        },
+        "deviation": {
+          "asr": 0.956,
+          "clean_correct_count": 500
+        },
+        "random": {
+          "asr": 0.96,
+          "clean_correct_count": 500
+        },
+        "no_drop": {
+          "asr": 0.984,
+          "clean_correct_count": 500
+        },
+        "final_layer": {
+          "asr": 0.96,
+          "clean_correct_count": 500
+        },
+        "gradcam_relu": {
+          "asr": 0.964,
+          "clean_correct_count": 500
+        }
+      },
+      "inception_v3": {
+        "selected": {
+          "asr": 0.7398373983739838,
+          "clean_correct_count": 492
+        },
+        "opposite": {
+          "asr": 0.7459349593495935,
+          "clean_correct_count": 492
+        },
+        "deviation": {
+          "asr": 0.7459349593495935,
+          "clean_correct_count": 492
+        },
+        "random": {
+          "asr": 0.733739837398374,
+          "clean_correct_count": 492
+        },
+        "no_drop": {
+          "asr": 0.7865853658536586,
+          "clean_correct_count": 492
+        },
+        "final_layer": {
+          "asr": 0.7439024390243902,
+          "clean_correct_count": 492
+        },
+        "gradcam_relu": {
+          "asr": 0.7540650406504065,
+          "clean_correct_count": 492
+        }
+      },
+      "inception_v4": {
+        "selected": {
+          "asr": 0.719758064516129,
+          "clean_correct_count": 496
+        },
+        "opposite": {
+          "asr": 0.717741935483871,
+          "clean_correct_count": 496
+        },
+        "deviation": {
+          "asr": 0.7298387096774194,
+          "clean_correct_count": 496
+        },
+        "random": {
+          "asr": 0.7137096774193549,
+          "clean_correct_count": 496
+        },
+        "no_drop": {
+          "asr": 0.7762096774193549,
+          "clean_correct_count": 496
+        },
+        "final_layer": {
+          "asr": 0.7217741935483871,
+          "clean_correct_count": 496
+        },
+        "gradcam_relu": {
+          "asr": 0.7298387096774194,
+          "clean_correct_count": 496
+        }
+      },
+      "inception_resnet_v2": {
+        "selected": {
+          "asr": 0.7128514056224899,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.6947791164658634,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.6987951807228916,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.6907630522088354,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.7730923694779116,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.7028112449799196,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.6987951807228916,
+          "clean_correct_count": 498
+        }
+      },
+      "resnet101": {
+        "selected": {
+          "asr": 0.7419354838709677,
+          "clean_correct_count": 496
+        },
+        "opposite": {
+          "asr": 0.717741935483871,
+          "clean_correct_count": 496
+        },
+        "deviation": {
+          "asr": 0.717741935483871,
+          "clean_correct_count": 496
+        },
+        "random": {
+          "asr": 0.719758064516129,
+          "clean_correct_count": 496
+        },
+        "no_drop": {
+          "asr": 0.7862903225806451,
+          "clean_correct_count": 496
+        },
+        "final_layer": {
+          "asr": 0.7419354838709677,
+          "clean_correct_count": 496
+        },
+        "gradcam_relu": {
+          "asr": 0.7157258064516129,
+          "clean_correct_count": 496
+        }
+      },
+      "inception_v3_adv": {
+        "selected": {
+          "asr": 0.7292929292929293,
+          "clean_correct_count": 495
+        },
+        "opposite": {
+          "asr": 0.7171717171717171,
+          "clean_correct_count": 495
+        },
+        "deviation": {
+          "asr": 0.7070707070707071,
+          "clean_correct_count": 495
+        },
+        "random": {
+          "asr": 0.7111111111111111,
+          "clean_correct_count": 495
+        },
+        "no_drop": {
+          "asr": 0.7474747474747475,
+          "clean_correct_count": 495
+        },
+        "final_layer": {
+          "asr": 0.7090909090909091,
+          "clean_correct_count": 495
+        },
+        "gradcam_relu": {
+          "asr": 0.705050505050505,
+          "clean_correct_count": 495
+        }
+      },
+      "inception_resnet_v2_adv": {
+        "selected": {
+          "asr": 0.6613226452905812,
+          "clean_correct_count": 499
+        },
+        "opposite": {
+          "asr": 0.6392785571142284,
+          "clean_correct_count": 499
+        },
+        "deviation": {
+          "asr": 0.6492985971943888,
+          "clean_correct_count": 499
+        },
+        "random": {
+          "asr": 0.6472945891783567,
+          "clean_correct_count": 499
+        },
+        "no_drop": {
+          "asr": 0.717434869739479,
+          "clean_correct_count": 499
+        },
+        "final_layer": {
+          "asr": 0.6432865731462926,
+          "clean_correct_count": 499
+        },
+        "gradcam_relu": {
+          "asr": 0.6472945891783567,
+          "clean_correct_count": 499
+        }
+      }
+    },
+    "pit_b_224": {
+      "levit_256": {
+        "selected": {
+          "asr": 0.7550200803212851,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.7389558232931727,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.7650602409638554,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.7550200803212851,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.7710843373493976,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.7389558232931727,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.7248995983935743,
+          "clean_correct_count": 498
+        }
+      },
+      "pit_b_224": {
+        "selected": {
+          "asr": 0.9457831325301205,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.9477911646586346,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.9598393574297188,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.9518072289156626,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.9718875502008032,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.9497991967871486,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.9437751004016064,
+          "clean_correct_count": 498
+        }
+      },
+      "deit_base_patch16_224": {
+        "selected": {
+          "asr": 0.7751004016064257,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.7449799196787149,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.7811244979919679,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.7670682730923695,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.8293172690763052,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.7550200803212851,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.7349397590361446,
+          "clean_correct_count": 498
+        }
+      },
+      "tnt_s_patch16_224": {
+        "selected": {
+          "asr": 0.7762096774193549,
+          "clean_correct_count": 496
+        },
+        "opposite": {
+          "asr": 0.7641129032258065,
+          "clean_correct_count": 496
+        },
+        "deviation": {
+          "asr": 0.8004032258064516,
+          "clean_correct_count": 496
+        },
+        "random": {
+          "asr": 0.8004032258064516,
+          "clean_correct_count": 496
+        },
+        "no_drop": {
+          "asr": 0.8467741935483871,
+          "clean_correct_count": 496
+        },
+        "final_layer": {
+          "asr": 0.7701612903225806,
+          "clean_correct_count": 496
+        },
+        "gradcam_relu": {
+          "asr": 0.7459677419354839,
+          "clean_correct_count": 496
+        }
+      },
+      "convit_base": {
+        "selected": {
+          "asr": 0.7484909456740443,
+          "clean_correct_count": 497
+        },
+        "opposite": {
+          "asr": 0.7263581488933601,
+          "clean_correct_count": 497
+        },
+        "deviation": {
+          "asr": 0.7847082494969819,
+          "clean_correct_count": 497
+        },
+        "random": {
+          "asr": 0.738430583501006,
+          "clean_correct_count": 497
+        },
+        "no_drop": {
+          "asr": 0.8128772635814889,
+          "clean_correct_count": 497
+        },
+        "final_layer": {
+          "asr": 0.744466800804829,
+          "clean_correct_count": 497
+        },
+        "gradcam_relu": {
+          "asr": 0.7062374245472837,
+          "clean_correct_count": 497
+        }
+      },
+      "visformer_small": {
+        "selected": {
+          "asr": 0.8152610441767069,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.8092369477911646,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.821285140562249,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.8132530120481928,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.8313253012048193,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.7911646586345381,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.7911646586345381,
+          "clean_correct_count": 498
+        }
+      },
+      "cait_s24_224": {
+        "selected": {
+          "asr": 0.702,
+          "clean_correct_count": 500
+        },
+        "opposite": {
+          "asr": 0.704,
+          "clean_correct_count": 500
+        },
+        "deviation": {
+          "asr": 0.728,
+          "clean_correct_count": 500
+        },
+        "random": {
+          "asr": 0.714,
+          "clean_correct_count": 500
+        },
+        "no_drop": {
+          "asr": 0.774,
+          "clean_correct_count": 500
+        },
+        "final_layer": {
+          "asr": 0.698,
+          "clean_correct_count": 500
+        },
+        "gradcam_relu": {
+          "asr": 0.67,
+          "clean_correct_count": 500
+        }
+      },
+      "inception_v3": {
+        "selected": {
+          "asr": 0.7032520325203252,
+          "clean_correct_count": 492
+        },
+        "opposite": {
+          "asr": 0.6463414634146342,
+          "clean_correct_count": 492
+        },
+        "deviation": {
+          "asr": 0.7052845528455285,
+          "clean_correct_count": 492
+        },
+        "random": {
+          "asr": 0.6788617886178862,
+          "clean_correct_count": 492
+        },
+        "no_drop": {
+          "asr": 0.7052845528455285,
+          "clean_correct_count": 492
+        },
+        "final_layer": {
+          "asr": 0.6605691056910569,
+          "clean_correct_count": 492
+        },
+        "gradcam_relu": {
+          "asr": 0.6199186991869918,
+          "clean_correct_count": 492
+        }
+      },
+      "inception_v4": {
+        "selected": {
+          "asr": 0.6512096774193549,
+          "clean_correct_count": 496
+        },
+        "opposite": {
+          "asr": 0.6270161290322581,
+          "clean_correct_count": 496
+        },
+        "deviation": {
+          "asr": 0.6915322580645161,
+          "clean_correct_count": 496
+        },
+        "random": {
+          "asr": 0.625,
+          "clean_correct_count": 496
+        },
+        "no_drop": {
+          "asr": 0.6673387096774194,
+          "clean_correct_count": 496
+        },
+        "final_layer": {
+          "asr": 0.6169354838709677,
+          "clean_correct_count": 496
+        },
+        "gradcam_relu": {
+          "asr": 0.6028225806451613,
+          "clean_correct_count": 496
+        }
+      },
+      "inception_resnet_v2": {
+        "selected": {
+          "asr": 0.5963855421686747,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.5883534136546185,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.6305220883534136,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.6365461847389559,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.6526104417670683,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.6104417670682731,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.5481927710843374,
+          "clean_correct_count": 498
+        }
+      },
+      "resnet101": {
+        "selected": {
+          "asr": 0.6653225806451613,
+          "clean_correct_count": 496
+        },
+        "opposite": {
+          "asr": 0.6330645161290323,
+          "clean_correct_count": 496
+        },
+        "deviation": {
+          "asr": 0.6491935483870968,
+          "clean_correct_count": 496
+        },
+        "random": {
+          "asr": 0.6491935483870968,
+          "clean_correct_count": 496
+        },
+        "no_drop": {
+          "asr": 0.6935483870967742,
+          "clean_correct_count": 496
+        },
+        "final_layer": {
+          "asr": 0.6129032258064516,
+          "clean_correct_count": 496
+        },
+        "gradcam_relu": {
+          "asr": 0.5705645161290323,
+          "clean_correct_count": 496
+        }
+      },
+      "inception_v3_adv": {
+        "selected": {
+          "asr": 0.5797979797979798,
+          "clean_correct_count": 495
+        },
+        "opposite": {
+          "asr": 0.5575757575757576,
+          "clean_correct_count": 495
+        },
+        "deviation": {
+          "asr": 0.6060606060606061,
+          "clean_correct_count": 495
+        },
+        "random": {
+          "asr": 0.593939393939394,
+          "clean_correct_count": 495
+        },
+        "no_drop": {
+          "asr": 0.6242424242424243,
+          "clean_correct_count": 495
+        },
+        "final_layer": {
+          "asr": 0.5818181818181818,
+          "clean_correct_count": 495
+        },
+        "gradcam_relu": {
+          "asr": 0.5434343434343434,
+          "clean_correct_count": 495
+        }
+      },
+      "inception_resnet_v2_adv": {
+        "selected": {
+          "asr": 0.48897795591182364,
+          "clean_correct_count": 499
+        },
+        "opposite": {
+          "asr": 0.49498997995991983,
+          "clean_correct_count": 499
+        },
+        "deviation": {
+          "asr": 0.5130260521042084,
+          "clean_correct_count": 499
+        },
+        "random": {
+          "asr": 0.46693386773547096,
+          "clean_correct_count": 499
+        },
+        "no_drop": {
+          "asr": 0.5130260521042084,
+          "clean_correct_count": 499
+        },
+        "final_layer": {
+          "asr": 0.4849699398797595,
+          "clean_correct_count": 499
+        },
+        "gradcam_relu": {
+          "asr": 0.4468937875751503,
+          "clean_correct_count": 499
+        }
+      }
+    },
+    "visformer_small": {
+      "levit_256": {
+        "selected": {
+          "asr": 0.6044176706827309,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.7068273092369478,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.6746987951807228,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.7008032128514057,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.7409638554216867,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.6265060240963856,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.5923694779116466,
+          "clean_correct_count": 498
+        }
+      },
+      "pit_b_224": {
+        "selected": {
+          "asr": 0.5763052208835341,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.6526104417670683,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.6305220883534136,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.6285140562248996,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.751004016064257,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.5803212851405622,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.5662650602409639,
+          "clean_correct_count": 498
+        }
+      },
+      "deit_base_patch16_224": {
+        "selected": {
+          "asr": 0.5100401606425703,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.5883534136546185,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.572289156626506,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.5682730923694779,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.678714859437751,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.5481927710843374,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.5321285140562249,
+          "clean_correct_count": 498
+        }
+      },
+      "tnt_s_patch16_224": {
+        "selected": {
+          "asr": 0.5766129032258065,
+          "clean_correct_count": 496
+        },
+        "opposite": {
+          "asr": 0.6491935483870968,
+          "clean_correct_count": 496
+        },
+        "deviation": {
+          "asr": 0.6270161290322581,
+          "clean_correct_count": 496
+        },
+        "random": {
+          "asr": 0.6189516129032258,
+          "clean_correct_count": 496
+        },
+        "no_drop": {
+          "asr": 0.7056451612903226,
+          "clean_correct_count": 496
+        },
+        "final_layer": {
+          "asr": 0.5967741935483871,
+          "clean_correct_count": 496
+        },
+        "gradcam_relu": {
+          "asr": 0.5866935483870968,
+          "clean_correct_count": 496
+        }
+      },
+      "convit_base": {
+        "selected": {
+          "asr": 0.4768611670020121,
+          "clean_correct_count": 497
+        },
+        "opposite": {
+          "asr": 0.5291750503018109,
+          "clean_correct_count": 497
+        },
+        "deviation": {
+          "asr": 0.5150905432595574,
+          "clean_correct_count": 497
+        },
+        "random": {
+          "asr": 0.5251509054325956,
+          "clean_correct_count": 497
+        },
+        "no_drop": {
+          "asr": 0.6297786720321932,
+          "clean_correct_count": 497
+        },
+        "final_layer": {
+          "asr": 0.5030181086519114,
+          "clean_correct_count": 497
+        },
+        "gradcam_relu": {
+          "asr": 0.48088531187122735,
+          "clean_correct_count": 497
+        }
+      },
+      "visformer_small": {
+        "selected": {
+          "asr": 0.9779116465863453,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.9899598393574297,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.9879518072289156,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.9839357429718876,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.9979919678714859,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.9738955823293173,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.9698795180722891,
+          "clean_correct_count": 498
+        }
+      },
+      "cait_s24_224": {
+        "selected": {
+          "asr": 0.508,
+          "clean_correct_count": 500
+        },
+        "opposite": {
+          "asr": 0.588,
+          "clean_correct_count": 500
+        },
+        "deviation": {
+          "asr": 0.562,
+          "clean_correct_count": 500
+        },
+        "random": {
+          "asr": 0.568,
+          "clean_correct_count": 500
+        },
+        "no_drop": {
+          "asr": 0.656,
+          "clean_correct_count": 500
+        },
+        "final_layer": {
+          "asr": 0.522,
+          "clean_correct_count": 500
+        },
+        "gradcam_relu": {
+          "asr": 0.504,
+          "clean_correct_count": 500
+        }
+      },
+      "inception_v3": {
+        "selected": {
+          "asr": 0.5589430894308943,
+          "clean_correct_count": 492
+        },
+        "opposite": {
+          "asr": 0.6524390243902439,
+          "clean_correct_count": 492
+        },
+        "deviation": {
+          "asr": 0.6097560975609756,
+          "clean_correct_count": 492
+        },
+        "random": {
+          "asr": 0.6321138211382114,
+          "clean_correct_count": 492
+        },
+        "no_drop": {
+          "asr": 0.7073170731707317,
+          "clean_correct_count": 492
+        },
+        "final_layer": {
+          "asr": 0.5853658536585366,
+          "clean_correct_count": 492
+        },
+        "gradcam_relu": {
+          "asr": 0.5284552845528455,
+          "clean_correct_count": 492
+        }
+      },
+      "inception_v4": {
+        "selected": {
+          "asr": 0.5463709677419355,
+          "clean_correct_count": 496
+        },
+        "opposite": {
+          "asr": 0.6330645161290323,
+          "clean_correct_count": 496
+        },
+        "deviation": {
+          "asr": 0.5806451612903226,
+          "clean_correct_count": 496
+        },
+        "random": {
+          "asr": 0.5987903225806451,
+          "clean_correct_count": 496
+        },
+        "no_drop": {
+          "asr": 0.7036290322580645,
+          "clean_correct_count": 496
+        },
+        "final_layer": {
+          "asr": 0.5504032258064516,
+          "clean_correct_count": 496
+        },
+        "gradcam_relu": {
+          "asr": 0.5282258064516129,
+          "clean_correct_count": 496
+        }
+      },
+      "inception_resnet_v2": {
+        "selected": {
+          "asr": 0.46987951807228917,
+          "clean_correct_count": 498
+        },
+        "opposite": {
+          "asr": 0.5682730923694779,
+          "clean_correct_count": 498
+        },
+        "deviation": {
+          "asr": 0.5522088353413654,
+          "clean_correct_count": 498
+        },
+        "random": {
+          "asr": 0.5240963855421686,
+          "clean_correct_count": 498
+        },
+        "no_drop": {
+          "asr": 0.6244979919678715,
+          "clean_correct_count": 498
+        },
+        "final_layer": {
+          "asr": 0.4899598393574297,
+          "clean_correct_count": 498
+        },
+        "gradcam_relu": {
+          "asr": 0.42971887550200805,
+          "clean_correct_count": 498
+        }
+      },
+      "resnet101": {
+        "selected": {
+          "asr": 0.5,
+          "clean_correct_count": 496
+        },
+        "opposite": {
+          "asr": 0.6229838709677419,
+          "clean_correct_count": 496
+        },
+        "deviation": {
+          "asr": 0.5846774193548387,
+          "clean_correct_count": 496
+        },
+        "random": {
+          "asr": 0.5665322580645161,
+          "clean_correct_count": 496
+        },
+        "no_drop": {
+          "asr": 0.6733870967741935,
+          "clean_correct_count": 496
+        },
+        "final_layer": {
+          "asr": 0.5342741935483871,
+          "clean_correct_count": 496
+        },
+        "gradcam_relu": {
+          "asr": 0.5100806451612904,
+          "clean_correct_count": 496
+        }
+      },
+      "inception_v3_adv": {
+        "selected": {
+          "asr": 0.45252525252525255,
+          "clean_correct_count": 495
+        },
+        "opposite": {
+          "asr": 0.5070707070707071,
+          "clean_correct_count": 495
+        },
+        "deviation": {
+          "asr": 0.5232323232323233,
+          "clean_correct_count": 495
+        },
+        "random": {
+          "asr": 0.5151515151515151,
+          "clean_correct_count": 495
+        },
+        "no_drop": {
+          "asr": 0.5656565656565656,
+          "clean_correct_count": 495
+        },
+        "final_layer": {
+          "asr": 0.46060606060606063,
+          "clean_correct_count": 495
+        },
+        "gradcam_relu": {
+          "asr": 0.4666666666666667,
+          "clean_correct_count": 495
+        }
+      },
+      "inception_resnet_v2_adv": {
+        "selected": {
+          "asr": 0.3527054108216433,
+          "clean_correct_count": 499
+        },
+        "opposite": {
+          "asr": 0.3867735470941884,
+          "clean_correct_count": 499
+        },
+        "deviation": {
+          "asr": 0.3807615230460922,
+          "clean_correct_count": 499
+        },
+        "random": {
+          "asr": 0.38276553106212424,
+          "clean_correct_count": 499
+        },
+        "no_drop": {
+          "asr": 0.43687374749499,
+          "clean_correct_count": 499
+        },
+        "final_layer": {
+          "asr": 0.342685370741483,
+          "clean_correct_count": 499
+        },
+        "gradcam_relu": {
+          "asr": 0.34468937875751504,
+          "clean_correct_count": 499
+        }
+      }
+    }
+  },
+  "per_source_macro": {
+    "vit_base_patch16_224": {
+      "selected": 0.6828897435897436,
+      "opposite": 0.6567974358974358,
+      "deviation": 0.6818743589743588,
+      "random": 0.6649361305361305,
+      "no_drop": 0.7455435897435889,
+      "final_layer": 0.6293076923076921,
+      "gradcam_relu": 0.6712897435897434
+    },
+    "cait_s24_224": {
+      "selected": 0.7866564102564101,
+      "opposite": 0.7741153846153851,
+      "deviation": 0.7774923076923081,
+      "random": 0.7702230769230766,
+      "no_drop": 0.8198461538461543,
+      "final_layer": 0.779741025641026,
+      "gradcam_relu": 0.7839897435897436
+    },
+    "pit_b_224": {
+      "selected": 0.7090564102564108,
+      "opposite": 0.6924000000000009,
+      "deviation": 0.7270589743589746,
+      "random": 0.7082384615384614,
+      "no_drop": 0.7468615384615388,
+      "final_layer": 0.6949512820512822,
+      "gradcam_relu": 0.666533333333333
+    },
+    "visformer_small": {
+      "selected": 0.5485051282051276,
+      "opposite": 0.6224617715617711,
+      "deviation": 0.6015589743589741,
+      "random": 0.6024948717948717,
+      "no_drop": 0.6838051282051277,
+      "final_layer": 0.5642284382284386,
+      "gradcam_relu": 0.5434233100233099
+    }
+  },
+  "patch_score_vs_random": {
+    "vit_base_patch16_224": {
+      "difference": 0.017953613053613055,
+      "ci95": [
+        0.00185314685314686,
+        0.03362051282051281
+      ],
+      "paired_count": 500
+    },
+    "cait_s24_224": {
+      "difference": 0.01643333333333333,
+      "ci95": [
+        0.003971794871794875,
+        0.029153846153846138
+      ],
+      "paired_count": 500
+    },
+    "pit_b_224": {
+      "difference": 0.0008179487179487082,
+      "ci95": [
+        -0.01685897435897437,
+        0.018164102564102568
+      ],
+      "paired_count": 500
+    },
+    "visformer_small": {
+      "difference": -0.05398974358974352,
+      "ci95": [
+        -0.07068974358974357,
+        -0.0375230769230769
+      ],
+      "paired_count": 500
+    }
+  },
+  "patch_score_vs_gradcam": {
+    "vit_base_patch16_224": {
+      "difference": 0.01160000000000001,
+      "ci95": [
+        -0.005394871794871804,
+        0.028161538461538436
+      ],
+      "paired_count": 500,
+      "noninferior_at_1pp": true
+    },
+    "cait_s24_224": {
+      "difference": 0.0026666666666666713,
+      "ci95": [
+        -0.010825641025641026,
+        0.01591025641025642
+      ],
+      "paired_count": 500,
+      "noninferior_at_1pp": false
+    },
+    "pit_b_224": {
+      "difference": 0.042523076923076886,
+      "ci95": [
+        0.026066666666666675,
+        0.05905897435897428
+      ],
+      "paired_count": 500,
+      "noninferior_at_1pp": true
+    },
+    "visformer_small": {
+      "difference": 0.005081818181818185,
+      "ci95": [
+        -0.010907692307692311,
+        0.021481818181818185
+      ],
+      "paired_count": 500,
+      "noninferior_at_1pp": false
+    }
+  },
+  "asr_denominator": "target-clean-correct images only",
+  "noninferiority_margin": -0.01,
+  "manifest": "outputs/research/selector_suite_fixed_mask/manifest.json",
+  "targets": [
+    "levit_256",
+    "pit_b_224",
+    "deit_base_patch16_224",
+    "tnt_s_patch16_224",
+    "convit_base",
+    "visformer_small",
+    "cait_s24_224",
+    "inception_v3",
+    "inception_v4",
+    "inception_resnet_v2",
+    "resnet101",
+    "inception_v3_adv",
+    "inception_resnet_v2_adv"
+  ]
+}

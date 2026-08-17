@@ -16,16 +16,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from nets import WHITEBOX_MODEL_CHOICES, build_whitebox_model
-from patch_score_gradcam_experiment import capture_gradcam_activation, load_samples
-from patch_score_mechanism_experiment import rank_tensor
-
-
-def row_spearman(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
-    left = rank_tensor(left).float()
-    right = rank_tensor(right).float()
-    left = left - left.mean(dim=1, keepdim=True)
-    right = right - right.mean(dim=1, keepdim=True)
-    return (left * right).sum(dim=1) / (left.norm(dim=1) * right.norm(dim=1)).clamp_min(1e-12)
+from experiments.semantic_forward_utils import (
+    capture_patch_score_activation,
+    load_samples,
+    normalize,
+    row_spearman,
+    write_json,
+)
 
 
 def common_local_global(model, activation: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, tuple[int, int]]:
@@ -65,7 +62,9 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/research/patch_score_same_activation"))
     args = parser.parse_args()
     models = [item.strip() for item in args.models.split(",") if item.strip()]
-    names, pixels_cpu, labels_cpu = load_samples(args.image_dir, args.annotations, args.samples)
+    names, pixels_cpu, labels_cpu = load_samples(
+        args.image_dir, args.annotations, 0, args.samples
+    )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     results = {}
     for model_name in models:
@@ -79,8 +78,10 @@ def main() -> None:
             end = min(len(names), start + args.sample_batch)
             pixels = pixels_cpu[start:end].to(device)
             labels = labels_cpu[start:end].to(device)
-            normalized = (pixels - torch.tensor(model.model_mean, device=device).view(1, 3, 1, 1)) / torch.tensor(model.model_std, device=device).view(1, 3, 1, 1)
-            logits, _captured, activation = capture_gradcam_activation(model, normalized)
+            normalized = normalize(model, pixels)
+            logits, activation, _source_name = capture_patch_score_activation(
+                model, normalized
+            )
             predicted = logits.argmax(dim=1)
             gradient = torch.autograd.grad(logits.gather(1, predicted[:, None]).sum(), activation)[0].detach()
             local, global_token, _grid = common_local_global(model, activation.detach())
@@ -96,7 +97,7 @@ def main() -> None:
                 map_values[name].append(row_spearman(patch_score, value).cpu())
                 map_values.setdefault(f"{name}:iou", []).append(top_half_iou(patch_score, value).cpu())
                 zero_values[name].append(value.abs().sum(dim=1).eq(0).cpu())
-            del pixels, labels, normalized, logits, _captured, activation, gradient, local, global_token, patch_score, signed
+            del pixels, labels, normalized, logits, activation, gradient, local, global_token, patch_score, signed
             if device.type == "cuda":
                 torch.cuda.empty_cache()
         results[model_name] = {
@@ -120,8 +121,7 @@ def main() -> None:
         },
         "results": results,
     }
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    (args.output_dir / "summary.json").write_text(json.dumps(output, indent=2), encoding="utf-8")
+    write_json(args.output_dir / "summary.json", output)
     print(json.dumps(output, indent=2))
 
 

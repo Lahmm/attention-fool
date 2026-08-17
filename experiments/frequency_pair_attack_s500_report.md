@@ -1,12 +1,13 @@
 # Frequency low/high view-pair attack: 500-sample report
 
+> **历史结果归档。** 该分支的可执行脚本和专属测试已在项目精简时移除；正式 transfer CSV 与本报告继续保留。下文出现的脚本路径仅用于记录当时协议，不是当前入口。
+
 ## Scope and isolation
 
 This experiment tests a replacement for the retained original/phase-shift view
 pair. It does not add a module to the production attack and does not change the
-defaults in `attack.py` or `main.py`. The implementation is isolated in
-`experiments/frequency_pair_attack.py`, where `FrequencyPairAttacker` subclasses
-the retained `PatchScoreAttacker`.
+defaults in `attack.py` or `main.py`. The historical implementation used an
+isolated `FrequencyPairAttacker` subclass of `PatchScoreAttacker`.
 
 The source model is ViT-B/16. All formal runs use the same 500 images, replay
 seed `20260720`, 10 attack steps, `epsilon=16/255`, 10 groups x 2 views, final
@@ -150,8 +151,7 @@ positive, the retained original/phase mainline should remain unchanged.
 
 ## Reproducibility artifacts
 
-- Implementation: `experiments/frequency_pair_attack.py`
-- Unit tests: `tests/test_frequency_pair_attack.py`
+- Historical implementation and unit tests: removed after the failed branch was archived
 - Frequency Gaussian outputs:
   `outputs/attack/vit_frequency_pair_gaussian_s500_seed20260720`
 - Frequency opponent outputs:
@@ -159,4 +159,3 @@ positive, the retained original/phase mainline should remain unchanged.
 - Same-seed raw-mainline outputs:
   `outputs/attack/vit_mainline_raw_opponent_s500_seed20260720`
 - Transfer CSV files use the corresponding names under `outputs/csv/`.
-

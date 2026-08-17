@@ -1,0 +1,54 @@
+{
+  "config": {
+    "model": "cait_s24_224",
+    "samples": 64,
+    "sample_batch": 8,
+    "route_repeats": 4,
+    "drop_ratio": 0.15,
+    "seed": 20260717
+  },
+  "mask_pairwise_iou": {
+    "high_score_extreme": 1.0,
+    "low_score_extreme": 1.0,
+    "random_uniform": 0.07896114140748978,
+    "score_deviation_extreme": 1.0
+  },
+  "strategies": {
+    "high_score_extreme": {
+      "route_logit_drop_mean": 0.05383874475955963,
+      "route_loss_increase_mean": 0.015590127615723759,
+      "global_feature_shift_mean": 0.024739235639572144,
+      "kept_local_feature_shift_mean": 0.098687525925925,
+      "kept_score_abs_change_mean": 0.017998985887970775,
+      "gradient_cosine_mean": 0.04380665115058946,
+      "gradient_norm_ratio_mean": 3.81662466871785
+    },
+    "low_score_extreme": {
+      "route_logit_drop_mean": 0.05948522686958313,
+      "route_loss_increase_mean": 0.030665386526379734,
+      "global_feature_shift_mean": 0.03547537326812744,
+      "kept_local_feature_shift_mean": 0.11413954442832619,
+      "kept_score_abs_change_mean": 0.020612683656509034,
+      "gradient_cosine_mean": 0.04656448964601623,
+      "gradient_norm_ratio_mean": 3.7967389872064814
+    },
+    "random_uniform": {
+      "route_logit_drop_mean": 0.032061945647001266,
+      "route_loss_increase_mean": 0.01237565178598743,
+      "global_feature_shift_mean": 0.019907763693481684,
+      "kept_local_feature_shift_mean": 0.10966616647783667,
+      "kept_score_abs_change_mean": 0.019248704164056107,
+      "gradient_cosine_mean": 0.05804418966681624,
+      "gradient_norm_ratio_mean": 3.3482748137321323
+    },
+    "score_deviation_extreme": {
+      "route_logit_drop_mean": 0.02265138179063797,
+      "route_loss_increase_mean": 0.023644962639082223,
+      "global_feature_shift_mean": 0.02657421864569187,
+      "kept_local_feature_shift_mean": 0.09933767904294655,
+      "kept_score_abs_change_mean": 0.018414629965263885,
+      "gradient_cosine_mean": 0.04009983282617213,
+      "gradient_norm_ratio_mean": 3.4699735867907293
+    }
+  }
+}

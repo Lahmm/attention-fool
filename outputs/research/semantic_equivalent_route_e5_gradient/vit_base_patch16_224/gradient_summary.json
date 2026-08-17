@@ -1,0 +1,417 @@
+{
+  "protocol": {
+    "mode": "gradient",
+    "source": "vit_base_patch16_224",
+    "targets": [
+      "cait_s24_224",
+      "pit_b_224",
+      "visformer_small"
+    ],
+    "samples": 64,
+    "sample_offset": 628,
+    "views": 20,
+    "mask_policy": "no patch drop; semantic score only reweights source views",
+    "whitebox_ensemble": false,
+    "noise": "opponent projected through initial RGB projection"
+  },
+  "route_mean": {
+    "uniform_opponent": {
+      "preserved_view_fraction": 0.657031251466833,
+      "mean_route_distance": 0.25644259830005467,
+      "mean_global_cosine": 0.9783229259774089,
+      "mean_view_js": 0.024884639649826568,
+      "weight_entropy": 2.995732307434082,
+      "clean_route_gradient_cosine": 0.038925092076169676,
+      "view_cosine_to_raw_mean": 0.24048806505743414,
+      "view_sign_agreement": 0.5703451782464981,
+      "view_effective_rank": 19.50647735595703
+    },
+    "global_preserve_opponent": {
+      "preserved_view_fraction": 0.657031251466833,
+      "mean_route_distance": 0.25644259830005467,
+      "mean_global_cosine": 0.9783229259774089,
+      "mean_view_js": 0.024884639649826568,
+      "weight_entropy": 2.719730856440033,
+      "clean_route_gradient_cosine": 0.04139450119691901,
+      "view_cosine_to_raw_mean": 0.22034359333338216,
+      "view_sign_agreement": 0.56732477247715,
+      "view_effective_rank": 19.506477057933807
+    },
+    "route_balance_opponent": {
+      "preserved_view_fraction": 0.657031251466833,
+      "mean_route_distance": 0.25644259830005467,
+      "mean_global_cosine": 0.9783229259774089,
+      "mean_view_js": 0.024884639649826568,
+      "weight_entropy": 2.989149957895279,
+      "clean_route_gradient_cosine": 0.03782606640015729,
+      "view_cosine_to_raw_mean": 0.23894653195748106,
+      "view_sign_agreement": 0.5694449841976166,
+      "view_effective_rank": 19.50647720694542
+    },
+    "semantic_equivalent_opponent": {
+      "preserved_view_fraction": 0.657031251466833,
+      "mean_route_distance": 0.25644259830005467,
+      "mean_global_cosine": 0.9783229259774089,
+      "mean_view_js": 0.024884639649826568,
+      "weight_entropy": 2.721179056099099,
+      "clean_route_gradient_cosine": 0.04055628508285736,
+      "view_cosine_to_raw_mean": 0.21971117536304519,
+      "view_sign_agreement": 0.5668593235313892,
+      "view_effective_rank": 19.50647708773613
+    },
+    "shuffled_semantic_opponent": {
+      "preserved_view_fraction": 0.657031251466833,
+      "mean_route_distance": 0.25644259830005467,
+      "mean_global_cosine": 0.9783229259774089,
+      "mean_view_js": 0.024884639649826568,
+      "weight_entropy": 2.7188757851352165,
+      "clean_route_gradient_cosine": 0.04103760724137828,
+      "view_cosine_to_raw_mean": 0.22015182784525678,
+      "view_sign_agreement": 0.5672794710844755,
+      "view_effective_rank": 19.506477504968643
+    },
+    "semantic_equivalent_feature_gaussian": {
+      "preserved_view_fraction": 0.720312503632158,
+      "mean_route_distance": 0.22983075183583423,
+      "mean_global_cosine": 0.9825112791731954,
+      "mean_view_js": 0.017595428482309217,
+      "weight_entropy": 2.7684881929308176,
+      "clean_route_gradient_cosine": 0.0698003040652111,
+      "view_cosine_to_raw_mean": 0.21790147642605007,
+      "view_sign_agreement": 0.5723256655037403,
+      "view_effective_rank": 19.505368769168854
+    }
+  },
+  "cross_model_mean": {
+    "uniform_opponent": {
+      "raw_target_gradient_cosine": 0.012931771896849872,
+      "processed_target_gradient_cosine": 0.013394464411552084,
+      "raw_target_sign_agreement": 0.5062638895275692,
+      "processed_target_sign_agreement": 0.506474950350821,
+      "one_step_target_logit_drop": 0.16880985101064047,
+      "one_step_target_loss_increase": 0.10448916279710829
+    },
+    "global_preserve_opponent": {
+      "raw_target_gradient_cosine": 0.01043070833566162,
+      "processed_target_gradient_cosine": 0.010938121605249762,
+      "raw_target_sign_agreement": 0.5057471647548178,
+      "processed_target_sign_agreement": 0.5059723801289996,
+      "one_step_target_logit_drop": 0.13882344961166382,
+      "one_step_target_loss_increase": 0.07633384152237947
+    },
+    "route_balance_opponent": {
+      "raw_target_gradient_cosine": 0.012904594155922192,
+      "processed_target_gradient_cosine": 0.013384631399882588,
+      "raw_target_sign_agreement": 0.506230637896806,
+      "processed_target_sign_agreement": 0.5064020822755992,
+      "one_step_target_logit_drop": 0.16824829578399658,
+      "one_step_target_loss_increase": 0.10422734978298347
+    },
+    "semantic_equivalent_opponent": {
+      "raw_target_gradient_cosine": 0.01041958395974992,
+      "processed_target_gradient_cosine": 0.01093838917889419,
+      "raw_target_sign_agreement": 0.5057113904816409,
+      "processed_target_sign_agreement": 0.5060046263970435,
+      "one_step_target_logit_drop": 0.13865208874146143,
+      "one_step_target_loss_increase": 0.07681847650868197
+    },
+    "shuffled_semantic_opponent": {
+      "raw_target_gradient_cosine": 0.010420459517869555,
+      "processed_target_gradient_cosine": 0.01092794226466746,
+      "raw_target_sign_agreement": 0.5057329796254635,
+      "processed_target_sign_agreement": 0.5059775025583804,
+      "one_step_target_logit_drop": 0.13909073173999786,
+      "one_step_target_loss_increase": 0.07631508571406205
+    },
+    "semantic_equivalent_feature_gaussian": {
+      "raw_target_gradient_cosine": 0.012358184040143291,
+      "processed_target_gradient_cosine": 0.012923287576086295,
+      "raw_target_sign_agreement": 0.5073050154993931,
+      "processed_target_sign_agreement": 0.5075420294888318,
+      "one_step_target_logit_drop": 0.2036192168792089,
+      "one_step_target_loss_increase": 0.11689086673626055
+    }
+  },
+  "paired_deltas": {
+    "global_preserve_opponent": {
+      "raw_target_gradient_cosine": {
+        "mean": -0.0025010637473315,
+        "ci95": [
+          -0.004920953884720802,
+          -0.0007513168966397643
+        ],
+        "positive_fraction": 0.4166666567325592,
+        "comparisons": 192
+      },
+      "processed_target_gradient_cosine": {
+        "mean": -0.0024563430342823267,
+        "ci95": [
+          -0.004874355625361204,
+          -0.0006833959487266839
+        ],
+        "positive_fraction": 0.421875,
+        "comparisons": 192
+      },
+      "raw_target_sign_agreement": {
+        "mean": -0.0005167247727513313,
+        "ci95": [
+          -0.000957647105678916,
+          -0.00015140947652980685
+        ],
+        "positive_fraction": 0.4375,
+        "comparisons": 192
+      },
+      "processed_target_sign_agreement": {
+        "mean": -0.0005025702412240207,
+        "ci95": [
+          -0.0009359841351397336,
+          -0.00013961372314952314
+        ],
+        "positive_fraction": 0.4375,
+        "comparisons": 192
+      },
+      "one_step_target_logit_drop": {
+        "mean": -0.02998640201985836,
+        "ci95": [
+          -0.05555083230137825,
+          -0.010070260614156723
+        ],
+        "positive_fraction": 0.4375,
+        "comparisons": 192
+      },
+      "one_step_target_loss_increase": {
+        "mean": -0.02815532125532627,
+        "ci95": [
+          -0.05331305414438248,
+          -0.00994239840656519
+        ],
+        "positive_fraction": 0.390625,
+        "comparisons": 192
+      }
+    },
+    "route_balance_opponent": {
+      "raw_target_gradient_cosine": {
+        "mean": -2.717774077609647e-05,
+        "ci95": [
+          -0.0001257858966710046,
+          7.797736907377839e-05
+        ],
+        "positive_fraction": 0.4583333432674408,
+        "comparisons": 192
+      },
+      "processed_target_gradient_cosine": {
+        "mean": -9.83300560619682e-06,
+        "ci95": [
+          -0.00011507683666422963,
+          0.00010062561341328546
+        ],
+        "positive_fraction": 0.4791666567325592,
+        "comparisons": 192
+      },
+      "raw_target_sign_agreement": {
+        "mean": -3.325163197587244e-05,
+        "ci95": [
+          -9.22145918593742e-05,
+          2.6330673790653236e-05
+        ],
+        "positive_fraction": 0.4739583432674408,
+        "comparisons": 192
+      },
+      "processed_target_sign_agreement": {
+        "mean": -7.286807522177696e-05,
+        "ci95": [
+          -0.00013733292871620506,
+          -7.510010618716478e-06
+        ],
+        "positive_fraction": 0.4166666567325592,
+        "comparisons": 192
+      },
+      "one_step_target_logit_drop": {
+        "mean": -0.0005615552072413266,
+        "ci95": [
+          -0.0030101777520030737,
+          0.001930248225107789
+        ],
+        "positive_fraction": 0.5104166865348816,
+        "comparisons": 192
+      },
+      "one_step_target_loss_increase": {
+        "mean": -0.00026181296561844647,
+        "ci95": [
+          -0.0011058386880904436,
+          0.0005749607807956636
+        ],
+        "positive_fraction": 0.4635416567325592,
+        "comparisons": 192
+      }
+    },
+    "semantic_equivalent_opponent": {
+      "raw_target_gradient_cosine": {
+        "mean": -0.0025121879298239946,
+        "ci95": [
+          -0.004909717943519354,
+          -0.0007691482896916568
+        ],
+        "positive_fraction": 0.4270833432674408,
+        "comparisons": 192
+      },
+      "processed_target_gradient_cosine": {
+        "mean": -0.0024560752790421247,
+        "ci95": [
+          -0.0048706186935305595,
+          -0.0006899775471538305
+        ],
+        "positive_fraction": 0.4166666567325592,
+        "comparisons": 192
+      },
+      "raw_target_sign_agreement": {
+        "mean": -0.0005524990265257657,
+        "ci95": [
+          -0.0009919034782797098,
+          -0.0001863842480815947
+        ],
+        "positive_fraction": 0.3958333432674408,
+        "comparisons": 192
+      },
+      "processed_target_sign_agreement": {
+        "mean": -0.00047032395377755165,
+        "ci95": [
+          -0.0009063922916539013,
+          -9.966963261831552e-05
+        ],
+        "positive_fraction": 0.4114583432674408,
+        "comparisons": 192
+      },
+      "one_step_target_logit_drop": {
+        "mean": -0.03015776164829731,
+        "ci95": [
+          -0.05576219782233238,
+          -0.010157478041946888
+        ],
+        "positive_fraction": 0.453125,
+        "comparisons": 192
+      },
+      "one_step_target_loss_increase": {
+        "mean": -0.027670688927173615,
+        "ci95": [
+          -0.053089071065187454,
+          -0.009551792405545712
+        ],
+        "positive_fraction": 0.4270833432674408,
+        "comparisons": 192
+      }
+    },
+    "shuffled_semantic_opponent": {
+      "raw_target_gradient_cosine": {
+        "mean": 8.755620797273878e-07,
+        "ci95": [
+          -0.0001123124675359577,
+          0.00010943061352008954
+        ],
+        "positive_fraction": 0.4947916567325592,
+        "comparisons": 192
+      },
+      "processed_target_gradient_cosine": {
+        "mean": -1.0446919077367056e-05,
+        "ci95": [
+          -0.0001267233892576769,
+          0.00010227779421256855
+        ],
+        "positive_fraction": 0.4791666567325592,
+        "comparisons": 192
+      },
+      "raw_target_sign_agreement": {
+        "mean": 2.158914321626071e-05,
+        "ci95": [
+          -4.0484537748852745e-05,
+          8.30108838272281e-05
+        ],
+        "positive_fraction": 0.5052083134651184,
+        "comparisons": 192
+      },
+      "processed_target_sign_agreement": {
+        "mean": -2.7123838663101196e-05,
+        "ci95": [
+          -8.618898573331535e-05,
+          3.1626055715605617e-05
+        ],
+        "positive_fraction": 0.4479166567325592,
+        "comparisons": 192
+      },
+      "one_step_target_logit_drop": {
+        "mean": 0.00043864300823770463,
+        "ci95": [
+          -0.0019460647599771619,
+          0.00275981891900301
+        ],
+        "positive_fraction": 0.5052083134651184,
+        "comparisons": 192
+      },
+      "one_step_target_loss_increase": {
+        "mean": -0.0005033907946199179,
+        "ci95": [
+          -0.0016167799476534128,
+          0.0004019326879642904
+        ],
+        "positive_fraction": 0.4947916567325592,
+        "comparisons": 192
+      }
+    },
+    "semantic_equivalent_feature_gaussian": {
+      "raw_target_gradient_cosine": {
+        "mean": 0.0019386002095416188,
+        "ci95": [
+          0.00016467356181237847,
+          0.003803978441283107
+        ],
+        "positive_fraction": 0.546875,
+        "comparisons": 192
+      },
+      "processed_target_gradient_cosine": {
+        "mean": 0.0019848982337862253,
+        "ci95": [
+          0.00016458866593893617,
+          0.003869864856824279
+        ],
+        "positive_fraction": 0.53125,
+        "comparisons": 192
+      },
+      "raw_target_sign_agreement": {
+        "mean": 0.0015936250565573573,
+        "ci95": [
+          0.0010145327541977167,
+          0.002184427808970213
+        ],
+        "positive_fraction": 0.6614583134651184,
+        "comparisons": 192
+      },
+      "processed_target_sign_agreement": {
+        "mean": 0.001537403091788292,
+        "ci95": [
+          0.0009374597575515509,
+          0.0021479816641658545
+        ],
+        "positive_fraction": 0.6510416865348816,
+        "comparisons": 192
+      },
+      "one_step_target_logit_drop": {
+        "mean": 0.06496713310480118,
+        "ci95": [
+          0.042242374271154404,
+          0.08949336409568787
+        ],
+        "positive_fraction": 0.65625,
+        "comparisons": 192
+      },
+      "one_step_target_loss_increase": {
+        "mean": 0.04007238894701004,
+        "ci95": [
+          0.02385346032679081,
+          0.060747940093278885
+        ],
+        "positive_fraction": 0.6770833134651184,
+        "comparisons": 192
+      }
+    }
+  }
+}

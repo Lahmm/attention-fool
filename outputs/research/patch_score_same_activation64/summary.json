@@ -1,0 +1,84 @@
+{
+  "config": {
+    "models": [
+      "vit_base_patch16_224",
+      "cait_s24_224",
+      "pit_b_224",
+      "visformer_small"
+    ],
+    "samples": 64,
+    "sample_batch": 8,
+    "protocol": "same logit-connected local activation; patch-score uses its global token or local mean, Grad-CAM uses target predicted-class gradient",
+    "seed": 20260717
+  },
+  "results": {
+    "vit_base_patch16_224": {
+      "gradcam_relu": {
+        "rank_spearman_mean": 0.4885869026184082,
+        "top_half_iou_mean": 0.5565788149833679,
+        "zero_fraction": 0.0
+      },
+      "gradcam_signed": {
+        "rank_spearman_mean": 0.5104638338088989,
+        "top_half_iou_mean": 0.5610194206237793,
+        "zero_fraction": 0.0
+      },
+      "gradcam_abs": {
+        "rank_spearman_mean": 0.30223050713539124,
+        "top_half_iou_mean": 0.4690285921096802,
+        "zero_fraction": 0.0
+      }
+    },
+    "cait_s24_224": {
+      "gradcam_relu": {
+        "rank_spearman_mean": 0.011156355030834675,
+        "top_half_iou_mean": 0.3590990900993347,
+        "zero_fraction": 0.015625
+      },
+      "gradcam_signed": {
+        "rank_spearman_mean": 0.032819584012031555,
+        "top_half_iou_mean": 0.35455745458602905,
+        "zero_fraction": 0.0
+      },
+      "gradcam_abs": {
+        "rank_spearman_mean": 0.027453331276774406,
+        "top_half_iou_mean": 0.3434547185897827,
+        "zero_fraction": 0.0
+      }
+    },
+    "pit_b_224": {
+      "gradcam_relu": {
+        "rank_spearman_mean": -0.14842602610588074,
+        "top_half_iou_mean": 0.31978124380111694,
+        "zero_fraction": 0.0
+      },
+      "gradcam_signed": {
+        "rank_spearman_mean": -0.16874855756759644,
+        "top_half_iou_mean": 0.31864023208618164,
+        "zero_fraction": 0.0
+      },
+      "gradcam_abs": {
+        "rank_spearman_mean": 0.012712481431663036,
+        "top_half_iou_mean": 0.36275342106819153,
+        "zero_fraction": 0.0
+      }
+    },
+    "visformer_small": {
+      "gradcam_relu": {
+        "rank_spearman_mean": 0.7570328712463379,
+        "top_half_iou_mean": 0.7381032705307007,
+        "zero_fraction": 0.0
+      },
+      "gradcam_signed": {
+        "rank_spearman_mean": 0.7714700102806091,
+        "top_half_iou_mean": 0.7381032705307007,
+        "zero_fraction": 0.0
+      },
+      "gradcam_abs": {
+        "rank_spearman_mean": 0.6801722049713135,
+        "top_half_iou_mean": 0.7168715596199036,
+        "zero_fraction": 0.0
+      }
+    }
+  }
+}

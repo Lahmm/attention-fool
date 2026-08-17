@@ -1,0 +1,143 @@
+{
+  "protocol": {
+    "samples": 128,
+    "sample_seed": 20260717,
+    "attack_seed": 20260716,
+    "image_ids_sha256": "47d5c7def28df577f96def8ab9e5e8b2e1baa07af15464f15aadd24f3dd4e691",
+    "selection_metric": "macro_off_diagonal_transfer_asr_over_other_three_sources",
+    "results_path": "outputs/research/routing_calibration/results.csv",
+    "global_scores": {
+      "high": 0.865234375,
+      "low": 0.8606770833333334
+    },
+    "best_scores_by_polarity": {
+      "high": {
+        "vit_base_patch16_224": 0.8619791666666666,
+        "cait_s24_224": 0.9140625,
+        "pit_b_224": 0.8958333333333334,
+        "visformer_small": 0.7890625
+      },
+      "low": {
+        "vit_base_patch16_224": 0.8385416666666666,
+        "cait_s24_224": 0.9270833333333334,
+        "pit_b_224": 0.9036458333333334,
+        "visformer_small": 0.7734375
+      }
+    }
+  },
+  "layer_scores": {
+    "vit_base_patch16_224": {
+      "high": {
+        "block3": 0.8385416666666666,
+        "block6": 0.8411458333333334,
+        "block9": 0.8515625,
+        "block12": 0.8619791666666666
+      },
+      "low": {
+        "block3": 0.8385416666666666,
+        "block6": 0.8307291666666666,
+        "block9": 0.8359375,
+        "block12": 0.8177083333333334
+      }
+    },
+    "cait_s24_224": {
+      "high": {
+        "block6_gap": 0.9036458333333334,
+        "block12_gap": 0.8932291666666666,
+        "block18_gap": 0.8723958333333334,
+        "block24_gap": 0.9140625,
+        "block24_class": 0.9088541666666666
+      },
+      "low": {
+        "block6_gap": 0.9244791666666666,
+        "block12_gap": 0.9270833333333334,
+        "block18_gap": 0.90625,
+        "block24_gap": 0.8932291666666666,
+        "block24_class": 0.90625
+      }
+    },
+    "pit_b_224": {
+      "high": {
+        "stage1_block3": 0.8645833333333334,
+        "stage2_block3": 0.8489583333333334,
+        "stage2_block6": 0.8619791666666666,
+        "stage3_block2": 0.8958333333333334,
+        "stage3_block4": 0.8880208333333334
+      },
+      "low": {
+        "stage1_block3": 0.8385416666666666,
+        "stage2_block3": 0.8567708333333334,
+        "stage2_block6": 0.8567708333333334,
+        "stage3_block2": 0.9036458333333334,
+        "stage3_block4": 0.9036458333333334
+      }
+    },
+    "visformer_small": {
+      "high": {
+        "stage1_block4": 0.6666666666666666,
+        "stage1_block7": 0.6510416666666666,
+        "stage2_block4": 0.7604166666666666,
+        "stage3_block2": 0.7890625,
+        "stage3_block4": 0.7604166666666666
+      },
+      "low": {
+        "stage1_block4": 0.5963541666666666,
+        "stage1_block7": 0.6302083333333334,
+        "stage2_block4": 0.7734375,
+        "stage3_block2": 0.7604166666666666,
+        "stage3_block4": 0.7708333333333334
+      }
+    }
+  },
+  "best_layers_by_polarity": {
+    "high": {
+      "vit_base_patch16_224": "block12",
+      "cait_s24_224": "block24_gap",
+      "pit_b_224": "stage3_block2",
+      "visformer_small": "stage3_block2"
+    },
+    "low": {
+      "vit_base_patch16_224": "block3",
+      "cait_s24_224": "block12_gap",
+      "pit_b_224": "stage3_block4",
+      "visformer_small": "stage2_block4"
+    }
+  },
+  "selected": {
+    "schema_version": 1,
+    "status": "frozen",
+    "global_polarity": "high",
+    "model_layers": {
+      "vit_base_patch16_224": "block12",
+      "cait_s24_224": "block24_gap",
+      "pit_b_224": "stage3_block2",
+      "visformer_small": "stage3_block2"
+    },
+    "calibration": {
+      "samples": 128,
+      "sample_seed": 20260717,
+      "attack_seed": 20260716,
+      "image_ids_sha256": "47d5c7def28df577f96def8ab9e5e8b2e1baa07af15464f15aadd24f3dd4e691",
+      "selection_metric": "macro_off_diagonal_transfer_asr_over_other_three_sources",
+      "results_path": "outputs/research/routing_calibration/results.csv",
+      "global_scores": {
+        "high": 0.865234375,
+        "low": 0.8606770833333334
+      },
+      "best_scores_by_polarity": {
+        "high": {
+          "vit_base_patch16_224": 0.8619791666666666,
+          "cait_s24_224": 0.9140625,
+          "pit_b_224": 0.8958333333333334,
+          "visformer_small": 0.7890625
+        },
+        "low": {
+          "vit_base_patch16_224": 0.8385416666666666,
+          "cait_s24_224": 0.9270833333333334,
+          "pit_b_224": 0.9036458333333334,
+          "visformer_small": 0.7734375
+        }
+      }
+    }
+  }
+}

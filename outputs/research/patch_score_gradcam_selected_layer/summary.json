@@ -1,0 +1,62 @@
+{
+  "config": {
+    "models": [
+      "vit_base_patch16_224",
+      "cait_s24_224",
+      "pit_b_224",
+      "visformer_small"
+    ],
+    "samples": 128,
+    "sample_offset": 500,
+    "target_mode": "true_class",
+    "alternate_control": "(true_class + 1) modulo class_count",
+    "layers": {
+      "vit_base_patch16_224": "block12",
+      "cait_s24_224": "block24_gap",
+      "pit_b_224": "stage3_block2",
+      "visformer_small": "stage3_block2"
+    }
+  },
+  "results": {
+    "vit_base_patch16_224": {
+      "patch_gradcam_spearman": 0.49401676894922275,
+      "patch_gradcam_top_half_iou": 0.5666224668966606,
+      "patch_gradcam_top_drop_iou": 0.1376563889789395,
+      "production_same_activation_spearman": 0.6023590600816533,
+      "true_alternate_gradcam_spearman": 0.009557832934660837,
+      "true_alternate_gradcam_top_drop_iou": 0.13087807898409665,
+      "gradcam_zero_fraction": 0.0,
+      "activation_source": "blocks[11] input (logit-connected fallback)"
+    },
+    "cait_s24_224": {
+      "patch_gradcam_spearman": 0.0982488145964453,
+      "patch_gradcam_top_half_iou": 0.36827241303399205,
+      "patch_gradcam_top_drop_iou": 0.10365289193578064,
+      "production_same_activation_spearman": 0.9999999962747097,
+      "true_alternate_gradcam_spearman": 0.11378378001973033,
+      "true_alternate_gradcam_top_drop_iou": 0.12317595415515825,
+      "gradcam_zero_fraction": 0.0078125,
+      "activation_source": "blocks[23] output"
+    },
+    "pit_b_224": {
+      "patch_gradcam_spearman": -0.2139380024455022,
+      "patch_gradcam_top_half_iou": 0.3056730655953288,
+      "patch_gradcam_top_drop_iou": 0.047618088545277715,
+      "production_same_activation_spearman": 0.9999999441206455,
+      "true_alternate_gradcam_spearman": 0.08094880019780248,
+      "true_alternate_gradcam_top_drop_iou": 0.11306007404346019,
+      "gradcam_zero_fraction": 0.078125,
+      "activation_source": "transformers[2].blocks[2] input (=block[1] output)"
+    },
+    "visformer_small": {
+      "patch_gradcam_spearman": 0.5859566350700334,
+      "patch_gradcam_top_half_iou": 0.6368275353452191,
+      "patch_gradcam_top_drop_iou": 0.1641207795473747,
+      "production_same_activation_spearman": 0.9999999990686774,
+      "true_alternate_gradcam_spearman": 0.20324617667938583,
+      "true_alternate_gradcam_top_drop_iou": 0.15921049879398197,
+      "gradcam_zero_fraction": 0.0,
+      "activation_source": "stage3[2] input (=stage3[1] output)"
+    }
+  }
+}

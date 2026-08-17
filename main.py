@@ -21,7 +21,6 @@ from attack import (
 )
 from gradient_replay import GradientReplay
 from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, build_whitebox_model
-from routing_config import FrozenRoutingConfig, file_sha256
 from utils import DEVICE, load_data, save_adversarial_images
 
 
@@ -164,7 +163,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--guide-aug-copies", type=int, default=20)
     parser.add_argument("--input-diversity-groups", type=int, default=10)
     parser.add_argument("--input-diversity-views-per-group", type=int, default=2)
-    parser.add_argument("--input-diversity-phase-shift", type=parse_phase_shift, default=(0, 0))
     parser.add_argument("--input-diversity-phase-shift-set", type=parse_phase_shift_set, default=((4, 4), (8, 8), (12, 12)))
     parser.add_argument("--guide-aug-strength", type=float, default=0.2)
     parser.add_argument("--patch-dropout-ratio", type=float, default=0.3)
@@ -208,21 +206,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--patch-selector", choices=PATCH_SELECTORS, default="patch_score")
     parser.add_argument(
-        "--gradcam-target-mode",
-        choices=("true", "predicted"),
-        default="true",
-        help="Class target used only by the Grad-CAM selector.",
-    )
-    parser.add_argument(
-        "--gradcam-zero-policy",
-        choices=("error", "random"),
-        default="error",
-        help=(
-            "Explicit handling for all-zero ReLU Grad-CAM maps. The fair selector suite "
-            "uses sample-keyed random ranking to preserve the matched drop budget."
-        ),
-    )
-    parser.add_argument(
         "--gaussian-sigma",
         type=float,
         default=4.0,
@@ -240,12 +223,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--prefetch-factor", type=int, default=4)
     parser.add_argument("--output-dir", default="outputs/attack/patch_score_routing")
-    parser.add_argument(
-        "--routing-config",
-        type=Path,
-        default=None,
-        help="Frozen global-polarity/model-layer calibration JSON.",
-    )
     return parser.parse_args()
 
 
@@ -264,13 +241,6 @@ def main(args: argparse.Namespace) -> None:
         num_workers=args.num_workers,
         prefetch_factor=args.prefetch_factor,
     )
-    routing_config = None
-    routing_config_sha256 = None
-    if args.routing_config is not None:
-        routing_config = FrozenRoutingConfig.load(args.routing_config)
-        routing_config_sha256 = file_sha256(args.routing_config)
-        args.patch_score_layer = routing_config.layer_for(args.whitebox_model)
-        args.patch_dropout_score_mode = routing_config.global_polarity
     model = build_whitebox_model(num_classes=num_classes, model_name=args.whitebox_model)
     attacker = PatchScoreAttacker(
         model=model,
@@ -287,7 +257,6 @@ def main(args: argparse.Namespace) -> None:
         guide_aug_copies=args.guide_aug_copies,
         input_diversity_groups=args.input_diversity_groups,
         input_diversity_views_per_group=args.input_diversity_views_per_group,
-        input_diversity_phase_shift=args.input_diversity_phase_shift,
         input_diversity_phase_shift_set=args.input_diversity_phase_shift_set,
         guide_aug_strength=args.guide_aug_strength,
         patch_dropout_ratio=args.patch_dropout_ratio,
@@ -308,8 +277,6 @@ def main(args: argparse.Namespace) -> None:
         feature_layer=args.feature_layer,
         patch_score_layer=args.patch_score_layer,
         patch_selector=args.patch_selector,
-        gradcam_target_mode=args.gradcam_target_mode,
-        gradcam_zero_policy=args.gradcam_zero_policy,
         gaussian_sigma=args.gaussian_sigma,
         gaussian_alpha=args.gaussian_alpha,
         device=DEVICE,
@@ -356,7 +323,6 @@ def main(args: argparse.Namespace) -> None:
         "input_diversity_total_views": (
             args.input_diversity_groups * args.input_diversity_views_per_group
         ),
-        "input_diversity_phase_shift": list(args.input_diversity_phase_shift),
         "input_diversity_phase_shift_set": [list(shift) for shift in args.input_diversity_phase_shift_set],
         "guide_aug_strength": args.guide_aug_strength,
         "patch_dropout_ratio": args.patch_dropout_ratio,
@@ -386,10 +352,6 @@ def main(args: argparse.Namespace) -> None:
         "feature_layer": args.feature_layer,
         "patch_score_layer": args.patch_score_layer,
         "patch_selector": args.patch_selector,
-        "gradcam_target_mode": args.gradcam_target_mode,
-        "gradcam_zero_policy": args.gradcam_zero_policy,
-        "routing_config": str(args.routing_config) if args.routing_config is not None else None,
-        "routing_config_sha256": routing_config_sha256,
         "gradient_postprocess": "mean",
         "gaussian_sigma": args.gaussian_sigma,
         "gaussian_alpha": args.gaussian_alpha,

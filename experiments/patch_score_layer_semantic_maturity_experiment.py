@@ -1,15 +1,13 @@
 """Describe semantic maturity at every registered patch-score checkpoint.
 
 This experiment is deliberately descriptive: none of its representation
-metrics are allowed to choose the production routing layer.  Layer selection
-is performed only by ``patch_score_routing_calibration.py`` on held-out
-cross-model transfer ASR.
+metrics select the production routing layer.  Attack-layer decisions require
+matched transferable-gradient and transfer-ASR evidence.
 """
 
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import math
 from pathlib import Path
@@ -23,7 +21,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from experiments.patch_score_routing_gradient_experiment import load_samples, normalize, row_spearman
+from experiments.semantic_forward_utils import (
+    load_samples,
+    normalize,
+    row_spearman,
+    write_csv,
+    write_json,
+)
 from nets import PATCH_SCORE_LAYER_CANDIDATES, WHITEBOX_MODEL_CHOICES, build_whitebox_model
 
 
@@ -169,14 +173,6 @@ def mean(rows: list[dict[str, object]], key: str) -> float:
     return sum(values) / len(values)
 
 
-def write_csv(path: Path, rows: list[dict[str, object]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
-
-
 def run_model(model_name: str, names, pixels_cpu, labels_cpu, args, device):
     model = build_whitebox_model(1000, model_name, pretrained=True, device=device).eval()
     layer_rows: dict[str, list[dict[str, object]]] = {}
@@ -318,7 +314,6 @@ def main() -> None:
         all_rows.extend(rows)
         summaries.extend(model_summaries)
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
     write_csv(args.output_dir / "per_image.csv", all_rows)
     write_csv(args.output_dir / "layer_summary.csv", summaries)
     payload = {
@@ -343,9 +338,7 @@ def main() -> None:
             for row in summaries
         ],
     }
-    (args.output_dir / "summary.json").write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    write_json(args.output_dir / "summary.json", payload)
     print(json.dumps(payload, indent=2, ensure_ascii=False))
 
 

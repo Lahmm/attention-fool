@@ -1,0 +1,469 @@
+{
+  "config": {
+    "sources": [
+      "vit_base_patch16_224",
+      "cait_s24_224",
+      "pit_b_224",
+      "visformer_small"
+    ],
+    "targets": [
+      "vit_base_patch16_224",
+      "cait_s24_224",
+      "pit_b_224",
+      "visformer_small"
+    ],
+    "samples": 64,
+    "sample_batch": 8,
+    "route_repeats": 4,
+    "drop_ratio": 0.15,
+    "mask_source": "source-model final local-token map",
+    "gradcam_variants": [
+      "relu",
+      "signed",
+      "abs"
+    ],
+    "seed": 20260717
+  },
+  "results": {
+    "vit_base_patch16_224": {
+      "vit_base_patch16_224": {
+        "patch_score": {
+          "target_logit_drop_mean": 0.09211458452045918,
+          "target_loss_increase_mean": 0.025870513258269057,
+          "target_prediction_changed_rate": 0.0078125
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": 0.13494808599352837,
+          "target_loss_increase_mean": 0.023327420334680937,
+          "target_prediction_changed_rate": 0.01171875
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": 0.1390584111213684,
+          "target_loss_increase_mean": 0.028193435093271546,
+          "target_prediction_changed_rate": 0.0078125
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": 0.13049297221004963,
+          "target_loss_increase_mean": 0.022438866988522932,
+          "target_prediction_changed_rate": 0.0078125
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": 0.09001627005636692,
+          "target_loss_increase_mean": 0.022806838882388547,
+          "target_prediction_changed_rate": 0.0078125
+        }
+      },
+      "cait_s24_224": {
+        "patch_score": {
+          "target_logit_drop_mean": 0.07912815921008587,
+          "target_loss_increase_mean": 0.022530706373800058,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": 0.15839139372110367,
+          "target_loss_increase_mean": 0.02371371566550806,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": 0.16171466931700706,
+          "target_loss_increase_mean": 0.03463359331362881,
+          "target_prediction_changed_rate": 0.01171875
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": 0.12925514206290245,
+          "target_loss_increase_mean": 0.018385800125543028,
+          "target_prediction_changed_rate": 0.0
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": 0.04730347357690334,
+          "target_loss_increase_mean": 0.015392342400446068,
+          "target_prediction_changed_rate": 0.0
+        }
+      },
+      "pit_b_224": {
+        "patch_score": {
+          "target_logit_drop_mean": 0.06764186732470989,
+          "target_loss_increase_mean": 0.038450698397355154,
+          "target_prediction_changed_rate": 0.01171875
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": 0.03193752095103264,
+          "target_loss_increase_mean": 0.02253134871716611,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": 0.039719631895422935,
+          "target_loss_increase_mean": 0.02114859689027071,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": 0.04213012382388115,
+          "target_loss_increase_mean": 0.024996462743729353,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": 0.03331203758716583,
+          "target_loss_increase_mean": 0.022321421769447625,
+          "target_prediction_changed_rate": 0.00390625
+        }
+      },
+      "visformer_small": {
+        "patch_score": {
+          "target_logit_drop_mean": 0.003456003963947296,
+          "target_loss_increase_mean": 0.0506889522948768,
+          "target_prediction_changed_rate": 0.02734375
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": -0.05499170161783695,
+          "target_loss_increase_mean": 0.017809164797654375,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": 0.011178186163306236,
+          "target_loss_increase_mean": 0.046155505639035255,
+          "target_prediction_changed_rate": 0.01953125
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": -0.016537727788090706,
+          "target_loss_increase_mean": 0.029807177692418918,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": 0.008285043761134148,
+          "target_loss_increase_mean": 0.029766405932605267,
+          "target_prediction_changed_rate": 0.00390625
+        }
+      }
+    },
+    "cait_s24_224": {
+      "vit_base_patch16_224": {
+        "patch_score": {
+          "target_logit_drop_mean": 0.08610124886035919,
+          "target_loss_increase_mean": 0.02117475999693852,
+          "target_prediction_changed_rate": 0.0078125
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": 0.10186915472149849,
+          "target_loss_increase_mean": 0.028245329958735965,
+          "target_prediction_changed_rate": 0.0078125
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": 0.08721188269555569,
+          "target_loss_increase_mean": 0.024869649845641106,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": 0.10012943670153618,
+          "target_loss_increase_mean": 0.02493296202737838,
+          "target_prediction_changed_rate": 0.0
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": 0.09001627005636692,
+          "target_loss_increase_mean": 0.022806838882388547,
+          "target_prediction_changed_rate": 0.0078125
+        }
+      },
+      "cait_s24_224": {
+        "patch_score": {
+          "target_logit_drop_mean": 0.030708031728863716,
+          "target_loss_increase_mean": 0.019861001026583835,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": 0.11193765699863434,
+          "target_loss_increase_mean": 0.03626949198951479,
+          "target_prediction_changed_rate": 0.015625
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": 0.105555834248662,
+          "target_loss_increase_mean": 0.03926836307073245,
+          "target_prediction_changed_rate": 0.01171875
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": 0.02980872616171837,
+          "target_loss_increase_mean": 0.014445807813899592,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": 0.04730347357690334,
+          "target_loss_increase_mean": 0.015392342400446068,
+          "target_prediction_changed_rate": 0.0
+        }
+      },
+      "pit_b_224": {
+        "patch_score": {
+          "target_logit_drop_mean": 0.02373291552066803,
+          "target_loss_increase_mean": 0.02482468995731324,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": 0.045541830360889435,
+          "target_loss_increase_mean": 0.03599201628821902,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": 0.05206461623311043,
+          "target_loss_increase_mean": 0.031647361640352756,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": 0.027923744171857834,
+          "target_loss_increase_mean": 0.024585479055531323,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": 0.03331203758716583,
+          "target_loss_increase_mean": 0.022321421769447625,
+          "target_prediction_changed_rate": 0.00390625
+        }
+      },
+      "visformer_small": {
+        "patch_score": {
+          "target_logit_drop_mean": -0.014927614480257034,
+          "target_loss_increase_mean": 0.032652842928655446,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": 0.02959403209388256,
+          "target_loss_increase_mean": 0.04410950266174041,
+          "target_prediction_changed_rate": 0.0078125
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": 0.04286227002739906,
+          "target_loss_increase_mean": 0.05866211070679128,
+          "target_prediction_changed_rate": 0.01171875
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": 0.023272091522812843,
+          "target_loss_increase_mean": 0.04660239946679212,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": 0.008285043761134148,
+          "target_loss_increase_mean": 0.029766405932605267,
+          "target_prediction_changed_rate": 0.00390625
+        }
+      }
+    },
+    "pit_b_224": {
+      "vit_base_patch16_224": {
+        "patch_score": {
+          "target_logit_drop_mean": 0.7266555204987526,
+          "target_loss_increase_mean": 0.16238626930862665,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": 0.6863251477479935,
+          "target_loss_increase_mean": 0.13510011689504609,
+          "target_prediction_changed_rate": 0.015625
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": 0.7042808085680008,
+          "target_loss_increase_mean": 0.14086167588538956,
+          "target_prediction_changed_rate": 0.0078125
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": 0.703000146895647,
+          "target_loss_increase_mean": 0.1385557946487097,
+          "target_prediction_changed_rate": 0.015625
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": 0.708984550088644,
+          "target_loss_increase_mean": 0.15272278123302385,
+          "target_prediction_changed_rate": 0.0
+        }
+      },
+      "cait_s24_224": {
+        "patch_score": {
+          "target_logit_drop_mean": 0.3561187908053398,
+          "target_loss_increase_mean": 0.0402217976807151,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": 0.5282074715942144,
+          "target_loss_increase_mean": 0.05648439666401828,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": 0.5120097137987614,
+          "target_loss_increase_mean": 0.04955188278108835,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": 0.5114688128232956,
+          "target_loss_increase_mean": 0.05686383899592329,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": 0.3718402814120054,
+          "target_loss_increase_mean": 0.04303113913920242,
+          "target_prediction_changed_rate": 0.0
+        }
+      },
+      "pit_b_224": {
+        "patch_score": {
+          "target_logit_drop_mean": 0.18844386748969555,
+          "target_loss_increase_mean": 0.029124034161213785,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": 0.3262281324714422,
+          "target_loss_increase_mean": 0.04940562910633162,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": 0.347012497484684,
+          "target_loss_increase_mean": 0.05583387575461529,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": 0.3390631712973118,
+          "target_loss_increase_mean": 0.05608952621696517,
+          "target_prediction_changed_rate": 0.0
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": 0.21065258607268333,
+          "target_loss_increase_mean": 0.03432794151012786,
+          "target_prediction_changed_rate": 0.0
+        }
+      },
+      "visformer_small": {
+        "patch_score": {
+          "target_logit_drop_mean": 0.025565888732671738,
+          "target_loss_increase_mean": 0.018515273492084816,
+          "target_prediction_changed_rate": 0.0078125
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": -0.04382017441093922,
+          "target_loss_increase_mean": -0.0034411637752782553,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": -0.03639908693730831,
+          "target_loss_increase_mean": -0.006914225348737091,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": -0.004672113806009293,
+          "target_loss_increase_mean": 0.011453888728283346,
+          "target_prediction_changed_rate": 0.0078125
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": -0.039496541023254395,
+          "target_loss_increase_mean": 0.0008232918917201459,
+          "target_prediction_changed_rate": 0.0078125
+        }
+      }
+    },
+    "visformer_small": {
+      "vit_base_patch16_224": {
+        "patch_score": {
+          "target_logit_drop_mean": 0.1498802751302719,
+          "target_loss_increase_mean": 0.02993739236262627,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": 0.18144166097044945,
+          "target_loss_increase_mean": 0.0435274533519987,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": 0.21811063401401043,
+          "target_loss_increase_mean": 0.04994848443311639,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": 0.1870202887803316,
+          "target_loss_increase_mean": 0.04353971617820207,
+          "target_prediction_changed_rate": 0.0
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": 0.14489812217652798,
+          "target_loss_increase_mean": 0.027010543446522206,
+          "target_prediction_changed_rate": 0.0
+        }
+      },
+      "cait_s24_224": {
+        "patch_score": {
+          "target_logit_drop_mean": 0.330855879932642,
+          "target_loss_increase_mean": 0.034164246659202036,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": 0.3606309946626425,
+          "target_loss_increase_mean": 0.04804978708853014,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": 0.3673222195357084,
+          "target_loss_increase_mean": 0.04618885034142295,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": 0.3831643629819155,
+          "target_loss_increase_mean": 0.05097429345914861,
+          "target_prediction_changed_rate": 0.0078125
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": 0.3185057248920202,
+          "target_loss_increase_mean": 0.03718555040541105,
+          "target_prediction_changed_rate": 0.00390625
+        }
+      },
+      "pit_b_224": {
+        "patch_score": {
+          "target_logit_drop_mean": 0.2713400088250637,
+          "target_loss_increase_mean": 0.040163352474337444,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": 0.2921394780278206,
+          "target_loss_increase_mean": 0.04969934211112559,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": 0.29934047907590866,
+          "target_loss_increase_mean": 0.04787709261290729,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": 0.304600365459919,
+          "target_loss_increase_mean": 0.05031162884552032,
+          "target_prediction_changed_rate": 0.00390625
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": 0.26555499620735645,
+          "target_loss_increase_mean": 0.04129047930473462,
+          "target_prediction_changed_rate": 0.0
+        }
+      },
+      "visformer_small": {
+        "patch_score": {
+          "target_logit_drop_mean": -0.011974964290857315,
+          "target_loss_increase_mean": -0.002292051416588947,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_relu": {
+          "target_logit_drop_mean": 0.030810467898845673,
+          "target_loss_increase_mean": 0.02253894743626006,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_signed": {
+          "target_logit_drop_mean": 0.02423660270869732,
+          "target_loss_increase_mean": 0.018354870087932795,
+          "target_prediction_changed_rate": 0.0
+        },
+        "gradcam_abs": {
+          "target_logit_drop_mean": 0.018801577389240265,
+          "target_loss_increase_mean": 0.01781670536729507,
+          "target_prediction_changed_rate": 0.0078125
+        },
+        "random_uniform": {
+          "target_logit_drop_mean": -0.0023219846189022064,
+          "target_loss_increase_mean": -0.002924344618804753,
+          "target_prediction_changed_rate": 0.0
+        }
+      }
+    }
+  }
+}

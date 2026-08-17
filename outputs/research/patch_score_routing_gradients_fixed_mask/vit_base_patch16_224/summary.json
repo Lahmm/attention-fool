@@ -1,0 +1,116 @@
+{
+  "config": {
+    "source": "vit_base_patch16_224",
+    "targets": [
+      "cait_s24_224",
+      "pit_b_224",
+      "visformer_small"
+    ],
+    "layers": [
+      "block6"
+    ],
+    "conditions": [
+      "selected",
+      "opposite",
+      "deviation",
+      "random",
+      "no_drop"
+    ],
+    "samples": 64,
+    "sample_offset": 500,
+    "seed": 20260716,
+    "global_polarity": "high",
+    "epsilon": 0.06274509803921569,
+    "steps": 10,
+    "views": 20,
+    "patch_mask_policy": "clean_fixed_per_attack",
+    "patch_mask_reference": "clean_pixels",
+    "token_score_cls_noise": true,
+    "opponent_strength": 0.2,
+    "gaussian_sigma": 4.0,
+    "gaussian_alpha": 0.75
+  },
+  "route_mean": {
+    "block6": {
+      "selected": {
+        "global_cosine_clean_masked": 0.9977034945040941,
+        "kept_token_cosine_clean_masked": 0.9371741926297545,
+        "score_map_spearman_clean_masked": 0.841158670373261,
+        "clean_route_gradient_cosine": 0.016487458098708885,
+        "view_effective_rank": 19.350237101316452
+      },
+      "opposite": {
+        "global_cosine_clean_masked": 0.9978136494755745,
+        "kept_token_cosine_clean_masked": 0.9272777726873755,
+        "score_map_spearman_clean_masked": 0.6521060634404421,
+        "clean_route_gradient_cosine": 0.01623597750949557,
+        "view_effective_rank": 19.234393507242203
+      },
+      "deviation": {
+        "global_cosine_clean_masked": 0.9978321697562933,
+        "kept_token_cosine_clean_masked": 0.936312492005527,
+        "score_map_spearman_clean_masked": 0.7361948331817985,
+        "clean_route_gradient_cosine": 0.014707785589052946,
+        "view_effective_rank": 19.297594249248505
+      },
+      "random": {
+        "global_cosine_clean_masked": 0.997702170163393,
+        "kept_token_cosine_clean_masked": 0.9309747656807303,
+        "score_map_spearman_clean_masked": 0.7494656732305884,
+        "clean_route_gradient_cosine": 0.01592225653530477,
+        "view_effective_rank": 19.330545961856842
+      },
+      "no_drop": {
+        "global_cosine_clean_masked": 0.9999999860301614,
+        "kept_token_cosine_clean_masked": 1.0,
+        "score_map_spearman_clean_masked": 0.9999999972060323,
+        "clean_route_gradient_cosine": 0.026470026879906072,
+        "view_effective_rank": 19.640861570835114
+      }
+    }
+  },
+  "cross_model_mean": {
+    "block6": {
+      "selected": {
+        "raw_target_gradient_cosine": 0.005293573906935005,
+        "processed_target_gradient_cosine": 0.00566526568172776,
+        "raw_target_sign_agreement": 0.4288720367476344,
+        "processed_target_sign_agreement": 0.5019740941934288,
+        "one_step_target_logit_drop": 0.06498464941978455,
+        "one_step_target_loss_increase": 0.03641255958549058
+      },
+      "opposite": {
+        "raw_target_gradient_cosine": 0.006065911276740128,
+        "processed_target_gradient_cosine": 0.006360957115551476,
+        "raw_target_sign_agreement": 0.42861710162833333,
+        "processed_target_sign_agreement": 0.5021802072102824,
+        "one_step_target_logit_drop": 0.05640618999799093,
+        "one_step_target_loss_increase": 0.03637665734277107
+      },
+      "deviation": {
+        "raw_target_gradient_cosine": 0.005717721922489242,
+        "processed_target_gradient_cosine": 0.006021300328181193,
+        "raw_target_sign_agreement": 0.429111333253483,
+        "processed_target_sign_agreement": 0.5027129159619411,
+        "one_step_target_logit_drop": 0.07347527394692104,
+        "one_step_target_loss_increase": 0.04132354673735487
+      },
+      "random": {
+        "raw_target_gradient_cosine": 0.005094862319310778,
+        "processed_target_gradient_cosine": 0.00545027356929495,
+        "raw_target_sign_agreement": 0.4289978438367446,
+        "processed_target_sign_agreement": 0.5028039858055612,
+        "one_step_target_logit_drop": 0.05793852359056473,
+        "one_step_target_loss_increase": 0.03120349458185956
+      },
+      "no_drop": {
+        "raw_target_gradient_cosine": 0.008516222939912646,
+        "processed_target_gradient_cosine": 0.008880822192774454,
+        "raw_target_sign_agreement": 0.5051325924384097,
+        "processed_target_sign_agreement": 0.5053331013768911,
+        "one_step_target_logit_drop": 0.0957741066813469,
+        "one_step_target_loss_increase": 0.05806883149974359
+      }
+    }
+  }
+}

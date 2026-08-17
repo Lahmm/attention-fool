@@ -1,0 +1,34 @@
+{
+  "model": "pit_b_224",
+  "images": 128,
+  "splits": 64,
+  "calibration_size": 64,
+  "candidate_strategies": [
+    "high_score_extreme",
+    "low_score_extreme",
+    "score_deviation_extreme"
+  ],
+  "baseline_strategy": "random_uniform",
+  "selected_strategy_counts": {
+    "high_score_extreme": 5,
+    "low_score_extreme": 59,
+    "score_deviation_extreme": 0
+  },
+  "selected_strategy_frequency": {
+    "high_score_extreme": 0.078125,
+    "low_score_extreme": 0.921875,
+    "score_deviation_extreme": 0.0
+  },
+  "evaluation_loss_delta_mean": 0.02874032536874438,
+  "evaluation_loss_delta_ci95": [
+    0.02345467908789676,
+    0.034025971649592
+  ],
+  "evaluation_loss_delta_positive_fraction": 0.921875,
+  "evaluation_logit_delta_mean": 0.09229701463482343,
+  "evaluation_logit_delta_ci95": [
+    0.08165893417657358,
+    0.10293509509307328
+  ],
+  "evaluation_logit_delta_positive_fraction": 0.921875
+}

@@ -1,0 +1,104 @@
+{
+  "config": {
+    "model": "visformer_small",
+    "samples": 64,
+    "sample_batch": 8,
+    "route_repeats": 4,
+    "drop_ratio": 0.15,
+    "layers": [
+      {
+        "label": "early",
+        "index": 0
+      },
+      {
+        "label": "mid",
+        "index": 7
+      },
+      {
+        "label": "final",
+        "index": 14
+      }
+    ],
+    "seed": 20260717
+  },
+  "mask_pairwise_iou": {
+    "early:high_score_extreme": 1.0,
+    "early:low_score_extreme": 1.0,
+    "early:random_uniform": 0.0810583308339119,
+    "early:score_deviation_extreme": 1.0,
+    "mid:high_score_extreme": 1.0,
+    "mid:low_score_extreme": 1.0,
+    "mid:random_uniform": 0.0835745632648468,
+    "mid:score_deviation_extreme": 1.0,
+    "final:high_score_extreme": 1.0,
+    "final:low_score_extreme": 1.0,
+    "final:random_uniform": 0.0802411213517189,
+    "final:score_deviation_extreme": 1.0
+  },
+  "early": {
+    "high_score_extreme": {
+      "logit_drop_mean": 0.4321547970175743,
+      "loss_increase_mean": 0.2865847342181951,
+      "prediction_changed_rate": 0.046875
+    },
+    "low_score_extreme": {
+      "logit_drop_mean": 0.6228475868701935,
+      "loss_increase_mean": 0.5028979193884879,
+      "prediction_changed_rate": 0.15625
+    },
+    "random_uniform": {
+      "logit_drop_mean": 1.026507193222642,
+      "loss_increase_mean": 0.6964799402630888,
+      "prediction_changed_rate": 0.1484375
+    },
+    "score_deviation_extreme": {
+      "logit_drop_mean": 0.681636318564415,
+      "loss_increase_mean": 0.5441677945200354,
+      "prediction_changed_rate": 0.140625
+    }
+  },
+  "mid": {
+    "high_score_extreme": {
+      "logit_drop_mean": -0.11474445462226868,
+      "loss_increase_mean": -0.005812018411234021,
+      "prediction_changed_rate": 0.0
+    },
+    "low_score_extreme": {
+      "logit_drop_mean": 0.18309440463781357,
+      "loss_increase_mean": 0.13953838346060365,
+      "prediction_changed_rate": 0.03125
+    },
+    "random_uniform": {
+      "logit_drop_mean": 0.016222765669226646,
+      "loss_increase_mean": 0.04735700640594587,
+      "prediction_changed_rate": 0.015625
+    },
+    "score_deviation_extreme": {
+      "logit_drop_mean": 0.12178443372249603,
+      "loss_increase_mean": 0.11707330879289657,
+      "prediction_changed_rate": 0.015625
+    }
+  },
+  "final": {
+    "high_score_extreme": {
+      "logit_drop_mean": 0.001101367175579071,
+      "loss_increase_mean": 0.006666530505754054,
+      "prediction_changed_rate": 0.0
+    },
+    "low_score_extreme": {
+      "logit_drop_mean": 0.0655197948217392,
+      "loss_increase_mean": 0.026785846799612045,
+      "prediction_changed_rate": 0.0
+    },
+    "random_uniform": {
+      "logit_drop_mean": -0.021140437573194504,
+      "loss_increase_mean": -0.005570470588281751,
+      "prediction_changed_rate": 0.0
+    },
+    "score_deviation_extreme": {
+      "logit_drop_mean": 0.05234488099813461,
+      "loss_increase_mean": 0.020160995540209115,
+      "prediction_changed_rate": 0.0
+    }
+  }
+}

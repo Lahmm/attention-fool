@@ -1,0 +1,143 @@
+{
+  "protocol": {
+    "samples": 128,
+    "sample_seed": 20260717,
+    "attack_seed": 20260716,
+    "image_ids_sha256": "47d5c7def28df577f96def8ab9e5e8b2e1baa07af15464f15aadd24f3dd4e691",
+    "selection_metric": "macro_off_diagonal_transfer_asr_over_other_three_sources",
+    "results_path": "outputs/research/routing_calibration_fixed_mask/results.csv",
+    "global_scores": {
+      "high": 0.7330729166666667,
+      "low": 0.7324218749999999
+    },
+    "best_scores_by_polarity": {
+      "high": {
+        "vit_base_patch16_224": 0.7760416666666666,
+        "cait_s24_224": 0.8489583333333334,
+        "pit_b_224": 0.7473958333333334,
+        "visformer_small": 0.5598958333333334
+      },
+      "low": {
+        "vit_base_patch16_224": 0.7447916666666666,
+        "cait_s24_224": 0.84375,
+        "pit_b_224": 0.7447916666666666,
+        "visformer_small": 0.5963541666666666
+      }
+    }
+  },
+  "layer_scores": {
+    "vit_base_patch16_224": {
+      "high": {
+        "block3": 0.7604166666666666,
+        "block6": 0.7760416666666666,
+        "block9": 0.7473958333333334,
+        "block12": 0.734375
+      },
+      "low": {
+        "block3": 0.7447916666666666,
+        "block6": 0.7291666666666666,
+        "block9": 0.7447916666666666,
+        "block12": 0.734375
+      }
+    },
+    "cait_s24_224": {
+      "high": {
+        "block6_gap": 0.8203125,
+        "block12_gap": 0.8385416666666666,
+        "block18_gap": 0.8333333333333334,
+        "block24_gap": 0.8489583333333334,
+        "block24_class": 0.8333333333333334
+      },
+      "low": {
+        "block6_gap": 0.8411458333333334,
+        "block12_gap": 0.7916666666666666,
+        "block18_gap": 0.8385416666666666,
+        "block24_gap": 0.8333333333333334,
+        "block24_class": 0.84375
+      }
+    },
+    "pit_b_224": {
+      "high": {
+        "stage1_block3": 0.5651041666666666,
+        "stage2_block3": 0.6380208333333334,
+        "stage2_block6": 0.6640625,
+        "stage3_block2": 0.7473958333333334,
+        "stage3_block4": 0.7291666666666666
+      },
+      "low": {
+        "stage1_block3": 0.5807291666666666,
+        "stage2_block3": 0.7447916666666666,
+        "stage2_block6": 0.7291666666666666,
+        "stage3_block2": 0.7317708333333334,
+        "stage3_block4": 0.7369791666666666
+      }
+    },
+    "visformer_small": {
+      "high": {
+        "stage1_block4": 0.390625,
+        "stage1_block7": 0.3958333333333333,
+        "stage2_block4": 0.4921875,
+        "stage3_block2": 0.5598958333333334,
+        "stage3_block4": 0.5390625
+      },
+      "low": {
+        "stage1_block4": 0.22135416666666666,
+        "stage1_block7": 0.23958333333333334,
+        "stage2_block4": 0.4114583333333333,
+        "stage3_block2": 0.5885416666666666,
+        "stage3_block4": 0.5963541666666666
+      }
+    }
+  },
+  "best_layers_by_polarity": {
+    "high": {
+      "vit_base_patch16_224": "block6",
+      "cait_s24_224": "block24_gap",
+      "pit_b_224": "stage3_block2",
+      "visformer_small": "stage3_block2"
+    },
+    "low": {
+      "vit_base_patch16_224": "block9",
+      "cait_s24_224": "block24_class",
+      "pit_b_224": "stage2_block3",
+      "visformer_small": "stage3_block4"
+    }
+  },
+  "selected": {
+    "schema_version": 1,
+    "status": "frozen",
+    "global_polarity": "high",
+    "model_layers": {
+      "vit_base_patch16_224": "block6",
+      "cait_s24_224": "block24_gap",
+      "pit_b_224": "stage3_block2",
+      "visformer_small": "stage3_block2"
+    },
+    "calibration": {
+      "samples": 128,
+      "sample_seed": 20260717,
+      "attack_seed": 20260716,
+      "image_ids_sha256": "47d5c7def28df577f96def8ab9e5e8b2e1baa07af15464f15aadd24f3dd4e691",
+      "selection_metric": "macro_off_diagonal_transfer_asr_over_other_three_sources",
+      "results_path": "outputs/research/routing_calibration_fixed_mask/results.csv",
+      "global_scores": {
+        "high": 0.7330729166666667,
+        "low": 0.7324218749999999
+      },
+      "best_scores_by_polarity": {
+        "high": {
+          "vit_base_patch16_224": 0.7760416666666666,
+          "cait_s24_224": 0.8489583333333334,
+          "pit_b_224": 0.7473958333333334,
+          "visformer_small": 0.5598958333333334
+        },
+        "low": {
+          "vit_base_patch16_224": 0.7447916666666666,
+          "cait_s24_224": 0.84375,
+          "pit_b_224": 0.7447916666666666,
+          "visformer_small": 0.5963541666666666
+        }
+      }
+    }
+  }
+}

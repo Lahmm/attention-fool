@@ -1,0 +1,54 @@
+{
+  "config": {
+    "model": "visformer_small",
+    "samples": 64,
+    "sample_batch": 8,
+    "route_repeats": 4,
+    "drop_ratio": 0.15,
+    "seed": 20260717
+  },
+  "mask_pairwise_iou": {
+    "high_score_extreme": 1.0,
+    "low_score_extreme": 1.0,
+    "random_uniform": 0.07825733721256256,
+    "score_deviation_extreme": 1.0
+  },
+  "strategies": {
+    "high_score_extreme": {
+      "route_logit_drop_mean": 0.001101367175579071,
+      "route_loss_increase_mean": 0.006666530505754054,
+      "global_feature_shift_mean": 0.04866017773747444,
+      "kept_local_feature_shift_mean": 0.18874120083637536,
+      "kept_score_abs_change_mean": 0.06618813163368031,
+      "gradient_cosine_mean": 0.33356883883243427,
+      "gradient_norm_ratio_mean": 1.0231214808300138
+    },
+    "low_score_extreme": {
+      "route_logit_drop_mean": 0.0655197948217392,
+      "route_loss_increase_mean": 0.026785846799612045,
+      "global_feature_shift_mean": 0.04360722750425339,
+      "kept_local_feature_shift_mean": 0.08363661589100957,
+      "kept_score_abs_change_mean": 0.031813009787583724,
+      "gradient_cosine_mean": 0.42526089437888004,
+      "gradient_norm_ratio_mean": 0.9513134281150997
+    },
+    "random_uniform": {
+      "route_logit_drop_mean": -0.0030110981315374374,
+      "route_loss_increase_mean": 0.004576461185934022,
+      "global_feature_shift_mean": 0.045971662271767855,
+      "kept_local_feature_shift_mean": 0.15518285997677594,
+      "kept_score_abs_change_mean": 0.05250324189546518,
+      "gradient_cosine_mean": 0.3426041813727352,
+      "gradient_norm_ratio_mean": 0.9801775608211756
+    },
+    "score_deviation_extreme": {
+      "route_logit_drop_mean": 0.05234488099813461,
+      "route_loss_increase_mean": 0.020160995540209115,
+      "global_feature_shift_mean": 0.044449751265347004,
+      "kept_local_feature_shift_mean": 0.09034855390200391,
+      "kept_score_abs_change_mean": 0.03421638099825941,
+      "gradient_cosine_mean": 0.410782876322628,
+      "gradient_norm_ratio_mean": 0.9872481193160638
+    }
+  }
+}

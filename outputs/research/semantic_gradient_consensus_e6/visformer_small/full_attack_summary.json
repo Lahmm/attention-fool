@@ -1,0 +1,153 @@
+{
+  "protocol": {
+    "experiment": "E6_decoupled_semantic_gradient_full_attack",
+    "source": "visformer_small",
+    "targets": [
+      "vit_base_patch16_224",
+      "cait_s24_224",
+      "pit_b_224"
+    ],
+    "samples": 500,
+    "sample_offset": 0,
+    "conditions": [
+      "opponent_baseline",
+      "shuffled_semantic",
+      "final_semantic_residual"
+    ],
+    "steps": 10,
+    "epsilon": 0.06274509803921569,
+    "semantic_phase": [
+      8,
+      8
+    ],
+    "semantic_branch": "noise_free_final_global_consistency_gradient",
+    "opponent_branch": "20_view_all_token_rgb_opponent_noise_CE_gradient",
+    "patch_drop": false,
+    "whitebox_ensemble": false,
+    "semantic_lambda": 0.25,
+    "gaussian_sigma": 4.0,
+    "gaussian_alpha": 0.75
+  },
+  "target_mean": {
+    "vit_base_patch16_224": {
+      "opponent_baseline": {
+        "clean_accuracy": 0.9980000257492065,
+        "all_asr": 0.4860000014305115,
+        "clean_correct_eligible": 499,
+        "clean_correct_conditional_asr": 0.48697394132614136
+      },
+      "shuffled_semantic": {
+        "clean_accuracy": 0.9980000257492065,
+        "all_asr": 0.49799999594688416,
+        "clean_correct_eligible": 499,
+        "clean_correct_conditional_asr": 0.4989979863166809
+      },
+      "final_semantic_residual": {
+        "clean_accuracy": 0.9980000257492065,
+        "all_asr": 0.49000000953674316,
+        "clean_correct_eligible": 499,
+        "clean_correct_conditional_asr": 0.49098196625709534
+      }
+    },
+    "cait_s24_224": {
+      "opponent_baseline": {
+        "clean_accuracy": 1.0,
+        "all_asr": 0.6600000262260437,
+        "clean_correct_eligible": 500,
+        "clean_correct_conditional_asr": 0.6600000262260437
+      },
+      "shuffled_semantic": {
+        "clean_accuracy": 1.0,
+        "all_asr": 0.656000018119812,
+        "clean_correct_eligible": 500,
+        "clean_correct_conditional_asr": 0.656000018119812
+      },
+      "final_semantic_residual": {
+        "clean_accuracy": 1.0,
+        "all_asr": 0.6359999775886536,
+        "clean_correct_eligible": 500,
+        "clean_correct_conditional_asr": 0.6359999775886536
+      }
+    },
+    "pit_b_224": {
+      "opponent_baseline": {
+        "clean_accuracy": 1.0,
+        "all_asr": 0.7419999837875366,
+        "clean_correct_eligible": 500,
+        "clean_correct_conditional_asr": 0.7419999837875366
+      },
+      "shuffled_semantic": {
+        "clean_accuracy": 1.0,
+        "all_asr": 0.75,
+        "clean_correct_eligible": 500,
+        "clean_correct_conditional_asr": 0.75
+      },
+      "final_semantic_residual": {
+        "clean_accuracy": 1.0,
+        "all_asr": 0.7559999823570251,
+        "clean_correct_eligible": 500,
+        "clean_correct_conditional_asr": 0.7559999823570251
+      }
+    }
+  },
+  "paired_asr_deltas": {
+    "shuffled_semantic": {
+      "vit_base_patch16_224": {
+        "mean_all_asr_delta": 0.012000000104308128,
+        "ci95": [
+          -0.004000000189989805,
+          0.02800000086426735
+        ],
+        "positive_fraction": 0.024000000208616257,
+        "comparisons": 500
+      },
+      "cait_s24_224": {
+        "mean_all_asr_delta": -0.004000000189989805,
+        "ci95": [
+          -0.02199999988079071,
+          0.014000000432133675
+        ],
+        "positive_fraction": 0.017999999225139618,
+        "comparisons": 500
+      },
+      "pit_b_224": {
+        "mean_all_asr_delta": 0.00800000037997961,
+        "ci95": [
+          -0.006000000052154064,
+          0.02199999988079071
+        ],
+        "positive_fraction": 0.017999999225139618,
+        "comparisons": 500
+      }
+    },
+    "final_semantic_residual": {
+      "vit_base_patch16_224": {
+        "mean_all_asr_delta": 0.004000000189989805,
+        "ci95": [
+          -0.017999999225139618,
+          0.026000000536441803
+        ],
+        "positive_fraction": 0.035999998450279236,
+        "comparisons": 500
+      },
+      "cait_s24_224": {
+        "mean_all_asr_delta": -0.024000000208616257,
+        "ci95": [
+          -0.04399999976158142,
+          -0.004000000189989805
+        ],
+        "positive_fraction": 0.014000000432133675,
+        "comparisons": 500
+      },
+      "pit_b_224": {
+        "mean_all_asr_delta": 0.014000000432133675,
+        "ci95": [
+          -0.0020000000949949026,
+          0.029999999329447746
+        ],
+        "positive_fraction": 0.024000000208616257,
+        "comparisons": 500
+      }
+    }
+  }
+}

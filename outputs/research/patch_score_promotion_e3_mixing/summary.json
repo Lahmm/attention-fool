@@ -1,0 +1,140 @@
+{
+  "protocol": {
+    "samples": 16,
+    "sample_offset": 628,
+    "models": [
+      "vit_base_patch16_224",
+      "cait_s24_224",
+      "pit_b_224",
+      "visformer_small"
+    ],
+    "reference": "post-block global representation held fixed across pre/mix/post",
+    "mix_boundary": "input to block.norm2 (post token-mixing residual)"
+  },
+  "results": {
+    "vit_base_patch16_224": {
+      "target_block": "blocks[11]",
+      "conditions": {
+        "promotion": {
+          "mix_gain": 0.3926021605730057,
+          "mlp_gain": 0.04065468654152937,
+          "total_gain": 0.433256845921278
+        },
+        "stable_high": {
+          "mix_gain": 0.39624912664294243,
+          "mlp_gain": 0.025714322735439055,
+          "total_gain": 0.4219634607434273
+        },
+        "stable_low": {
+          "mix_gain": 0.3876952063292265,
+          "mlp_gain": -0.0124685226182919,
+          "total_gain": 0.3752266876399517
+        },
+        "random": {
+          "mix_gain": 0.39485916309058666,
+          "mlp_gain": 0.004010044827737147,
+          "total_gain": 0.39886919409036636
+        }
+      },
+      "promotion_minus_stable_low_mix_gain": 0.004906952381134033,
+      "promotion_minus_random_mix_gain": -0.0022569894790649414,
+      "promotion_mix_gain_ci95": [
+        0.3580045998096466,
+        0.4263191521167755
+      ]
+    },
+    "cait_s24_224": {
+      "target_block": "blocks[23]",
+      "conditions": {
+        "promotion": {
+          "mix_gain": 0.05259863194078207,
+          "mlp_gain": 0.12542388343717903,
+          "total_gain": 0.17802251246757805
+        },
+        "stable_high": {
+          "mix_gain": 0.05528922309167683,
+          "mlp_gain": 0.12916114495601505,
+          "total_gain": 0.18445036630146205
+        },
+        "stable_low": {
+          "mix_gain": 0.050223895988892764,
+          "mlp_gain": 0.0608718030853197,
+          "total_gain": 0.11109569924883544
+        },
+        "random": {
+          "mix_gain": 0.05231812584679574,
+          "mlp_gain": 0.09084081731270999,
+          "total_gain": 0.14315894315950572
+        }
+      },
+      "promotion_minus_stable_low_mix_gain": 0.002374734729528427,
+      "promotion_minus_random_mix_gain": 0.00028050318360328674,
+      "promotion_mix_gain_ci95": [
+        0.040260281413793564,
+        0.06468038260936737
+      ]
+    },
+    "pit_b_224": {
+      "target_block": "transformers[2].blocks[3]",
+      "conditions": {
+        "promotion": {
+          "mix_gain": 0.08717674546642229,
+          "mlp_gain": -0.26478903740644455,
+          "total_gain": -0.1776122935116291
+        },
+        "stable_high": {
+          "mix_gain": 0.08521114735049196,
+          "mlp_gain": -0.2550241071730852,
+          "total_gain": -0.16981296322774142
+        },
+        "stable_low": {
+          "mix_gain": 0.054203323379624635,
+          "mlp_gain": -0.2965038735419512,
+          "total_gain": -0.24230054684448987
+        },
+        "random": {
+          "mix_gain": 0.07076813210733235,
+          "mlp_gain": -0.27294172067195177,
+          "total_gain": -0.2021735911257565
+        }
+      },
+      "promotion_minus_stable_low_mix_gain": 0.032973431050777435,
+      "promotion_minus_random_mix_gain": 0.01640862226486206,
+      "promotion_mix_gain_ci95": [
+        0.055700886994600296,
+        0.11525657027959824
+      ]
+    },
+    "visformer_small": {
+      "target_block": "stage3[3]",
+      "conditions": {
+        "promotion": {
+          "mix_gain": 0.06057056528516114,
+          "mlp_gain": 0.013902595863328315,
+          "total_gain": 0.07447316232719459
+        },
+        "stable_high": {
+          "mix_gain": 0.06354957551229745,
+          "mlp_gain": 0.017575182413565926,
+          "total_gain": 0.08112475846428424
+        },
+        "stable_low": {
+          "mix_gain": 0.06445477996021509,
+          "mlp_gain": 0.04289100624009734,
+          "total_gain": 0.10734578757546842
+        },
+        "random": {
+          "mix_gain": 0.06279173051007092,
+          "mlp_gain": 0.031114175682887435,
+          "total_gain": 0.09390590782277286
+        }
+      },
+      "promotion_minus_stable_low_mix_gain": -0.0038842111825942993,
+      "promotion_minus_random_mix_gain": -0.0022211596369743347,
+      "promotion_mix_gain_ci95": [
+        0.05351103097200394,
+        0.06811613589525223
+      ]
+    }
+  }
+}

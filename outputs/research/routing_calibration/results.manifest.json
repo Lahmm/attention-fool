@@ -1,0 +1,2336 @@
+{
+  "protocol": {
+    "samples": 128,
+    "sample_offset": 500,
+    "attack_seed": 20260716,
+    "selectors": [
+      "patch_score"
+    ],
+    "target_models": [
+      "vit_base_patch16_224",
+      "cait_s24_224",
+      "pit_b_224",
+      "visformer_small"
+    ]
+  },
+  "jobs": [
+    {
+      "source_model": "vit_base_patch16_224",
+      "polarity": "high",
+      "layer": "block3",
+      "attack_output_dir": "outputs/attack/routing_calibration/vit_base_patch16_224/high/block3",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "vit_base_patch16_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block3",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/vit_base_patch16_224/high/block3"
+      ],
+      "eval_commands": {
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/high/block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/high/block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/high/block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "vit_base_patch16_224",
+      "polarity": "high",
+      "layer": "block6",
+      "attack_output_dir": "outputs/attack/routing_calibration/vit_base_patch16_224/high/block6",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "vit_base_patch16_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block6",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/vit_base_patch16_224/high/block6"
+      ],
+      "eval_commands": {
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/high/block6",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/high/block6",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/high/block6",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "vit_base_patch16_224",
+      "polarity": "high",
+      "layer": "block9",
+      "attack_output_dir": "outputs/attack/routing_calibration/vit_base_patch16_224/high/block9",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "vit_base_patch16_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block9",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/vit_base_patch16_224/high/block9"
+      ],
+      "eval_commands": {
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/high/block9",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/high/block9",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/high/block9",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "vit_base_patch16_224",
+      "polarity": "high",
+      "layer": "block12",
+      "attack_output_dir": "outputs/attack/routing_calibration/vit_base_patch16_224/high/block12",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "vit_base_patch16_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block12",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/vit_base_patch16_224/high/block12"
+      ],
+      "eval_commands": {
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/high/block12",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/high/block12",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/high/block12",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "vit_base_patch16_224",
+      "polarity": "low",
+      "layer": "block3",
+      "attack_output_dir": "outputs/attack/routing_calibration/vit_base_patch16_224/low/block3",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "vit_base_patch16_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block3",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/vit_base_patch16_224/low/block3"
+      ],
+      "eval_commands": {
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/low/block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/low/block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/low/block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "vit_base_patch16_224",
+      "polarity": "low",
+      "layer": "block6",
+      "attack_output_dir": "outputs/attack/routing_calibration/vit_base_patch16_224/low/block6",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "vit_base_patch16_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block6",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/vit_base_patch16_224/low/block6"
+      ],
+      "eval_commands": {
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/low/block6",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/low/block6",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/low/block6",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "vit_base_patch16_224",
+      "polarity": "low",
+      "layer": "block9",
+      "attack_output_dir": "outputs/attack/routing_calibration/vit_base_patch16_224/low/block9",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "vit_base_patch16_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block9",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/vit_base_patch16_224/low/block9"
+      ],
+      "eval_commands": {
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/low/block9",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/low/block9",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/low/block9",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "vit_base_patch16_224",
+      "polarity": "low",
+      "layer": "block12",
+      "attack_output_dir": "outputs/attack/routing_calibration/vit_base_patch16_224/low/block12",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "vit_base_patch16_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block12",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/vit_base_patch16_224/low/block12"
+      ],
+      "eval_commands": {
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/low/block12",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/low/block12",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/vit_base_patch16_224/low/block12",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "cait_s24_224",
+      "polarity": "high",
+      "layer": "block6_gap",
+      "attack_output_dir": "outputs/attack/routing_calibration/cait_s24_224/high/block6_gap",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "cait_s24_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block6_gap",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/cait_s24_224/high/block6_gap"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/high/block6_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/high/block6_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/high/block6_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "cait_s24_224",
+      "polarity": "high",
+      "layer": "block12_gap",
+      "attack_output_dir": "outputs/attack/routing_calibration/cait_s24_224/high/block12_gap",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "cait_s24_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block12_gap",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/cait_s24_224/high/block12_gap"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/high/block12_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/high/block12_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/high/block12_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "cait_s24_224",
+      "polarity": "high",
+      "layer": "block18_gap",
+      "attack_output_dir": "outputs/attack/routing_calibration/cait_s24_224/high/block18_gap",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "cait_s24_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block18_gap",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/cait_s24_224/high/block18_gap"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/high/block18_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/high/block18_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/high/block18_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "cait_s24_224",
+      "polarity": "high",
+      "layer": "block24_gap",
+      "attack_output_dir": "outputs/attack/routing_calibration/cait_s24_224/high/block24_gap",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "cait_s24_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block24_gap",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/cait_s24_224/high/block24_gap"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/high/block24_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/high/block24_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/high/block24_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "cait_s24_224",
+      "polarity": "high",
+      "layer": "block24_class",
+      "attack_output_dir": "outputs/attack/routing_calibration/cait_s24_224/high/block24_class",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "cait_s24_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block24_class",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/cait_s24_224/high/block24_class"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/high/block24_class",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/high/block24_class",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/high/block24_class",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "cait_s24_224",
+      "polarity": "low",
+      "layer": "block6_gap",
+      "attack_output_dir": "outputs/attack/routing_calibration/cait_s24_224/low/block6_gap",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "cait_s24_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block6_gap",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/cait_s24_224/low/block6_gap"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/low/block6_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/low/block6_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/low/block6_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "cait_s24_224",
+      "polarity": "low",
+      "layer": "block12_gap",
+      "attack_output_dir": "outputs/attack/routing_calibration/cait_s24_224/low/block12_gap",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "cait_s24_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block12_gap",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/cait_s24_224/low/block12_gap"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/low/block12_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/low/block12_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/low/block12_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "cait_s24_224",
+      "polarity": "low",
+      "layer": "block18_gap",
+      "attack_output_dir": "outputs/attack/routing_calibration/cait_s24_224/low/block18_gap",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "cait_s24_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block18_gap",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/cait_s24_224/low/block18_gap"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/low/block18_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/low/block18_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/low/block18_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "cait_s24_224",
+      "polarity": "low",
+      "layer": "block24_gap",
+      "attack_output_dir": "outputs/attack/routing_calibration/cait_s24_224/low/block24_gap",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "cait_s24_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block24_gap",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/cait_s24_224/low/block24_gap"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/low/block24_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/low/block24_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/low/block24_gap",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "cait_s24_224",
+      "polarity": "low",
+      "layer": "block24_class",
+      "attack_output_dir": "outputs/attack/routing_calibration/cait_s24_224/low/block24_class",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "cait_s24_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "block24_class",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/cait_s24_224/low/block24_class"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/low/block24_class",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/low/block24_class",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/cait_s24_224/low/block24_class",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "pit_b_224",
+      "polarity": "high",
+      "layer": "stage1_block3",
+      "attack_output_dir": "outputs/attack/routing_calibration/pit_b_224/high/stage1_block3",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "pit_b_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage1_block3",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/pit_b_224/high/stage1_block3"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/high/stage1_block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/high/stage1_block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/high/stage1_block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "pit_b_224",
+      "polarity": "high",
+      "layer": "stage2_block3",
+      "attack_output_dir": "outputs/attack/routing_calibration/pit_b_224/high/stage2_block3",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "pit_b_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage2_block3",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/pit_b_224/high/stage2_block3"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/high/stage2_block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/high/stage2_block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/high/stage2_block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "pit_b_224",
+      "polarity": "high",
+      "layer": "stage2_block6",
+      "attack_output_dir": "outputs/attack/routing_calibration/pit_b_224/high/stage2_block6",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "pit_b_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage2_block6",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/pit_b_224/high/stage2_block6"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/high/stage2_block6",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/high/stage2_block6",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/high/stage2_block6",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "pit_b_224",
+      "polarity": "high",
+      "layer": "stage3_block2",
+      "attack_output_dir": "outputs/attack/routing_calibration/pit_b_224/high/stage3_block2",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "pit_b_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage3_block2",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/pit_b_224/high/stage3_block2"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/high/stage3_block2",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/high/stage3_block2",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/high/stage3_block2",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "pit_b_224",
+      "polarity": "high",
+      "layer": "stage3_block4",
+      "attack_output_dir": "outputs/attack/routing_calibration/pit_b_224/high/stage3_block4",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "pit_b_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage3_block4",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/pit_b_224/high/stage3_block4"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/high/stage3_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/high/stage3_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/high/stage3_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "pit_b_224",
+      "polarity": "low",
+      "layer": "stage1_block3",
+      "attack_output_dir": "outputs/attack/routing_calibration/pit_b_224/low/stage1_block3",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "pit_b_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage1_block3",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/pit_b_224/low/stage1_block3"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/low/stage1_block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/low/stage1_block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/low/stage1_block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "pit_b_224",
+      "polarity": "low",
+      "layer": "stage2_block3",
+      "attack_output_dir": "outputs/attack/routing_calibration/pit_b_224/low/stage2_block3",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "pit_b_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage2_block3",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/pit_b_224/low/stage2_block3"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/low/stage2_block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/low/stage2_block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/low/stage2_block3",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "pit_b_224",
+      "polarity": "low",
+      "layer": "stage2_block6",
+      "attack_output_dir": "outputs/attack/routing_calibration/pit_b_224/low/stage2_block6",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "pit_b_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage2_block6",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/pit_b_224/low/stage2_block6"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/low/stage2_block6",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/low/stage2_block6",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/low/stage2_block6",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "pit_b_224",
+      "polarity": "low",
+      "layer": "stage3_block2",
+      "attack_output_dir": "outputs/attack/routing_calibration/pit_b_224/low/stage3_block2",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "pit_b_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage3_block2",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/pit_b_224/low/stage3_block2"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/low/stage3_block2",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/low/stage3_block2",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/low/stage3_block2",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "pit_b_224",
+      "polarity": "low",
+      "layer": "stage3_block4",
+      "attack_output_dir": "outputs/attack/routing_calibration/pit_b_224/low/stage3_block4",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "pit_b_224",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage3_block4",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/pit_b_224/low/stage3_block4"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/low/stage3_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/low/stage3_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "visformer_small": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/pit_b_224/low/stage3_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "visformer_small",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "visformer_small",
+      "polarity": "high",
+      "layer": "stage1_block4",
+      "attack_output_dir": "outputs/attack/routing_calibration/visformer_small/high/stage1_block4",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "visformer_small",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage1_block4",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/visformer_small/high/stage1_block4"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/high/stage1_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/high/stage1_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/high/stage1_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "visformer_small",
+      "polarity": "high",
+      "layer": "stage1_block7",
+      "attack_output_dir": "outputs/attack/routing_calibration/visformer_small/high/stage1_block7",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "visformer_small",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage1_block7",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/visformer_small/high/stage1_block7"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/high/stage1_block7",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/high/stage1_block7",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/high/stage1_block7",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "visformer_small",
+      "polarity": "high",
+      "layer": "stage2_block4",
+      "attack_output_dir": "outputs/attack/routing_calibration/visformer_small/high/stage2_block4",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "visformer_small",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage2_block4",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/visformer_small/high/stage2_block4"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/high/stage2_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/high/stage2_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/high/stage2_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "visformer_small",
+      "polarity": "high",
+      "layer": "stage3_block2",
+      "attack_output_dir": "outputs/attack/routing_calibration/visformer_small/high/stage3_block2",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "visformer_small",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage3_block2",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/visformer_small/high/stage3_block2"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/high/stage3_block2",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/high/stage3_block2",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/high/stage3_block2",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "visformer_small",
+      "polarity": "high",
+      "layer": "stage3_block4",
+      "attack_output_dir": "outputs/attack/routing_calibration/visformer_small/high/stage3_block4",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "visformer_small",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage3_block4",
+        "--patch-dropout-score-mode",
+        "high",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/visformer_small/high/stage3_block4"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/high/stage3_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/high/stage3_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/high/stage3_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "visformer_small",
+      "polarity": "low",
+      "layer": "stage1_block4",
+      "attack_output_dir": "outputs/attack/routing_calibration/visformer_small/low/stage1_block4",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "visformer_small",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage1_block4",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/visformer_small/low/stage1_block4"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/low/stage1_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/low/stage1_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/low/stage1_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "visformer_small",
+      "polarity": "low",
+      "layer": "stage1_block7",
+      "attack_output_dir": "outputs/attack/routing_calibration/visformer_small/low/stage1_block7",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "visformer_small",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage1_block7",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/visformer_small/low/stage1_block7"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/low/stage1_block7",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/low/stage1_block7",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/low/stage1_block7",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "visformer_small",
+      "polarity": "low",
+      "layer": "stage2_block4",
+      "attack_output_dir": "outputs/attack/routing_calibration/visformer_small/low/stage2_block4",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "visformer_small",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage2_block4",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/visformer_small/low/stage2_block4"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/low/stage2_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/low/stage2_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/low/stage2_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "visformer_small",
+      "polarity": "low",
+      "layer": "stage3_block2",
+      "attack_output_dir": "outputs/attack/routing_calibration/visformer_small/low/stage3_block2",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "visformer_small",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage3_block2",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/visformer_small/low/stage3_block2"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/low/stage3_block2",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/low/stage3_block2",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/low/stage3_block2",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ]
+      }
+    },
+    {
+      "source_model": "visformer_small",
+      "polarity": "low",
+      "layer": "stage3_block4",
+      "attack_output_dir": "outputs/attack/routing_calibration/visformer_small/low/stage3_block4",
+      "attack_command": [
+        "python",
+        "main.py",
+        "--whitebox-model",
+        "visformer_small",
+        "--max-attacked-samples",
+        "128",
+        "--sample-offset",
+        "500",
+        "--seed",
+        "20260716",
+        "--patch-score-layer",
+        "stage3_block4",
+        "--patch-dropout-score-mode",
+        "low",
+        "--patch-selector",
+        "patch_score",
+        "--output-dir",
+        "outputs/attack/routing_calibration/visformer_small/low/stage3_block4"
+      ],
+      "eval_commands": {
+        "vit_base_patch16_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/low/stage3_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "vit_base_patch16_224",
+          "--no-record"
+        ],
+        "cait_s24_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/low/stage3_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "cait_s24_224",
+          "--no-record"
+        ],
+        "pit_b_224": [
+          "python",
+          "transfer_eval.py",
+          "--image-dir",
+          "outputs/attack/routing_calibration/visformer_small/low/stage3_block4",
+          "--prefix",
+          "adv_",
+          "--model-name",
+          "pit_b_224",
+          "--no-record"
+        ]
+      }
+    }
+  ]
+}

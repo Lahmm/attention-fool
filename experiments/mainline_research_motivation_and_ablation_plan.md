@@ -1,6 +1,6 @@
 # Patch-Score Routing Attack：研究动机、方法故事与后续实验计划
 
-> **历史文档。** 本文保留早期实验动机与已完成边界结果，不再作为当前选层、极性或主实验协议。当前权威协议见 [`patch_score_routing_layer_story_and_protocol.md`](patch_score_routing_layer_story_and_protocol.md)：模型可以选择不同层，但必须冻结同一个全局 score 极性；选层依据是独立校准集上的跨模型迁移 ASR，而不是 clean-output suppression。
+> **历史文档。** 本文保留早期实验动机与已完成边界结果，不再作为当前选层、极性或主实验协议。旧 calibration/fixed-mask 协议及其可执行代码已经退出；当前动态-mask生产协议与保留接口以仓库根目录 `README.md` 为准。
 
 ## 1. 研究定位
 

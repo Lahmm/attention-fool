@@ -1,5 +1,7 @@
 # Patch-score 路由选层：论文故事与完整实验协议
 
+> **历史协议归档。** 本文记录已经完成的 calibration、fixed-mask 和 selector-suite 协议；相关可执行脚本已移除，正式结果保存在 `outputs/research/` 并由 `results/` 建立索引。当前生产协议与可执行边界以仓库根目录 `README.md` 为准，下文命令不可再作为当前入口。
+
 ## 1. 论文主张
 
 本工作的起点不是证明高层 patch-score 会迁移到背景，也不是把 patch-score 解释为单 patch 因果显著性。需要检验的核心故事是：

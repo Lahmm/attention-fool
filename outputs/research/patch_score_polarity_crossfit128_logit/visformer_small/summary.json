@@ -1,0 +1,35 @@
+{
+  "model": "visformer_small",
+  "images": 128,
+  "splits": 64,
+  "calibration_size": 64,
+  "candidate_strategies": [
+    "high_score_extreme",
+    "low_score_extreme",
+    "score_deviation_extreme"
+  ],
+  "baseline_strategy": "random_uniform",
+  "selection_metric": "logit",
+  "selected_strategy_counts": {
+    "high_score_extreme": 16,
+    "low_score_extreme": 37,
+    "score_deviation_extreme": 11
+  },
+  "selected_strategy_frequency": {
+    "high_score_extreme": 0.25,
+    "low_score_extreme": 0.578125,
+    "score_deviation_extreme": 0.171875
+  },
+  "evaluation_loss_delta_mean": -0.0036538927188303205,
+  "evaluation_loss_delta_ci95": [
+    -0.005816898093174202,
+    -0.0014908873444864387
+  ],
+  "evaluation_loss_delta_positive_fraction": 0.3125,
+  "evaluation_logit_delta_mean": 0.016679933905834332,
+  "evaluation_logit_delta_ci95": [
+    0.011622706627780865,
+    0.0217371611838878
+  ],
+  "evaluation_logit_delta_positive_fraction": 0.828125
+}

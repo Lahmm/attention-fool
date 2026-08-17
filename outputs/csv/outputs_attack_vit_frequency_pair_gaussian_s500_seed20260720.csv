@@ -1,0 +1,50 @@
+exp_name,timestamp,git_head,adv_dir,adv_image_count,avg,avg_vit,avg_cnn,image_dir,prefix,model_name,batch_size,num_workers,prefetch_factor,amp,tf32,num_images,attack_params,levit_256,pit_b_224,deit_base_patch16_224,tnt_s_patch16_224,convit_base,visformer_small,cait_s24_224,inception_v3,inception_v4,inception_resnet_v2,resnet101,inception_v3_adv,inception_resnet_v2_adv
+vit_frequency_pair_gaussian_s500_seed20260720,2026-07-20 20:51:54,19802c2a,outputs/attack/vit_frequency_pair_gaussian_s500_seed20260720,500,0.5947692307692308,0.664,0.5139999999999999,outputs/attack/vit_frequency_pair_gaussian_s500_seed20260720,adv_,"levit_256,pit_b_224,deit_base_patch16_224,tnt_s_patch16_224,convit_base,visformer_small,cait_s24_224,inception_v3,inception_v4,inception_resnet_v2,resnet101,inception_v3_adv,inception_resnet_v2_adv",128,8,4,True,True,500,"{
+  ""experiment"": ""frequency_pair_attack"",
+  ""whitebox_model"": ""vit_base_patch16_224"",
+  ""max_attacked_samples"": 500,
+  ""epsilon"": 0.06274509803921569,
+  ""step_size"": 0.006274509803921568,
+  ""steps"": 10,
+  ""seed"": 20260720,
+  ""batch_size"": 16,
+  ""input_diversity_groups"": 10,
+  ""input_diversity_views_per_group"": 2,
+  ""input_diversity_total_views"": 20,
+  ""patch_dropout_ratio"": 0.3,
+  ""patch_dropout_score_mode"": ""high"",
+  ""patch_dropout_sampling_mode"": ""random"",
+  ""token_score_cls_noise"": true,
+  ""post_dropout_feature_noise_type"": ""gaussian"",
+  ""post_dropout_feature_noise_strength"": 0.2,
+  ""gaussian_alpha"": 0.0,
+  ""score_source"": ""blocks[11]"",
+  ""patch_score_layer"": ""final"",
+  ""score_grid"": [
+    14,
+    14
+  ],
+  ""target_patch_drop_ratio"": 0.15,
+  ""actual_patch_drop_count"": 29,
+  ""actual_patch_drop_ratio"": 0.14795918367346939,
+  ""feature_noise_type"": ""feature_iid_gaussian"",
+  ""post_dropout_feature_noise_position"": ""initial"",
+  ""gaussian_sigma"": 4.0,
+  ""model_mean"": [
+    0.5,
+    0.5,
+    0.5
+  ],
+  ""model_std"": [
+    0.5,
+    0.5,
+    0.5
+  ],
+  ""experimental_augmentation"": ""frequency_low_high_pair"",
+  ""frequency_decomposition"": ""complementary_fourier_gaussian"",
+  ""frequency_sigma"": 2.0,
+  ""frequency_low_residual_scale"": 0.0,
+  ""frequency_high_residual_scale"": 2.0,
+  ""frequency_merge"": ""raw_gradient_mean"",
+  ""mainline_code_modified"": false
+}",0.6599999999999999,0.594,0.64,0.6699999999999999,0.624,0.6,0.86,0.558,0.52,0.496,0.526,0.53,0.45399999999999996

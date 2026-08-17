@@ -1,57 +1,28 @@
 # Patch-Score Routing Attack
 
-本仓库当前主线研究一种“语义路由 + 颜色结构随机扰动”的黑盒迁移攻击，重点不是继续堆叠攻击技巧，而是围绕两个核心机制建立清晰、可分析且自洽的文章方法：
+本项目研究一种面向黑盒迁移的“语义路由 + 颜色结构随机扰动”攻击。当前代码只保留两类内容：完整攻击主线与必要对照，以及用于发现跨模型前向语义共性的五条可复现实验链。已经证伪或退出主线的探索仅保留正式结果，不再暴露可执行入口。
 
-1. **Patch-score 引导的 patch drop：扰动应该放在哪里？**
-2. **RGB opponent-channel 随机噪声：保留信息应该如何被扰动？**
+## 当前主线
 
-前者负责空间选择，后者负责扰动形态。核心假设是：patch-score 提供一个 label-free、gradient-independent 的 global/local 表示路由坐标；drop 该坐标中的候选位置并扰动剩余证据，可能重组源模型的梯度路径并增加跨模型共享成分。它不是单 patch 因果显著性定义。
+主线由两个核心机制组成：
 
-默认主线为：
+1. **patch-score-guided patch drop**：用 global/local 表示余弦关系提供 label-free、gradient-independent 的语义坐标，决定在哪里扰动；
+2. **RGB opponent-channel noise**：在亮度、红绿和黄蓝方向采样，再经过模型首层 RGB projection，决定如何扰动保留证据。
+
+生产默认是动态 mask 的 `original_score_postdrop_phase_pair`：每个攻击 step、每个 augmentation group 都在当前对抗像素上重算 final-layer patch score，并从 high-score half 随机采样新 mask；仅同组 original/phase 两个视图共享 mask。默认 10 steps × 10 groups，因此每张图选择 100 次 mask。
 
 ```text
-final-layer global/local patch score on the current adversarial image
-→ high-score-tail candidate stochastic pixel patch dropout per step/group
-→ original / phase-shifted view pair
-→ kept-only feature noise at the initial RGB projection
+current adversarial pixels
+→ final-layer global/local patch score
+→ random drop from high-score half
+→ original / phase-shift pair with a shared group mask
+→ kept-only opponent noise at the initial RGB projection
 → raw 20-view gradient mean
-→ Gaussian gradient residual
-→ MI-FGSM update
+→ Gaussian residual (sigma=4, alpha=0.75)
+→ MI update
 ```
 
-## 安装与数据
-
-```bash
-pip install -r requirements.txt
-```
-
-默认使用 `data/clean_resized_images` 中的 1000 张 ImageNet 验证图像，以及
-`data/image_name_to_class_id_and_name.json` 标签文件。模型权重默认从项目内的
-`data/huggingface` 离线缓存加载。
-
-## 研究主线与方法动机
-
-### Patch-score 路由：从随机删 patch 变成语义选择性删 patch
-
-普通 patch dropout 只控制删多少，不回答删哪里。当前动态主线在每个攻击 step 的每个 group 上，对当前对抗图像提取 final-layer global representation 和 local patch tokens，用二者余弦相似度得到 patch-score。攻击从 high-score-tail 候选区随机抽取少量 patch，并把 mask 映射回像素空间。同一 group 的 original/phase 两条 view 共用这一个 mask；不同 group 和不同 step 重新计算 score 并重新采样 mask。
-
-研究把它当作一个**语义路由器**来分析：相同 native token ratio 下，不同层的 score-guided drop 是否重组 kept-token 表示、多视图梯度和跨模型梯度？哪一层能产生更高的 held-out transfer ASR？最终层只是对照，不是预设答案。clean logit、单 patch occlusion 和 source feature change 只作为边界诊断，不能用于选层。
-
-完整的冻结规则、Grad-CAM 对照和实验命令见 [候选层路由论文协议](experiments/patch_score_routing_layer_story_and_protocol.md)。
-
-### RGB opponent-channel noise：从各向同性噪声变成颜色结构扰动
-
-普通 feature-space IID Gaussian 只表达“有随机扰动”，没有表达 RGB 输入本身的颜色几何，也没有利用模型第一层如何把 RGB 混合成特征。当前默认噪声在亮度、红绿对抗、黄蓝对抗三个 opponent-channel 方向上采样，再通过真实首层 RGB projection 映射到初始特征空间，并按当前特征 RMS 缩放。
-
-文章动机应明确为：颜色对抗方向提供了比独立 RGB/feature Gaussian 更有结构的随机扰动坐标，而首层 projection 让该坐标与模型的输入通道混合保持一致。噪声只注入 kept tokens，使 patch-score 负责“删掉哪些语义证据”，opponent noise 负责“扰动剩余证据的颜色表达”，形成清晰的职责分工。
-
-后续重点分析三类颜色方向、噪声协方差和频谱、initial projection 注入位置、kept-only 与其他 mask 策略，以及 RMS matching 对有效扰动强度的影响。
-
-### 其他组件的定位
-
-phase-shifted view pair、20-view raw gradient mean、Gaussian gradient residual 和 MI-FGSM 是稳定梯度估计和完成优化的支撑组件，不应喧宾夺主。最终有效性指标是 target-clean-correct transfer ASR；直接机制证据包括跨模型 gradient cosine、sign agreement、held-out target one-step response 和多视图 effective rank。
-
-## 默认主线
+默认运行：
 
 ```bash
 python main.py \
@@ -60,90 +31,78 @@ python main.py \
   --output-dir outputs/attack/vit_mainline
 ```
 
-默认 production run 使用历史动态-mask的 `final/high` 行为。`--routing-config` 仍可用于冻结层实验，但不再定义默认生产主线。
+默认数据位于 `data/clean_resized_images`，标签为 `data/image_name_to_class_id_and_name.json`，模型从 `data/huggingface` 离线缓存读取。
 
-默认设置为 1000 样本、`epsilon=16/255`、10 steps、10 groups × 2 views、约 15%
-实际 patch drop、kept-only opponent-projected RGB 噪声，以及：
+## 保留的攻击接口
 
-```text
-g' = g + 0.75 * GaussianBlur(g, sigma=4)
-```
-
-Gaussian residual 位于 20-view raw mean 之后、MI 累积之前。它保留完整原始梯度，
-并不是用低通梯度替换原始方向。设置 `--gaussian-alpha 0` 可复现 raw-mean 路径。
-
-### 两种保留的噪声实现
-
-代码保留两种噪声实现，二者都固定注入到 initial RGB projection 输出，并且只作用于
-kept tokens。文章主线优先研究 `opponent_projected`；`gaussian` 主要作为结构噪声对照：
-
-- `opponent_projected`（默认）：在 opponent-channel RGB 基上采样，再通过首层 RGB
-  projection 映射到特征空间。
-- `gaussian`：直接在初始投影特征上采样 IID Gaussian。
-
-两者都按当前特征 RMS 缩放。切换到普通 Gaussian：
-
-```bash
-python main.py \
-  --post-dropout-feature-noise-type gaussian \
-  --output-dir outputs/attack/vit_feature_gaussian
-```
-
-## 保留的对照攻击
-
-仓库继续支持 `none`、通用 pixel `patch_dropout` 和 ViT `token_patch_dropout`，以及
-MI、NI、DIM、TI。它们用于隔离两个核心机制，而不是作为后续主线继续堆叠的方向。
-
-```bash
-# 通用 pixel patch dropout
-python main.py \
-  --attack-method patch_dropout \
-  --guide-aug-copies 20 \
-  --feature-layer -1 \
-  --gaussian-alpha 0 \
-  --output-dir outputs/attack/patch_dropout
-
-# ViT token dropout
-python main.py \
-  --attack-method token_patch_dropout \
-  --input-diversity-groups 20 \
-  --input-diversity-views-per-group 1 \
-  --gaussian-alpha 0 \
-  --output-dir outputs/attack/token_patch_dropout
-
-# 基础 MI + NI + DIM + TI
-python main.py \
-  --attack-method none \
-  --dim --ni --ti-sigma 1.0 \
-  --gaussian-alpha 0 \
-  --output-dir outputs/attack/dim_ti_ni
-```
-
-默认 phase-pair 主线不与 DIM 叠加。所有 group/view 配置仍受每步最多 20 次实际
-model view 的限制。
-
-## 白盒模型与候选路由层
-
-| 模型 | 预注册候选层 | global 表示 |
+| 类别 | 当前保留接口 | 定位 |
 | --- | --- | --- |
-| `vit_base_patch16_224` | block 3/6/9/12 | CLS |
-| `cait_s24_224` | block 6/12/18/24 GAP；block24 class | GAP / class-attention CLS |
-| `pit_b_224` | stage1 b3；stage2 b3/b6；stage3 b2/b4 | CLS |
-| `visformer_small` | stage1 b4/b7；stage2 b4；stage3 b2/b4 | GAP |
+| 生产主线 | `original_score_postdrop_phase_pair` | 动态 patch-score mask + original/phase + kept-only feature noise |
+| 基础路径 | `none` | 无 patch drop 的优化基线 |
+| 像素对照 | `patch_dropout` | 通用 pixel patch dropout |
+| token 对照 | `token_patch_dropout` | ViT token patch dropout |
+| 优化与增强 | MI、NI、DIM、TI | 支撑机制和受控消融，不是新的论文主机制 |
+| 主线路由选择 | `patch_score`、`random`、`no_drop` | 语义路由、随机路由、无 drop 对照 |
 
-跨层公平性固定 native token ratio：候选集为一半 tokens，实际 drop 约 15%。128图校准和500图selector suite属于已完成的固定-mask历史研究协议，不再覆盖当前动态-mask生产主线。
-
-## 迁移评估
+`none`、pixel `patch_dropout`、token `patch_dropout` 与 NI/DIM/TI 的示例：
 
 ```bash
-python transfer_eval.py \
-  --image-dir outputs/attack/vit_mainline \
-  --prefix adv_
+python main.py --attack-method none --dim --ni --ti-sigma 1.0 \
+  --gaussian-alpha 0 --output-dir outputs/attack/dim_ti_ni
+
+python main.py --attack-method patch_dropout --guide-aug-copies 20 \
+  --feature-layer -1 --gaussian-alpha 0 \
+  --output-dir outputs/attack/pixel_patch_dropout
+
+python main.py --attack-method token_patch_dropout \
+  --input-diversity-groups 20 --input-diversity-views-per-group 1 \
+  --gaussian-alpha 0 --output-dir outputs/attack/token_patch_dropout
 ```
 
-迁移评估使用 7 个 Transformer 和 6 个 CNN，并将结果写入 `outputs/csv`。ASR 用于
-检验迁移性，不作为后续工作的唯一目标。保留的
-1000 样本历史结果与完整方法说明见
-`experiments/mainline_data_aug_gaussian_story_s1000.md`。其中已有 CaiT/PiT/Visformer
-结果是 raw mean；当前代码对四个白盒默认启用 Gaussian residual，但不将未运行的
-全模型 Gaussian 配置描述为已有实验结论。
+默认 phase-pair 主线不与 DIM 组合。每步实际 model views 上限为 20。主线还保留 `gaussian` feature noise 作为 `opponent_projected` 的结构对照，并可用 `--gaussian-alpha 0` 关闭梯度 Gaussian residual。
+
+## 保留的前向语义实验
+
+| 探索方向 | 可执行脚本 | 正式产物 | 已支持的结论 | 对应主线参数 |
+| --- | --- | --- | --- | --- |
+| 语义成熟度 | `experiments/patch_score_layer_semantic_maturity_experiment.py` | `outputs/research/patch_score_layer_semantic_maturity/` | 四种架构均存在随深度发展的 global/local 语义结构；clean-output 敏感度不用于选攻击层 | `--patch-score-layer`，生产默认仍为 `final` |
+| 跨层语义晋升 | `experiments/patch_score_promotion_observation.py` | `outputs/research/patch_score_promotion_e1_e2/` | patch 排名会从 early 到 final 系统性重排；共性是功能过程，不是固定空间模板 | final-layer `patch_score` 路由的表示依据 |
+| 末层混合来源 | `experiments/patch_score_promotion_mixing_experiment.py` | `outputs/research/patch_score_promotion_e3_mixing/` | 晋升主要发生在末层 mixing 边界，可跨架构用同一 global/local 语言描述 | `patch_score_layer=final` 的机制解释 |
+| 同激活 Grad-CAM | `experiments/patch_score_same_activation_experiment.py` | `outputs/research/patch_score_same_activation64/summary.json` | patch-score 与 Grad-CAM 在同一激活上部分重合但判据不同；不证明任一 selector 普遍更优 | Grad-CAM 仅作语义标准对照，不是主线 selector |
+| 语义等价视图 | `experiments/semantic_equivalent_route_experiment.py` | `outputs/research/semantic_equivalent_route_e5_forward/` | phase/noise 视图可保持 global 语义，同时显著改变 local route；不同架构共享这一现象 | phase set、opponent/feature Gaussian、view groups |
+
+五个脚本共享 `experiments/semantic_forward_utils.py`，负责数据切片、归一化、公共网格、rank/Spearman、bootstrap、结果写出和同激活捕获。它们不再依赖旧 selector calibration 或语义梯度实验。
+
+从 semantic 角度，目前证据只支持以下边界内共性：
+
+- global/local 语义关系会随网络深度成熟并发生 patch 排名重组；
+- 末层 token mixing 是这一重组的重要共同边界；
+- global 语义近似保持时，local routing 仍可被 phase/noise 系统性改变；
+- 跨模型共性是“语义路由的功能形式”，不是每张图、每个模型共享同一张空间 mask；
+- patch-score 与 class-conditioned Grad-CAM 是不同但可能部分重叠的语义标准。
+
+## 主线与历史实验边界
+
+当前可执行研究代码只有：
+
+- `main.py`、`attack.py`、`gradient_replay.py`、`transfer_eval.py`；
+- `nets/` 中四种白盒模型 adapter；
+- 上述五个 forward-semantic 实验及公共工具；
+- 与这些路径对应的测试。
+
+clean-output causality/polarity/layer/route-response、固定 mask calibration、selector suite、Grad-CAM Protocol B/transfer/stability、E4 与 E5-gradient/E6-E10、frequency pair、patch shuffle 的可执行代码已经移除。它们的正式结果和结论仍保存在 [结果归档](results/README.md)；这些结果是边界证据，不得覆盖当前动态 mask 生产策略。
+
+## 迁移评估与测试
+
+```bash
+python transfer_eval.py --image-dir outputs/attack/vit_mainline --prefix adv_
+python -m unittest discover -s tests
+```
+
+迁移评估覆盖项目注册的 Transformer/CNN target，并写入 `outputs/csv`。最终有效性以 target-clean-correct transfer ASR 为准，同时关注 cross-model gradient cosine、sign agreement、held-out one-step response 与 full iterative transfer；source clean-logit suppression 不能替代这些指标。
+
+安装依赖：
+
+```bash
+pip install -r requirements.txt
+```

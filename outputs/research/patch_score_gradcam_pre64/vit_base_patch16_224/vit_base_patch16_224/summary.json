@@ -1,0 +1,78 @@
+{
+  "config": {
+    "model": "vit_base_patch16_224",
+    "samples": 64,
+    "sample_batch": 8,
+    "route_repeats": 4,
+    "drop_ratio": 0.15,
+    "target_mode": "predicted",
+    "score_layer": "final",
+    "gradcam": "token Grad-CAM ReLU on logit-connected final-block input activation",
+    "seed": 20260717
+  },
+  "map": {
+    "patch_score": {
+      "rank_spearman_mean": 1.0,
+      "top_half_iou_mean": 1.0
+    },
+    "random_uniform": {
+      "rank_spearman_mean": 1.0,
+      "top_half_iou_mean": 1.0
+    },
+    "gradcam_relu": {
+      "rank_spearman_mean": 0.38915171223925427,
+      "top_half_iou_mean": 0.5114814864937216
+    },
+    "gradcam_signed": {
+      "rank_spearman_mean": 0.40104060678277165,
+      "top_half_iou_mean": 0.516608129022643
+    },
+    "gradcam_abs": {
+      "rank_spearman_mean": 0.23985187598736957,
+      "top_half_iou_mean": 0.44778031716123223
+    }
+  },
+  "gradcam_relu_zero_fraction": 0.0,
+  "selectors": {
+    "patch_score": {
+      "route_logit_drop_mean": 0.09211458452045918,
+      "route_loss_increase_mean": 0.025870513258269057,
+      "route_prediction_changed_mean": 0.0078125,
+      "map_rank_spearman_mean": 1.0,
+      "map_top_half_iou_mean": 1.0,
+      "candidate_zero_gradcam_mean": 0.0
+    },
+    "gradcam_relu": {
+      "route_logit_drop_mean": 0.1217100191861391,
+      "route_loss_increase_mean": 0.03646856277191546,
+      "route_prediction_changed_mean": 0.00390625,
+      "map_rank_spearman_mean": 0.38915171223925427,
+      "map_top_half_iou_mean": 0.5114814864937216,
+      "candidate_zero_gradcam_mean": 0.0
+    },
+    "gradcam_signed": {
+      "route_logit_drop_mean": 0.1285533457994461,
+      "route_loss_increase_mean": 0.03891286005091388,
+      "route_prediction_changed_mean": 0.0,
+      "map_rank_spearman_mean": 0.40104060678277165,
+      "map_top_half_iou_mean": 0.516608129022643,
+      "candidate_zero_gradcam_mean": 0.0
+    },
+    "gradcam_abs": {
+      "route_logit_drop_mean": 0.09123389609158039,
+      "route_loss_increase_mean": 0.027584109222516418,
+      "route_prediction_changed_mean": 0.0,
+      "map_rank_spearman_mean": 0.23985187598736957,
+      "map_top_half_iou_mean": 0.44778031716123223,
+      "candidate_zero_gradcam_mean": 0.0
+    },
+    "random_uniform": {
+      "route_logit_drop_mean": 0.09001627005636692,
+      "route_loss_increase_mean": 0.022806838882388547,
+      "route_prediction_changed_mean": 0.0078125,
+      "map_rank_spearman_mean": 1.0,
+      "map_top_half_iou_mean": 1.0,
+      "candidate_zero_gradcam_mean": 0.0
+    }
+  }
+}

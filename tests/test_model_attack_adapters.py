@@ -6,7 +6,6 @@ from types import SimpleNamespace
 import torch
 
 from attack import PatchScoreAttacker
-from gradient_replay import GradientReplay
 from nets import build_whitebox_model
 from nets.base import AttackFeatureState, PatchScoreFeatures
 
@@ -19,7 +18,7 @@ class DummyModel:
         return self
 
 
-class TinyGradCamModel(torch.nn.Module):
+class TinyPatchScoreModel(torch.nn.Module):
     model_mean = (0.0, 0.0, 0.0)
     model_std = (1.0, 1.0, 1.0)
 
@@ -34,11 +33,6 @@ class TinyGradCamModel(torch.nn.Module):
 
     def patch_score_layer_candidates(self):
         return ("tiny",)
-
-    def patch_score_activation_capture(self, _score_layer):
-        from nets.base import PatchScoreActivationCapture
-
-        return PatchScoreActivationCapture(self.conv, "output", "conv output")
 
     def extract_patch_score_features(self, x, *, score_layer="final"):
         activation = self.conv(x)
@@ -244,7 +238,7 @@ class MainlineBudgetAndNoiseTests(unittest.TestCase):
 
     def test_registered_nonfinal_layer_is_accepted(self):
         attacker = PatchScoreAttacker(
-            TinyGradCamModel(),
+            TinyPatchScoreModel(),
             patch_score_layer="tiny",
             steps=1,
             input_diversity_groups=1,
@@ -255,11 +249,10 @@ class MainlineBudgetAndNoiseTests(unittest.TestCase):
 
     def test_selector_masks_share_the_native_budget(self):
         pixels = torch.ones(1, 3, 2, 2, requires_grad=True)
-        labels = torch.zeros(1, dtype=torch.long)
-        for selector in ("patch_score", "gradcam_relu", "random", "deviation"):
+        for selector in ("patch_score", "random"):
             with self.subTest(selector=selector):
                 attacker = PatchScoreAttacker(
-                    TinyGradCamModel(),
+                    TinyPatchScoreModel(),
                     patch_score_layer="tiny",
                     patch_selector=selector,
                     patch_dropout_ratio=0.3,
@@ -268,13 +261,13 @@ class MainlineBudgetAndNoiseTests(unittest.TestCase):
                     input_diversity_views_per_group=2,
                     device=torch.device("cpu"),
                 )
-                mask, grid = attacker._compute_mainline_drop_mask(pixels, labels)
+                mask, grid = attacker._compute_mainline_drop_mask(pixels)
                 self.assertEqual(grid, (2, 2))
                 self.assertEqual(int(mask.sum()), 1)
                 self.assertEqual(attacker.mainline_metadata()["patch_selector"], selector)
 
         no_drop = PatchScoreAttacker(
-            TinyGradCamModel(),
+            TinyPatchScoreModel(),
             patch_score_layer="tiny",
             patch_selector="no_drop",
             steps=1,
@@ -282,38 +275,9 @@ class MainlineBudgetAndNoiseTests(unittest.TestCase):
             input_diversity_views_per_group=2,
             device=torch.device("cpu"),
         )
-        mask, _ = no_drop._compute_mainline_drop_mask(pixels, labels)
+        mask, _ = no_drop._compute_mainline_drop_mask(pixels)
         self.assertEqual(int(mask.sum()), 0)
         self.assertEqual(no_drop.mainline_metadata()["target_patch_drop_ratio"], 0.0)
-
-    def test_zero_gradcam_uses_explicit_replayed_random_ranking(self):
-        pixels = torch.ones(1, 3, 2, 2, requires_grad=True)
-        labels = torch.ones(1, dtype=torch.long)
-        masks = []
-        for _ in range(2):
-            attacker = PatchScoreAttacker(
-                TinyGradCamModel(),
-                patch_score_layer="tiny",
-                patch_selector="gradcam_relu",
-                gradcam_zero_policy="random",
-                patch_dropout_ratio=0.3,
-                steps=1,
-                input_diversity_groups=1,
-                input_diversity_views_per_group=2,
-                device=torch.device("cpu"),
-            )
-            replay = GradientReplay(17)
-            replay.begin_batch(["sample"])
-            replay.set_context(step=0, group=0, view=-1)
-            attacker._gradient_replay = replay
-            mask, _ = attacker._compute_mainline_drop_mask(pixels, labels)
-            masks.append(mask)
-            metadata = attacker.mainline_metadata()
-            self.assertEqual(metadata["gradcam_zero_policy"], "random")
-            self.assertEqual(metadata["gradcam_zero_fraction"], 1.0)
-            self.assertEqual(int(mask.sum()), 1)
-        self.assertTrue(torch.equal(masks[0], masks[1]))
-
 
 @unittest.skipUnless(os.environ.get("RUN_MODEL_SMOKE") == "1", "set RUN_MODEL_SMOKE=1")
 class RealModelMainlineSmokeTests(unittest.TestCase):

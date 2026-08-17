@@ -1,0 +1,113 @@
+{
+  "config": {
+    "source": "cait_s24_224",
+    "targets": [
+      "vit_base_patch16_224",
+      "pit_b_224",
+      "visformer_small"
+    ],
+    "layers": [
+      "block24_gap"
+    ],
+    "conditions": [
+      "selected",
+      "opposite",
+      "deviation",
+      "random",
+      "no_drop"
+    ],
+    "samples": 64,
+    "sample_offset": 500,
+    "seed": 20260716,
+    "global_polarity": "high",
+    "epsilon": 0.06274509803921569,
+    "steps": 10,
+    "views": 20,
+    "opponent_strength": 0.2,
+    "gaussian_sigma": 4.0,
+    "gaussian_alpha": 0.75
+  },
+  "route_mean": {
+    "block24_gap": {
+      "selected": {
+        "global_cosine_clean_masked": 0.9834230458363891,
+        "kept_token_cosine_clean_masked": 0.8966842209920287,
+        "score_map_spearman_clean_masked": 0.7193197049200535,
+        "clean_route_gradient_cosine": 0.033681754171993816,
+        "view_effective_rank": 19.397280305624008
+      },
+      "opposite": {
+        "global_cosine_clean_masked": 0.9838935295119882,
+        "kept_token_cosine_clean_masked": 0.8875143174082041,
+        "score_map_spearman_clean_masked": 0.744503634981811,
+        "clean_route_gradient_cosine": 0.031477055159484735,
+        "view_effective_rank": 19.53219398856163
+      },
+      "deviation": {
+        "global_cosine_clean_masked": 0.9849301464855671,
+        "kept_token_cosine_clean_masked": 0.8918371992185712,
+        "score_map_spearman_clean_masked": 0.7187944580800831,
+        "clean_route_gradient_cosine": 0.03052245372782636,
+        "view_effective_rank": 19.453346103429794
+      },
+      "random": {
+        "global_cosine_clean_masked": 0.9848317373543978,
+        "kept_token_cosine_clean_masked": 0.8925162339583039,
+        "score_map_spearman_clean_masked": 0.7455150485038757,
+        "clean_route_gradient_cosine": 0.03009161289446638,
+        "view_effective_rank": 19.548676431179047
+      },
+      "no_drop": {
+        "global_cosine_clean_masked": 1.0000000083819032,
+        "kept_token_cosine_clean_masked": 1.0,
+        "score_map_spearman_clean_masked": 0.9999999953433871,
+        "clean_route_gradient_cosine": 0.038699566985087586,
+        "view_effective_rank": 19.481320172548294
+      }
+    }
+  },
+  "cross_model_mean": {
+    "block24_gap": {
+      "selected": {
+        "raw_target_gradient_cosine": 0.009920198938137522,
+        "processed_target_gradient_cosine": 0.010331349237731047,
+        "raw_target_sign_agreement": 0.5042575479795536,
+        "processed_target_sign_agreement": 0.5044192702819904,
+        "one_step_target_logit_drop": 0.15564443419377008,
+        "one_step_target_loss_increase": 0.09960608367691748
+      },
+      "opposite": {
+        "raw_target_gradient_cosine": 0.009615375335518669,
+        "processed_target_gradient_cosine": 0.009903569633479492,
+        "raw_target_sign_agreement": 0.5048298368540903,
+        "processed_target_sign_agreement": 0.5049851958950361,
+        "one_step_target_logit_drop": 0.14892074714104334,
+        "one_step_target_loss_increase": 0.08860654864110984
+      },
+      "deviation": {
+        "raw_target_gradient_cosine": 0.01022853332960949,
+        "processed_target_gradient_cosine": 0.010665218821031885,
+        "raw_target_sign_agreement": 0.5045735895012816,
+        "processed_target_sign_agreement": 0.5048369656627377,
+        "one_step_target_logit_drop": 0.15345344692468643,
+        "one_step_target_loss_increase": 0.09453688731688696
+      },
+      "random": {
+        "raw_target_gradient_cosine": 0.010398250548253904,
+        "processed_target_gradient_cosine": 0.01077350412015221,
+        "raw_target_sign_agreement": 0.5042431883824369,
+        "processed_target_sign_agreement": 0.5044941822998226,
+        "one_step_target_logit_drop": 0.1413928046822548,
+        "one_step_target_loss_increase": 0.08728013890989435
+      },
+      "no_drop": {
+        "raw_target_gradient_cosine": 0.011561949516059636,
+        "processed_target_gradient_cosine": 0.01195536977077912,
+        "raw_target_sign_agreement": 0.5060528934312364,
+        "processed_target_sign_agreement": 0.5062133717971543,
+        "one_step_target_logit_drop": 0.20371758689483008,
+        "one_step_target_loss_increase": 0.11116505504469387
+      }
+    }
+  }
+}
