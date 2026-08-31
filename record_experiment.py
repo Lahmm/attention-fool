@@ -135,6 +135,7 @@ def record_results(
     adv_dir_arg: str | Path,
     asr_by_model: dict[str, float],
 ) -> Path:
+    """Record ASR values defined as one minus adversarial-set accuracy."""
     repo_path = repo_path.expanduser().resolve()
     adv_dir = validate_adv_dir(repo_path, str(adv_dir_arg))
     results: dict[str, Any] = dict(asr_by_model)

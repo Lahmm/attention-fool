@@ -7,6 +7,21 @@ import transfer_eval
 
 
 class HuggingFaceTransferModelTests(unittest.TestCase):
+    def test_asr_is_one_minus_adversarial_accuracy(self):
+        self.assertEqual(transfer_eval.ASR_DEFINITION, "1 - adversarial accuracy")
+        self.assertAlmostEqual(
+            transfer_eval.adversarial_accuracy_to_asr(correct=23, total=100),
+            0.77,
+        )
+        self.assertEqual(
+            transfer_eval.adversarial_accuracy_to_asr(correct=0, total=0),
+            0.0,
+        )
+
+    def test_asr_rejects_invalid_adversarial_counts(self):
+        with self.assertRaises(ValueError):
+            transfer_eval.adversarial_accuracy_to_asr(correct=11, total=10)
+
     def test_default_suite_is_thirteen_real_huggingface_models(self):
         self.assertEqual(len(transfer_eval.DEFAULT_BLACK_BOX_MODELS), 13)
         self.assertIn("inception_v3_adv", transfer_eval.DEFAULT_BLACK_BOX_MODELS)

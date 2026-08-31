@@ -39,6 +39,7 @@ DEFAULT_CNN_BLACK_BOX_MODELS = [
     "inception_resnet_v2_adv",
 ]
 DEFAULT_BLACK_BOX_MODELS = DEFAULT_VIT_BLACK_BOX_MODELS + DEFAULT_CNN_BLACK_BOX_MODELS
+ASR_DEFINITION = "1 - adversarial accuracy"
 
 MODEL_ALIASES = {
     "LeViT-256": "levit_256",
@@ -95,6 +96,15 @@ def collect_images(image_dir: Path, prefix: str) -> List[Path]:
     paths = [p for p in image_dir.iterdir() if p.is_file() and p.name.startswith(prefix)]
     paths.sort()
     return paths
+
+
+def adversarial_accuracy_to_asr(correct: int, total: int) -> float:
+    """Return ASR over all adversarial inputs, without clean-correct filtering."""
+    if total < 0:
+        raise ValueError("total must be non-negative")
+    if correct < 0 or correct > total:
+        raise ValueError("correct must be between 0 and total")
+    return 1.0 - (correct / total) if total > 0 else 0.0
 
 
 def extract_original_name(filename: str, prefix: str) -> str:
@@ -408,7 +418,7 @@ def main(
             print(f"model={black_model} unavailable: {exc}")
             continue
         acc = correct / total if total > 0 else 0.0
-        asr = 1.0 - acc if total > 0 else 0.0
+        asr = adversarial_accuracy_to_asr(correct, total)
         asr_by_model[black_model] = asr
         metrics_by_model[black_model] = {
             "asr": asr,
@@ -427,6 +437,7 @@ def main(
         return
 
     print("ASR by model:")
+    print(f"Definition: {ASR_DEFINITION}")
     print({model_name: round(asr, 6) for model_name, asr in asr_by_model.items()})
     print("Metrics by model:")
     print(
@@ -457,6 +468,7 @@ def main(
             "amp": use_amp,
             "tf32": use_tf32,
             "num_images": len(image_paths),
+            "asr_definition": ASR_DEFINITION,
         }
         # Include attack parameters if available alongside the images
         attack_params_path = resolved_image_dir / "attack_params.json"
@@ -475,7 +487,12 @@ def main(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Evaluate transferability on adversarial or clean samples.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Evaluate adversarial samples with ASR defined as "
+            f"{ASR_DEFINITION}."
+        )
+    )
     parser.add_argument("--image-dir", type=str, default="outputs/attack", help="Directory with saved images.")
     parser.add_argument("--annotations-path", type=str, default="data/image_name_to_class_id_and_name.json")
     parser.add_argument("--prefix", type=str, default="adv_", help="Filename prefix used to infer original names.")

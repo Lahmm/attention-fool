@@ -60,6 +60,9 @@ x_{t+1}=\Pi_{B_\infty(x,16/255)}
 | feature noise | initial RGB `opponent_projected`，strength=0.2，kept-only |
 | 迁移评估 | 7 个 Transformer + 6 个 CNN |
 
+本文及对应 CSV 统一采用 `ASR = 1 - adversarial accuracy`。分母为送入目标模型的全部
+1000 张对抗样本，不按目标模型在 clean 图上的预测结果筛选子集。
+
 不同白盒的 score 网格和实际 drop 数量为：
 
 | 白盒源模型 | score 来源 | 网格 | 每组实际 drop |

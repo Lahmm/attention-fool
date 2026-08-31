@@ -74,7 +74,11 @@ python transfer_eval.py --image-dir outputs/attack/vit_mainline --prefix adv_
 python -m unittest discover -s tests
 ```
 
-迁移评估覆盖项目注册的 Transformer/CNN target，并写入 `outputs/csv`。最终有效性以 target-clean-correct transfer ASR 为准，同时关注 cross-model gradient cosine、sign agreement、held-out one-step response 与 full iterative transfer；source clean-logit suppression 不能替代这些指标。
+迁移评估覆盖项目注册的 Transformer/CNN target，并写入 `outputs/csv`。项目统一定义
+`ASR = 1 - adversarial accuracy`：分母是送入目标模型评估的全部对抗样本，不筛选
+target-clean-correct 子集。后续 CSV 会在 `asr_definition` 字段中保存该定义。除 ASR 外，
+同时关注 cross-model gradient cosine、sign agreement、held-out one-step response 与 full
+iterative transfer；source clean-logit suppression 不能替代这些指标。
 
 安装依赖：
 
