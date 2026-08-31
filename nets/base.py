@@ -61,21 +61,6 @@ class PatchScoreFeatures:
             )
 
 
-@dataclass(frozen=True)
-class PatchScoreActivationCapture:
-    """Hook specification for a logit-connected Grad-CAM activation."""
-
-    module: nn.Module
-    hook_type: str
-    source_name: str
-
-    def validate(self) -> None:
-        if self.hook_type not in {"input", "output"}:
-            raise ValueError("hook_type must be input or output.")
-        if not self.source_name:
-            raise ValueError("Grad-CAM activation source_name must be non-empty.")
-
-
 @dataclass
 class AttackFeatureState:
     """Opaque resumable state at a model's first RGB-projected feature map."""
@@ -177,15 +162,6 @@ class WhiteBoxWithHook(nn.Module):
         twice.
         """
         return ("final",)
-
-    def patch_score_activation_capture(
-        self,
-        score_layer: str,
-    ) -> PatchScoreActivationCapture:
-        """Return the logit-connected hook used by the Grad-CAM selector."""
-        raise NotImplementedError(
-            f"Grad-CAM checkpoint lookup is not implemented for {self.model_name}."
-        )
 
     def prepare_attack_feature_state(self, x: torch.Tensor) -> AttackFeatureState:
         raise NotImplementedError(f"attack feature preparation is not implemented for {self.model_name}.")

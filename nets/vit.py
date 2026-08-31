@@ -5,7 +5,6 @@ import torch
 from .base import (
     AttackFeatureState,
     DEFAULT_PRETRAINED,
-    PatchScoreActivationCapture,
     PatchScoreFeatures,
     WhiteBoxWithHook,
     conv2d_attack_metadata,
@@ -48,25 +47,6 @@ class ViTWithHook(WhiteBoxWithHook):
 
     def patch_score_layer_candidates(self) -> tuple[str, ...]:
         return tuple(self._PATCH_SCORE_LAYERS)
-
-    def patch_score_activation_capture(self, score_layer: str):
-        canonical = "block12" if score_layer == "final" else score_layer
-        if canonical not in self._PATCH_SCORE_LAYERS:
-            raise ValueError(f"unsupported ViT patch score layer: {score_layer!r}")
-        block_count = self._PATCH_SCORE_LAYERS[canonical]
-        if block_count < len(self.model.blocks):
-            return PatchScoreActivationCapture(
-                module=self.model.blocks[block_count],
-                hook_type="input",
-                source_name=(
-                    f"blocks[{block_count}] input (=blocks[{block_count - 1}] output)"
-                ),
-            )
-        return PatchScoreActivationCapture(
-            module=self.model.blocks[-1],
-            hook_type="input",
-            source_name="blocks[11] input (logit-connected fallback)",
-        )
 
     def extract_patch_score_features(
         self,

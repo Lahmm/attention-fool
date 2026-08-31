@@ -5,7 +5,6 @@ import torch
 from .base import (
     AttackFeatureState,
     DEFAULT_PRETRAINED,
-    PatchScoreActivationCapture,
     PatchScoreFeatures,
     WhiteBoxWithHook,
     conv2d_attack_metadata,
@@ -47,36 +46,6 @@ class PiTB224WithHook(WhiteBoxWithHook):
 
     def patch_score_layer_candidates(self) -> tuple[str, ...]:
         return tuple(self._PATCH_SCORE_LAYERS)
-
-    def patch_score_activation_capture(self, score_layer: str):
-        canonical = "stage3_block4" if score_layer == "final" else score_layer
-        if canonical not in self._PATCH_SCORE_LAYERS:
-            raise ValueError(f"unsupported PiT patch score layer: {score_layer!r}")
-        stage_index, block_count = self._PATCH_SCORE_LAYERS[canonical]
-        stage = self.model.transformers[stage_index]
-        if block_count < len(stage.blocks):
-            return PatchScoreActivationCapture(
-                module=stage.blocks[block_count],
-                hook_type="input",
-                source_name=(
-                    f"transformers[{stage_index}].blocks[{block_count}] input "
-                    f"(=block[{block_count - 1}] output)"
-                ),
-            )
-        if stage_index == len(self.model.transformers) - 1:
-            return PatchScoreActivationCapture(
-                module=stage.blocks[-1],
-                hook_type="input",
-                source_name=(
-                    f"transformers[{stage_index}].blocks[{block_count - 1}] input "
-                    "(logit-connected fallback)"
-                ),
-            )
-        return PatchScoreActivationCapture(
-            module=stage.blocks[block_count - 1],
-            hook_type="output",
-            source_name=f"transformers[{stage_index}].blocks[{block_count - 1}] output",
-        )
 
     @staticmethod
     def _run_stage_to_block(

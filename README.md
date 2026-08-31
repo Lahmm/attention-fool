@@ -1,6 +1,6 @@
 # Patch-Score Routing Attack
 
-本项目研究一种面向黑盒迁移的“语义路由 + 颜色结构随机扰动”攻击。当前代码只保留两类内容：完整攻击主线与必要对照，以及用于发现跨模型前向语义共性的五条可复现实验链。已经证伪或退出主线的探索仅保留正式结果，不再暴露可执行入口。
+本项目研究一种面向黑盒迁移的“语义路由 + 颜色结构随机扰动”攻击。当前代码和主实验记录聚焦完整攻击主线与必要对照。
 
 ## 当前主线
 
@@ -61,36 +61,11 @@ python main.py --attack-method token_patch_dropout \
 
 默认 phase-pair 主线不与 DIM 组合。每步实际 model views 上限为 20。主线还保留 `gaussian` feature noise 作为 `opponent_projected` 的结构对照，并可用 `--gaussian-alpha 0` 关闭梯度 Gaussian residual。
 
-## 保留的前向语义实验
+## 主线结果
 
-| 探索方向 | 可执行脚本 | 正式产物 | 已支持的结论 | 对应主线参数 |
-| --- | --- | --- | --- | --- |
-| 语义成熟度 | `experiments/patch_score_layer_semantic_maturity_experiment.py` | `outputs/research/patch_score_layer_semantic_maturity/` | 四种架构均存在随深度发展的 global/local 语义结构；clean-output 敏感度不用于选攻击层 | `--patch-score-layer`，生产默认仍为 `final` |
-| 跨层语义晋升 | `experiments/patch_score_promotion_observation.py` | `outputs/research/patch_score_promotion_e1_e2/` | patch 排名会从 early 到 final 系统性重排；共性是功能过程，不是固定空间模板 | final-layer `patch_score` 路由的表示依据 |
-| 末层混合来源 | `experiments/patch_score_promotion_mixing_experiment.py` | `outputs/research/patch_score_promotion_e3_mixing/` | 晋升主要发生在末层 mixing 边界，可跨架构用同一 global/local 语言描述 | `patch_score_layer=final` 的机制解释 |
-| 同激活 Grad-CAM | `experiments/patch_score_same_activation_experiment.py` | `outputs/research/patch_score_same_activation64/summary.json` | patch-score 与 Grad-CAM 在同一激活上部分重合但判据不同；不证明任一 selector 普遍更优 | Grad-CAM 仅作语义标准对照，不是主线 selector |
-| 语义等价视图 | `experiments/semantic_equivalent_route_experiment.py` | `outputs/research/semantic_equivalent_route_e5_forward/` | phase/noise 视图可保持 global 语义，同时显著改变 local route；不同架构共享这一现象 | phase set、opponent/feature Gaussian、view groups |
-
-五个脚本共享 `experiments/semantic_forward_utils.py`，负责数据切片、归一化、公共网格、rank/Spearman、bootstrap、结果写出和同激活捕获。它们不再依赖旧 selector calibration 或语义梯度实验。
-
-从 semantic 角度，目前证据只支持以下边界内共性：
-
-- global/local 语义关系会随网络深度成熟并发生 patch 排名重组；
-- 末层 token mixing 是这一重组的重要共同边界；
-- global 语义近似保持时，local routing 仍可被 phase/noise 系统性改变；
-- 跨模型共性是“语义路由的功能形式”，不是每张图、每个模型共享同一张空间 mask；
-- patch-score 与 class-conditioned Grad-CAM 是不同但可能部分重叠的语义标准。
-
-## 主线与历史实验边界
-
-当前可执行研究代码只有：
-
-- `main.py`、`attack.py`、`gradient_replay.py`、`transfer_eval.py`；
-- `nets/` 中四种白盒模型 adapter；
-- 上述五个 forward-semantic 实验及公共工具；
-- 与这些路径对应的测试。
-
-clean-output causality/polarity/layer/route-response、固定 mask calibration、selector suite、Grad-CAM Protocol B/transfer/stability、E4 与 E5-gradient/E6-E10、frequency pair、patch shuffle 的可执行代码已经移除。它们的正式结果和结论仍保存在 [结果归档](results/README.md)；这些结果是边界证据，不得覆盖当前动态 mask 生产策略。
+正式主实验只保留四个白盒模型的 1000 图结果。实验报告见
+`experiments/mainline_data_aug_gaussian_story_s1000.md`，迁移评估 CSV 位于
+`outputs/csv/`，对应对抗样本和复现元数据位于 `outputs/attack/`。
 
 ## 迁移评估与测试
 

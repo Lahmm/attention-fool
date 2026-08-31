@@ -5,7 +5,6 @@ import torch
 from .base import (
     AttackFeatureState,
     DEFAULT_PRETRAINED,
-    PatchScoreActivationCapture,
     PatchScoreFeatures,
     WhiteBoxWithHook,
     conv2d_attack_metadata,
@@ -51,27 +50,6 @@ class VisformerSmallWithHook(WhiteBoxWithHook):
 
     def patch_score_layer_candidates(self) -> tuple[str, ...]:
         return tuple(self._PATCH_SCORE_LAYERS)
-
-    def patch_score_activation_capture(self, score_layer: str):
-        canonical = "stage3_block4" if score_layer == "final" else score_layer
-        if canonical not in self._PATCH_SCORE_LAYERS:
-            raise ValueError(f"unsupported Visformer patch score layer: {score_layer!r}")
-        stage_index, block_count = self._PATCH_SCORE_LAYERS[canonical]
-        stage = getattr(self.model, f"stage{stage_index}")
-        if block_count < len(stage):
-            return PatchScoreActivationCapture(
-                module=stage[block_count],
-                hook_type="input",
-                source_name=(
-                    f"stage{stage_index}[{block_count}] input "
-                    f"(=stage{stage_index}[{block_count - 1}] output)"
-                ),
-            )
-        return PatchScoreActivationCapture(
-            module=stage[block_count - 1],
-            hook_type="output",
-            source_name=f"stage{stage_index}[{block_count - 1}] output",
-        )
 
     def _run_to_checkpoint(
         self,

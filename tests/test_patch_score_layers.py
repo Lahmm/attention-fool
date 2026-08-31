@@ -2,7 +2,7 @@ import unittest
 
 import torch
 
-from nets.base import PatchScoreActivationCapture, PatchScoreFeatures
+from nets.base import PatchScoreFeatures
 from nets.cait import CaiTS24WithHook
 from nets.pit import PiTB224WithHook
 from nets.visformer import VisformerSmallWithHook
@@ -55,13 +55,6 @@ class PatchScoreLayerContractTests(unittest.TestCase):
         features.global_mode = "unknown"
         with self.assertRaisesRegex(ValueError, "global_mode"):
             features.validate()
-
-    def test_gradcam_capture_metadata_is_validated(self):
-        module = torch.nn.Identity()
-        PatchScoreActivationCapture(module, "input", "block input").validate()
-        with self.assertRaisesRegex(ValueError, "hook_type"):
-            PatchScoreActivationCapture(module, "invalid", "block").validate()
-
 
 if __name__ == "__main__":
     unittest.main()
