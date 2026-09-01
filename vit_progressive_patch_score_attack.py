@@ -100,10 +100,24 @@ class ViTProgressivePatchScoreAttacker(PatchScoreAttacker):
         self._progressive_checkpoint_selection_count = 0
 
         # The parent attack method is retained only for its update/gradient
-        # machinery.  Its final-layer view iterator is overridden below.
-        kwargs.setdefault("attack_method", "original_score_postdrop_phase_pair")
+        # machinery. Its final-layer selector and view iterator are not used by
+        # this subclass, but the phase-pair settings remain parent invariants.
+        attack_method = kwargs.pop("attack_method", "original_score_postdrop_phase_pair")
+        if attack_method != "original_score_postdrop_phase_pair":
+            raise ValueError(
+                "the progressive ViT attack requires "
+                "attack_method='original_score_postdrop_phase_pair'"
+            )
+        views_per_group = kwargs.pop("input_diversity_views_per_group", 2)
+        if views_per_group != 2:
+            raise ValueError("the progressive ViT attack requires two views per group")
+        kwargs["attack_method"] = attack_method
+        kwargs["input_diversity_views_per_group"] = views_per_group
         kwargs.setdefault("patch_selector", "patch_score")
-        kwargs.setdefault("patch_dropout_ratio", sum(drop_ratios))
+        # Progressive ratios are independent per-checkpoint budgets. Do not
+        # feed their sum into the parent's unused single-dropout budget, whose
+        # [0, 1] validation would reject otherwise valid schedules.
+        kwargs["patch_dropout_ratio"] = 0.0
         kwargs.setdefault("patch_dropout_score_mode", "high")
         kwargs.setdefault("patch_dropout_sampling_mode", "random")
         kwargs.setdefault("post_dropout_feature_noise_type", "opponent_projected")
