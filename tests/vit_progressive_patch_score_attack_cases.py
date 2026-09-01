@@ -1,3 +1,4 @@
+import json
 import os
 import types
 import unittest
@@ -109,6 +110,11 @@ class ProgressiveViTTests(unittest.TestCase):
         attacker = self.make_attacker(drop_ratios=(0.4, 0.4, 0.4))
         self.assertEqual(attacker.progressive_drop_ratios, (0.4, 0.4, 0.4))
         self.assertEqual(attacker.patch_dropout_ratio, 0.0)
+
+    def test_metadata_is_json_serializable(self):
+        attacker = self.make_attacker()
+        encoded = json.dumps(attacker.mainline_metadata())
+        self.assertIn('"model_mean": [0.0, 0.0, 0.0]', encoded)
 
     def test_phase_pair_invariants_cannot_be_overridden(self):
         with self.assertRaisesRegex(ValueError, "requires.*attack_method"):

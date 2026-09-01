@@ -361,8 +361,8 @@ class ViTProgressivePatchScoreAttacker(PatchScoreAttacker):
             "opponent_noise_strength": self.opponent_noise_strength,
             "feature_noise_cls": False,
             "asr_definition": "1 - adversarial accuracy over all evaluated samples",
-            "model_mean": list(self.model_mean),
-            "model_std": list(self.model_std),
+            "model_mean": self.model_mean.flatten().tolist(),
+            "model_std": self.model_std.flatten().tolist(),
             "gaussian_sigma": self.gaussian_sigma,
             "gaussian_alpha": self.gaussian_alpha,
         }
