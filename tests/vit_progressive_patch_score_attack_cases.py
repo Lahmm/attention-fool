@@ -121,6 +121,8 @@ class ProgressiveViTTests(unittest.TestCase):
             self.make_attacker(attack_method="none")
         with self.assertRaisesRegex(ValueError, "two views"):
             self.make_attacker(input_diversity_views_per_group=1)
+        with self.assertRaisesRegex(ValueError, "progressive patch_selector"):
+            self.make_attacker(patch_selector="no_drop")
 
     def test_sampled_tokens_belong_to_current_high_half(self):
         attacker = self.make_attacker()
@@ -132,6 +134,22 @@ class ProgressiveViTTests(unittest.TestCase):
         high_half.scatter_(1, torch.topk(scores, 2, dim=1).indices, True)
         self.assertFalse(bool(torch.any(mask & ~high_half)))
         self.assertTrue(torch.equal(mask.sum(dim=1), torch.ones(2, dtype=torch.long)))
+
+    def test_random_selector_skips_scores_and_uses_full_patch_budget(self):
+        attacker = self.make_attacker(patch_selector="random")
+
+        def score_must_not_run(*_args, **_kwargs):
+            raise AssertionError("random progressive selection must not compute patch scores")
+
+        attacker._score_at_checkpoint = score_must_not_run
+        schedule = attacker._build_mask_schedule(torch.rand(2, 3, 4, 4))
+        self.assertEqual(schedule.counts, (1, 1, 1))
+        schedule.validate(batch_size=2, token_count=4)
+        metadata = attacker.mainline_metadata()
+        self.assertEqual(metadata["attack_method"], "vit_progressive_random")
+        self.assertEqual(metadata["patch_selector"], "random")
+        self.assertEqual(metadata["score_reference"], "none_uniform_all_local_tokens")
+        self.assertFalse(metadata["score_cls_noise_active"])
 
     def test_schedule_is_sequential_and_can_repeat_positions(self):
         attacker = self.make_attacker()
@@ -264,6 +282,25 @@ class ProgressiveViTTests(unittest.TestCase):
         for first_mask, second_mask in zip(first.masks, second.masks):
             self.assertTrue(torch.equal(first_mask, second_mask))
 
+    def test_replay_reproduces_random_checkpoint_masks(self):
+        attacker = self.make_attacker(patch_selector="random")
+        pixels = torch.rand(1, 3, 4, 4)
+
+        def replayed_schedule():
+            replay = GradientReplay(4321)
+            replay.begin_batch(["sample.png"])
+            replay.set_context(step=3, group=5, view=-1)
+            attacker._gradient_replay = replay
+            try:
+                return attacker._build_mask_schedule(pixels)
+            finally:
+                attacker._gradient_replay = None
+
+        first = replayed_schedule()
+        second = replayed_schedule()
+        for first_mask, second_mask in zip(first.masks, second.masks):
+            self.assertTrue(torch.equal(first_mask, second_mask))
+
     def test_two_views_backpropagate_and_attack_respects_epsilon(self):
         attacker = self.make_attacker()
         pixels = torch.rand(1, 3, 4, 4, requires_grad=True)
@@ -296,22 +333,25 @@ class ProgressiveViTTests(unittest.TestCase):
             pretrained=False,
             device=torch.device("cpu"),
         )
-        attacker = ViTProgressivePatchScoreAttacker(
-            model,
-            steps=1,
-            input_diversity_groups=1,
-            input_diversity_views_per_group=2,
-            use_momentum=False,
-            gaussian_alpha=0.0,
-            device=torch.device("cpu"),
-        )
-        pixels = torch.rand(1, 3, 224, 224, requires_grad=True)
-        labels = torch.zeros(1, dtype=torch.long)
-        schedule = attacker._build_mask_schedule(pixels)
-        loss = attacker._forward_with_schedule(pixels, labels, schedule)
-        gradient = torch.autograd.grad(loss, pixels)[0]
-        self.assertEqual(schedule.counts, (10, 10, 10))
-        self.assertTrue(torch.isfinite(gradient).all())
+        for patch_selector in ("patch_score", "random"):
+            with self.subTest(patch_selector=patch_selector):
+                attacker = ViTProgressivePatchScoreAttacker(
+                    model,
+                    patch_selector=patch_selector,
+                    steps=1,
+                    input_diversity_groups=1,
+                    input_diversity_views_per_group=2,
+                    use_momentum=False,
+                    gaussian_alpha=0.0,
+                    device=torch.device("cpu"),
+                )
+                pixels = torch.rand(1, 3, 224, 224, requires_grad=True)
+                labels = torch.zeros(1, dtype=torch.long)
+                schedule = attacker._build_mask_schedule(pixels)
+                loss = attacker._forward_with_schedule(pixels, labels, schedule)
+                gradient = torch.autograd.grad(loss, pixels)[0]
+                self.assertEqual(schedule.counts, (10, 10, 10))
+                self.assertTrue(torch.isfinite(gradient).all())
 
 
 if __name__ == "__main__":

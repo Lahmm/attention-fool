@@ -1,4 +1,4 @@
-"""Standalone ViT progressive patch-score routing attack.
+"""Standalone ViT progressive patch-drop routing attack.
 
 This module intentionally does not alter the production attack entry points.
 It implements the experimental progressive variant for a ViT-B/16 white-box:
@@ -30,6 +30,7 @@ IMAGE_DIR = "data/clean_resized_images"
 ANNOTATIONS_PATH = "data/image_name_to_class_id_and_name.json"
 DEFAULT_CHECKPOINTS = (3, 6, 9)
 DEFAULT_DROP_RATIOS = (0.05, 0.05, 0.05)
+PROGRESSIVE_PATCH_SELECTORS = ("patch_score", "random")
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,7 @@ class ViTProgressivePatchScoreAttacker(PatchScoreAttacker):
         *,
         checkpoints: tuple[int, ...] = DEFAULT_CHECKPOINTS,
         drop_ratios: tuple[float, ...] = DEFAULT_DROP_RATIOS,
+        patch_selector: str = "patch_score",
         score_cls_noise_strength: float = 0.2,
         opponent_noise_strength: float = 0.2,
         **kwargs,
@@ -87,12 +89,18 @@ class ViTProgressivePatchScoreAttacker(PatchScoreAttacker):
         checkpoints = tuple(int(value) for value in checkpoints)
         drop_ratios = tuple(float(value) for value in drop_ratios)
         self._validate_progressive_config(checkpoints, drop_ratios)
+        if patch_selector not in PROGRESSIVE_PATCH_SELECTORS:
+            raise ValueError(
+                "progressive patch_selector must be one of "
+                f"{PROGRESSIVE_PATCH_SELECTORS}, got {patch_selector!r}"
+            )
         if score_cls_noise_strength < 0:
             raise ValueError("score_cls_noise_strength must be non-negative")
         if opponent_noise_strength < 0:
             raise ValueError("opponent_noise_strength must be non-negative")
         self.progressive_checkpoints = checkpoints
         self.progressive_drop_ratios = drop_ratios
+        self.progressive_patch_selector = patch_selector
         self.score_cls_noise_strength = float(score_cls_noise_strength)
         self.opponent_noise_strength = float(opponent_noise_strength)
         self._progressive_mask_counts = tuple()
@@ -113,7 +121,7 @@ class ViTProgressivePatchScoreAttacker(PatchScoreAttacker):
             raise ValueError("the progressive ViT attack requires two views per group")
         kwargs["attack_method"] = attack_method
         kwargs["input_diversity_views_per_group"] = views_per_group
-        kwargs.setdefault("patch_selector", "patch_score")
+        kwargs["patch_selector"] = patch_selector
         # Progressive ratios are independent per-checkpoint budgets. Do not
         # feed their sum into the parent's unused single-dropout budget, whose
         # [0, 1] validation would reject otherwise valid schedules.
@@ -212,6 +220,31 @@ class ViTProgressivePatchScoreAttacker(PatchScoreAttacker):
             mask[batch_index, selected] = True
         return mask.detach()
 
+    def _sample_random_mask(
+        self,
+        *,
+        batch_size: int,
+        token_count: int,
+        ratio: float,
+        checkpoint: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Sample the checkpoint budget uniformly from all local patches."""
+        drop_count = max(1, int(round(token_count * ratio)))
+        mask = torch.zeros(batch_size, token_count, dtype=torch.bool, device=device)
+        for batch_index in range(batch_size):
+            if self._gradient_replay is None:
+                order = torch.randperm(token_count, device=device)
+            else:
+                order = self._gradient_replay.randperm(
+                    token_count,
+                    f"progressive_random_drop_block{checkpoint}",
+                    batch_index,
+                    device=device,
+                )
+            mask[batch_index, order[:drop_count]] = True
+        return mask.detach()
+
     def _build_mask_schedule(self, pixels: torch.Tensor) -> ProgressiveMaskSchedule:
         """Run one no-grad progressive trajectory on the current attack iterate."""
         base = self._vit
@@ -228,8 +261,17 @@ class ViTProgressivePatchScoreAttacker(PatchScoreAttacker):
             start = 0
             for checkpoint, ratio in zip(self.progressive_checkpoints, self.progressive_drop_ratios):
                 tokens = self._run_vit_blocks(base.blocks, tokens, start, checkpoint)
-                scores = self._score_at_checkpoint(tokens, checkpoint=checkpoint)
-                mask = self._sample_high_mask(scores, ratio, checkpoint=checkpoint)
+                if self.progressive_patch_selector == "patch_score":
+                    scores = self._score_at_checkpoint(tokens, checkpoint=checkpoint)
+                    mask = self._sample_high_mask(scores, ratio, checkpoint=checkpoint)
+                else:
+                    mask = self._sample_random_mask(
+                        batch_size=tokens.size(0),
+                        token_count=token_count,
+                        ratio=ratio,
+                        checkpoint=checkpoint,
+                        device=tokens.device,
+                    )
                 tokens = self._apply_local_mask(tokens, mask)
                 masks.append(mask)
                 count = int(mask.sum(dim=1)[0].item())
@@ -341,13 +383,19 @@ class ViTProgressivePatchScoreAttacker(PatchScoreAttacker):
 
     def mainline_metadata(self) -> dict[str, object]:
         return {
-            "attack_method": "vit_progressive_patch_score",
+            "attack_method": f"vit_progressive_{self.progressive_patch_selector}",
             "whitebox_model": MODEL_NAME,
+            "patch_selector": self.progressive_patch_selector,
             "progressive_checkpoints": list(self.progressive_checkpoints),
             "progressive_drop_ratios": list(self.progressive_drop_ratios),
             "progressive_drop_counts": list(self._progressive_mask_counts),
             "progressive_repeated_positions": True,
-            "score_reference": "current_cls_plus_checkpoint_gaussian_noise",
+            "score_reference": (
+                "current_cls_plus_checkpoint_gaussian_noise"
+                if self.progressive_patch_selector == "patch_score"
+                else "none_uniform_all_local_tokens"
+            ),
+            "score_cls_noise_active": self.progressive_patch_selector == "patch_score",
             "score_cls_noise_strength": self.score_cls_noise_strength,
             "token_intervention": "local_patch_tokens_hard_zero_after_checkpoint",
             "mask_schedule_policy": "current_attack_iterate_per_step_group",
@@ -482,6 +530,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Standalone progressive ViT patch-score attack")
     parser.add_argument("--checkpoints", type=_parse_int_list, default=DEFAULT_CHECKPOINTS)
     parser.add_argument("--drop-ratios", type=_parse_float_list, default=DEFAULT_DROP_RATIOS)
+    parser.add_argument(
+        "--patch-selector",
+        choices=PROGRESSIVE_PATCH_SELECTORS,
+        default="patch_score",
+        help="Select from the score-high half or uniformly from all local patches.",
+    )
     parser.add_argument("--score-cls-noise-strength", type=float, default=0.2)
     parser.add_argument("--opponent-noise-strength", type=float, default=0.2)
     parser.add_argument("--epsilon", type=float, default=16.0 / 255.0)
@@ -532,6 +586,7 @@ def main(args: argparse.Namespace) -> None:
         model,
         checkpoints=args.checkpoints,
         drop_ratios=args.drop_ratios,
+        patch_selector=args.patch_selector,
         score_cls_noise_strength=args.score_cls_noise_strength,
         opponent_noise_strength=args.opponent_noise_strength,
         epsilon=args.epsilon,
