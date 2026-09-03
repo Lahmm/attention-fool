@@ -11,9 +11,10 @@ import torch.nn as nn
 from utils import DEVICE
 
 LOCAL_HF_CACHE = Path(__file__).resolve().parents[1] / "data" / "huggingface"
-os.environ.setdefault("HF_HOME", str(LOCAL_HF_CACHE))
-os.environ.setdefault("HF_HUB_CACHE", str(LOCAL_HF_CACHE / "hub"))
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
+# Model construction always resolves weights from the repository-local cache.
+os.environ["HF_HOME"] = str(LOCAL_HF_CACHE)
+os.environ["HF_HUB_CACHE"] = str(LOCAL_HF_CACHE / "hub")
+os.environ["HF_HUB_OFFLINE"] = "1"
 
 
 DEFAULT_PRETRAINED = True

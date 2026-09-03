@@ -6,9 +6,10 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 LOCAL_HF_CACHE = Path(__file__).resolve().parent / "data" / "huggingface"
-os.environ.setdefault("HF_HOME", str(LOCAL_HF_CACHE))
-os.environ.setdefault("HF_HUB_CACHE", str(LOCAL_HF_CACHE / "hub"))
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
+# Evaluation must use the same repository-local weights as attack generation.
+os.environ["HF_HOME"] = str(LOCAL_HF_CACHE)
+os.environ["HF_HUB_CACHE"] = str(LOCAL_HF_CACHE / "hub")
+os.environ["HF_HUB_OFFLINE"] = "1"
 
 import timm
 import torch

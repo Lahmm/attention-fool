@@ -7,9 +7,11 @@ import shutil
 from pathlib import Path
 
 LOCAL_HF_CACHE = Path(__file__).resolve().parent / "data" / "huggingface"
-os.environ.setdefault("HF_HOME", str(LOCAL_HF_CACHE))
-os.environ.setdefault("HF_HUB_CACHE", str(LOCAL_HF_CACHE / "hub"))
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
+# Keep model provenance repository-local even when the invoking shell exports
+# a different global Hugging Face cache.
+os.environ["HF_HOME"] = str(LOCAL_HF_CACHE)
+os.environ["HF_HUB_CACHE"] = str(LOCAL_HF_CACHE / "hub")
+os.environ["HF_HUB_OFFLINE"] = "1"
 
 from tqdm import tqdm
 
