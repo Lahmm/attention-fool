@@ -221,7 +221,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--image-dir", default=IMAGE_DIR)
     parser.add_argument("--annotations-path", default=ANNOTATIONS_PATH)
-    parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--batch-size", type=int, default=96)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--prefetch-factor", type=int, default=4)
     parser.add_argument("--output-dir", default="outputs/attack/patch_score_routing")

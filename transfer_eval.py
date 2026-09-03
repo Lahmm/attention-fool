@@ -497,7 +497,7 @@ if __name__ == "__main__":
     parser.add_argument("--image-dir", type=str, default="outputs/attack", help="Directory with saved images.")
     parser.add_argument("--annotations-path", type=str, default="data/image_name_to_class_id_and_name.json")
     parser.add_argument("--prefix", type=str, default="adv_", help="Filename prefix used to infer original names.")
-    parser.add_argument("--batch-size", type=int, default=256, help="Images per inference batch.")
+    parser.add_argument("--batch-size", type=int, default=512, help="Images per inference batch.")
     parser.add_argument("--num-workers", type=int, default=8, help="DataLoader worker processes for image decode/transform.")
     parser.add_argument("--prefetch-factor", type=int, default=4, help="Batches prefetched per DataLoader worker.")
     parser.add_argument("--amp", action="store_true", help="Use CUDA fp16 autocast for faster transfer evaluation.")
