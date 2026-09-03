@@ -135,6 +135,26 @@ class ProgressiveViTTests(unittest.TestCase):
         self.assertFalse(bool(torch.any(mask & ~high_half)))
         self.assertTrue(torch.equal(mask.sum(dim=1), torch.ones(2, dtype=torch.long)))
 
+    def test_sampled_tokens_belong_to_current_low_half(self):
+        attacker = self.make_attacker(patch_selector="low")
+        scores = torch.tensor(
+            [[0.0, 1.0, 2.0, 3.0], [8.0, 3.0, 5.0, 1.0]]
+        )
+        mask = attacker._sample_low_mask(scores, 0.25, checkpoint=3)
+        low_half = torch.zeros_like(mask)
+        low_half.scatter_(1, torch.topk(scores, 2, dim=1, largest=False).indices, True)
+        self.assertFalse(bool(torch.any(mask & ~low_half)))
+        self.assertTrue(torch.equal(mask.sum(dim=1), torch.ones(2, dtype=torch.long)))
+        metadata = attacker.mainline_metadata()
+        self.assertEqual(metadata["patch_selector"], "low")
+        self.assertTrue(metadata["score_cls_noise_active"])
+
+    def test_high_is_an_explicit_alias_for_patch_score_selection(self):
+        attacker = self.make_attacker(patch_selector="high")
+        schedule = attacker._build_mask_schedule(torch.rand(1, 3, 4, 4))
+        self.assertEqual(schedule.counts, (1, 1, 1))
+        self.assertEqual(attacker.mainline_metadata()["patch_selector"], "high")
+
     def test_random_selector_skips_scores_and_uses_full_patch_budget(self):
         attacker = self.make_attacker(patch_selector="random")
 
@@ -333,7 +353,7 @@ class ProgressiveViTTests(unittest.TestCase):
             pretrained=False,
             device=torch.device("cpu"),
         )
-        for patch_selector in ("patch_score", "random"):
+        for patch_selector in ("patch_score", "high", "low", "random"):
             with self.subTest(patch_selector=patch_selector):
                 attacker = ViTProgressivePatchScoreAttacker(
                     model,

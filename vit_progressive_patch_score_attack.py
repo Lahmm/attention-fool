@@ -30,7 +30,7 @@ IMAGE_DIR = "data/clean_resized_images"
 ANNOTATIONS_PATH = "data/image_name_to_class_id_and_name.json"
 DEFAULT_CHECKPOINTS = (3, 6, 9)
 DEFAULT_DROP_RATIOS = (0.05, 0.05, 0.05)
-PROGRESSIVE_PATCH_SELECTORS = ("patch_score", "random")
+PROGRESSIVE_PATCH_SELECTORS = ("patch_score", "high", "low", "random")
 
 
 @dataclass(frozen=True)
@@ -121,7 +121,9 @@ class ViTProgressivePatchScoreAttacker(PatchScoreAttacker):
             raise ValueError("the progressive ViT attack requires two views per group")
         kwargs["attack_method"] = attack_method
         kwargs["input_diversity_views_per_group"] = views_per_group
-        kwargs["patch_selector"] = patch_selector
+        # The parent only validates its production selector vocabulary; the
+        # progressive high/low distinction is implemented entirely here.
+        kwargs["patch_selector"] = "random" if patch_selector == "random" else "patch_score"
         # Progressive ratios are independent per-checkpoint budgets. Do not
         # feed their sum into the parent's unused single-dropout budget, whose
         # [0, 1] validation would reject otherwise valid schedules.
@@ -220,6 +222,42 @@ class ViTProgressivePatchScoreAttacker(PatchScoreAttacker):
             mask[batch_index, selected] = True
         return mask.detach()
 
+    def _sample_low_mask(
+        self,
+        scores: torch.Tensor,
+        ratio: float,
+        *,
+        checkpoint: int,
+    ) -> torch.Tensor:
+        """Sample the checkpoint budget from the score-low half."""
+        if scores.ndim != 2:
+            raise ValueError(f"scores must have shape [B,N], got {tuple(scores.shape)}")
+        batch_size, token_count = scores.shape
+        candidate_count = max(1, token_count // 2)
+        drop_count = max(1, int(round(token_count * ratio)))
+        if drop_count > candidate_count:
+            raise ValueError(
+                f"drop ratio {ratio} selects {drop_count} tokens, but low half has "
+                f"only {candidate_count} candidates"
+            )
+        candidates = torch.topk(scores, candidate_count, dim=1, largest=False).indices
+        mask = torch.zeros_like(scores, dtype=torch.bool)
+        for batch_index in range(batch_size):
+            if self._gradient_replay is None:
+                order = torch.randperm(candidate_count, device=scores.device)
+            else:
+                # Reuse the score-guided event so high/low comparisons draw
+                # the same candidate ranks for an otherwise identical replay.
+                order = self._gradient_replay.randperm(
+                    candidate_count,
+                    f"progressive_drop_block{checkpoint}",
+                    batch_index,
+                    device=scores.device,
+                )
+            selected = candidates[batch_index, order[:drop_count]]
+            mask[batch_index, selected] = True
+        return mask.detach()
+
     def _sample_random_mask(
         self,
         *,
@@ -261,9 +299,12 @@ class ViTProgressivePatchScoreAttacker(PatchScoreAttacker):
             start = 0
             for checkpoint, ratio in zip(self.progressive_checkpoints, self.progressive_drop_ratios):
                 tokens = self._run_vit_blocks(base.blocks, tokens, start, checkpoint)
-                if self.progressive_patch_selector == "patch_score":
+                if self.progressive_patch_selector in ("patch_score", "high", "low"):
                     scores = self._score_at_checkpoint(tokens, checkpoint=checkpoint)
-                    mask = self._sample_high_mask(scores, ratio, checkpoint=checkpoint)
+                    if self.progressive_patch_selector == "low":
+                        mask = self._sample_low_mask(scores, ratio, checkpoint=checkpoint)
+                    else:
+                        mask = self._sample_high_mask(scores, ratio, checkpoint=checkpoint)
                 else:
                     mask = self._sample_random_mask(
                         batch_size=tokens.size(0),
@@ -392,10 +433,10 @@ class ViTProgressivePatchScoreAttacker(PatchScoreAttacker):
             "progressive_repeated_positions": True,
             "score_reference": (
                 "current_cls_plus_checkpoint_gaussian_noise"
-                if self.progressive_patch_selector == "patch_score"
+                if self.progressive_patch_selector in ("patch_score", "high", "low")
                 else "none_uniform_all_local_tokens"
             ),
-            "score_cls_noise_active": self.progressive_patch_selector == "patch_score",
+            "score_cls_noise_active": self.progressive_patch_selector != "random",
             "score_cls_noise_strength": self.score_cls_noise_strength,
             "token_intervention": "local_patch_tokens_hard_zero_after_checkpoint",
             "mask_schedule_policy": "current_attack_iterate_per_step_group",
@@ -534,7 +575,10 @@ def parse_args() -> argparse.Namespace:
         "--patch-selector",
         choices=PROGRESSIVE_PATCH_SELECTORS,
         default="patch_score",
-        help="Select from the score-high half or uniformly from all local patches.",
+        help=(
+            "Select from the score-high half, score-low half, or uniformly from all "
+            "local patches; patch_score is a backward-compatible alias for high."
+        ),
     )
     parser.add_argument("--score-cls-noise-strength", type=float, default=0.2)
     parser.add_argument("--opponent-noise-strength", type=float, default=0.2)
