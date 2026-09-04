@@ -354,7 +354,11 @@ def main(args: argparse.Namespace) -> None:
         "feature_layer": args.feature_layer,
         "patch_score_layer": args.patch_score_layer,
         "patch_selector": args.patch_selector,
-        "gradient_postprocess": "mean",
+        "gradient_postprocess": (
+            "raw_mean_plus_gaussian_residual"
+            if args.gaussian_alpha != 0
+            else "raw_mean"
+        ),
         "gaussian_sigma": args.gaussian_sigma,
         "gaussian_alpha": args.gaussian_alpha,
     }
