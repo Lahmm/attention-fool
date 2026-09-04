@@ -423,6 +423,20 @@ class ViTProgressivePatchScoreAttacker(PatchScoreAttacker):
             yield self._forward_with_schedule(shifted_pixels, labels, phase_schedule)
 
     def mainline_metadata(self) -> dict[str, object]:
+        score_based_selector = self.progressive_patch_selector in (
+            "patch_score",
+            "high",
+            "low",
+        )
+        score_cls_noise_active = (
+            score_based_selector and self.score_cls_noise_strength > 0
+        )
+        if score_cls_noise_active:
+            score_reference = "current_cls_plus_checkpoint_gaussian_noise"
+        elif score_based_selector:
+            score_reference = "current_cls_without_noise"
+        else:
+            score_reference = "none_uniform_all_local_tokens"
         return {
             "attack_method": f"vit_progressive_{self.progressive_patch_selector}",
             "whitebox_model": MODEL_NAME,
@@ -431,12 +445,8 @@ class ViTProgressivePatchScoreAttacker(PatchScoreAttacker):
             "progressive_drop_ratios": list(self.progressive_drop_ratios),
             "progressive_drop_counts": list(self._progressive_mask_counts),
             "progressive_repeated_positions": True,
-            "score_reference": (
-                "current_cls_plus_checkpoint_gaussian_noise"
-                if self.progressive_patch_selector in ("patch_score", "high", "low")
-                else "none_uniform_all_local_tokens"
-            ),
-            "score_cls_noise_active": self.progressive_patch_selector != "random",
+            "score_reference": score_reference,
+            "score_cls_noise_active": score_cls_noise_active,
             "score_cls_noise_strength": self.score_cls_noise_strength,
             "token_intervention": "local_patch_tokens_hard_zero_after_checkpoint",
             "mask_schedule_policy": "current_attack_iterate_per_step_group",

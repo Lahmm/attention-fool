@@ -136,7 +136,10 @@ class ProgressiveViTTests(unittest.TestCase):
         self.assertTrue(torch.equal(mask.sum(dim=1), torch.ones(2, dtype=torch.long)))
 
     def test_sampled_tokens_belong_to_current_low_half(self):
-        attacker = self.make_attacker(patch_selector="low")
+        attacker = self.make_attacker(
+            patch_selector="low",
+            score_cls_noise_strength=0.2,
+        )
         scores = torch.tensor(
             [[0.0, 1.0, 2.0, 3.0], [8.0, 3.0, 5.0, 1.0]]
         )
@@ -154,6 +157,16 @@ class ProgressiveViTTests(unittest.TestCase):
         schedule = attacker._build_mask_schedule(torch.rand(1, 3, 4, 4))
         self.assertEqual(schedule.counts, (1, 1, 1))
         self.assertEqual(attacker.mainline_metadata()["patch_selector"], "high")
+
+    def test_zero_score_cls_noise_is_recorded_as_inactive(self):
+        attacker = self.make_attacker(
+            patch_selector="high",
+            score_cls_noise_strength=0.0,
+        )
+        metadata = attacker.mainline_metadata()
+        self.assertFalse(metadata["score_cls_noise_active"])
+        self.assertEqual(metadata["score_cls_noise_strength"], 0.0)
+        self.assertEqual(metadata["score_reference"], "current_cls_without_noise")
 
     def test_random_selector_skips_scores_and_uses_full_patch_budget(self):
         attacker = self.make_attacker(patch_selector="random")
