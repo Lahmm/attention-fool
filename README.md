@@ -67,10 +67,6 @@ python main.py --attack-method token_patch_dropout \
 `experiments/mainline_data_aug_gaussian_story_s1000.md`，迁移评估 CSV 位于
 `outputs/csv/`，对应对抗样本和复现元数据位于 `outputs/attack/`。
 
-当前最高 ViT 主线中 CLS score noise 与 Gaussian gradient residual 的 2×2 控制变量
-补实验及可直接执行的攻击/迁移命令见
-`experiments/vit_cls_score_noise_gradient_postprocess_s1000.md`。
-
 ## 迁移评估与测试
 
 ```bash
