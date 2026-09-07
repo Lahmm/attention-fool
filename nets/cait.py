@@ -6,6 +6,7 @@ from .base import (
     AttackFeatureState,
     DEFAULT_PRETRAINED,
     PatchScoreFeatures,
+    ProgressiveAttackState,
     WhiteBoxWithHook,
     conv2d_attack_metadata,
     sequential_modules,
@@ -25,6 +26,8 @@ class CaiTS24WithHook(WhiteBoxWithHook):
         "block24_gap": 24,
         "block24_class": 24,
     }
+    _PROGRESSIVE_LAYERS = tuple(f"block{index}_gap" for index in range(1, 25))
+    _DEFAULT_PROGRESSIVE_LAYERS = ("block6_gap", "block14_gap", "block22_gap")
 
     def _feature_modules(self):
         return sequential_modules(getattr(self.model, "blocks", None))
@@ -102,6 +105,72 @@ class CaiTS24WithHook(WhiteBoxWithHook):
             raise ValueError("replacement CaiT local tokens do not match the attack state.")
         local_tokens, cls_token = self._run_encoder(local_tokens)
         tokens = self.model.norm(torch.cat((cls_token, local_tokens), dim=1))
+        return self.model.forward_head(tokens)
+
+    def progressive_checkpoint_candidates(self) -> tuple[str, ...]:
+        return self._PROGRESSIVE_LAYERS
+
+    def default_progressive_checkpoints(self) -> tuple[str, ...]:
+        return self._DEFAULT_PROGRESSIVE_LAYERS
+
+    def begin_progressive_forward(self, x: torch.Tensor) -> ProgressiveAttackState:
+        initial = self.prepare_attack_feature_state(x)
+        return ProgressiveAttackState(
+            initial.local_tokens, initial.grid_size, {"block_index": 0}
+        )
+
+    def replace_progressive_local_tokens(
+        self, state: ProgressiveAttackState, local_tokens: torch.Tensor
+    ) -> ProgressiveAttackState:
+        if local_tokens.shape != state.local_tokens.shape:
+            raise ValueError("replacement CaiT progressive tokens do not match the state.")
+        return ProgressiveAttackState(local_tokens, state.grid_size, dict(state.context))
+
+    def advance_progressive_state(
+        self, state: ProgressiveAttackState, checkpoint_id: str
+    ) -> ProgressiveAttackState:
+        if checkpoint_id not in self._PROGRESSIVE_LAYERS:
+            raise ValueError(f"unsupported CaiT progressive checkpoint: {checkpoint_id!r}.")
+        target = int(checkpoint_id.removeprefix("block").removesuffix("_gap"))
+        start = int(state.context["block_index"])
+        if target <= start:
+            raise ValueError("CaiT progressive checkpoints must be strictly increasing.")
+        local = state.local_tokens
+        for block in self.model.blocks[start:target]:
+            local = block(local)
+        return ProgressiveAttackState(local, state.grid_size, {"block_index": target})
+
+    def progressive_score_features(
+        self, state: ProgressiveAttackState, checkpoint_id: str
+    ) -> PatchScoreFeatures:
+        features = PatchScoreFeatures(
+            local_tokens=state.local_tokens,
+            global_token=state.local_tokens.mean(dim=1, keepdim=True),
+            grid_size=state.grid_size,
+            source_name=f"blocks[{state.context['block_index'] - 1}]+gap",
+            layer_id=checkpoint_id,
+            global_mode="gap",
+        )
+        features.validate()
+        return features
+
+    def apply_progressive_mask(
+        self, state: ProgressiveAttackState, mask: torch.Tensor
+    ) -> ProgressiveAttackState:
+        if mask.shape != state.local_tokens.shape[:2] or mask.dtype != torch.bool:
+            raise ValueError("CaiT progressive mask does not match local tokens.")
+        local = torch.where(mask.unsqueeze(-1), torch.zeros_like(state.local_tokens), state.local_tokens)
+        return ProgressiveAttackState(local, state.grid_size, dict(state.context))
+
+    def finish_progressive_forward(self, state: ProgressiveAttackState) -> torch.Tensor:
+        local = state.local_tokens
+        start = int(state.context["block_index"])
+        for block in self.model.blocks[start:]:
+            local = block(local)
+        cls = self.model.cls_token.expand(local.size(0), -1, -1)
+        for block in self.model.blocks_token_only:
+            cls = block(local, cls)
+        tokens = self.model.norm(torch.cat((cls, local), dim=1))
         return self.model.forward_head(tokens)
 
 

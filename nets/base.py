@@ -89,6 +89,30 @@ class AttackFeatureState:
             raise ValueError("RGB projection output channels do not match local feature channels.")
 
 
+@dataclass
+class ProgressiveAttackState:
+    """Opaque architecture state used by the progressive mainline.
+
+    ``local_tokens`` and ``grid_size`` always describe the representation at
+    the current routing checkpoint.  ``context`` is owned by the adapter and
+    carries prefix tokens, spatial tensors and cursor positions as needed.
+    The attack treats it as opaque and only calls the adapter methods below.
+    """
+
+    local_tokens: torch.Tensor
+    grid_size: tuple[int, int]
+    context: object
+
+    def validate(self) -> None:
+        if self.local_tokens.ndim != 3:
+            raise ValueError(
+                "progressive local_tokens must have shape [B,N,D], got "
+                f"{tuple(self.local_tokens.shape)}."
+            )
+        if self.local_tokens.size(1) != self.grid_size[0] * self.grid_size[1]:
+            raise ValueError("progressive local token count does not match grid_size.")
+
+
 def conv2d_attack_metadata(module: nn.Module) -> dict[str, object]:
     """Return strict RGB projection metadata for an attack feature state."""
     if not isinstance(module, nn.Conv2d) or module.in_channels != 3:
@@ -173,6 +197,64 @@ class WhiteBoxWithHook(nn.Module):
         local_tokens: torch.Tensor,
     ) -> torch.Tensor:
         raise NotImplementedError(f"resumable attack forward is not implemented for {self.model_name}.")
+
+    def progressive_checkpoint_candidates(self) -> tuple[str, ...]:
+        """Return checkpoints that can be traversed by the progressive attack."""
+        raise NotImplementedError(
+            f"progressive checkpoints are not implemented for {self.model_name}."
+        )
+
+    def default_progressive_checkpoints(self) -> tuple[str, ...]:
+        """Return the three architecture-specific mainline checkpoints."""
+        raise NotImplementedError(
+            f"progressive checkpoint defaults are not implemented for {self.model_name}."
+        )
+
+    def begin_progressive_forward(self, x: torch.Tensor) -> ProgressiveAttackState:
+        raise NotImplementedError(
+            f"progressive forward preparation is not implemented for {self.model_name}."
+        )
+
+    def replace_progressive_local_tokens(
+        self,
+        state: ProgressiveAttackState,
+        local_tokens: torch.Tensor,
+    ) -> ProgressiveAttackState:
+        raise NotImplementedError(
+            f"progressive token replacement is not implemented for {self.model_name}."
+        )
+
+    def advance_progressive_state(
+        self,
+        state: ProgressiveAttackState,
+        checkpoint_id: str,
+    ) -> ProgressiveAttackState:
+        raise NotImplementedError(
+            f"progressive traversal is not implemented for {self.model_name}."
+        )
+
+    def progressive_score_features(
+        self,
+        state: ProgressiveAttackState,
+        checkpoint_id: str,
+    ) -> PatchScoreFeatures:
+        raise NotImplementedError(
+            f"progressive scoring is not implemented for {self.model_name}."
+        )
+
+    def apply_progressive_mask(
+        self,
+        state: ProgressiveAttackState,
+        mask: torch.Tensor,
+    ) -> ProgressiveAttackState:
+        raise NotImplementedError(
+            f"progressive masking is not implemented for {self.model_name}."
+        )
+
+    def finish_progressive_forward(self, state: ProgressiveAttackState) -> torch.Tensor:
+        raise NotImplementedError(
+            f"progressive forward completion is not implemented for {self.model_name}."
+        )
 
     def _reset_caches(self) -> None:
         self.feature_tokens = [None] * len(self.feature_modules)

@@ -7,7 +7,12 @@ import torch
 from torch import nn
 
 from gradient_replay import GradientReplay
-from nets.base import AttackFeatureState, conv2d_attack_metadata
+from nets.base import (
+    AttackFeatureState,
+    PatchScoreFeatures,
+    ProgressiveAttackState,
+    conv2d_attack_metadata,
+)
 from vit_progressive_patch_score_attack import (
     MODEL_NAME,
     ProgressiveMaskSchedule,
@@ -78,6 +83,54 @@ class TinyViTWrapper(nn.Module):
             context={"prefix_tokens": tokens[:, :1]},
             **conv2d_attack_metadata(self.model.patch_embed.proj),
         )
+
+    def progressive_checkpoint_candidates(self):
+        return tuple(f"block{index}" for index in range(1, 12))
+
+    def default_progressive_checkpoints(self):
+        return ("block3", "block7", "block11")
+
+    def begin_progressive_forward(self, x):
+        initial = self.prepare_attack_feature_state(x)
+        return ProgressiveAttackState(
+            initial.local_tokens,
+            initial.grid_size,
+            {"prefix_tokens": initial.context["prefix_tokens"], "block_index": 0},
+        )
+
+    def replace_progressive_local_tokens(self, state, local_tokens):
+        return ProgressiveAttackState(local_tokens, state.grid_size, dict(state.context))
+
+    def advance_progressive_state(self, state, checkpoint_id):
+        target = int(checkpoint_id.removeprefix("block"))
+        tokens = torch.cat((state.context["prefix_tokens"], state.local_tokens), dim=1)
+        for block in self.model.blocks[state.context["block_index"] : target]:
+            tokens = block(tokens)
+        return ProgressiveAttackState(
+            tokens[:, 1:],
+            state.grid_size,
+            {"prefix_tokens": tokens[:, :1], "block_index": target},
+        )
+
+    def progressive_score_features(self, state, checkpoint_id):
+        return PatchScoreFeatures(
+            state.local_tokens,
+            state.context["prefix_tokens"],
+            state.grid_size,
+            f"blocks[{state.context['block_index'] - 1}]",
+            checkpoint_id,
+            "cls",
+        )
+
+    def apply_progressive_mask(self, state, mask):
+        local = torch.where(mask.unsqueeze(-1), torch.zeros_like(state.local_tokens), state.local_tokens)
+        return ProgressiveAttackState(local, state.grid_size, dict(state.context))
+
+    def finish_progressive_forward(self, state):
+        tokens = torch.cat((state.context["prefix_tokens"], state.local_tokens), dim=1)
+        for block in self.model.blocks[state.context["block_index"] :]:
+            tokens = block(tokens)
+        return self.model.forward_head(self.model.norm(tokens))
 
     def eval(self):
         super().eval()

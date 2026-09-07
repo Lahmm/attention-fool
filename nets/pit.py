@@ -6,6 +6,7 @@ from .base import (
     AttackFeatureState,
     DEFAULT_PRETRAINED,
     PatchScoreFeatures,
+    ProgressiveAttackState,
     WhiteBoxWithHook,
     conv2d_attack_metadata,
     nested_stage_blocks,
@@ -25,6 +26,23 @@ class PiTB224WithHook(WhiteBoxWithHook):
         "stage3_block2": (2, 2),
         "stage3_block4": (2, 4),
     }
+    _PROGRESSIVE_LAYERS = (
+        "stage1_block3",
+        "stage2_block1",
+        "stage2_block2",
+        "stage2_block3",
+        "stage2_block4",
+        "stage2_block5",
+        "stage2_block6",
+        "stage3_block1",
+        "stage3_block2",
+        "stage3_block3",
+    )
+    _DEFAULT_PROGRESSIVE_LAYERS = (
+        "stage1_block3",
+        "stage2_block5",
+        "stage3_block3",
+    )
 
     def _feature_modules(self):
         return nested_stage_blocks(getattr(self.model, "transformers", ()))
@@ -128,6 +146,153 @@ class PiTB224WithHook(WhiteBoxWithHook):
             raise ValueError("replacement PiT local tokens do not match the attack state.")
         _, cls_token = self._run_transformers(state, local_tokens)
         return self.model.forward_head(self.model.norm(cls_token))
+
+    def progressive_checkpoint_candidates(self) -> tuple[str, ...]:
+        return self._PROGRESSIVE_LAYERS
+
+    def default_progressive_checkpoints(self) -> tuple[str, ...]:
+        return self._DEFAULT_PROGRESSIVE_LAYERS
+
+    def begin_progressive_forward(self, x: torch.Tensor) -> ProgressiveAttackState:
+        initial = self.prepare_attack_feature_state(x)
+        return ProgressiveAttackState(
+            initial.local_tokens,
+            initial.grid_size,
+            {
+                "cls_token": initial.context["cls_token"],
+                "stage_index": 0,
+                "block_index": 0,
+                "stage_prepared": False,
+            },
+        )
+
+    def replace_progressive_local_tokens(
+        self, state: ProgressiveAttackState, local_tokens: torch.Tensor
+    ) -> ProgressiveAttackState:
+        if local_tokens.shape != state.local_tokens.shape:
+            raise ValueError("replacement PiT progressive tokens do not match the state.")
+        return ProgressiveAttackState(local_tokens, state.grid_size, dict(state.context))
+
+    @staticmethod
+    def _parse_progressive_checkpoint(checkpoint_id: str) -> tuple[int, int]:
+        stage_text, block_text = checkpoint_id.split("_")
+        return int(stage_text.removeprefix("stage")) - 1, int(block_text.removeprefix("block"))
+
+    @staticmethod
+    def _pit_spatial(state: ProgressiveAttackState) -> torch.Tensor:
+        batch, _, channels = state.local_tokens.shape
+        height, width = state.grid_size
+        return state.local_tokens.transpose(1, 2).reshape(batch, channels, height, width)
+
+    @staticmethod
+    def _split_pit_tokens(
+        tokens: torch.Tensor, prefix_count: int, grid_size: tuple[int, int]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        cls = tokens[:, :prefix_count]
+        batch, _, channels = tokens.shape
+        spatial = tokens[:, prefix_count:].transpose(1, 2).reshape(
+            batch, channels, *grid_size
+        )
+        return spatial, cls
+
+    def _prepare_pit_stage(
+        self, stage_index: int, spatial: torch.Tensor, cls: torch.Tensor
+    ) -> tuple[torch.Tensor, tuple[int, int]]:
+        stage = self.model.transformers[stage_index]
+        if stage.pool is not None:
+            spatial, cls = stage.pool(spatial, cls)
+        grid = (int(spatial.size(-2)), int(spatial.size(-1)))
+        tokens = torch.cat((cls, spatial.flatten(2).transpose(1, 2)), dim=1)
+        return stage.norm(tokens), grid
+
+    def advance_progressive_state(
+        self, state: ProgressiveAttackState, checkpoint_id: str
+    ) -> ProgressiveAttackState:
+        if checkpoint_id not in self._PROGRESSIVE_LAYERS:
+            raise ValueError(f"unsupported PiT progressive checkpoint: {checkpoint_id!r}.")
+        target_stage, target_block = self._parse_progressive_checkpoint(checkpoint_id)
+        stage_index = int(state.context["stage_index"])
+        block_index = int(state.context["block_index"])
+        prepared = bool(state.context["stage_prepared"])
+        if (target_stage, target_block) <= (stage_index, block_index):
+            raise ValueError("PiT progressive checkpoints must be strictly increasing.")
+        spatial = self._pit_spatial(state)
+        cls = state.context["cls_token"]
+        prefix_count = cls.size(1)
+        grid = state.grid_size
+        while stage_index <= target_stage:
+            stage = self.model.transformers[stage_index]
+            if not prepared:
+                tokens, grid = self._prepare_pit_stage(stage_index, spatial, cls)
+                prepared = True
+            else:
+                tokens = torch.cat((cls, spatial.flatten(2).transpose(1, 2)), dim=1)
+            end = target_block if stage_index == target_stage else len(stage.blocks)
+            for block in stage.blocks[block_index:end]:
+                tokens = block(tokens)
+            spatial, cls = self._split_pit_tokens(tokens, prefix_count, grid)
+            block_index = end
+            if stage_index == target_stage:
+                return ProgressiveAttackState(
+                    spatial.flatten(2).transpose(1, 2),
+                    grid,
+                    {
+                        "cls_token": cls,
+                        "stage_index": stage_index,
+                        "block_index": block_index,
+                        "stage_prepared": True,
+                    },
+                )
+            stage_index += 1
+            block_index = 0
+            prepared = False
+        raise RuntimeError("PiT progressive checkpoint was not reached.")
+
+    def progressive_score_features(
+        self, state: ProgressiveAttackState, checkpoint_id: str
+    ) -> PatchScoreFeatures:
+        stage_index = int(state.context["stage_index"])
+        block_index = int(state.context["block_index"])
+        features = PatchScoreFeatures(
+            local_tokens=state.local_tokens,
+            global_token=state.context["cls_token"][:, :1],
+            grid_size=state.grid_size,
+            source_name=f"transformers[{stage_index}].blocks[{block_index - 1}]",
+            layer_id=checkpoint_id,
+            global_mode="cls",
+        )
+        features.validate()
+        return features
+
+    def apply_progressive_mask(
+        self, state: ProgressiveAttackState, mask: torch.Tensor
+    ) -> ProgressiveAttackState:
+        if mask.shape != state.local_tokens.shape[:2] or mask.dtype != torch.bool:
+            raise ValueError("PiT progressive mask does not match local tokens.")
+        local = torch.where(mask.unsqueeze(-1), torch.zeros_like(state.local_tokens), state.local_tokens)
+        return ProgressiveAttackState(local, state.grid_size, dict(state.context))
+
+    def finish_progressive_forward(self, state: ProgressiveAttackState) -> torch.Tensor:
+        spatial = self._pit_spatial(state)
+        cls = state.context["cls_token"]
+        stage_index = int(state.context["stage_index"])
+        block_index = int(state.context["block_index"])
+        prepared = bool(state.context["stage_prepared"])
+        prefix_count = cls.size(1)
+        grid = state.grid_size
+        while stage_index < len(self.model.transformers):
+            stage = self.model.transformers[stage_index]
+            if not prepared:
+                tokens, grid = self._prepare_pit_stage(stage_index, spatial, cls)
+            else:
+                tokens = torch.cat((cls, spatial.flatten(2).transpose(1, 2)), dim=1)
+            for block in stage.blocks[block_index:]:
+                tokens = block(tokens)
+            spatial, cls = self._split_pit_tokens(tokens, prefix_count, grid)
+            stage_index += 1
+            block_index = 0
+            prepared = False
+        return self.model.forward_head(self.model.norm(cls))
 
 def build_pit_b_224_model(
     num_classes: int,
