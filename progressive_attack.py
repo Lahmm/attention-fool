@@ -51,11 +51,13 @@ class ProgressiveMaskSelection:
 class ProgressiveMaskSchedule:
     selections: tuple[ProgressiveMaskSelection, ...]
 
-    def validate(self, *, batch_size: int) -> None:
+    def validate(self, *, batch_size: int, token_count: int | None = None) -> None:
         if not self.selections:
             raise ValueError("a progressive schedule must contain selections.")
         for selection in self.selections:
             selection.validate(batch_size=batch_size)
+            if token_count is not None and selection.mask.size(1) != token_count:
+                raise ValueError("schedule token count does not match the requested count.")
 
     @property
     def checkpoints(self) -> tuple[str, ...]:
@@ -72,6 +74,13 @@ class ProgressiveMaskSchedule:
     @property
     def grid_sizes(self) -> tuple[tuple[int, int], ...]:
         return tuple(item.grid_size for item in self.selections)
+
+    @property
+    def grid_size(self) -> tuple[int, int]:
+        grids = self.grid_sizes
+        if any(grid != grids[0] for grid in grids[1:]):
+            raise ValueError("cross-scale schedules do not have one grid_size.")
+        return grids[0]
 
 
 class ProgressivePatchScoreAttacker:
@@ -181,6 +190,7 @@ class ProgressivePatchScoreAttacker:
         self.opponent_noise_strength = float(opponent_noise_strength)
         self.post_dropout_phase_token_noise = bool(post_dropout_phase_token_noise)
         self.post_dropout_feature_noise_strength = self.opponent_noise_strength
+        self.patch_dropout_ratio = 0.0
         self.epsilon = float(epsilon)
         self.steps = int(steps)
         self.step_size = float(step_size) if step_size is not None else self.epsilon / self.steps
@@ -296,6 +306,18 @@ class ProgressivePatchScoreAttacker:
                 )
             mask[batch_index, order[:drop_count]] = True
         return mask.detach()
+
+    def _sample_high_mask(
+        self, scores: torch.Tensor, ratio: float, *, checkpoint: str | int
+    ) -> torch.Tensor:
+        checkpoint_id = self._canonical_checkpoint(self.model, checkpoint)
+        return self._sample_score_mask(scores, ratio, checkpoint_id, largest=True)
+
+    def _sample_low_mask(
+        self, scores: torch.Tensor, ratio: float, *, checkpoint: str | int
+    ) -> torch.Tensor:
+        checkpoint_id = self._canonical_checkpoint(self.model, checkpoint)
+        return self._sample_score_mask(scores, ratio, checkpoint_id, largest=False)
 
     def _build_mask_schedule(self, pixels: torch.Tensor) -> ProgressiveMaskSchedule:
         with torch.no_grad():

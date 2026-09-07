@@ -1,4 +1,5 @@
 import ast
+import hashlib
 from pathlib import Path
 import unittest
 
@@ -8,16 +9,13 @@ from gradient_replay import GradientReplay
 from progressive_attack import ProgressivePatchScoreAttacker
 from tests.vit_progressive_patch_score_attack_cases import (
     TinyViTWrapper,
-    ViTProgressivePatchScoreAttacker,
 )
 
 
 class ProgressiveIndependenceTests(unittest.TestCase):
-    def make_pair(self, **overrides):
+    def make_attacker(self, **overrides):
         torch.manual_seed(7)
-        legacy_model = TinyViTWrapper()
-        new_model = TinyViTWrapper()
-        new_model.load_state_dict(legacy_model.state_dict())
+        model = TinyViTWrapper()
         common = {
             "checkpoints": (3, 6, 9),
             "drop_ratios": (0.25, 0.25, 0.25),
@@ -32,10 +30,13 @@ class ProgressiveIndependenceTests(unittest.TestCase):
             "device": torch.device("cpu"),
         }
         common.update(overrides)
-        return (
-            ViTProgressivePatchScoreAttacker(legacy_model, **common),
-            ProgressivePatchScoreAttacker(new_model, **common),
-        )
+        return ProgressivePatchScoreAttacker(model, **common)
+
+    @staticmethod
+    def digest(tensor):
+        return hashlib.sha256(
+            tensor.detach().contiguous().numpy().tobytes()
+        ).hexdigest()
 
     def test_module_has_no_attack_import_or_inheritance(self):
         source_path = Path(__file__).resolve().parents[1] / "progressive_attack.py"
@@ -60,7 +61,7 @@ class ProgressiveIndependenceTests(unittest.TestCase):
         self.assertEqual(progressive_class.bases, [])
 
     def test_vit_schedule_is_golden_equivalent(self):
-        legacy, independent = self.make_pair()
+        independent = self.make_attacker()
         pixels = torch.linspace(0.01, 0.99, 48).view(1, 3, 4, 4)
 
         def schedule(attacker):
@@ -73,50 +74,52 @@ class ProgressiveIndependenceTests(unittest.TestCase):
             finally:
                 attacker._gradient_replay = None
 
-        legacy_schedule = schedule(legacy)
         independent_schedule = schedule(independent)
-        self.assertEqual(legacy_schedule.counts, independent_schedule.counts)
-        for expected, actual in zip(legacy_schedule.masks, independent_schedule.masks):
-            self.assertTrue(torch.equal(expected, actual))
+        self.assertEqual(independent_schedule.counts, (1, 1, 1))
+        self.assertEqual(
+            [self.digest(mask) for mask in independent_schedule.masks],
+            [
+                "b40711a88c7039756fb8a73827eabe2c0fe5a0346ca7e0a104adc0fc764f528d",
+                "bf5e8ffa51a9e748985800c1d3d7f1a2a6ae7435136593ca8d9637e3f87c699c",
+                "b40711a88c7039756fb8a73827eabe2c0fe5a0346ca7e0a104adc0fc764f528d",
+            ],
+        )
 
     def test_vit_gradient_and_adversarial_output_are_golden_equivalent(self):
-        legacy, independent = self.make_pair()
+        independent = self.make_attacker()
         pixels = torch.linspace(0.01, 0.99, 48).view(1, 3, 4, 4)
         labels = torch.tensor([1])
-        legacy_probe = legacy.probe_attack_gradients(
-            pixels,
-            labels,
-            replay=GradientReplay(20260903),
-            sample_ids=["golden.png"],
-        )
         independent_probe = independent.probe_attack_gradients(
             pixels,
             labels,
             replay=GradientReplay(20260903),
             sample_ids=["golden.png"],
         )
-        for key in ("view_gradients", "raw_mean", "processed"):
-            self.assertTrue(
-                torch.equal(legacy_probe[key], independent_probe[key]),
-                f"golden mismatch for {key}",
-            )
-        legacy_adv = legacy.attack_batch(
-            pixels, labels, replay=GradientReplay(99), sample_ids=["golden.png"]
+        self.assertEqual(
+            {key: self.digest(value) for key, value in independent_probe.items()},
+            {
+                "view_gradients": "e97a182ec0d9da128e8bc76c4b814664b4c7ea9547fcbaac2f39a95d773b8a85",
+                "raw_mean": "df11a2ddecceaf795868b2d882cdbf37be6c1c01ba2dda73986c63c257daee7d",
+                "processed": "df11a2ddecceaf795868b2d882cdbf37be6c1c01ba2dda73986c63c257daee7d",
+            },
         )
         independent_adv = independent.attack_batch(
             pixels, labels, replay=GradientReplay(99), sample_ids=["golden.png"]
         )
-        self.assertTrue(torch.equal(legacy_adv, independent_adv))
+        self.assertEqual(
+            self.digest(independent_adv),
+            "df31fe9923f1e00f0a40bc8c8bab0af159eb3f6e3e3d310cbdef9e1f7c8c1463",
+        )
 
     def test_score_noise_metadata_is_boolean_and_canonical_strength_is_numeric(self):
-        _, attacker = self.make_pair(score_cls_noise_strength=0.0)
+        attacker = self.make_attacker(score_cls_noise_strength=0.0)
         metadata = attacker.mainline_metadata()
         self.assertIs(metadata["score_global_noise_active"], False)
         self.assertIsInstance(metadata["score_global_noise_active"], bool)
         self.assertEqual(metadata["score_global_noise_strength"], 0.0)
 
     def test_cross_grid_phase_and_union_preserve_each_budget(self):
-        _, attacker = self.make_pair()
+        attacker = self.make_attacker()
         from progressive_attack import ProgressiveMaskSchedule, ProgressiveMaskSelection
 
         first = ProgressiveMaskSelection(

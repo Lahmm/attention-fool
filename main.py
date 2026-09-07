@@ -15,19 +15,27 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 
 from tqdm import tqdm
 
-from attack import (
-    ATTACK_METHODS,
-    PATCH_SELECTORS,
-    POST_DROPOUT_NOISE_TYPES,
-    PatchScoreAttacker,
-)
 from gradient_replay import GradientReplay
 from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, build_whitebox_model
+from progressive_attack import (
+    DEFAULT_DROP_RATIOS,
+    PROGRESSIVE_PATCH_SELECTORS,
+    ProgressivePatchScoreAttacker,
+)
 from utils import DEVICE, load_data, save_adversarial_images
 
 
 IMAGE_DIR = "data/clean_resized_images"
 ANNOTATIONS_PATH = "data/image_name_to_class_id_and_name.json"
+ATTACK_METHODS = (
+    "progressive",
+    "original_score_postdrop_phase_pair",
+    "none",
+    "patch_dropout",
+    "token_patch_dropout",
+)
+PATCH_SELECTORS = ("patch_score", "random", "no_drop")
+POST_DROPOUT_NOISE_TYPES = ("gaussian", "opponent_projected")
 
 
 def parse_float_range(value: str) -> tuple[float, float]:
@@ -49,6 +57,28 @@ def parse_phase_shift_set(value: str) -> tuple[tuple[int, int], ...]:
     if not shifts:
         raise argparse.ArgumentTypeError("phase shift set cannot be empty")
     return shifts
+
+
+def parse_checkpoint_list(value: str) -> tuple[str | int, ...]:
+    checkpoints: list[str | int] = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        checkpoints.append(int(item) if item.isdigit() else item)
+    if not checkpoints:
+        raise argparse.ArgumentTypeError("checkpoint list cannot be empty")
+    return tuple(checkpoints)
+
+
+def parse_float_list(value: str) -> tuple[float, ...]:
+    try:
+        values = tuple(float(item.strip()) for item in value.split(",") if item.strip())
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected comma-separated floats") from exc
+    if not values:
+        raise argparse.ArgumentTypeError("float list cannot be empty")
+    return values
 
 
 def validate_output_dir(output_dir: str) -> Path:
@@ -78,7 +108,7 @@ def clear_directory_contents(directory: Path) -> None:
 
 def attack_all_samples(
     dataloader,
-    attacker: PatchScoreAttacker,
+    attacker,
     output_dir: Path,
     max_attacked_samples: int | None,
     sample_offset: int = 0,
@@ -140,8 +170,8 @@ def attack_all_samples(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Patch-score routing attack")
-    parser.add_argument("--attack-method", choices=ATTACK_METHODS, default="original_score_postdrop_phase_pair")
+    parser = argparse.ArgumentParser(description="Progressive patch-score routing attack")
+    parser.add_argument("--attack-method", choices=ATTACK_METHODS, default="progressive")
     parser.add_argument("--whitebox-model", choices=WHITEBOX_MODEL_CHOICES, default=DEFAULT_MODEL_NAME)
     parser.add_argument("--max-attacked-samples", type=int, default=1000)
     parser.add_argument(
@@ -167,6 +197,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input-diversity-views-per-group", type=int, default=2)
     parser.add_argument("--input-diversity-phase-shift-set", type=parse_phase_shift_set, default=((4, 4), (8, 8), (12, 12)))
     parser.add_argument("--guide-aug-strength", type=float, default=0.2)
+    parser.add_argument(
+        "--checkpoints",
+        type=parse_checkpoint_list,
+        default=None,
+        help="Three adapter checkpoint IDs; defaults are architecture-specific.",
+    )
+    parser.add_argument("--drop-ratios", type=parse_float_list, default=DEFAULT_DROP_RATIOS)
+    parser.add_argument(
+        "--progressive-patch-selector",
+        choices=PROGRESSIVE_PATCH_SELECTORS,
+        default=None,
+        help="Explicit progressive selector; otherwise --patch-selector is used.",
+    )
+    parser.add_argument("--score-global-noise-strength", type=float, default=None)
+    parser.add_argument(
+        "--score-cls-noise-strength",
+        type=float,
+        default=None,
+        help="Deprecated ViT-compatible alias for --score-global-noise-strength.",
+    )
+    parser.add_argument("--opponent-noise-strength", type=float, default=0.2)
     parser.add_argument("--patch-dropout-ratio", type=float, default=0.3)
     parser.add_argument("--patch-dropout-score-mode", choices=("high", "low", "all"), default="high")
     parser.add_argument("--patch-dropout-sampling-mode", choices=("random", "bernoulli", "extreme", "score_weighted"), default="random")
@@ -206,7 +257,11 @@ def parse_args() -> argparse.Namespace:
         default="final",
         help="Registered routing checkpoint for the selected white-box model.",
     )
-    parser.add_argument("--patch-selector", choices=PATCH_SELECTORS, default="patch_score")
+    parser.add_argument(
+        "--patch-selector",
+        choices=tuple(dict.fromkeys((*PATCH_SELECTORS, *PROGRESSIVE_PATCH_SELECTORS))),
+        default="patch_score",
+    )
     parser.add_argument(
         "--gaussian-sigma",
         type=float,
@@ -224,7 +279,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=96)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--prefetch-factor", type=int, default=4)
-    parser.add_argument("--output-dir", default="outputs/attack/patch_score_routing")
+    parser.add_argument("--output-dir", default="outputs/attack/progressive_patch_score")
     return parser.parse_args()
 
 
@@ -244,45 +299,77 @@ def main(args: argparse.Namespace) -> None:
         prefetch_factor=args.prefetch_factor,
     )
     model = build_whitebox_model(num_classes=num_classes, model_name=args.whitebox_model)
-    attacker = PatchScoreAttacker(
-        model=model,
-        epsilon=args.epsilon,
-        step_size=args.step_size,
-        steps=args.steps,
-        attack_method=args.attack_method,
-        use_momentum=args.mi,
-        momentum_decay=args.mi_decay,
-        nesterov=args.ni,
-        ti_sigma=args.ti_sigma,
-        input_diversity=args.dim,
-        dim_resize_range=args.dim_resize_range,
-        guide_aug_copies=args.guide_aug_copies,
-        input_diversity_groups=args.input_diversity_groups,
-        input_diversity_views_per_group=args.input_diversity_views_per_group,
-        input_diversity_phase_shift_set=args.input_diversity_phase_shift_set,
-        guide_aug_strength=args.guide_aug_strength,
-        patch_dropout_ratio=args.patch_dropout_ratio,
-        patch_dropout_score_mode=args.patch_dropout_score_mode,
-        patch_dropout_sampling_mode=args.patch_dropout_sampling_mode,
-        patch_dropout_score_quantile_jitter=args.patch_dropout_score_quantile_jitter,
-        patch_dropout_score_noise=args.patch_dropout_score_noise,
-        patch_dropout_noise_mode=args.patch_dropout_noise_mode,
-        token_cls_noise=args.token_cls_noise,
-        token_score_cls_noise=args.token_score_cls_noise,
-        token_score_cls_mode=args.token_score_cls_mode,
-        token_score_patch_noise=args.token_score_patch_noise,
-        token_cls_noise_mode=args.token_cls_noise_mode,
-        token_cls_noise_strength=args.token_cls_noise_strength,
-        post_dropout_phase_token_noise=args.post_dropout_phase_token_noise,
-        post_dropout_feature_noise_strength=args.post_dropout_feature_noise_strength,
-        post_dropout_feature_noise_type=args.post_dropout_feature_noise_type,
-        feature_layer=args.feature_layer,
-        patch_score_layer=args.patch_score_layer,
-        patch_selector=args.patch_selector,
-        gaussian_sigma=args.gaussian_sigma,
-        gaussian_alpha=args.gaussian_alpha,
-        device=DEVICE,
-    )
+    if args.attack_method == "progressive":
+        if args.input_diversity_views_per_group != 2:
+            raise ValueError("the progressive mainline requires exactly two views per group.")
+        attacker = ProgressivePatchScoreAttacker(
+            model=model,
+            checkpoints=args.checkpoints,
+            drop_ratios=args.drop_ratios,
+            patch_selector=args.progressive_patch_selector or args.patch_selector,
+            score_global_noise_strength=args.score_global_noise_strength,
+            score_cls_noise_strength=args.score_cls_noise_strength,
+            opponent_noise_strength=args.opponent_noise_strength,
+            epsilon=args.epsilon,
+            step_size=args.step_size,
+            steps=args.steps,
+            use_momentum=args.mi,
+            momentum_decay=args.mi_decay,
+            nesterov=args.ni,
+            ti_sigma=args.ti_sigma,
+            input_diversity_groups=args.input_diversity_groups,
+            input_diversity_views_per_group=2,
+            input_diversity_phase_shift_set=args.input_diversity_phase_shift_set,
+            post_dropout_phase_token_noise=args.post_dropout_phase_token_noise,
+            gaussian_sigma=args.gaussian_sigma,
+            gaussian_alpha=args.gaussian_alpha,
+            device=DEVICE,
+        )
+    else:
+        # The legacy implementation is intentionally imported only inside the
+        # legacy branch.  Progressive execution therefore remains functional
+        # when attack.py is absent.
+        from attack import PatchScoreAttacker
+
+        attacker = PatchScoreAttacker(
+            model=model,
+            epsilon=args.epsilon,
+            step_size=args.step_size,
+            steps=args.steps,
+            attack_method=args.attack_method,
+            use_momentum=args.mi,
+            momentum_decay=args.mi_decay,
+            nesterov=args.ni,
+            ti_sigma=args.ti_sigma,
+            input_diversity=args.dim,
+            dim_resize_range=args.dim_resize_range,
+            guide_aug_copies=args.guide_aug_copies,
+            input_diversity_groups=args.input_diversity_groups,
+            input_diversity_views_per_group=args.input_diversity_views_per_group,
+            input_diversity_phase_shift_set=args.input_diversity_phase_shift_set,
+            guide_aug_strength=args.guide_aug_strength,
+            patch_dropout_ratio=args.patch_dropout_ratio,
+            patch_dropout_score_mode=args.patch_dropout_score_mode,
+            patch_dropout_sampling_mode=args.patch_dropout_sampling_mode,
+            patch_dropout_score_quantile_jitter=args.patch_dropout_score_quantile_jitter,
+            patch_dropout_score_noise=args.patch_dropout_score_noise,
+            patch_dropout_noise_mode=args.patch_dropout_noise_mode,
+            token_cls_noise=args.token_cls_noise,
+            token_score_cls_noise=args.token_score_cls_noise,
+            token_score_cls_mode=args.token_score_cls_mode,
+            token_score_patch_noise=args.token_score_patch_noise,
+            token_cls_noise_mode=args.token_cls_noise_mode,
+            token_cls_noise_strength=args.token_cls_noise_strength,
+            post_dropout_phase_token_noise=args.post_dropout_phase_token_noise,
+            post_dropout_feature_noise_strength=args.post_dropout_feature_noise_strength,
+            post_dropout_feature_noise_type=args.post_dropout_feature_noise_type,
+            feature_layer=args.feature_layer,
+            patch_score_layer=args.patch_score_layer,
+            patch_selector=args.patch_selector,
+            gaussian_sigma=args.gaussian_sigma,
+            gaussian_alpha=args.gaussian_alpha,
+            device=DEVICE,
+        )
 
     clear_directory_contents(output_dir)
     replay = GradientReplay(args.seed) if args.seed is not None else None
@@ -327,6 +414,18 @@ def main(args: argparse.Namespace) -> None:
         ),
         "input_diversity_phase_shift_set": [list(shift) for shift in args.input_diversity_phase_shift_set],
         "guide_aug_strength": args.guide_aug_strength,
+        "checkpoints": list(args.checkpoints) if args.checkpoints is not None else None,
+        "drop_ratios": list(args.drop_ratios),
+        "progressive_patch_selector": args.progressive_patch_selector or args.patch_selector,
+        "score_global_noise_strength": (
+            args.score_global_noise_strength
+            if args.score_global_noise_strength is not None
+            else args.score_cls_noise_strength
+            if args.score_cls_noise_strength is not None
+            else 0.2
+        ),
+        "score_cls_noise_strength_cli_alias": args.score_cls_noise_strength,
+        "opponent_noise_strength": args.opponent_noise_strength,
         "patch_dropout_ratio": args.patch_dropout_ratio,
         "patch_dropout_score_mode": args.patch_dropout_score_mode,
         "patch_dropout_sampling_mode": args.patch_dropout_sampling_mode,
