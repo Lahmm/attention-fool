@@ -9,27 +9,37 @@
 1. **patch-score-guided patch drop**：用 global/local 表示余弦关系提供 label-free、gradient-independent 的语义坐标，决定在哪里扰动；
 2. **RGB opponent-channel noise**：在亮度、红绿和黄蓝方向采样，再经过模型首层 RGB projection，决定如何扰动保留证据。
 
-生产默认是动态 mask 的 `original_score_postdrop_phase_pair`：每个攻击 step、每个 augmentation group 都在当前对抗像素上重算 final-layer patch score，并从 high-score half 随机采样新 mask；仅同组 original/phase 两个视图共享 mask。默认 10 steps × 10 groups，因此每张图选择 100 次 mask。
+当前研究主线已经晋升为 progressive high-score attack。已验证的 ViT-B/16 配置在
+`(3, 7, 11)` 三个 checkpoint boundary 上依次计算当前 global/local patch score，每次从
+high-score half 随机抽取 5% local tokens 并 hard-zero；后续 checkpoint 在已经过前序
+drop 的 token 状态上继续计算，允许不同 checkpoint 重复选择同一位置。
+
+每个 attack step、每个 augmentation group 都从当前对抗像素构造新的三级 schedule。
+original view 使用该 schedule，phase view 使用空间变换后的对应 schedule。默认 10 steps ×
+10 groups，因此每张图构造 100 个 schedule、执行 300 次 checkpoint mask selection。
 
 ```text
 current adversarial pixels
-→ final-layer global/local patch score
-→ random drop from high-score half
-→ original / phase-shift pair with a shared group mask
+→ sequential global/local scores at checkpoint boundaries 3, 7, 11
+→ 5% high-tail local-token drop at each checkpoint
+→ original schedule / spatially transformed phase schedule
 → kept-only opponent noise at the initial RGB projection
 → raw 20-view gradient mean
 → Gaussian residual (sigma=4, alpha=0.75)
 → MI update
 ```
 
-默认运行：
+当前主线的可执行参考仍位于独立的 ViT 文件中：
 
 ```bash
-python main.py \
-  --whitebox-model vit_base_patch16_224 \
-  --seed 20260716 \
-  --output-dir outputs/attack/vit_mainline
+python vit_progressive_patch_score_attack.py \
+  --checkpoints 3,7,11 \
+  --drop-ratios 0.05,0.05,0.05 \
+  --patch-selector high
 ```
+
+`main.py` 暂时仍承载旧的 final-layer cross-architecture 实现；在 progressive 逻辑完成
+跨架构适配并迁入之前，不应把 `main.py` 的默认行为称为当前研究主线。
 
 默认数据位于 `data/clean_resized_images`，标签为 `data/image_name_to_class_id_and_name.json`，模型从 `data/huggingface` 离线缓存读取。
 
@@ -37,12 +47,13 @@ python main.py \
 
 | 类别 | 当前保留接口 | 定位 |
 | --- | --- | --- |
-| 生产主线 | `original_score_postdrop_phase_pair` | 动态 patch-score mask + original/phase + kept-only feature noise |
+| 当前研究主线 | `vit_progressive_patch_score_attack.py` | `3,7,11` progressive high-score schedule；当前仅 ViT |
+| 历史跨架构基线 | `original_score_postdrop_phase_pair` | final-layer 动态 pixel drop；暂由 `main.py` 保留 |
 | 基础路径 | `none` | 无 patch drop 的优化基线 |
 | 像素对照 | `patch_dropout` | 通用 pixel patch dropout |
 | token 对照 | `token_patch_dropout` | ViT token patch dropout |
 | 优化与增强 | MI、NI、DIM、TI | 支撑机制和受控消融，不是新的论文主机制 |
-| 主线路由选择 | `patch_score`、`random`、`no_drop` | 语义路由、随机路由、无 drop 对照 |
+| Progressive selector | `high`、`low`、`random` | 主线 high 与两个受控路由对照 |
 
 `none`、pixel `patch_dropout`、token `patch_dropout` 与 NI/DIM/TI 的示例：
 
@@ -59,13 +70,18 @@ python main.py --attack-method token_patch_dropout \
   --gaussian-alpha 0 --output-dir outputs/attack/token_patch_dropout
 ```
 
-默认 phase-pair 主线不与 DIM 组合。每步实际 model views 上限为 20。主线还保留 `gaussian` feature noise 作为 `opponent_projected` 的结构对照，并可用 `--gaussian-alpha 0` 关闭梯度 Gaussian residual。
+默认 progressive phase-pair 不与 DIM 组合，每步为 20 个实际 model views。CLS score
+noise 与 Gaussian residual 是已完成控制变量的支撑因素，不作为新增论文核心机制。
 
 ## 主线结果
 
-正式主实验只保留四个白盒模型的 1000 图结果。实验报告见
-`experiments/mainline_data_aug_gaussian_story_s1000.md`，迁移评估 CSV 位于
-`outputs/csv/`，对应对抗样本和复现元数据位于 `outputs/attack/`。
+当前 ViT progressive 主线 `3,7,11 + high` 的 1000 图 Overall ASR 为 79.75%，高于
+同 seed 的 final-layer 基线 78.45%。high/low/random、checkpoint schedule 和 CLS score
+noise × Gaussian residual 控制结果位于 `outputs/csv/`。
+
+旧四白盒 final-layer 实验现作为跨架构基线保留，报告见
+`experiments/mainline_data_aug_gaussian_story_s1000.md`。下一阶段目标是将 progressive
+语义迁入 `main.py`，并通过 `nets/` adapter 恢复 ViT、CaiT、PiT、Visformer 四源支持。
 
 ## 迁移评估与测试
 

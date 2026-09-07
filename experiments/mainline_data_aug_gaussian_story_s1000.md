@@ -1,15 +1,20 @@
-# Patch 路由攻击+RGB对手噪声
+# 历史 final-layer 跨架构基线：Patch 路由攻击+RGB对手噪声
 
-## 当前研究定位
+> 状态说明：本文件记录的是已经完成的四源 final-layer
+> `original_score_postdrop_phase_pair` 基线，不再定义当前研究主线。当前主线已经晋升为
+> ViT progressive `3,7,11 + high`；其跨架构迁移尚未完成。
 
-文章主线围绕两个具有明确职责分工的机制建立 motivation：
+## 历史基线定位
+
+该基线与当前主线共享两个具有明确职责分工的核心机制：
 
 1. **Patch-score-guided patch drop：决定扰动位置。** 普通 patch dropout 只对空间块做随机删除，无法区分哪些局部区域正在承担当前类别判断。patch-score 用最终语义层的 global/local 关系建立一个模型感知的路由器，从高分候选区域中选择性删除 patch，目标是破坏模型依赖的判别证据。
 2. **RGB opponent-channel random noise：决定保留证据如何被扰动。** 普通 IID Gaussian 没有颜色结构，也没有经过模型输入投影。opponent-channel 噪声在亮度、红绿对抗、黄蓝对抗坐标中采样，再经首层 RGB projection 映射到初始特征，目标是在保留 token 上破坏颜色表达与局部表征的稳定性。
 
-后续实验优先验证这两个机制是否真的改变了语义证据、特征响应和梯度结构。phase pair、20-view gradient mean、Gaussian residual、MI-FGSM 和 ASR 都是支撑机制或验证指标，不应成为文章贡献叙事的中心。
+这些结果继续用于跨架构参照。phase pair、20-view gradient mean、Gaussian residual、
+MI-FGSM 和 ASR 都是支撑机制或验证指标，不应成为文章贡献叙事的中心。
 
-## 攻击方法
+## 历史基线攻击方法
 
 每个迭代步对当前对抗图像执行 10 个 group。每个 group：
 
