@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 
 PROGRESSIVE_PATCH_SELECTORS = ("patch_score", "high", "low", "random")
+PROGRESSIVE_FEATURE_NOISE_TYPES = ("opponent_projected", "gaussian")
 DEFAULT_DROP_RATIOS = (0.05, 0.05, 0.05)
 
 
@@ -96,6 +97,7 @@ class ProgressivePatchScoreAttacker:
         score_global_noise_strength: float | None = None,
         score_cls_noise_strength: float | None = None,
         opponent_noise_strength: float = 0.2,
+        feature_noise_type: str = "opponent_projected",
         epsilon: float = 16.0 / 255.0,
         step_size: float | None = None,
         steps: int = 10,
@@ -160,6 +162,10 @@ class ProgressivePatchScoreAttacker:
         )
         if resolved_score_noise < 0 or opponent_noise_strength < 0:
             raise ValueError("score and opponent noise strengths must be non-negative.")
+        if feature_noise_type not in PROGRESSIVE_FEATURE_NOISE_TYPES:
+            raise ValueError(
+                f"feature_noise_type must be one of {PROGRESSIVE_FEATURE_NOISE_TYPES}."
+            )
 
         candidates = tuple(model.progressive_checkpoint_candidates())
         requested = checkpoints or tuple(model.default_progressive_checkpoints())
@@ -188,6 +194,7 @@ class ProgressivePatchScoreAttacker:
         # because GAP-based adapters do not have a CLS token.
         self.score_cls_noise_strength = self.score_global_noise_strength
         self.opponent_noise_strength = float(opponent_noise_strength)
+        self.feature_noise_type = feature_noise_type
         self.post_dropout_phase_token_noise = bool(post_dropout_phase_token_noise)
         self.post_dropout_feature_noise_strength = self.opponent_noise_strength
         self.patch_dropout_ratio = 0.0
@@ -497,6 +504,21 @@ class ProgressivePatchScoreAttacker:
         self._feature_noise_type = "opponent_channel_rgb_projection"
         return self.opponent_noise_strength * feature_noise * (token_rms / noise_rms)
 
+    def _kept_feature_noise(self, state) -> torch.Tensor:
+        if self.feature_noise_type == "opponent_projected":
+            return self._strict_opponent_feature_noise(state)
+        raw_noise = self._randn_like(state.local_tokens, "mainline_feature_gaussian")
+        token_rms = (
+            state.local_tokens.detach()
+            .square()
+            .mean(dim=(1, 2), keepdim=True)
+            .sqrt()
+            .clamp_min(1e-6)
+        )
+        noise_rms = raw_noise.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
+        self._feature_noise_type = "feature_iid_gaussian"
+        return self.opponent_noise_strength * raw_noise * (token_rms / noise_rms)
+
     def _forward_with_schedule(
         self, pixels: torch.Tensor, labels: torch.Tensor, schedule: ProgressiveMaskSchedule
     ) -> torch.Tensor:
@@ -512,7 +534,7 @@ class ProgressivePatchScoreAttacker:
                 schedule, pixels.size(-2), pixels.size(-1)
             ).to(pixels)
             initial_drop = self._image_mask_to_projection_drop_mask(image_union, initial)
-            noise = self._strict_opponent_feature_noise(initial)
+            noise = self._kept_feature_noise(initial)
             local = torch.where((~initial_drop).unsqueeze(-1), local + noise, local)
         state = self.model.replace_progressive_local_tokens(state, local)
         for item in schedule.selections:
@@ -755,8 +777,14 @@ class ProgressivePatchScoreAttacker:
             ),
             "mask_pair_sharing": "same_schedule_with_phase_transformed_masks",
             "phase_mask_transform": "image_reflect_shift_then_native_grid_occupancy_topk",
-            "opponent_noise": "initial_rgb_projection_kept_image_union_only",
+            "opponent_noise": (
+                "initial_rgb_projection_kept_image_union_only"
+                if self.feature_noise_type == "opponent_projected"
+                and self.opponent_noise_strength > 0
+                else "disabled"
+            ),
             "opponent_noise_strength": self.opponent_noise_strength,
+            "feature_noise_type": self.feature_noise_type,
             "feature_noise_cls": False,
             "asr_definition": "1 - adversarial accuracy over all evaluated samples",
             "model_mean": self.model_mean.flatten().tolist(),

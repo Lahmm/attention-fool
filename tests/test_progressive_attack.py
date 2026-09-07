@@ -118,6 +118,21 @@ class ProgressiveIndependenceTests(unittest.TestCase):
         self.assertIsInstance(metadata["score_global_noise_active"], bool)
         self.assertEqual(metadata["score_global_noise_strength"], 0.0)
 
+    def test_gaussian_feature_noise_is_rms_matched_and_noise_off_is_explicit(self):
+        attacker = self.make_attacker(
+            feature_noise_type="gaussian", opponent_noise_strength=0.25
+        )
+        state = attacker.model.prepare_attack_feature_state(torch.rand(1, 3, 4, 4))
+        noise = attacker._kept_feature_noise(state)
+        token_rms = state.local_tokens.square().mean(dim=(1, 2)).sqrt()
+        noise_rms = noise.square().mean(dim=(1, 2)).sqrt()
+        self.assertTrue(torch.allclose(noise_rms, 0.25 * token_rms, rtol=1e-5))
+        self.assertEqual(attacker._feature_noise_type, "feature_iid_gaussian")
+
+        disabled = self.make_attacker(opponent_noise_strength=0.0)
+        metadata = disabled.mainline_metadata()
+        self.assertEqual(metadata["opponent_noise"], "disabled")
+
     def test_cross_grid_phase_and_union_preserve_each_budget(self):
         attacker = self.make_attacker()
         from progressive_attack import ProgressiveMaskSchedule, ProgressiveMaskSelection

@@ -310,6 +310,7 @@ def main(args: argparse.Namespace) -> None:
             score_global_noise_strength=args.score_global_noise_strength,
             score_cls_noise_strength=args.score_cls_noise_strength,
             opponent_noise_strength=args.opponent_noise_strength,
+            feature_noise_type=args.post_dropout_feature_noise_type,
             epsilon=args.epsilon,
             step_size=args.step_size,
             steps=args.steps,
