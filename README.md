@@ -75,13 +75,18 @@ noise 与 Gaussian residual 是已完成控制变量的支撑因素，不作为�
 
 ## 主线结果
 
-当前 ViT progressive 主线 `3,7,11 + high` 的 1000 图 Overall ASR 为 79.75%，高于
-同 seed 的 final-layer 基线 78.45%。high/low/random、checkpoint schedule 和 CLS score
-noise × Gaussian residual 控制结果位于 `outputs/csv/`。
+`progressive_attack.py` 已作为独立生产主线接入 `main.py`，不再继承或导入
+`attack.py`。ViT、CaiT、PiT、Visformer 四个源模型均已完成 1000 图攻击和 13 目标迁移；
+Overall ASR 分别为 79.58%、75.75%、75.52% 和 71.46%。每图均动态生成 100 个
+schedule、执行 300 次 checkpoint mask 选择。
 
-旧四白盒 final-layer 实验现作为跨架构基线保留，报告见
-`experiments/mainline_data_aug_gaussian_story_s1000.md`。下一阶段目标是将 progressive
-语义迁入 `main.py`，并通过 `nets/` adapter 恢复 ViT、CaiT、PiT、Visformer 四源支持。
+ViT 的同 seed 控制显示：RGB opponent noise 的 Overall/CNN ASR 为 79.58%/73.32%，
+IID Gaussian 为 78.42%/70.28%，noise-off 为 62.52%/51.95%。progressive high 相对旧
+final-layer 路由提升 1.31pp Overall，相对 progressive random 提升 0.59pp。
+
+完整的架构契约、测试门禁、逐源结果、控制变量和梯度诊断见
+`experiments/progressive_cross_arch_mainline_s1000.md`。旧四白盒 final-layer 证据仍保留在
+`experiments/mainline_data_aug_gaussian_story_s1000.md`，仅作为历史边界与基线。
 
 ## 迁移评估与测试
 
