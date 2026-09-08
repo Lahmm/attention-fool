@@ -38,8 +38,9 @@ python vit_progressive_patch_score_attack.py \
   --patch-selector high
 ```
 
-`main.py` 暂时仍承载旧的 final-layer cross-architecture 实现；在 progressive 逻辑完成
-跨架构适配并迁入之前，不应把 `main.py` 的默认行为称为当前研究主线。
+`main.py` 已通过 architecture adapters 承载 ViT、CaiT、PiT 和 Visformer 的
+progressive 主线。CaiT-S24 经 1000 图选层验证后默认使用
+`block6_gap,block18_gap,block22_gap`。
 
 默认数据位于 `data/clean_resized_images`，标签为 `data/image_name_to_class_id_and_name.json`，模型从 `data/huggingface` 离线缓存读取。
 
@@ -47,7 +48,7 @@ python vit_progressive_patch_score_attack.py \
 
 | 类别 | 当前保留接口 | 定位 |
 | --- | --- | --- |
-| 当前研究主线 | `vit_progressive_patch_score_attack.py` | `3,7,11` progressive high-score schedule；当前仅 ViT |
+| 当前研究主线 | `main.py` | 四架构 adapter progressive high-score schedule |
 | 历史跨架构基线 | `original_score_postdrop_phase_pair` | final-layer 动态 pixel drop；暂由 `main.py` 保留 |
 | 基础路径 | `none` | 无 patch drop 的优化基线 |
 | 像素对照 | `patch_dropout` | 通用 pixel patch dropout |
@@ -77,7 +78,9 @@ noise 与 Gaussian residual 是已完成控制变量的支撑因素，不作为�
 
 `progressive_attack.py` 已作为独立生产主线接入 `main.py`，不再继承或导入
 `attack.py`。ViT、CaiT、PiT、Visformer 四个源模型均已完成 1000 图攻击和 13 目标迁移；
-Overall ASR 分别为 79.58%、75.75%、75.52% 和 71.46%。每图均动态生成 100 个
+Overall ASR 分别为 79.58%、77.63%、75.52% 和 71.46%。其中 CaiT 使用
+`block6,block18,block22`，相对初始 `block6,block14,block22` 配置提升 1.88pp
+Overall 和 1.93pp strict black-box Overall。每图均动态生成 100 个
 schedule、执行 300 次 checkpoint mask 选择。
 
 ViT 的同 seed 控制显示：RGB opponent noise 的 Overall/CNN ASR 为 79.58%/73.32%，

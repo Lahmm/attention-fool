@@ -1,7 +1,11 @@
 # Progressive cross-architecture mainline: implementation and 1000-image validation
 
-Date: 2026-09-07  
-Code revision used for the formal runs: `cf4b9ada`
+Date: 2026-09-07
+
+CaiT checkpoint follow-up: 2026-09-08
+
+Code revisions used for the formal runs: initial matrix `cf4b9ada`, CaiT
+checkpoint follow-up `c17d9ab5`
 
 ## Mainline definition
 
@@ -37,7 +41,7 @@ only the architecture-specific hidden-state traversal:
 | Source | Default checkpoints | Global representation | Native grids | Drop counts |
 | --- | --- | --- | --- | --- |
 | ViT-B/16 | block3, block7, block11 | CLS | 14×14, 14×14, 14×14 | 10, 10, 10 |
-| CaiT-S24 | block6, block14, block22 | GAP | 14×14, 14×14, 14×14 | 10, 10, 10 |
+| CaiT-S24 | block6, block18, block22 | GAP | 14×14, 14×14, 14×14 | 10, 10, 10 |
 | PiT-B | stage1/block3, stage2/block5, stage3/block3 | CLS | 31×31, 16×16, 8×8 | 48, 13, 3 |
 | Visformer-S | stage1/block4, stage2/block2, stage3/block3 | GAP | 28×28, 14×14, 7×7 | 39, 10, 2 |
 
@@ -84,7 +88,7 @@ seven Transformer and six CNN models.
 | Source | Overall ASR | Transformer avg | CNN avg | Strict black-box overall* |
 | --- | ---: | ---: | ---: | ---: |
 | ViT-B/16 | **79.58%** | **84.94%** | **73.32%** | 79.58% |
-| CaiT-S24 | 75.75% | 79.63% | 71.22% | 74.35% |
+| CaiT-S24 | 77.63% | 81.46% | 73.17% | 76.28% |
 | PiT-B | 75.52% | 84.30% | 65.28% | 73.69% |
 | Visformer-S | 71.46% | 76.83% | 65.20% | 69.12% |
 
@@ -94,11 +98,33 @@ with the same architecture as the source. ViT-B/16 is not in the target list.
 The per-target auditable records are:
 
 - `outputs/csv/outputs_attack_progressive_mainline_vit_s1000_seed20260907.csv`
-- `outputs/csv/outputs_attack_progressive_mainline_cait_s1000_seed20260907.csv`
+- `outputs/csv/outputs_attack_progressive_cait_b6_b18_b22_s1000_seed20260907.csv`
 - `outputs/csv/outputs_attack_progressive_mainline_pit_s1000_seed20260907.csv`
 - `outputs/csv/outputs_attack_progressive_mainline_visformer_s1000_seed20260907.csv`
 
 ## Controlled comparisons
+
+### CaiT progressive checkpoint retuning
+
+The initial cross-architecture matrix used CaiT checkpoints block6/14/22. A
+same-seed 1000-image follow-up changed only the middle checkpoint to block18;
+the high-score selector spelling is behaviorally identical to the earlier
+`patch_score` alias.
+
+| CaiT checkpoints | Overall | Transformer | CNN | Strict black-box overall |
+| --- | ---: | ---: | ---: | ---: |
+| block6/14/22 | 75.75% | 79.63% | 71.22% | 74.35% |
+| block6/18/22 | **77.63%** | **81.46%** | **73.17%** | **76.28%** |
+
+The selected block6/18/22 schedule improves Overall by 1.88pp, Transformer by
+1.83pp, CNN by 1.95pp and strict black-box Overall by 1.93pp. All thirteen
+individual targets improve. The original block6/14/22 record remains at
+`outputs/csv/outputs_attack_progressive_mainline_cait_s1000_seed20260907.csv`.
+
+Moving only the final checkpoint to block24 was a clear negative control on the
+same 192-image screening subset: strict black-box Overall fell from 76.22% to
+63.80%, while source CaiT ASR increased. This is retained as evidence that
+terminal routing can overfit the source rather than improve transfer.
 
 ### Progressive routing versus historical final-layer routing
 
