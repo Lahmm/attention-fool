@@ -16,7 +16,7 @@ from progressive_attack import ProgressivePatchScoreAttacker
 class ProgressiveAdapterContractTests(unittest.TestCase):
     EXPECTED_DEFAULTS = {
         ViTWithHook: ("block3", "block7", "block11"),
-        CaiTS24WithHook: ("block6_gap", "block18_gap", "block22_gap"),
+        CaiTS24WithHook: ("block6_gap", "block17_gap", "block23_gap"),
         PiTB224WithHook: ("stage1_block3", "stage2_block5", "stage3_block3"),
         VisformerSmallWithHook: ("stage1_block4", "stage2_block2", "stage3_block3"),
     }
