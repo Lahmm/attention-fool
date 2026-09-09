@@ -27,7 +27,7 @@ class CaiTS24WithHook(WhiteBoxWithHook):
         "block24_class": 24,
     }
     _PROGRESSIVE_LAYERS = tuple(f"block{index}_gap" for index in range(1, 25))
-    _DEFAULT_PROGRESSIVE_LAYERS = ("block6_gap", "block17_gap", "block23_gap")
+    _DEFAULT_PROGRESSIVE_LAYERS = ("block5_gap", "block17_gap", "block23_gap")
 
     def _feature_modules(self):
         return sequential_modules(getattr(self.model, "blocks", None))

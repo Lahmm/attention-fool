@@ -5,7 +5,8 @@ Date: 2026-09-07
 CaiT checkpoint follow-ups: 2026-09-08 to 2026-09-09
 
 Code revisions used for the formal runs: initial matrix `cf4b9ada`, CaiT
-block6/18/22 follow-up `c17d9ab5`, and block6/17/23 follow-up `3dd43259`
+block6/18/22 follow-up `c17d9ab5`, block6/17/23 follow-up `3dd43259`, and
+block5/17/23 follow-up `3abd7c0b`
 
 ## Mainline definition
 
@@ -41,7 +42,7 @@ only the architecture-specific hidden-state traversal:
 | Source | Default checkpoints | Global representation | Native grids | Drop counts |
 | --- | --- | --- | --- | --- |
 | ViT-B/16 | block3, block7, block11 | CLS | 14×14, 14×14, 14×14 | 10, 10, 10 |
-| CaiT-S24 | block6, block17, block23 | GAP | 14×14, 14×14, 14×14 | 10, 10, 10 |
+| CaiT-S24 | block5, block17, block23 | GAP | 14×14, 14×14, 14×14 | 10, 10, 10 |
 | PiT-B | stage1/block3, stage2/block5, stage3/block3 | CLS | 31×31, 16×16, 8×8 | 48, 13, 3 |
 | Visformer-S | stage1/block4, stage2/block2, stage3/block3 | GAP | 28×28, 14×14, 7×7 | 39, 10, 2 |
 
@@ -88,7 +89,7 @@ seven Transformer and six CNN models.
 | Source | Overall ASR | Transformer avg | CNN avg | Strict black-box overall* |
 | --- | ---: | ---: | ---: | ---: |
 | ViT-B/16 | 79.58% | 84.94% | 73.32% | 79.58% |
-| CaiT-S24 | **83.81%** | **87.70%** | **79.27%** | **82.68%** |
+| CaiT-S24 | **84.15%** | **87.97%** | **79.68%** | **83.02%** |
 | PiT-B | 75.52% | 84.30% | 65.28% | 73.69% |
 | Visformer-S | 71.46% | 76.83% | 65.20% | 69.12% |
 
@@ -98,7 +99,7 @@ with the same architecture as the source. ViT-B/16 is not in the target list.
 The per-target auditable records are:
 
 - `outputs/csv/outputs_attack_progressive_mainline_vit_s1000_seed20260907.csv`
-- `outputs/csv/outputs_attack_progressive_cait_b6_b17_b23_s1000_seed20260907.csv`
+- `outputs/csv/outputs_attack_progressive_cait_b5_b17_b23_s1000_seed20260907.csv`
 - `outputs/csv/outputs_attack_progressive_mainline_pit_s1000_seed20260907.csv`
 - `outputs/csv/outputs_attack_progressive_mainline_visformer_s1000_seed20260907.csv`
 
@@ -109,20 +110,22 @@ The per-target auditable records are:
 The initial cross-architecture matrix used CaiT checkpoints block6/14/22.
 Same-seed 1000-image follow-ups first moved the middle checkpoint to block18,
 then identified block17, and finally moved the late checkpoint from block22 to
-block23. The high-score selector spelling is behaviorally identical to the
-earlier `patch_score` alias.
+block23 and refined the early checkpoint from block6 to block5. The high-score
+selector spelling is behaviorally identical to the earlier `patch_score`
+alias.
 
 | CaiT checkpoints | Overall | Transformer | CNN | Strict black-box overall |
 | --- | ---: | ---: | ---: | ---: |
 | block6/14/22 | 75.75% | 79.63% | 71.22% | 74.35% |
 | block6/18/22 | 77.63% | 81.46% | 73.17% | 76.28% |
 | block6/17/22 | 81.44% | 85.37% | 76.85% | 80.21% |
-| block6/17/23 | **83.81%** | **87.70%** | **79.27%** | **82.68%** |
+| block6/17/23 | 83.81% | 87.70% | 79.27% | 82.68% |
+| block5/17/23 | **84.15%** | **87.97%** | **79.68%** | **83.02%** |
 
-Relative to block6/17/22, the selected block6/17/23 schedule improves Overall
-by 2.37pp, Transformer by 2.33pp, CNN by 2.42pp and strict black-box Overall by
-2.47pp. All thirteen individual targets improve. Relative to the initial
-block6/14/22 schedule, the gains are 8.06pp Overall and 8.33pp strict
+Relative to block6/17/23, the selected block5/17/23 schedule improves Overall
+by 0.34pp, Transformer by 0.27pp, CNN by 0.42pp and strict black-box Overall by
+0.34pp. Nine of thirteen individual targets improve. Relative to the initial
+block6/14/22 schedule, the full-run gains are 8.40pp Overall and 8.67pp strict
 black-box Overall. The original record remains at
 `outputs/csv/outputs_attack_progressive_mainline_cait_s1000_seed20260907.csv`.
 

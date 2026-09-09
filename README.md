@@ -40,7 +40,7 @@ python vit_progressive_patch_score_attack.py \
 
 `main.py` 已通过 architecture adapters 承载 ViT、CaiT、PiT 和 Visformer 的
 progressive 主线。CaiT-S24 经 1000 图选层验证后默认使用
-`block6_gap,block17_gap,block23_gap`。
+`block5_gap,block17_gap,block23_gap`。
 
 默认数据位于 `data/clean_resized_images`，标签为 `data/image_name_to_class_id_and_name.json`，模型从 `data/huggingface` 离线缓存读取。
 
@@ -78,9 +78,9 @@ noise 与 Gaussian residual 是已完成控制变量的支撑因素，不作为�
 
 `progressive_attack.py` 已作为独立生产主线接入 `main.py`，不再继承或导入
 `attack.py`。ViT、CaiT、PiT、Visformer 四个源模型均已完成 1000 图攻击和 13 目标迁移；
-Overall ASR 分别为 79.58%、83.81%、75.52% 和 71.46%。其中 CaiT 使用
-`block6,block17,block23`，相对初始 `block6,block14,block22` 配置提升 8.06pp
-Overall 和 8.33pp strict black-box Overall。每图均动态生成 100 个
+Overall ASR 分别为 79.58%、84.15%、75.52% 和 71.46%。其中 CaiT 使用
+`block5,block17,block23`，相对初始 `block6,block14,block22` 配置提升 8.40pp
+Overall 和 8.67pp strict black-box Overall。每图均动态生成 100 个
 schedule、执行 300 次 checkpoint mask 选择。
 
 ViT 的同 seed 控制显示：RGB opponent noise 的 Overall/CNN ASR 为 79.58%/73.32%，
