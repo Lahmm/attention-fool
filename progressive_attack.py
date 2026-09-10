@@ -92,7 +92,7 @@ class ProgressivePatchScoreAttacker:
         model,
         *,
         checkpoints: tuple[str | int, ...] | None = None,
-        drop_ratios: tuple[float, ...] = DEFAULT_DROP_RATIOS,
+        drop_ratios: tuple[float, ...] | None = None,
         patch_selector: str = "patch_score",
         score_global_noise_strength: float | None = None,
         score_cls_noise_strength: float | None = None,
@@ -170,6 +170,11 @@ class ProgressivePatchScoreAttacker:
         candidates = tuple(model.progressive_checkpoint_candidates())
         requested = checkpoints or tuple(model.default_progressive_checkpoints())
         canonical = tuple(self._canonical_checkpoint(model, value) for value in requested)
+        if drop_ratios is None:
+            ratio_provider = getattr(model, "default_progressive_drop_ratios", None)
+            drop_ratios = (
+                ratio_provider() if callable(ratio_provider) else DEFAULT_DROP_RATIOS
+            )
         ratios = tuple(float(value) for value in drop_ratios)
         if len(canonical) != 3 or len(ratios) != 3:
             raise ValueError("exactly three progressive checkpoints and ratios are required.")

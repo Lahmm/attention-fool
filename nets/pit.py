@@ -39,9 +39,14 @@ class PiTB224WithHook(WhiteBoxWithHook):
         "stage3_block3",
     )
     _DEFAULT_PROGRESSIVE_LAYERS = (
-        "stage1_block3",
-        "stage2_block5",
+        "stage2_block1",
+        "stage3_block2",
         "stage3_block3",
+    )
+    _DEFAULT_PROGRESSIVE_DROP_RATIOS = (
+        0.02081165,
+        0.03125,
+        0.09375,
     )
 
     def _feature_modules(self):
@@ -152,6 +157,9 @@ class PiTB224WithHook(WhiteBoxWithHook):
 
     def default_progressive_checkpoints(self) -> tuple[str, ...]:
         return self._DEFAULT_PROGRESSIVE_LAYERS
+
+    def default_progressive_drop_ratios(self) -> tuple[float, ...]:
+        return self._DEFAULT_PROGRESSIVE_DROP_RATIOS
 
     def begin_progressive_forward(self, x: torch.Tensor) -> ProgressiveAttackState:
         initial = self.prepare_attack_feature_state(x)

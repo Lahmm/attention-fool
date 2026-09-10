@@ -17,7 +17,7 @@ class ProgressiveAdapterContractTests(unittest.TestCase):
     EXPECTED_DEFAULTS = {
         ViTWithHook: ("block3", "block7", "block11"),
         CaiTS24WithHook: ("block5_gap", "block17_gap", "block23_gap"),
-        PiTB224WithHook: ("stage1_block3", "stage2_block5", "stage3_block3"),
+        PiTB224WithHook: ("stage2_block1", "stage3_block2", "stage3_block3"),
         VisformerSmallWithHook: ("stage1_block4", "stage2_block2", "stage3_block3"),
     }
 
@@ -28,6 +28,17 @@ class ProgressiveAdapterContractTests(unittest.TestCase):
                 candidates = adapter._PROGRESSIVE_LAYERS
                 positions = [candidates.index(item) for item in defaults]
                 self.assertEqual(positions, sorted(positions))
+
+    def test_architecture_specific_default_drop_ratios(self):
+        for adapter in self.EXPECTED_DEFAULTS:
+            with self.subTest(adapter=adapter.__name__):
+                instance = object.__new__(adapter)
+                expected = (
+                    (0.02081165, 0.03125, 0.09375)
+                    if adapter is PiTB224WithHook
+                    else (0.05, 0.05, 0.05)
+                )
+                self.assertEqual(instance.default_progressive_drop_ratios(), expected)
 
     def test_main_has_no_top_level_legacy_attack_import(self):
         source = (Path(__file__).resolve().parents[1] / "main.py").read_text(

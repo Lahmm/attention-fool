@@ -210,6 +210,10 @@ class WhiteBoxWithHook(nn.Module):
             f"progressive checkpoint defaults are not implemented for {self.model_name}."
         )
 
+    def default_progressive_drop_ratios(self) -> tuple[float, ...]:
+        """Return architecture-specific per-checkpoint drop ratios."""
+        return (0.05, 0.05, 0.05)
+
     def begin_progressive_forward(self, x: torch.Tensor) -> ProgressiveAttackState:
         raise NotImplementedError(
             f"progressive forward preparation is not implemented for {self.model_name}."

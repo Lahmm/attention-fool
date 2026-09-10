@@ -118,6 +118,10 @@ class ProgressiveIndependenceTests(unittest.TestCase):
         self.assertIsInstance(metadata["score_global_noise_active"], bool)
         self.assertEqual(metadata["score_global_noise_strength"], 0.0)
 
+    def test_model_specific_default_drop_ratios_are_used_when_omitted(self):
+        attacker = self.make_attacker(drop_ratios=None)
+        self.assertEqual(attacker.progressive_drop_ratios, (0.05, 0.05, 0.05))
+
     def test_gaussian_feature_noise_is_rms_matched_and_noise_off_is_explicit(self):
         attacker = self.make_attacker(
             feature_noise_type="gaussian", opponent_noise_strength=0.25

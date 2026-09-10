@@ -40,7 +40,9 @@ python vit_progressive_patch_score_attack.py \
 
 `main.py` 已通过 architecture adapters 承载 ViT、CaiT、PiT 和 Visformer 的
 progressive 主线。CaiT-S24 经 1000 图选层验证后默认使用
-`block5_gap,block17_gap,block23_gap`。
+`block5_gap,block17_gap,block23_gap`。PiT-B 当前默认使用筛选出的 L2 配置
+`stage2_block1,stage3_block2,stage3_block3`，对应 drop ratios
+`0.02081165,0.03125,0.09375`（实际 drop 数 `5,2,6`）；其完整 1000 图验证尚待完成。
 
 默认数据位于 `data/clean_resized_images`，标签为 `data/image_name_to_class_id_and_name.json`，模型从 `data/huggingface` 离线缓存读取。
 

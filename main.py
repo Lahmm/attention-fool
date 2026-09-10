@@ -203,7 +203,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Three adapter checkpoint IDs; defaults are architecture-specific.",
     )
-    parser.add_argument("--drop-ratios", type=parse_float_list, default=DEFAULT_DROP_RATIOS)
+    parser.add_argument(
+        "--drop-ratios",
+        type=parse_float_list,
+        default=None,
+        help="Three drop ratios; omitted values use the source adapter defaults.",
+    )
     parser.add_argument(
         "--progressive-patch-selector",
         choices=PROGRESSIVE_PATCH_SELECTORS,
@@ -416,7 +421,11 @@ def main(args: argparse.Namespace) -> None:
         "input_diversity_phase_shift_set": [list(shift) for shift in args.input_diversity_phase_shift_set],
         "guide_aug_strength": args.guide_aug_strength,
         "checkpoints": list(args.checkpoints) if args.checkpoints is not None else None,
-        "drop_ratios": list(args.drop_ratios),
+        "drop_ratios": (
+            list(attacker.progressive_drop_ratios)
+            if args.attack_method == "progressive"
+            else list(args.drop_ratios or DEFAULT_DROP_RATIOS)
+        ),
         "progressive_patch_selector": args.progressive_patch_selector or args.patch_selector,
         "score_global_noise_strength": (
             args.score_global_noise_strength

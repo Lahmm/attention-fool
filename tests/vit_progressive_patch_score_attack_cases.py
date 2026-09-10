@@ -91,6 +91,9 @@ class TinyViTWrapper(nn.Module):
     def default_progressive_checkpoints(self):
         return ("block3", "block7", "block11")
 
+    def default_progressive_drop_ratios(self):
+        return (0.05, 0.05, 0.05)
+
     def begin_progressive_forward(self, x):
         initial = self.prepare_attack_feature_state(x)
         return ProgressiveAttackState(
