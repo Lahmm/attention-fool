@@ -18,7 +18,7 @@ class ProgressiveAdapterContractTests(unittest.TestCase):
         ViTWithHook: ("block3", "block7", "block11"),
         CaiTS24WithHook: ("block5_gap", "block17_gap", "block23_gap"),
         PiTB224WithHook: ("stage2_block1", "stage3_block2", "stage3_block3"),
-        VisformerSmallWithHook: ("stage1_block4", "stage2_block2", "stage3_block3"),
+        VisformerSmallWithHook: ("stage1_block1", "stage2_block1", "stage3_block1"),
     }
 
     def test_each_adapter_registers_three_ordered_defaults(self):

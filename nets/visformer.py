@@ -43,9 +43,9 @@ class VisformerSmallWithHook(WhiteBoxWithHook):
         "stage3_block3",
     )
     _DEFAULT_PROGRESSIVE_LAYERS = (
-        "stage1_block4",
-        "stage2_block2",
-        "stage3_block3",
+        "stage1_block1",
+        "stage2_block1",
+        "stage3_block1",
     )
 
     def _feature_modules(self):
