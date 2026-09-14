@@ -100,6 +100,7 @@ class ProgressivePatchScoreAttacker:
         checkpoints: tuple[str | int, ...] | None = None,
         drop_ratios: tuple[float, ...] | None = None,
         patch_selector: str = "high",
+        score_window_ratio: float = 0.5,
         score_global_noise_strength: float | None = None,
         score_cls_noise_strength: float | None = None,
         opponent_noise_strength: float = 0.2,
@@ -156,6 +157,8 @@ class ProgressivePatchScoreAttacker:
                 f"patch_selector must be one of {PROGRESSIVE_PATCH_SELECTORS}, "
                 f"got {patch_selector!r}."
             )
+        if not 0.0 < float(score_window_ratio) <= 1.0:
+            raise ValueError("score_window_ratio must satisfy 0 < ratio <= 1.")
         if score_global_noise_strength is not None and score_cls_noise_strength is not None:
             if float(score_global_noise_strength) != float(score_cls_noise_strength):
                 raise ValueError("score noise aliases disagree.")
@@ -209,6 +212,7 @@ class ProgressivePatchScoreAttacker:
         self.progressive_checkpoints = canonical
         self.progressive_drop_ratios = ratios
         self.progressive_patch_selector = patch_selector
+        self.score_window_ratio = float(score_window_ratio)
         self.score_global_noise_strength = float(resolved_score_noise)
         # Compatibility name is metadata-only; the canonical setting is global
         # because GAP-based adapters do not have a CLS token.
@@ -291,7 +295,7 @@ class ProgressivePatchScoreAttacker:
         self, scores: torch.Tensor, ratio: float, checkpoint: str, *, largest: bool
     ) -> torch.Tensor:
         batch_size, token_count = scores.shape
-        candidate_count = max(1, token_count // 2)
+        candidate_count = max(1, int(round(token_count * self.score_window_ratio)))
         drop_count = max(1, int(round(token_count * ratio)))
         if drop_count > candidate_count:
             raise ValueError("drop budget exceeds the selected score half.")
@@ -792,6 +796,7 @@ class ProgressivePatchScoreAttacker:
             "attack_method": "progressive_patch_score",
             "whitebox_model": getattr(self.model, "model_name", "unknown"),
             "patch_selector": self.progressive_patch_selector,
+            "score_window_ratio": self.score_window_ratio,
             "drop_map_policy": drop_map_policy,
             "progressive_checkpoints": list(self.progressive_checkpoints),
             "progressive_drop_ratios": list(self.progressive_drop_ratios),

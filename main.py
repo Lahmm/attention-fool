@@ -215,6 +215,12 @@ def parse_args() -> argparse.Namespace:
         default="high",
         help="Progressive drop-map construction policy.",
     )
+    parser.add_argument(
+        "--score-window-ratio",
+        type=float,
+        default=0.5,
+        help="Fraction of top/bottom-scoring tokens the progressive drop samples from.",
+    )
     parser.add_argument("--score-global-noise-strength", type=float, default=None)
     parser.add_argument(
         "--score-cls-noise-strength",
@@ -312,6 +318,7 @@ def main(args: argparse.Namespace) -> None:
             checkpoints=args.checkpoints,
             drop_ratios=args.drop_ratios,
             patch_selector=args.progressive_patch_selector,
+            score_window_ratio=args.score_window_ratio,
             score_global_noise_strength=args.score_global_noise_strength,
             score_cls_noise_strength=args.score_cls_noise_strength,
             opponent_noise_strength=args.opponent_noise_strength,
@@ -427,6 +434,7 @@ def main(args: argparse.Namespace) -> None:
             else list(args.drop_ratios or DEFAULT_DROP_RATIOS)
         ),
         "progressive_patch_selector": args.progressive_patch_selector,
+        "score_window_ratio": args.score_window_ratio,
         "score_global_noise_strength": (
             args.score_global_noise_strength
             if args.score_global_noise_strength is not None
