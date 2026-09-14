@@ -187,6 +187,7 @@ class AttackPipelineTests(unittest.TestCase):
         self.assertEqual(args.post_dropout_feature_noise_type, "opponent_projected")
         self.assertEqual(args.sample_offset, 0)
         self.assertEqual(args.patch_selector, "patch_score")
+        self.assertEqual(args.progressive_patch_selector, "high")
         self.assertEqual(
             set(PATCH_SELECTORS),
             {"patch_score", "random", "no_drop"},

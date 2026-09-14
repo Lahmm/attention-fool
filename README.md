@@ -35,8 +35,13 @@ current adversarial pixels
 python vit_progressive_patch_score_attack.py \
   --checkpoints 3,7,11 \
   --drop-ratios 0.05,0.05,0.05 \
-  --patch-selector high
+  --progressive-patch-selector high
 ```
+
+默认主线仍使用三个 checkpoint。实验接口也支持任意非零数量的、严格递增的
+checkpoint，并要求 `--drop-ratios` 提供完全相同数量的逐层比例；不对这些比例的总和
+施加额外限制。自定义 `N` 个 checkpoint 时，默认 10 steps × 10 groups 对应每张图
+`100 × N` 次 checkpoint mask selection。
 
 `main.py` 已通过 architecture adapters 承载 ViT、CaiT、PiT 和 Visformer 的
 progressive 主线。CaiT-S24 经 1000 图选层验证后默认使用
@@ -56,7 +61,11 @@ progressive 主线。CaiT-S24 经 1000 图选层验证后默认使用
 | 像素对照 | `patch_dropout` | 通用 pixel patch dropout |
 | token 对照 | `token_patch_dropout` | ViT token patch dropout |
 | 优化与增强 | MI、NI、DIM、TI | 支撑机制和受控消融，不是新的论文主机制 |
-| Progressive selector | `high`、`low`、`random` | 主线 high 与两个受控路由对照 |
+| Progressive selector | `high`、`low`、`random`、`extreme-high`、`extreme-low` | 主线 high 与受控路由对照 |
+
+`high`/`low` 分别从 patch-score 高/低半区随机抽取当前层预算；`extreme-high`/
+`extreme-low` 直接按 score 排序选取最高/最低的当前层预算；`random` 从全部 local
+tokens 均匀随机抽取。Progressive 接口不再接受历史 `patch_score` selector 别名。
 
 `none`、pixel `patch_dropout`、token `patch_dropout` 与 NI/DIM/TI 的示例：
 

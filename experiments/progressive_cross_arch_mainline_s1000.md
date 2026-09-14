@@ -110,9 +110,9 @@ The per-target auditable records are:
 The initial cross-architecture matrix used CaiT checkpoints block6/14/22.
 Same-seed 1000-image follow-ups first moved the middle checkpoint to block18,
 then identified block17, and finally moved the late checkpoint from block22 to
-block23 and refined the early checkpoint from block6 to block5. The high-score
-selector spelling is behaviorally identical to the earlier `patch_score`
-alias.
+block23 and refined the early checkpoint from block6 to block5. Historical runs
+that recorded the former `patch_score` selector used the same behavior as
+`high`; the current progressive CLI retains only the explicit `high` spelling.
 
 | CaiT checkpoints | Overall | Transformer | CNN | Strict black-box overall |
 | --- | ---: | ---: | ---: | ---: |

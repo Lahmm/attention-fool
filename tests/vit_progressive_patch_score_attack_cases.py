@@ -13,7 +13,7 @@ from nets.base import (
     ProgressiveAttackState,
     conv2d_attack_metadata,
 )
-from progressive_attack import ProgressiveMaskSelection
+from progressive_attack import PROGRESSIVE_PATCH_SELECTORS, ProgressiveMaskSelection
 from vit_progressive_patch_score_attack import (
     MODEL_NAME,
     ProgressiveMaskSchedule,
@@ -168,6 +168,41 @@ class ProgressiveViTTests(unittest.TestCase):
         self.assertEqual(attacker.progressive_drop_ratios, (0.4, 0.4, 0.4))
         self.assertEqual(attacker.patch_dropout_ratio, 0.0)
 
+    def test_checkpoint_count_is_dynamic_and_matches_ratios(self):
+        attacker = self.make_attacker(
+            checkpoints=(2, 4, 6, 9),
+            drop_ratios=(0.25, 0.25, 0.25, 0.25),
+        )
+        pixels = torch.rand(1, 3, 4, 4)
+        schedule = attacker._build_mask_schedule(pixels)
+        self.assertEqual(schedule.checkpoints, ("block2", "block4", "block6", "block9"))
+        self.assertEqual(schedule.counts, (1, 1, 1, 1))
+        shifted = attacker._phase_mask_schedule(schedule, [(0, 0)], height=4, width=4)
+        self.assertEqual(shifted.counts, schedule.counts)
+        metadata = attacker.mainline_metadata()
+        self.assertEqual(metadata["checkpoint_mask_selection_count_per_image"], 4)
+
+    def test_checkpoint_and_ratio_counts_must_match(self):
+        with self.assertRaisesRegex(ValueError, "count mismatch"):
+            self.make_attacker(
+                checkpoints=(2, 4, 6, 9),
+                drop_ratios=(0.25, 0.25, 0.25),
+            )
+        with self.assertRaisesRegex(ValueError, "at least one"):
+            self.make_attacker(checkpoints=(), drop_ratios=())
+
+    def test_dynamic_checkpoints_remain_unique_and_ordered(self):
+        with self.assertRaisesRegex(ValueError, "strictly increasing"):
+            self.make_attacker(
+                checkpoints=(2, 6, 4, 9),
+                drop_ratios=(0.25, 0.25, 0.25, 0.25),
+            )
+        with self.assertRaisesRegex(ValueError, "strictly increasing"):
+            self.make_attacker(
+                checkpoints=(2, 4, 4, 9),
+                drop_ratios=(0.25, 0.25, 0.25, 0.25),
+            )
+
     def test_metadata_is_json_serializable(self):
         attacker = self.make_attacker()
         encoded = json.dumps(attacker.mainline_metadata())
@@ -180,13 +215,23 @@ class ProgressiveViTTests(unittest.TestCase):
             self.make_attacker(input_diversity_views_per_group=1)
         with self.assertRaisesRegex(ValueError, "patch_selector"):
             self.make_attacker(patch_selector="no_drop")
+        with self.assertRaisesRegex(ValueError, "patch_selector"):
+            self.make_attacker(patch_selector="patch_score")
+
+    def test_progressive_selector_surface_has_no_patch_score_alias(self):
+        self.assertEqual(
+            PROGRESSIVE_PATCH_SELECTORS,
+            ("high", "low", "random", "extreme-high", "extreme-low"),
+        )
 
     def test_sampled_tokens_belong_to_current_high_half(self):
         attacker = self.make_attacker()
         scores = torch.tensor(
             [[0.0, 1.0, 2.0, 3.0], [8.0, 3.0, 5.0, 1.0]]
         )
-        mask = attacker._sample_high_mask(scores, 0.25, checkpoint=3)
+        mask = attacker._sample_half_random_mask(
+            scores, 0.25, "block3", largest=True
+        )
         high_half = torch.zeros_like(mask)
         high_half.scatter_(1, torch.topk(scores, 2, dim=1).indices, True)
         self.assertFalse(bool(torch.any(mask & ~high_half)))
@@ -200,7 +245,9 @@ class ProgressiveViTTests(unittest.TestCase):
         scores = torch.tensor(
             [[0.0, 1.0, 2.0, 3.0], [8.0, 3.0, 5.0, 1.0]]
         )
-        mask = attacker._sample_low_mask(scores, 0.25, checkpoint=3)
+        mask = attacker._sample_half_random_mask(
+            scores, 0.25, "block3", largest=False
+        )
         low_half = torch.zeros_like(mask)
         low_half.scatter_(1, torch.topk(scores, 2, dim=1, largest=False).indices, True)
         self.assertFalse(bool(torch.any(mask & ~low_half)))
@@ -209,11 +256,34 @@ class ProgressiveViTTests(unittest.TestCase):
         self.assertEqual(metadata["patch_selector"], "low")
         self.assertTrue(metadata["score_cls_noise_active"])
 
-    def test_high_is_an_explicit_alias_for_patch_score_selection(self):
-        attacker = self.make_attacker(patch_selector="high")
+    def test_high_is_the_default_progressive_selection(self):
+        attacker = self.make_attacker()
         schedule = attacker._build_mask_schedule(torch.rand(1, 3, 4, 4))
         self.assertEqual(schedule.counts, (1, 1, 1))
         self.assertEqual(attacker.mainline_metadata()["patch_selector"], "high")
+
+    def test_extreme_selectors_take_exact_score_tails(self):
+        scores = torch.tensor(
+            [
+                [0.0, 7.0, 2.0, 5.0, 1.0, 6.0, 3.0, 4.0],
+                [8.0, 3.0, 5.0, 1.0, 7.0, 2.0, 6.0, 4.0],
+            ]
+        )
+        high = self.make_attacker(patch_selector="extreme-high")
+        high_mask = high._sample_extreme_mask(scores, 0.25, largest=True)
+        expected_high = torch.zeros_like(high_mask)
+        expected_high[0, [1, 5]] = True
+        expected_high[1, [0, 4]] = True
+        self.assertTrue(torch.equal(high_mask, expected_high))
+        self.assertEqual(high.mainline_metadata()["drop_map_policy"], "score_extreme_high")
+
+        low = self.make_attacker(patch_selector="extreme-low")
+        low_mask = low._sample_extreme_mask(scores, 0.25, largest=False)
+        expected_low = torch.zeros_like(low_mask)
+        expected_low[0, [0, 4]] = True
+        expected_low[1, [3, 5]] = True
+        self.assertTrue(torch.equal(low_mask, expected_low))
+        self.assertEqual(low.mainline_metadata()["drop_map_policy"], "score_extreme_low")
 
     def test_zero_score_cls_noise_is_recorded_as_inactive(self):
         attacker = self.make_attacker(
@@ -259,7 +329,7 @@ class ProgressiveViTTests(unittest.TestCase):
             return mask
 
         attacker._score_at_checkpoint = types.MethodType(record_scores, attacker)
-        attacker._sample_score_mask = types.MethodType(repeat_first_position, attacker)
+        attacker._sample_half_random_mask = types.MethodType(repeat_first_position, attacker)
         schedule = attacker._build_mask_schedule(pixels)
 
         self.assertTrue(all(bool(mask[0, 0]) for mask in schedule.masks))
@@ -419,7 +489,7 @@ class ProgressiveViTTests(unittest.TestCase):
             pretrained=False,
             device=torch.device("cpu"),
         )
-        for patch_selector in ("patch_score", "high", "low", "random"):
+        for patch_selector in PROGRESSIVE_PATCH_SELECTORS:
             with self.subTest(patch_selector=patch_selector):
                 attacker = ViTProgressivePatchScoreAttacker(
                     model,

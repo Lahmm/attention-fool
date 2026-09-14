@@ -201,19 +201,19 @@ def parse_args() -> argparse.Namespace:
         "--checkpoints",
         type=parse_checkpoint_list,
         default=None,
-        help="Three adapter checkpoint IDs; defaults are architecture-specific.",
+        help="Ordered adapter checkpoint IDs; defaults are architecture-specific.",
     )
     parser.add_argument(
         "--drop-ratios",
         type=parse_float_list,
         default=None,
-        help="Three drop ratios; omitted values use the source adapter defaults.",
+        help="One ratio per checkpoint; omitted values use the source adapter defaults.",
     )
     parser.add_argument(
         "--progressive-patch-selector",
         choices=PROGRESSIVE_PATCH_SELECTORS,
-        default=None,
-        help="Explicit progressive selector; otherwise --patch-selector is used.",
+        default="high",
+        help="Progressive drop-map construction policy.",
     )
     parser.add_argument("--score-global-noise-strength", type=float, default=None)
     parser.add_argument(
@@ -264,7 +264,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--patch-selector",
-        choices=tuple(dict.fromkeys((*PATCH_SELECTORS, *PROGRESSIVE_PATCH_SELECTORS))),
+        choices=PATCH_SELECTORS,
         default="patch_score",
     )
     parser.add_argument(
@@ -311,7 +311,7 @@ def main(args: argparse.Namespace) -> None:
             model=model,
             checkpoints=args.checkpoints,
             drop_ratios=args.drop_ratios,
-            patch_selector=args.progressive_patch_selector or args.patch_selector,
+            patch_selector=args.progressive_patch_selector,
             score_global_noise_strength=args.score_global_noise_strength,
             score_cls_noise_strength=args.score_cls_noise_strength,
             opponent_noise_strength=args.opponent_noise_strength,
@@ -426,7 +426,7 @@ def main(args: argparse.Namespace) -> None:
             if args.attack_method == "progressive"
             else list(args.drop_ratios or DEFAULT_DROP_RATIOS)
         ),
-        "progressive_patch_selector": args.progressive_patch_selector or args.patch_selector,
+        "progressive_patch_selector": args.progressive_patch_selector,
         "score_global_noise_strength": (
             args.score_global_noise_strength
             if args.score_global_noise_strength is not None

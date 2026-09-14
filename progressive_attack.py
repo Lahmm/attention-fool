@@ -20,7 +20,13 @@ if TYPE_CHECKING:
     from gradient_replay import GradientReplay
 
 
-PROGRESSIVE_PATCH_SELECTORS = ("patch_score", "high", "low", "random")
+PROGRESSIVE_PATCH_SELECTORS = (
+    "high",
+    "low",
+    "random",
+    "extreme-high",
+    "extreme-low",
+)
 PROGRESSIVE_FEATURE_NOISE_TYPES = ("opponent_projected", "gaussian")
 DEFAULT_DROP_RATIOS = (0.05, 0.05, 0.05)
 
@@ -93,7 +99,7 @@ class ProgressivePatchScoreAttacker:
         *,
         checkpoints: tuple[str | int, ...] | None = None,
         drop_ratios: tuple[float, ...] | None = None,
-        patch_selector: str = "patch_score",
+        patch_selector: str = "high",
         score_global_noise_strength: float | None = None,
         score_cls_noise_strength: float | None = None,
         opponent_noise_strength: float = 0.2,
@@ -168,7 +174,11 @@ class ProgressivePatchScoreAttacker:
             )
 
         candidates = tuple(model.progressive_checkpoint_candidates())
-        requested = checkpoints or tuple(model.default_progressive_checkpoints())
+        requested = (
+            tuple(model.default_progressive_checkpoints())
+            if checkpoints is None
+            else tuple(checkpoints)
+        )
         canonical = tuple(self._canonical_checkpoint(model, value) for value in requested)
         if drop_ratios is None:
             ratio_provider = getattr(model, "default_progressive_drop_ratios", None)
@@ -176,14 +186,19 @@ class ProgressivePatchScoreAttacker:
                 ratio_provider() if callable(ratio_provider) else DEFAULT_DROP_RATIOS
             )
         ratios = tuple(float(value) for value in drop_ratios)
-        if len(canonical) != 3 or len(ratios) != 3:
-            raise ValueError("exactly three progressive checkpoints and ratios are required.")
+        if not canonical:
+            raise ValueError("at least one progressive checkpoint is required.")
+        if len(canonical) != len(ratios):
+            raise ValueError(
+                "progressive checkpoint/drop-ratio count mismatch: "
+                f"{len(canonical)} checkpoints vs {len(ratios)} ratios."
+            )
         if any(item not in candidates for item in canonical):
             raise ValueError(
                 f"checkpoints {canonical} must belong to adapter candidates {candidates}."
             )
         positions = tuple(candidates.index(item) for item in canonical)
-        if positions != tuple(sorted(positions)) or len(set(positions)) != 3:
+        if positions != tuple(sorted(positions)) or len(set(positions)) != len(positions):
             raise ValueError("progressive checkpoints must be strictly increasing.")
         if any(ratio <= 0.0 or ratio > 0.5 for ratio in ratios):
             raise ValueError("each progressive drop ratio must satisfy 0 < ratio <= 0.5.")
@@ -272,7 +287,7 @@ class ProgressivePatchScoreAttacker:
             global_token = global_token + self.score_global_noise_strength * token_rms * noise
         return F.cosine_similarity(local, global_token.expand_as(local), dim=-1)
 
-    def _sample_score_mask(
+    def _sample_half_random_mask(
         self, scores: torch.Tensor, ratio: float, checkpoint: str, *, largest: bool
     ) -> torch.Tensor:
         batch_size, token_count = scores.shape
@@ -293,6 +308,18 @@ class ProgressivePatchScoreAttacker:
                     device=scores.device,
                 )
             mask[batch_index, candidates[batch_index, order[:drop_count]]] = True
+        return mask.detach()
+
+    @staticmethod
+    def _sample_extreme_mask(
+        scores: torch.Tensor, ratio: float, *, largest: bool
+    ) -> torch.Tensor:
+        batch_size, token_count = scores.shape
+        drop_count = max(1, int(round(token_count * ratio)))
+        order = torch.argsort(scores, dim=1, descending=largest, stable=True)
+        selected = order[:, :drop_count]
+        mask = torch.zeros(batch_size, token_count, dtype=torch.bool, device=scores.device)
+        mask.scatter_(1, selected, True)
         return mask.detach()
 
     def _sample_random_mask(
@@ -319,18 +346,6 @@ class ProgressivePatchScoreAttacker:
             mask[batch_index, order[:drop_count]] = True
         return mask.detach()
 
-    def _sample_high_mask(
-        self, scores: torch.Tensor, ratio: float, *, checkpoint: str | int
-    ) -> torch.Tensor:
-        checkpoint_id = self._canonical_checkpoint(self.model, checkpoint)
-        return self._sample_score_mask(scores, ratio, checkpoint_id, largest=True)
-
-    def _sample_low_mask(
-        self, scores: torch.Tensor, ratio: float, *, checkpoint: str | int
-    ) -> torch.Tensor:
-        checkpoint_id = self._canonical_checkpoint(self.model, checkpoint)
-        return self._sample_score_mask(scores, ratio, checkpoint_id, largest=False)
-
     def _build_mask_schedule(self, pixels: torch.Tensor) -> ProgressiveMaskSchedule:
         with torch.no_grad():
             state = self.model.begin_progressive_forward(self._normalize(pixels.detach()))
@@ -351,13 +366,20 @@ class ProgressivePatchScoreAttacker:
                         checkpoint=checkpoint,
                         device=features.local_tokens.device,
                     )
+                elif self.progressive_patch_selector in ("extreme-high", "extreme-low"):
+                    scores = self._score_at_checkpoint(features)
+                    mask = self._sample_extreme_mask(
+                        scores,
+                        ratio,
+                        largest=self.progressive_patch_selector == "extreme-high",
+                    )
                 else:
                     scores = self._score_at_checkpoint(features)
-                    mask = self._sample_score_mask(
+                    mask = self._sample_half_random_mask(
                         scores,
                         ratio,
                         checkpoint,
-                        largest=self.progressive_patch_selector != "low",
+                        largest=self.progressive_patch_selector == "high",
                     )
                 count = int(mask.sum(dim=1)[0].item())
                 selections.append(
@@ -752,6 +774,13 @@ class ProgressivePatchScoreAttacker:
 
     def mainline_metadata(self) -> dict[str, object]:
         score_based = self.progressive_patch_selector != "random"
+        drop_map_policy = {
+            "high": "score_high_half_random",
+            "low": "score_low_half_random",
+            "random": "uniform_random",
+            "extreme-high": "score_extreme_high",
+            "extreme-low": "score_extreme_low",
+        }[self.progressive_patch_selector]
         score_noise_active = score_based and self.score_global_noise_strength > 0
         if score_noise_active:
             score_reference = "current_global_plus_checkpoint_gaussian_noise"
@@ -763,6 +792,7 @@ class ProgressivePatchScoreAttacker:
             "attack_method": "progressive_patch_score",
             "whitebox_model": getattr(self.model, "model_name", "unknown"),
             "patch_selector": self.progressive_patch_selector,
+            "drop_map_policy": drop_map_policy,
             "progressive_checkpoints": list(self.progressive_checkpoints),
             "progressive_drop_ratios": list(self.progressive_drop_ratios),
             "progressive_drop_counts": list(self._progressive_mask_counts),
