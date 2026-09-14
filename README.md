@@ -47,7 +47,9 @@ checkpoint，并要求 `--drop-ratios` 提供完全相同数量的逐层比例�
 progressive 主线。CaiT-S24 经 1000 图选层验证后默认使用
 `block5_gap,block17_gap,block23_gap`。PiT-B 当前默认使用筛选出的 L2 配置
 `stage2_block1,stage3_block2,stage3_block3`，对应 drop ratios
-`0.02081165,0.03125,0.09375`（实际 drop 数 `5,2,6`）；其完整 1000 图验证尚待完成。
+`0.02081165,0.03125,0.09375`（实际 drop 数 `5,2,6`）。Visformer-S
+默认使用 I3 配置 `stage1_block1,stage2_block1,stage3_block1`，三层均为
+5% drop（实际 drop 数 `39,10,2`）。这两个配置均已完成 1000 图验证。
 
 默认数据位于 `data/clean_resized_images`，标签为 `data/image_name_to_class_id_and_name.json`，模型从 `data/huggingface` 离线缓存读取。
 
@@ -89,14 +91,18 @@ noise 与 Gaussian residual 是已完成控制变量的支撑因素，不作为�
 
 `progressive_attack.py` 已作为独立生产主线接入 `main.py`，不再继承或导入
 `attack.py`。ViT、CaiT、PiT、Visformer 四个源模型均已完成 1000 图攻击和 13 目标迁移；
-Overall ASR 分别为 79.58%、84.15%、75.52% 和 71.46%。其中 CaiT 使用
+Overall ASR 分别为 79.58%、84.15%、80.44% 和 73.16%。其中 CaiT 使用
 `block5,block17,block23`，相对初始 `block6,block14,block22` 配置提升 8.40pp
-Overall 和 8.67pp strict black-box Overall。每图均动态生成 100 个
+Overall 和 8.67pp strict black-box Overall；PiT L2 相对初始配置提升
+4.92pp Overall，Visformer I3 提升 1.70pp Overall。每图均动态生成 100 个
 schedule、执行 300 次 checkpoint mask 选择。
 
 ViT 的同 seed 控制显示：RGB opponent noise 的 Overall/CNN ASR 为 79.58%/73.32%，
 IID Gaussian 为 78.42%/70.28%，noise-off 为 62.52%/51.95%。progressive high 相对旧
 final-layer 路由提升 1.31pp Overall，相对 progressive random 提升 0.59pp。
+相同 `(3,7,11)` 下，`high`/`low`/`random` 的 1000 图 Overall ASR 分别为
+79.75%/79.26%/79.16%；另一组同 seed 对照中，`extreme-high` 为
+77.82%，低于 `high` 的 79.58%。`extreme-low` 尚无 1000 图正式结果。
 
 完整的架构契约、测试门禁、逐源结果、控制变量和梯度诊断见
 `experiments/progressive_cross_arch_mainline_s1000.md`。旧四白盒 final-layer 证据仍保留在

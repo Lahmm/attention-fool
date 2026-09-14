@@ -12,10 +12,12 @@ at checkpoint boundaries `(3, 7, 11)` and independent 5% local-token drops.
 Its selector, checkpoint, and CLS-noise/gradient-residual transfer records are
 retained under `outputs/csv/`.
 
-The progressive implementation is currently ViT-only.  Migration into
-`main.py` and adapter-backed CaiT, PiT, and Visformer support remain pending;
-the existing `main.py` default must therefore be treated as a legacy executable
-rather than the promoted research mainline.
+The independent progressive implementation is integrated into `main.py`
+through architecture adapters for ViT, CaiT, PiT, and Visformer. All four
+selected defaults have completed 1000-image attack and 13-target transfer
+evaluation. The implementation contract, selected configurations, screening
+results, and auditable CSV paths are recorded in
+`experiments/progressive_cross_arch_mainline_s1000.md`.
 
 ## Historical cross-architecture baseline
 

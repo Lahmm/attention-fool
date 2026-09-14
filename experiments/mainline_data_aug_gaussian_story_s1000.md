@@ -2,7 +2,9 @@
 
 > 状态说明：本文件记录的是已经完成的四源 final-layer
 > `original_score_postdrop_phase_pair` 基线，不再定义当前研究主线。当前主线已经晋升为
-> ViT progressive `3,7,11 + high`；其跨架构迁移尚未完成。
+> adapter-backed progressive high-score attack；ViT、CaiT、PiT 和 Visformer 均已完成
+> 1000 图跨架构迁移。当前结果见
+> `experiments/progressive_cross_arch_mainline_s1000.md`。
 
 ## 历史基线定位
 
