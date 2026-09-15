@@ -28,6 +28,12 @@ PROGRESSIVE_PATCH_SELECTORS = (
     "extreme-low",
 )
 PROGRESSIVE_FEATURE_NOISE_TYPES = ("opponent_projected", "gaussian")
+PROGRESSIVE_SCORE_MODES = (
+    "cosine",
+    "gap_leave_one_out_cosine",
+    "gap_projection",
+    "gap_channel_rms_cosine",
+)
 DEFAULT_DROP_RATIOS = (0.05, 0.05, 0.05)
 
 
@@ -101,6 +107,7 @@ class ProgressivePatchScoreAttacker:
         drop_ratios: tuple[float, ...] | None = None,
         patch_selector: str = "high",
         score_window_ratio: float = 0.5,
+        progressive_score_mode: str = "cosine",
         score_global_noise_strength: float | None = None,
         score_cls_noise_strength: float | None = None,
         opponent_noise_strength: float = 0.2,
@@ -159,6 +166,10 @@ class ProgressivePatchScoreAttacker:
             )
         if not 0.0 < float(score_window_ratio) <= 1.0:
             raise ValueError("score_window_ratio must satisfy 0 < ratio <= 1.")
+        if progressive_score_mode not in PROGRESSIVE_SCORE_MODES:
+            raise ValueError(
+                f"progressive_score_mode must be one of {PROGRESSIVE_SCORE_MODES}."
+            )
         if score_global_noise_strength is not None and score_cls_noise_strength is not None:
             if float(score_global_noise_strength) != float(score_cls_noise_strength):
                 raise ValueError("score noise aliases disagree.")
@@ -213,6 +224,7 @@ class ProgressivePatchScoreAttacker:
         self.progressive_drop_ratios = ratios
         self.progressive_patch_selector = patch_selector
         self.score_window_ratio = float(score_window_ratio)
+        self.progressive_score_mode = progressive_score_mode
         self.score_global_noise_strength = float(resolved_score_noise)
         # Compatibility name is metadata-only; the canonical setting is global
         # because GAP-based adapters do not have a CLS token.
@@ -282,14 +294,38 @@ class ProgressivePatchScoreAttacker:
 
     def _score_at_checkpoint(self, features) -> torch.Tensor:
         local = features.local_tokens
-        global_token = features.global_token
+        clean_global = features.global_token
+        global_noise = torch.zeros_like(clean_global)
         if self.score_global_noise_strength > 0:
             token_rms = local.detach().square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
             noise = self._randn_like(
-                global_token, f"progressive_score_cls_{features.layer_id}"
+                clean_global, f"progressive_score_cls_{features.layer_id}"
             )
-            global_token = global_token + self.score_global_noise_strength * token_rms * noise
-        return F.cosine_similarity(local, global_token.expand_as(local), dim=-1)
+            global_noise = self.score_global_noise_strength * token_rms * noise
+        global_token = clean_global + global_noise
+        if self.progressive_score_mode == "cosine":
+            return F.cosine_similarity(local, global_token.expand_as(local), dim=-1)
+        if features.global_mode != "gap":
+            raise ValueError(
+                f"score mode {self.progressive_score_mode!r} requires GAP features."
+            )
+        if self.progressive_score_mode == "gap_leave_one_out_cosine":
+            token_count = local.size(1)
+            if token_count <= 1:
+                raise ValueError("leave-one-out GAP score requires at least two local tokens.")
+            leave_one_out = (
+                token_count * clean_global.expand_as(local) - local
+            ) / (token_count - 1)
+            leave_one_out = leave_one_out + global_noise.expand_as(local)
+            return F.cosine_similarity(local, leave_one_out, dim=-1)
+        if self.progressive_score_mode == "gap_projection":
+            return (local * global_token.expand_as(local)).sum(dim=-1) / (local.size(-1) ** 0.5)
+        channel_rms = local.square().mean(dim=1, keepdim=True).sqrt().clamp_min(1e-6)
+        return F.cosine_similarity(
+            local / channel_rms,
+            global_token.expand_as(local) / channel_rms,
+            dim=-1,
+        )
 
     def _sample_half_random_mask(
         self, scores: torch.Tensor, ratio: float, checkpoint: str, *, largest: bool
@@ -797,6 +833,7 @@ class ProgressivePatchScoreAttacker:
             "whitebox_model": getattr(self.model, "model_name", "unknown"),
             "patch_selector": self.progressive_patch_selector,
             "score_window_ratio": self.score_window_ratio,
+            "progressive_score_mode": self.progressive_score_mode,
             "drop_map_policy": drop_map_policy,
             "progressive_checkpoints": list(self.progressive_checkpoints),
             "progressive_drop_ratios": list(self.progressive_drop_ratios),

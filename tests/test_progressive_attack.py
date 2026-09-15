@@ -6,6 +6,7 @@ import unittest
 import torch
 
 from gradient_replay import GradientReplay
+from nets.base import PatchScoreFeatures
 from progressive_attack import ProgressivePatchScoreAttacker
 from tests.vit_progressive_patch_score_attack_cases import (
     TinyViTWrapper,
@@ -117,6 +118,85 @@ class ProgressiveIndependenceTests(unittest.TestCase):
         self.assertIs(metadata["score_global_noise_active"], False)
         self.assertIsInstance(metadata["score_global_noise_active"], bool)
         self.assertEqual(metadata["score_global_noise_strength"], 0.0)
+
+    def test_gap_score_modes_match_their_definitions(self):
+        local = torch.tensor(
+            [[[2.0, 0.0], [0.0, 1.0], [1.0, 2.0]]], dtype=torch.float32
+        )
+        global_token = local.mean(dim=1, keepdim=True)
+        features = PatchScoreFeatures(
+            local_tokens=local,
+            global_token=global_token,
+            grid_size=(1, 3),
+            source_name="gap-test",
+            layer_id="gap-test",
+            global_mode="gap",
+        )
+        cosine = self.make_attacker(
+            progressive_score_mode="cosine", score_cls_noise_strength=0.0
+        )._score_at_checkpoint(features)
+        self.assertTrue(
+            torch.allclose(
+                cosine,
+                torch.nn.functional.cosine_similarity(
+                    local, global_token.expand_as(local), dim=-1
+                ),
+            )
+        )
+
+        leave_one_out = self.make_attacker(
+            progressive_score_mode="gap_leave_one_out_cosine",
+            score_cls_noise_strength=0.0,
+        )._score_at_checkpoint(features)
+        expected_loo_global = (local.size(1) * global_token - local) / (local.size(1) - 1)
+        self.assertTrue(
+            torch.allclose(
+                leave_one_out,
+                torch.nn.functional.cosine_similarity(local, expected_loo_global, dim=-1),
+            )
+        )
+
+        projection = self.make_attacker(
+            progressive_score_mode="gap_projection", score_cls_noise_strength=0.0
+        )._score_at_checkpoint(features)
+        self.assertTrue(
+            torch.allclose(
+                projection,
+                (local * global_token).sum(dim=-1) / (local.size(-1) ** 0.5),
+            )
+        )
+
+        channel_rms = local.square().mean(dim=1, keepdim=True).sqrt().clamp_min(1e-6)
+        rms_cosine = self.make_attacker(
+            progressive_score_mode="gap_channel_rms_cosine",
+            score_cls_noise_strength=0.0,
+        )._score_at_checkpoint(features)
+        self.assertTrue(
+            torch.allclose(
+                rms_cosine,
+                torch.nn.functional.cosine_similarity(
+                    local / channel_rms,
+                    global_token.expand_as(local) / channel_rms,
+                    dim=-1,
+                ),
+            )
+        )
+
+    def test_gap_only_score_modes_reject_cls_features(self):
+        attacker = self.make_attacker(
+            progressive_score_mode="gap_projection", score_cls_noise_strength=0.0
+        )
+        local = torch.ones(1, 2, 3)
+        features = PatchScoreFeatures(
+            local_tokens=local,
+            global_token=local[:, :1],
+            grid_size=(1, 2),
+            source_name="cls-test",
+            layer_id="cls-test",
+            global_mode="cls",
+        )
+        with self.assertRaisesRegex(ValueError, "requires GAP"):
+            attacker._score_at_checkpoint(features)
 
     def test_model_specific_default_drop_ratios_are_used_when_omitted(self):
         attacker = self.make_attacker(drop_ratios=None)
