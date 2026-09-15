@@ -98,3 +98,23 @@ but its benefit overlaps substantially with the late-heavy schedule rather than
 adding independently. The 2/28 projection combination is the highest CaiT
 Overall result in this 192-image campaign, but is not promoted without a larger
 validation run.
+
+## Visformer GAP-projection and opponent-noise combination
+
+The independently favorable Visformer settings were combined at the retained
+stage2/stage3 41/10 schedule:
+
+| Score | Opponent strength | Overall | Transformer | CNN | Strict black-box |
+|---|---:|---:|---:|---:|---:|
+| cosine | 0.2 | 77.04% | 82.22% | 71.01% | 75.13% |
+| gap_projection | 0.2 | 79.09% | 84.52% | 72.74% | 77.34% |
+| cosine | 0.4 | 81.29% | 85.94% | 75.87% | 79.73% |
+| gap_projection | 0.4 | **82.61%** | **87.13%** | **77.34%** | **81.16%** |
+
+The combination improves Overall by 1.32pp and strict black-box ASR by 1.43pp
+over cosine at strength 0.4. Relative to projection at strength 0.2, it improves
+Overall by 3.53pp and strict ASR by 3.82pp. The gain therefore survives removal
+of the Visformer self-target and shows that projection and stronger opponent
+noise are complementary on this 192-image screen. The combination is the
+highest observed Visformer setting in the campaign, pending larger-sample
+validation.
