@@ -15,30 +15,51 @@ from progressive_attack import ProgressivePatchScoreAttacker
 
 class ProgressiveAdapterContractTests(unittest.TestCase):
     EXPECTED_DEFAULTS = {
-        ViTWithHook: ("block3", "block7", "block11"),
+        ViTWithHook: ("block3", "block11"),
         CaiTS24WithHook: ("block5_gap", "block17_gap", "block23_gap"),
         PiTB224WithHook: ("stage2_block1", "stage3_block2", "stage3_block3"),
-        VisformerSmallWithHook: ("stage1_block1", "stage2_block1", "stage3_block1"),
+        VisformerSmallWithHook: ("stage2_block1", "stage3_block1"),
+    }
+    EXPECTED_DEFAULT_COUNTS = {
+        ViTWithHook: ((196, 196), (10, 10)),
+        CaiTS24WithHook: ((196, 196, 196), (10, 10, 10)),
+        PiTB224WithHook: ((256, 64, 64), (5, 2, 6)),
+        VisformerSmallWithHook: ((196, 49), (41, 10)),
     }
 
-    def test_each_adapter_registers_three_ordered_defaults(self):
+    def test_each_adapter_registers_ordered_defaults(self):
         for adapter, defaults in self.EXPECTED_DEFAULTS.items():
             with self.subTest(adapter=adapter.__name__):
                 self.assertEqual(adapter._DEFAULT_PROGRESSIVE_LAYERS, defaults)
                 candidates = adapter._PROGRESSIVE_LAYERS
                 positions = [candidates.index(item) for item in defaults]
                 self.assertEqual(positions, sorted(positions))
+                self.assertGreater(len(defaults), 1)
 
     def test_architecture_specific_default_drop_ratios(self):
+        expected_ratios = {
+            ViTWithHook: (0.051020408163, 0.051020408163),
+            CaiTS24WithHook: (0.05, 0.05, 0.05),
+            PiTB224WithHook: (0.02081165, 0.03125, 0.09375),
+            VisformerSmallWithHook: (0.209183673469, 0.204081632653),
+        }
         for adapter in self.EXPECTED_DEFAULTS:
             with self.subTest(adapter=adapter.__name__):
                 instance = object.__new__(adapter)
-                expected = (
-                    (0.02081165, 0.03125, 0.09375)
-                    if adapter is PiTB224WithHook
-                    else (0.05, 0.05, 0.05)
+                self.assertEqual(
+                    instance.default_progressive_drop_ratios(), expected_ratios[adapter]
                 )
-                self.assertEqual(instance.default_progressive_drop_ratios(), expected)
+
+    def test_architecture_specific_defaults_resolve_expected_drop_counts(self):
+        for adapter, (token_counts, expected_counts) in self.EXPECTED_DEFAULT_COUNTS.items():
+            with self.subTest(adapter=adapter.__name__):
+                instance = object.__new__(adapter)
+                ratios = instance.default_progressive_drop_ratios()
+                self.assertEqual(len(ratios), len(token_counts))
+                self.assertEqual(
+                    tuple(round(tokens * ratio) for tokens, ratio in zip(token_counts, ratios)),
+                    expected_counts,
+                )
 
     def test_main_has_no_top_level_legacy_attack_import(self):
         source = (Path(__file__).resolve().parents[1] / "main.py").read_text(

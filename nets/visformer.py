@@ -43,10 +43,10 @@ class VisformerSmallWithHook(WhiteBoxWithHook):
         "stage3_block3",
     )
     _DEFAULT_PROGRESSIVE_LAYERS = (
-        "stage1_block1",
         "stage2_block1",
         "stage3_block1",
     )
+    _DEFAULT_PROGRESSIVE_DROP_RATIOS = (0.209183673469, 0.204081632653)
 
     def _feature_modules(self):
         modules = []
@@ -171,6 +171,9 @@ class VisformerSmallWithHook(WhiteBoxWithHook):
 
     def default_progressive_checkpoints(self) -> tuple[str, ...]:
         return self._DEFAULT_PROGRESSIVE_LAYERS
+
+    def default_progressive_drop_ratios(self) -> tuple[float, ...]:
+        return self._DEFAULT_PROGRESSIVE_DROP_RATIOS
 
     def begin_progressive_forward(self, x: torch.Tensor) -> ProgressiveAttackState:
         initial = self.prepare_attack_feature_state(x)

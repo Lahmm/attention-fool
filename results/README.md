@@ -19,6 +19,11 @@ evaluation. The implementation contract, selected configurations, screening
 results, and auditable CSV paths are recorded in
 `experiments/progressive_cross_arch_mainline_s1000.md`.
 
+The `main.py` defaults are selected under `high`, `score-window-ratio=0.5`, and
+`K>1`: ViT block3/11 with 10/10 drops, CaiT block5/17/23 with 10/10/10, PiT
+stage2-block1/stage3-block2/stage3-block3 with 5/2/6, and Visformer
+stage2-block1/stage3-block1 with 41/10.
+
 ## Historical cross-architecture baseline
 
 The final-layer dynamic-mask `original_score_postdrop_phase_pair` pipeline is

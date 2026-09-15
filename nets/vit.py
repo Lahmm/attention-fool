@@ -26,7 +26,8 @@ class ViTWithHook(WhiteBoxWithHook):
         "block12": 12,
     }
     _PROGRESSIVE_LAYERS = tuple(f"block{index}" for index in range(1, 12))
-    _DEFAULT_PROGRESSIVE_LAYERS = ("block3", "block7", "block11")
+    _DEFAULT_PROGRESSIVE_LAYERS = ("block3", "block11")
+    _DEFAULT_PROGRESSIVE_DROP_RATIOS = (0.051020408163, 0.051020408163)
 
     def _feature_modules(self):
         return sequential_modules(getattr(self.model, "blocks", None))
@@ -96,6 +97,9 @@ class ViTWithHook(WhiteBoxWithHook):
 
     def default_progressive_checkpoints(self) -> tuple[str, ...]:
         return self._DEFAULT_PROGRESSIVE_LAYERS
+
+    def default_progressive_drop_ratios(self) -> tuple[float, ...]:
+        return self._DEFAULT_PROGRESSIVE_DROP_RATIOS
 
     def begin_progressive_forward(self, x: torch.Tensor) -> ProgressiveAttackState:
         initial = self.prepare_attack_feature_state(x)

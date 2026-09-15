@@ -11,7 +11,6 @@ import argparse
 from main import main as _run_mainline
 from main import parse_args as _parse_mainline_args
 from progressive_attack import (
-    DEFAULT_DROP_RATIOS,
     PROGRESSIVE_PATCH_SELECTORS,
     ProgressiveMaskSchedule,
     ProgressivePatchScoreAttacker,
@@ -20,7 +19,9 @@ from utils import DEVICE
 
 
 MODEL_NAME = "vit_base_patch16_224"
-DEFAULT_CHECKPOINTS = (3, 7, 11)
+REFERENCE_CHECKPOINTS = (3, 7, 11)
+DEFAULT_CHECKPOINTS = (3, 11)
+DEFAULT_DROP_RATIOS = (0.051020408163, 0.051020408163)
 ViTProgressivePatchScoreAttacker = ProgressivePatchScoreAttacker
 
 

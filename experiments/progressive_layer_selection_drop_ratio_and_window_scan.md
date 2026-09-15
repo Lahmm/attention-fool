@@ -138,50 +138,50 @@ K=2 prefers keeping the stage-2 and stage-3 token: `(s2b1,s3b3)` 81.33 vs
 `(s2b1,s3b1)` 77.04 > `(s1b1,s3b1)` 75.96 > `(s1b1,s2b1)` 75.20. The common
 theme is that the earliest checkpoint contributes least.
 
-### 2.3 Best-measured per-model configurations, and the K=3 decision
+### 2.3 Best-measured per-model configurations
 
-The ASR-maximising configuration found for each source, all confirmed on the
-full 1000 images:
+The unconstrained ASR-maximising configuration found for each source, all
+confirmed on the full 1000 images:
 
-| Source | Best-measured configuration | ASR | `K=3` default | ASR | Gain forgone |
+| Source | Best-measured configuration | ASR | Former `K=3` default | ASR | Gain |
 | --- | --- | ---: | --- | ---: | ---: |
 | CaiT-S24 | **block23, 30** | **86.40** | block5/17/23, 10/10/10 | 84.15 | +2.25 |
-| ViT-B/16 | **block3,block11, 15/15** | **80.15** | block3/7/11, 10/10/10 | 79.58 | +0.57 |
+| ViT-B/16 | **block3,block11, 10/10** | **80.28** | block3/7/11, 10/10/10 | 79.58 | +0.71 |
 | Visformer-S | **stage2_block1,stage3_block1, 41/10** | **74.25** | stage1/2/3 block1, 39/10/2 | 73.16 | +1.09 |
 | PiT-B | stage2_block1,stage3_block2,stage3_block3, 5/2/6 | 80.44 | identical | 80.44 | 0 |
 
-Best-measured four-source mean **80.31%** against **79.33%** for the `K=3`
-defaults, a difference of 0.98pp, entirely from per-model layer specialisation.
-CaiT's gain is largely a checkpoint-count effect (three points to one); ViT's
-is a position effect (dropping the middle point); Visformer's is a
-stage-allocation effect (dropping stage 1 and concentrating on stages 2 and 3).
+Best-measured four-source mean is **80.34%**, against **79.33%** for the former
+`K=3` defaults. CaiT's gain is largely a checkpoint-count effect (three points
+to one); ViT's is a position and budget effect; Visformer's is a
+stage-allocation effect.
 
-**Research decision (2026-09-15): the production mainline retains `K = 3`
-uniformly across all four sources, i.e. the existing per-model defaults.** No
-code change is required; the four resolver defaults in `nets/` are already
-`K = 3`.
+The production mainline initially retained `K=3` uniformly to preserve a
+three-point mechanism. That decision was subsequently superseded by the
+constrained-ASR default selection below. The explicit ViT `(3,7,11)` schedule
+remains the canonical mechanism-validation reference and is still supported.
 
-The deciding consideration is mechanism preservation rather than ASR. A single
-checkpoint removes the progressive schedule the method is named for, and
-CaiT's `K=1` optimum is knife-edge: block22 scores 80.49, block23 88.02 and
-block24 58.85, so a one-layer displacement costs 7.5pp or 29pp. A schedule
-spread over three checkpoints is correspondingly more robust to the choice of
-any single layer, and its `K=3` form is what the cross-architecture transfer
-results and the surrounding ablations were measured against.
+### 2.4 Current constrained-ASR defaults
 
-This decision forgoes the 0.98pp four-source mean gain and supersedes the
-"adopted configuration" reading of the table above, which is retained as an
-upper-bound exploration.
+The production defaults maximise completed 1000-image Overall ASR subject to
+`selector=high`, `score-window-ratio=0.5`, and `K>1`:
 
-**Consequence for the window axis.** The section 4 sweep was run on the
-best-measured configurations, so its results do **not** carry over to the
-retained `K=3` schedules — except for PiT-B, whose schedule is unchanged. In
-particular, the finding that score guidance is worth nothing on ViT-B/16 was
-measured at `(block3,block11)`; the historical same-seed 1000-image comparison
-at the retained `(3,7,11)` shows the opposite, with `high` ahead of `random` by
-0.59pp (79.75 vs 79.16). Restoring `K=3` therefore also restores the evidence
-that score-guided selection helps on ViT-B/16. No window or selector data
-exists for CaiT-S24 or Visformer-S at their retained `K=3` schedules.
+| Source | Current default | Overall ASR |
+| --- | --- | ---: |
+| ViT-B/16 | block3/block11, 10/10 | **80.28%** |
+| CaiT-S24 | block5/17/23, 10/10/10 | **84.15%** |
+| PiT-B | stage2_block1/stage3_block2/stage3_block3, 5/2/6 | **80.44%** |
+| Visformer-S | stage2_block1/stage3_block1, 41/10 | **74.25%** |
+
+The four-source mean is **79.78%**. CaiT retains `K=3` because its screening
+`K=2` winner reversed on 1000 images (83.48% versus 84.15%). ViT's 10/10 result
+is only 0.13pp above 15/15, below the measured 0.17pp seed floor, but it is the
+highest completed result under the stated selection rule.
+
+For window interpretation, the section 4 sweep ran on the best-measured layer
+configurations. It applies directly to the PiT and Visformer defaults, but not
+to CaiT's retained `K=3` schedule or ViT's newly reduced 10/10 budget. The
+historical ViT `(3,7,11)` control still shows `high` ahead of `random` by
+0.59pp (79.75 versus 79.16).
 
 ---
 
@@ -213,8 +213,11 @@ declines. Outside the extremes the spread is under 1pp, so the budget can be
 treated as a weak parameter — with the important exception that no single
 checkpoint may be pushed toward a 0.5 ratio (section 3.3).
 
-The 20-drop ViT result (82.73) is screening-only and has not been confirmed at
-1000 images; the adopted configuration uses 30 drops.
+The 20-drop ViT result (82.73) was screening-only in the original scan. Its
+subsequent 1000-image confirmation obtained
+**80.28%**, versus 80.15% for 30 drops. The +0.13pp full-set difference is below
+the measured 0.17pp seed floor; 10/10 is nevertheless retained as the numeric
+winner and current default.
 
 ### 3.3 Cross-scale models require equal-ratio allocation
 
@@ -263,7 +266,7 @@ sources, and its objective is the four-source mean ASR.
 
 ### 4.2 Screening results
 
-Sweep on each model's adopted layer configuration, 192 images, offset 0.
+Sweep on each model's then-selected layer configuration, 192 images, offset 0.
 
 | window | ViT-B/16 | CaiT-S24 | PiT-B | Visformer-S | mean |
 | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -312,19 +315,14 @@ global token — is a saliency measure when the global token is a CLS token, but
 for a GAP model it degenerates into similarity with the model's own mean
 pooled representation, which need not track adversarial importance.
 
-### 4.4 Open decision
+### 4.4 Window interpretation and current choice
 
-Under the stated constraint (one window value shared by all four sources,
-objective = four-source mean) the optimum is **`w = 1.00`, i.e. disabling
-score guidance**, worth +0.82pp over the default. This conflicts with the
-paper's main claim, which is that patch-score routing decides *where* to
-perturb. Three options, none of which is chosen here:
-
-1. keep `w = 0.50`, retaining the claim and forgoing 0.82pp;
-2. adopt `w = 1.00`, taking the 0.82pp and dropping the routing claim;
-3. redefine the GAP-family score (for example against the classifier token
-   rather than the pooled mean), which requires code changes beyond the
-   current scope.
+Under the scan's original constraint (one window value shared by all four
+sources, objective = four-source mean), the numeric optimum is **`w = 1.00`,
+i.e. disabling score guidance**, worth +0.82pp over `w=0.50`. This conflicts
+with the paper mechanism in which patch-score routing decides *where* to
+perturb. The current production selection therefore explicitly fixes
+`w=0.50`; redefining the GAP-family score remains a possible future direction.
 
 ---
 
@@ -332,39 +330,37 @@ perturb. Three options, none of which is chosen here:
 
 | Finding | Confidence | Basis |
 | --- | --- | --- |
-| Per-model layer specialisation is the largest single gain (+0.98pp) | high | four models, 1000 images |
+| Per-model layer/budget specialisation reaches +1.01pp unconstrained | high | four models, 1000 images |
 | `K <= 3` beats `K = 4` and `K = 6` | medium-high | 4/4 models, holds under strict black-box; all rows hold total budget constant, so constant-per-checkpoint `K >= 4` is untested |
 | CaiT-S24 `K = 1` beats every `K >= 2` schedule on the full set | high | K=2 confirmed at 83.48 and K=3 at 84.15 versus 86.40 |
 | CaiT-S24 optimum is the single checkpoint block23; final-layer routing is destructive | high | sharp peak plus 29pp collapse, 1000-image confirmation |
 | ViT-B/16 optimum is `(block3, block11)`, skipping the middle | high | neighbour sweep plus 1000-image confirmation |
-| 15% total budget is neither required nor optimal | medium | swept only at `K=1` (CaiT) and `K=2` (ViT) |
+| 15% total budget is neither required nor optimal | medium-high | ViT `K=2` confirmed at 1000; CaiT swept only at `K=1` screening scale |
 | Cross-scale sources must allocate by equal ratio | high | 25pp split artefact on Visformer-S |
 | The window moves the four-source mean by at most 0.82pp | medium | 1000-image data at 0.50 and 1.00 only; intermediate points are screening-only |
-| Score guidance is worthless on the retuned ViT-B/16 | medium-high | 0.07pp at 1000 images, below the seed floor |
+| Score guidance is worthless on the 15/15 retuned ViT-B/16 | medium-high | 0.07pp at 1000 images, below the seed floor; 10/10 window interaction is untested |
 | The window and layer-selection axes are coupled | high | the ViT routing gain present at `(3,7,11)` disappears at `(3,11)` |
 
-Best configuration under the global constraints (window fixed across models,
-objective = four-source mean): **81.13%** at `w = 1.00`, versus 80.31% at
-`w = 0.50`, versus 79.33% for the retained `K = 3` defaults.
+On the schedules used by the window sweep, the best shared window is `w=1.00`
+at **81.13%**, versus 80.31% at `w=0.50`. Those numbers are controlled window
+evidence rather than current-default results because the ViT sweep used 15/15.
 
-**Standing configuration after the 2026-09-15 decision:** the production
-mainline keeps `K = 3` on all four sources with the existing `nets/` defaults,
-at a four-source mean of 79.33%. The 80.31% and 81.13% rows above are measured
-on schedules that are not in production, and the `w = 1.00` row in particular
-depends on the retuned ViT-B/16 and Visformer-S schedules.
+**Current production defaults:** `high`, `w=0.5`, `K>1`, with per-model
+1000-image winners: ViT K2 10/10, CaiT K3 10/10/10, PiT K3 5/2/6, and
+Visformer K2 41/10. Their four-source mean is **79.78%**.
 
 ---
 
 ## 6. Open items
 
-Resolved by the 2026-09-15 decision: the production mainline keeps `K = 3`
-uniformly, so the `K` ladder stands as an upper-bound exploration rather than a
-pending migration.
+Resolved by the current default decision: production uses the best completed
+1000-image result under `high`, `w=0.5`, and `K>1`; checkpoint count is
+architecture-specific rather than uniformly three.
 
 Still open:
 
-- Window and selector data for CaiT-S24 and Visformer-S at their retained
-  `K=3` schedules (none exists). The section 4 sweep does not apply to them.
+- Window and selector data for CaiT-S24 at its retained `K=3` schedule (none
+  exists). The section 4 sweep used CaiT K=1 and does not apply to this default.
 
 - Constant per-checkpoint budget with `K >= 4` (the complement of section 2.1).
 - 1000-image confirmation of window values 0.25, 0.35 and 0.70.
@@ -372,7 +368,8 @@ Still open:
   and one structural contrast (IID Gaussian 78.42% vs opponent 79.58%) exist.
   The magnitude has never been swept, and it is the largest unexplored
   interval in the attack.
-- The ViT-B/16 20-drop budget result (82.73 screening) is unconfirmed.
+- The window interaction for the new ViT 10/10 default; the completed window
+  sweep used the same layers with 15/15 drops.
 - The window and layer-selection axes are coupled (section 4.4), so any future
   change to the window would in principle require re-selecting layers under the
   new window, especially for Visformer-S. The converse also holds: because the
@@ -408,19 +405,28 @@ cancels.
 ```bash
 PY=/root/miniconda3/envs/att-atk/bin/python
 
-# Adopted CaiT-S24 configuration
+# Current CaiT-S24 default
 $PY main.py --attack-method progressive --whitebox-model cait_s24_224 \
-  --checkpoints block23_gap --drop-ratios 0.153061 --batch-size 48 \
+  --checkpoints block5_gap,block17_gap,block23_gap \
+  --drop-ratios 0.05,0.05,0.05 --batch-size 48 \
   --max-attacked-samples 1000 --sample-offset 0 --seed 20260907 \
   --output-dir outputs/attack/<name>
 
-# Adopted ViT-B/16 configuration
+# Current ViT-B/16 default
 $PY main.py --attack-method progressive --whitebox-model vit_base_patch16_224 \
-  --checkpoints block3,block11 --drop-ratios 0.076531,0.076531 --batch-size 96 \
+  --checkpoints block3,block11 --drop-ratios 0.051020408163,0.051020408163 \
+  --batch-size 96 \
   --max-attacked-samples 1000 --sample-offset 0 --seed 20260907 \
   --output-dir outputs/attack/<name>
 
-# Adopted Visformer-S configuration
+# Current PiT-B default
+$PY main.py --attack-method progressive --whitebox-model pit_b_224 \
+  --checkpoints stage2_block1,stage3_block2,stage3_block3 \
+  --drop-ratios 0.02081165,0.03125,0.09375 --batch-size 96 \
+  --max-attacked-samples 1000 --sample-offset 0 --seed 20260907 \
+  --output-dir outputs/attack/<name>
+
+# Current Visformer-S default
 $PY main.py --attack-method progressive --whitebox-model visformer_small \
   --checkpoints stage2_block1,stage3_block1 --drop-ratios 0.209184,0.204082 \
   --batch-size 48 --max-attacked-samples 1000 --sample-offset 0 --seed 20260907 \

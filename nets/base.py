@@ -205,7 +205,7 @@ class WhiteBoxWithHook(nn.Module):
         )
 
     def default_progressive_checkpoints(self) -> tuple[str, ...]:
-        """Return the three architecture-specific mainline checkpoints."""
+        """Return the architecture-specific mainline checkpoints."""
         raise NotImplementedError(
             f"progressive checkpoint defaults are not implemented for {self.model_name}."
         )

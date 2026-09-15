@@ -1,0 +1,126 @@
+exp_name,timestamp,git_head,adv_dir,adv_image_count,avg,avg_vit,avg_cnn,image_dir,prefix,model_name,batch_size,num_workers,prefetch_factor,amp,tf32,num_images,asr_definition,attack_params,levit_256,pit_b_224,deit_base_patch16_224,tnt_s_patch16_224,convit_base,visformer_small,cait_s24_224,inception_v3,inception_v4,inception_resnet_v2,resnet101,inception_v3_adv,inception_resnet_v2_adv
+scanD_vit_k2_budget20_confirm_s1000_offset0_seed20260907,2026-09-15 16:19:38,116f2b79,outputs/attack/scanD_vit_k2_budget20_confirm_s1000_offset0_seed20260907,1000,0.8028461538461538,0.8542857142857142,0.7428333333333333,outputs/attack/scanD_vit_k2_budget20_confirm_s1000_offset0_seed20260907,adv_,"levit_256,pit_b_224,deit_base_patch16_224,tnt_s_patch16_224,convit_base,visformer_small,cait_s24_224,inception_v3,inception_v4,inception_resnet_v2,resnet101,inception_v3_adv,inception_resnet_v2_adv",512,8,4,True,True,1000,1 - adversarial accuracy,"{
+  ""attack_method"": ""progressive_patch_score"",
+  ""whitebox_model"": ""vit_base_patch16_224"",
+  ""max_attacked_samples"": 1000,
+  ""sample_offset"": 0,
+  ""epsilon"": 0.06274509803921569,
+  ""step_size"": 0.006274509803921568,
+  ""steps"": 10,
+  ""seed"": 20260907,
+  ""mi"": true,
+  ""mi_decay"": 1.0,
+  ""ni"": false,
+  ""ti_sigma"": 0.0,
+  ""dim"": false,
+  ""dim_resize_range"": [
+    0.85,
+    1.0
+  ],
+  ""guide_aug_copies"": 20,
+  ""input_diversity_groups"": 10,
+  ""input_diversity_views_per_group"": 2,
+  ""input_diversity_total_views"": 20,
+  ""input_diversity_phase_shift_set"": [
+    [
+      4,
+      4
+    ],
+    [
+      8,
+      8
+    ],
+    [
+      12,
+      12
+    ]
+  ],
+  ""guide_aug_strength"": 0.2,
+  ""checkpoints"": [
+    ""block3"",
+    ""block11""
+  ],
+  ""drop_ratios"": [
+    0.051020408163,
+    0.051020408163
+  ],
+  ""progressive_patch_selector"": ""high"",
+  ""score_window_ratio"": 0.5,
+  ""score_global_noise_strength"": 0.2,
+  ""score_cls_noise_strength_cli_alias"": null,
+  ""opponent_noise_strength"": 0.2,
+  ""patch_dropout_ratio"": 0.3,
+  ""patch_dropout_score_mode"": ""high"",
+  ""patch_dropout_sampling_mode"": ""random"",
+  ""patch_dropout_score_quantile_jitter"": 0.0,
+  ""patch_dropout_score_noise"": 0.0,
+  ""patch_dropout_noise_mode"": ""opponent_channel_gaussian"",
+  ""token_cls_noise"": false,
+  ""token_score_cls_noise"": true,
+  ""token_score_cls_mode"": ""learned"",
+  ""token_score_patch_noise"": false,
+  ""token_cls_noise_mode"": ""gaussian"",
+  ""token_cls_noise_strength"": 0.2,
+  ""post_dropout_phase_token_noise"": true,
+  ""post_dropout_feature_noise_strength"": 0.2,
+  ""post_dropout_feature_noise_type"": ""opponent_projected"",
+  ""post_dropout_feature_noise_position"": ""initial"",
+  ""feature_layer"": 12,
+  ""patch_score_layer"": ""final"",
+  ""patch_selector"": ""high"",
+  ""gradient_postprocess"": ""raw_mean_plus_gaussian_residual"",
+  ""gaussian_sigma"": 4.0,
+  ""gaussian_alpha"": 0.75,
+  ""drop_map_policy"": ""score_high_half_random"",
+  ""progressive_checkpoints"": [
+    ""block3"",
+    ""block11""
+  ],
+  ""progressive_drop_ratios"": [
+    0.051020408163,
+    0.051020408163
+  ],
+  ""progressive_drop_counts"": [
+    10,
+    10
+  ],
+  ""progressive_grids"": [
+    [
+      14,
+      14
+    ],
+    [
+      14,
+      14
+    ]
+  ],
+  ""progressive_global_modes"": [
+    ""cls"",
+    ""cls""
+  ],
+  ""progressive_repeated_positions"": true,
+  ""score_reference"": ""current_global_plus_checkpoint_gaussian_noise"",
+  ""score_global_noise_active"": true,
+  ""score_cls_noise_active"": true,
+  ""score_cls_noise_strength"": 0.2,
+  ""token_intervention"": ""local_patch_tokens_hard_zero_after_checkpoint"",
+  ""mask_schedule_policy"": ""current_attack_iterate_per_step_group"",
+  ""mask_schedule_count_per_image"": 100,
+  ""checkpoint_mask_selection_count_per_image"": 200,
+  ""mask_pair_sharing"": ""same_schedule_with_phase_transformed_masks"",
+  ""phase_mask_transform"": ""image_reflect_shift_then_native_grid_occupancy_topk"",
+  ""opponent_noise"": ""initial_rgb_projection_kept_image_union_only"",
+  ""feature_noise_type"": ""opponent_projected"",
+  ""feature_noise_cls"": false,
+  ""asr_definition"": ""1 - adversarial accuracy over all evaluated samples"",
+  ""model_mean"": [
+    0.5,
+    0.5,
+    0.5
+  ],
+  ""model_std"": [
+    0.5,
+    0.5,
+    0.5
+  ]
+}",0.829,0.846,0.854,0.852,0.844,0.843,0.912,0.767,0.75,0.743,0.779,0.732,0.6859999999999999

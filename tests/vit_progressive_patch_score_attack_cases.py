@@ -15,8 +15,11 @@ from nets.base import (
 )
 from progressive_attack import PROGRESSIVE_PATCH_SELECTORS, ProgressiveMaskSelection
 from vit_progressive_patch_score_attack import (
+    DEFAULT_CHECKPOINTS,
+    DEFAULT_DROP_RATIOS,
     MODEL_NAME,
     ProgressiveMaskSchedule,
+    REFERENCE_CHECKPOINTS,
     ViTProgressivePatchScoreAttacker,
     _parse_float_list,
     _parse_int_list,
@@ -162,6 +165,11 @@ class ProgressiveViTTests(unittest.TestCase):
     def test_list_parsers(self):
         self.assertEqual(_parse_int_list("3, 6,9"), (3, 6, 9))
         self.assertEqual(_parse_float_list(".05, 0.1, .2"), (0.05, 0.1, 0.2))
+
+    def test_exported_vit_defaults_and_reference_are_distinct(self):
+        self.assertEqual(DEFAULT_CHECKPOINTS, (3, 11))
+        self.assertEqual(DEFAULT_DROP_RATIOS, (0.051020408163, 0.051020408163))
+        self.assertEqual(REFERENCE_CHECKPOINTS, (3, 7, 11))
 
     def test_independent_ratios_do_not_hit_parent_single_budget_limit(self):
         attacker = self.make_attacker(drop_ratios=(0.4, 0.4, 0.4))

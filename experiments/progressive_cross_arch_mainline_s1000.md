@@ -2,7 +2,7 @@
 
 Initial formal matrix: 2026-09-07
 
-Checkpoint, ratio, and selector follow-ups audited through: 2026-09-14
+Checkpoint, ratio, and selector follow-ups audited through: 2026-09-15
 
 Code revisions used for the formal runs include: initial matrix `cf4b9ada`,
 CaiT block6/18/22 follow-up `c17d9ab5`, block6/17/23 follow-up `3dd43259`,
@@ -14,7 +14,8 @@ block5/17/23 follow-up `3abd7c0b`, and the generalized-selector revision
 The production mainline is the independent `ProgressivePatchScoreAttacker` in
 `progressive_attack.py`. It contains exactly the two paper mechanisms:
 
-1. patch-score-guided progressive hard-zero routing at three checkpoints;
+1. patch-score-guided progressive hard-zero routing at architecture-specific
+   checkpoint schedules;
 2. kept-only RGB opponent-channel random noise projected through the source
    model's initial RGB convolution and RMS-matched in feature space.
 
@@ -42,15 +43,15 @@ only the architecture-specific hidden-state traversal:
 
 | Source | Default checkpoints | Global representation | Native grids | Drop counts |
 | --- | --- | --- | --- | --- |
-| ViT-B/16 | block3, block7, block11 | CLS | 14×14, 14×14, 14×14 | 10, 10, 10 |
+| ViT-B/16 | block3, block11 | CLS | 14×14, 14×14 | 10, 10 |
 | CaiT-S24 | block5, block17, block23 | GAP | 14×14, 14×14, 14×14 | 10, 10, 10 |
 | PiT-B | stage2/block1, stage3/block2, stage3/block3 | CLS | 16×16, 8×8, 8×8 | 5, 2, 6 |
-| Visformer-S | stage1/block1, stage2/block1, stage3/block1 | GAP | 28×28, 14×14, 7×7 | 39, 10, 2 |
+| Visformer-S | stage2/block1, stage3/block1 | GAP | 14×14, 7×7 | 41, 10 |
 
 For cross-scale models, every checkpoint mask retains its own grid. Phase
 transforms happen in image space and are projected back with count-preserving
 top-k occupancy. Kept-only opponent noise uses the image-space union of all
-three masks, mapped through the true receptive fields of the initial RGB
+checkpoint masks, mapped through the true receptive fields of the initial RGB
 projection.
 
 ## Completed verification gates
@@ -80,9 +81,9 @@ projection.
 - Formal scale: the selected defaults for all four sources, the initial
   cross-architecture matrix, two ViT noise controls, and the retained
   full-scale checkpoint/selector follow-ups complete 1000 images. Every formal
-  directory has 1000 adversarial PNGs; the three-checkpoint runs record 300
-  checkpoint selections per image and maximum saved-PNG L-infinity 16/255.
-- Test suite: 66 tests pass; four optional/real tests are skipped in the default
+  directory has 1000 adversarial PNGs; K2/K3 runs record 200/300 checkpoint
+  selections per image and maximum saved-PNG L-infinity 16/255.
+- Test suite: 68 tests pass; four optional/real tests are skipped in the default
   run, and the four-model real adapter test passes when explicitly enabled.
 
 ## Formal cross-architecture transfer results
@@ -93,29 +94,30 @@ seven Transformer and six CNN models.
 
 | Source | Overall ASR | Transformer avg | CNN avg | Strict black-box overall* |
 | --- | ---: | ---: | ---: | ---: |
-| ViT-B/16 | 79.58% | 84.94% | 73.32% | 79.58% |
+| ViT-B/16 | **80.28%** | 85.43% | 74.28% | **80.28%** |
 | CaiT-S24 | **84.15%** | **87.97%** | **79.68%** | **83.02%** |
 | PiT-B | 80.44% | **88.87%** | 70.60% | 78.86% |
-| Visformer-S | 73.16% | 78.24% | 67.23% | 70.97% |
+| Visformer-S | 74.25% | 78.99% | 68.73% | 72.13% |
 
 `*` For CaiT, PiT and Visformer, strict black-box averages exclude the target
 with the same architecture as the source. ViT-B/16 is not in the target list.
 
 The per-target auditable records are:
 
-- `outputs/csv/outputs_attack_progressive_mainline_vit_s1000_seed20260907.csv`
+- `outputs/csv/outputs_attack_scanD_vit_k2_budget20_confirm_s1000_offset0_seed20260907.csv`
 - `outputs/csv/outputs_attack_progressive_cait_b5_b17_b23_s1000_seed20260907.csv`
 - `outputs/csv/outputs_attack_progressive_pit_l2_s1000_seed20260907.csv`
-- `outputs/csv/outputs_attack_progressive_visformer_i3_s1b1_s2b1_s3b1_s1000_seed20260907.csv`
+- `outputs/csv/outputs_attack_scanD_visformer_k2eqr_s2b1_s3b1_confirm_s1000_offset0_seed20260907.csv`
 
 The initial adapter defaults and the final selected defaults are both retained
 for auditability:
 
 | Source | Initial Overall | Selected Overall | Gain | Initial strict | Selected strict | Gain |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| ViT-B/16 | 79.58% | **80.28%** | +0.71pp | 79.58% | **80.28%** | +0.71pp |
 | CaiT-S24 | 75.75% | **84.15%** | +8.40pp | 74.35% | **83.02%** | +8.67pp |
 | PiT-B | 75.52% | **80.44%** | +4.92pp | 73.69% | **78.86%** | +5.17pp |
-| Visformer-S | 71.46% | **73.16%** | +1.70pp | 69.12% | **70.97%** | +1.85pp |
+| Visformer-S | 71.46% | **74.25%** | +2.79pp | 69.12% | **72.13%** | +3.01pp |
 
 ## Controlled comparisons
 
@@ -285,13 +287,15 @@ Both A1 and I3 were then run on all 1000 images:
 | --- | ---: | ---: | ---: | ---: |
 | Initial V0 | 71.46% | 76.83% | 65.20% | 69.12% |
 | A1, s1b1/s2b2/s3b3 | 72.78% | **78.33%** | 66.30% | 70.54% |
-| **I3 selected default, s1b1/s2b1/s3b1** | **73.16%** | 78.24% | **67.23%** | **70.97%** |
+| I3 former K3 default, s1b1/s2b1/s3b1 | 73.16% | 78.24% | 67.23% | 70.97% |
+| **Current K2 default, s2b1/s3b1, 41/10** | **74.25%** | **78.99%** | **68.73%** | **72.13%** |
 
-I3 wins Overall, CNN, and strict Overall, while A1 is 0.09pp higher on the
-Transformer subset. The auditable full records are
+I3 won the original K3 comparison, while the later equal-ratio K2 follow-up
+became the constrained-ASR default. The auditable full records are
 `outputs/csv/outputs_attack_progressive_visformer_a1_s1b1_s2b2_s3b3_s1000_seed20260907.csv`
-and
-`outputs/csv/outputs_attack_progressive_visformer_i3_s1b1_s2b1_s3b1_s1000_seed20260907.csv`.
+`outputs/csv/outputs_attack_progressive_visformer_i3_s1b1_s2b1_s3b1_s1000_seed20260907.csv`,
+with the current K2 record at
+`outputs/csv/outputs_attack_scanD_visformer_k2eqr_s2b1_s3b1_confirm_s1000_offset0_seed20260907.csv`.
 
 ### Progressive routing versus historical final-layer routing
 
@@ -306,13 +310,13 @@ covered by the bitwise golden parity gate.
 Progressive improves by 1.31pp Overall, 1.49pp Transformer and 1.10pp CNN.
 
 For completeness, the older cross-architecture final-layer records and the
-selected progressive results are summarized below. Only the ViT pair above is
+then-selected progressive results are summarized below. Only the ViT pair above is
 a same-seed controlled routing comparison. The other historical rows use seed
 20260716 and raw-gradient final-layer runs, whereas the progressive rows use
 seed 20260907 and the promoted optimization stack; their deltas are context,
 not causal estimates of routing quality.
 
-| Source | Historical final-layer Overall | Selected progressive Overall | Difference |
+| Source | Historical final-layer Overall | Then-selected progressive Overall | Difference |
 | --- | ---: | ---: | ---: |
 | ViT-B/16, controlled pair | 78.45% | **79.75%** | +1.31pp |
 | CaiT-S24, historical context | **87.00%** | 84.15% | -2.85pp |
