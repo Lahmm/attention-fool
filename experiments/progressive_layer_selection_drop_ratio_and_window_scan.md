@@ -36,7 +36,8 @@ measured, not assumed.
 - **192-image screening is accurate to roughly ±0.5–0.8pp, and its error is
   two-sided.** ViT K=2 (block3,block11) measured +1.00pp at 192 images but
   only +0.57pp at 1000. CaiT K=1 (block23) measured +1.44pp at 192 but +2.25pp
-  at 1000. Screening both over- and under-states the full-set effect.
+  at 1000. Screening both over- and under-states the full-set effect, and at
+  0.79pp it can even invert a ranking — see the CaiT K=2 row in section 2.1.
 - **The seed-to-seed floor at 1000 images is ~0.17pp.** The identical
   configuration `(3,7,11) high` scored 79.75% at seed 20260903 and 79.58% at
   seed 20260907.
@@ -85,6 +86,23 @@ The peak is at `K <= 3` for all four sources, and `K = 6` is clearly worse
 everywhere. Recomputing with the strict black-box average leaves the ordering
 unchanged — for example CaiT `K=1` 87.11 vs `K=6` 79.12, PiT `K=3` 81.68 vs
 `K=6` 78.43 — so the pattern is not an artifact of source-model self-transfer.
+
+**1000-image confirmation of the best non-`K=1` CaiT-S24 schedule.** The ladder
+made `(block17,block23)` the best CaiT schedule with more than one checkpoint,
+0.12pp *ahead* of the `K=3` baseline. On the full 1000 images the ranking
+reverses:
+
+| CaiT-S24 schedule | 192 images | 1000 images |
+| --- | ---: | ---: |
+| `K=1` block23_gap, 30 | 88.02 | **86.40** |
+| `K=3` block5/17/23, 10/10/10 | 86.58 | **84.15** |
+| `K=2` block17/23, 15/15 | 86.70 | **83.48** |
+
+Screening put `K=2` 0.12pp above `K=3`; the full set puts it 0.67pp below, a
+0.79pp swing that flips the sign. This leaves the adopted configuration
+unchanged — `K=1` remains best by a wide margin — but it is the sharpest
+illustration in this document of why a sub-1pp screening delta must not be
+promoted without a full-set run.
 
 **Caveat.** Every row holds the total budget constant, so the ladder measures
 "spread the same budget thinner" rather than "add checkpoints that each keep a
@@ -290,6 +308,7 @@ perturb. Three options, none of which is chosen here:
 | --- | --- | --- |
 | Per-model layer specialisation is the largest single gain (+0.98pp) | high | four models, 1000 images |
 | `K <= 3` beats `K = 4` and `K = 6` | medium-high | 4/4 models, holds under strict black-box; all rows hold total budget constant, so constant-per-checkpoint `K >= 4` is untested |
+| CaiT-S24 `K = 1` beats every `K >= 2` schedule on the full set | high | K=2 confirmed at 83.48 and K=3 at 84.15 versus 86.40 |
 | CaiT-S24 optimum is the single checkpoint block23; final-layer routing is destructive | high | sharp peak plus 29pp collapse, 1000-image confirmation |
 | ViT-B/16 optimum is `(block3, block11)`, skipping the middle | high | neighbour sweep plus 1000-image confirmation |
 | 15% total budget is neither required nor optimal | medium | swept only at `K=1` (CaiT) and `K=2` (ViT) |
@@ -325,6 +344,7 @@ Screening and confirmation runs:
 
 - `outputs/attack/scanB_*` — section 2.1 `K` ladder, section 3.3 ratios
 - `outputs/attack/scanB2_*` — section 2.3 confirmations, equal-ratio retest
+- `outputs/attack/scanB3_*` — section 2.1 CaiT-S24 `K=2` 1000-image confirmation
 - `outputs/attack/scanD_*` — section 2.2 positions, section 3.2 budgets
 - `outputs/attack/scanA_*` — section 4.2 window screening
 - `outputs/attack/scanA2_*` — section 4.3 window confirmation
