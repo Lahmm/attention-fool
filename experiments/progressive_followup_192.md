@@ -2,7 +2,8 @@
 
 Date: 2026-09-15
 
-Status: implementation complete; experiment matrix pending execution.
+Status: 38-run base matrix complete; CaiT GAP-projection two-level replication
+complete; remaining adaptive opponent-strength runs pending.
 
 ## Fixed protocol
 
@@ -75,3 +76,25 @@ Every run must complete transfer evaluation with zero skipped images and write
 `outputs/csv/outputs_attack_<run-name>.csv`. The final report will include all
 parameters, four aggregate ASRs, thirteen per-target ASRs, baseline deltas,
 opponent-strength gradient diagnostics, and the selected adaptive follow-ups.
+
+## CaiT GAP-projection replication
+
+The Visformer `gap_projection` gain was replicated on CaiT with two controlled
+192-image runs using the fixed protocol above:
+
+| Schedule | Score | Overall | Transformer | CNN | Strict black-box |
+|---|---|---:|---:|---:|---:|
+| block5/17/23, 10/10/10 | cosine | 86.42% | 91.07% | 80.99% | 85.37% |
+| block5/17/23, 10/10/10 | gap_projection | 87.30% | 91.67% | 82.20% | 86.37% |
+| block17/23, 2/28 | cosine | 87.74% | 91.82% | 82.99% | 86.76% |
+| block17/23, 2/28 | gap_projection | **87.94%** | **92.26%** | 82.90% | **86.98%** |
+
+Changing only the score on the original 10/10/10 schedule improves Overall by
+0.88pp and strict black-box ASR by 1.00pp, so the Visformer result does
+generalize to the other GAP architecture. On the late-heavy 2/28 schedule the
+gain is only 0.20pp Overall and 0.22pp strict, below the 0.5pp screening-tie
+threshold. Thus GAP projection is supported as a cross-GAP score improvement,
+but its benefit overlaps substantially with the late-heavy schedule rather than
+adding independently. The 2/28 projection combination is the highest CaiT
+Overall result in this 192-image campaign, but is not promoted without a larger
+validation run.
