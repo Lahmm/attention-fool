@@ -138,24 +138,50 @@ K=2 prefers keeping the stage-2 and stage-3 token: `(s2b1,s3b3)` 81.33 vs
 `(s2b1,s3b1)` 77.04 > `(s1b1,s3b1)` 75.96 > `(s1b1,s2b1)` 75.20. The common
 theme is that the earliest checkpoint contributes least.
 
-### 2.3 Adopted per-model configurations
+### 2.3 Best-measured per-model configurations, and the K=3 decision
 
-All four rows are confirmed on the full 1000 images.
+The ASR-maximising configuration found for each source, all confirmed on the
+full 1000 images:
 
-| Source | Previous configuration | Previous ASR | Adopted configuration | Adopted ASR | Delta |
+| Source | Best-measured configuration | ASR | `K=3` default | ASR | Gain forgone |
 | --- | --- | ---: | --- | ---: | ---: |
-| CaiT-S24 | block5/17/23, 10/10/10 | 84.15 | **block23, 30** | **86.40** | **+2.25** |
-| ViT-B/16 | block3/7/11, 10/10/10 | 79.58 | **block3,block11, 15/15** | **80.15** | **+0.57** |
-| Visformer-S | stage1/2/3 block1, 39/10/2 | 73.16 | **stage2_block1,stage3_block1, 41/10** | **74.25** | **+1.09** |
-| PiT-B | stage2_block1,stage3_block2,stage3_block3, 5/2/6 | 80.44 | unchanged | 80.44 | 0 |
+| CaiT-S24 | **block23, 30** | **86.40** | block5/17/23, 10/10/10 | 84.15 | +2.25 |
+| ViT-B/16 | **block3,block11, 15/15** | **80.15** | block3/7/11, 10/10/10 | 79.58 | +0.57 |
+| Visformer-S | **stage2_block1,stage3_block1, 41/10** | **74.25** | stage1/2/3 block1, 39/10/2 | 73.16 | +1.09 |
+| PiT-B | stage2_block1,stage3_block2,stage3_block3, 5/2/6 | 80.44 | identical | 80.44 | 0 |
 
-Four-source mean: **79.33% -> 80.31% (+0.98pp)**, entirely from per-model layer
-specialisation.
-
+Best-measured four-source mean **80.31%** against **79.33%** for the `K=3`
+defaults, a difference of 0.98pp, entirely from per-model layer specialisation.
 CaiT's gain is largely a checkpoint-count effect (three points to one); ViT's
 is a position effect (dropping the middle point); Visformer's is a
-stage-allocation effect (dropping stage 1 entirely and concentrating on
-stages 2 and 3).
+stage-allocation effect (dropping stage 1 and concentrating on stages 2 and 3).
+
+**Research decision (2026-09-15): the production mainline retains `K = 3`
+uniformly across all four sources, i.e. the existing per-model defaults.** No
+code change is required; the four resolver defaults in `nets/` are already
+`K = 3`.
+
+The deciding consideration is mechanism preservation rather than ASR. A single
+checkpoint removes the progressive schedule the method is named for, and
+CaiT's `K=1` optimum is knife-edge: block22 scores 80.49, block23 88.02 and
+block24 58.85, so a one-layer displacement costs 7.5pp or 29pp. A schedule
+spread over three checkpoints is correspondingly more robust to the choice of
+any single layer, and its `K=3` form is what the cross-architecture transfer
+results and the surrounding ablations were measured against.
+
+This decision forgoes the 0.98pp four-source mean gain and supersedes the
+"adopted configuration" reading of the table above, which is retained as an
+upper-bound exploration.
+
+**Consequence for the window axis.** The section 4 sweep was run on the
+best-measured configurations, so its results do **not** carry over to the
+retained `K=3` schedules — except for PiT-B, whose schedule is unchanged. In
+particular, the finding that score guidance is worth nothing on ViT-B/16 was
+measured at `(block3,block11)`; the historical same-seed 1000-image comparison
+at the retained `(3,7,11)` shows the opposite, with `high` ahead of `random` by
+0.59pp (79.75 vs 79.16). Restoring `K=3` therefore also restores the evidence
+that score-guided selection helps on ViT-B/16. No window or selector data
+exists for CaiT-S24 or Visformer-S at their retained `K=3` schedules.
 
 ---
 
@@ -318,12 +344,27 @@ perturb. Three options, none of which is chosen here:
 | The window and layer-selection axes are coupled | high | the ViT routing gain present at `(3,7,11)` disappears at `(3,11)` |
 
 Best configuration under the global constraints (window fixed across models,
-objective = four-source mean): **81.13%** at `w = 1.00`, versus 80.31% at the
-current `w = 0.50`, versus 79.33% for the previous defaults.
+objective = four-source mean): **81.13%** at `w = 1.00`, versus 80.31% at
+`w = 0.50`, versus 79.33% for the retained `K = 3` defaults.
+
+**Standing configuration after the 2026-09-15 decision:** the production
+mainline keeps `K = 3` on all four sources with the existing `nets/` defaults,
+at a four-source mean of 79.33%. The 80.31% and 81.13% rows above are measured
+on schedules that are not in production, and the `w = 1.00` row in particular
+depends on the retuned ViT-B/16 and Visformer-S schedules.
 
 ---
 
 ## 6. Open items
+
+Resolved by the 2026-09-15 decision: the production mainline keeps `K = 3`
+uniformly, so the `K` ladder stands as an upper-bound exploration rather than a
+pending migration.
+
+Still open:
+
+- Window and selector data for CaiT-S24 and Visformer-S at their retained
+  `K=3` schedules (none exists). The section 4 sweep does not apply to them.
 
 - Constant per-checkpoint budget with `K >= 4` (the complement of section 2.1).
 - 1000-image confirmation of window values 0.25, 0.35 and 0.70.
@@ -332,9 +373,11 @@ current `w = 0.50`, versus 79.33% for the previous defaults.
   The magnitude has never been swept, and it is the largest unexplored
   interval in the attack.
 - The ViT-B/16 20-drop budget result (82.73 screening) is unconfirmed.
-- Since the window sweep ran on the adopted layer configurations, a change to
-  the window would in principle require re-selecting layers under the new
-  window, especially for Visformer-S.
+- The window and layer-selection axes are coupled (section 4.4), so any future
+  change to the window would in principle require re-selecting layers under the
+  new window, especially for Visformer-S. The converse also holds: because the
+  window sweep ran on the best-measured rather than the retained schedules, it
+  must be re-measured if layer positions are revisited.
 
 ---
 
