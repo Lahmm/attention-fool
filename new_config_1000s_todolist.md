@@ -2,7 +2,8 @@
 
 Date: 2026-09-15
 
-Status: pending execution.
+Status: complete. All four attacks and thirteen-target transfer evaluations
+finished with zero skipped images on 2026-09-16.
 
 ## Objective
 
@@ -43,22 +44,22 @@ the full 1000-image set; results must not be extrapolated from earlier runs.
 
 ## Execution checklist
 
-- [ ] Generate 1000 adversarial images for ViT-B/16.
-- [ ] Run the complete transfer evaluation for ViT-B/16.
-- [ ] Generate 1000 adversarial images for CaiT-S24.
-- [ ] Run the complete transfer evaluation for CaiT-S24.
-- [ ] Generate 1000 adversarial images for PiT-B.
-- [ ] Run the complete transfer evaluation for PiT-B.
-- [ ] Generate 1000 adversarial images for Visformer-S.
-- [ ] Run the complete transfer evaluation for Visformer-S.
-- [ ] Verify zero skipped images for every target and source configuration.
-- [ ] Verify every attack directory contains exactly 1000 adversarial PNGs,
+- [x] Generate 1000 adversarial images for ViT-B/16.
+- [x] Run the complete transfer evaluation for ViT-B/16.
+- [x] Generate 1000 adversarial images for CaiT-S24.
+- [x] Run the complete transfer evaluation for CaiT-S24.
+- [x] Generate 1000 adversarial images for PiT-B.
+- [x] Run the complete transfer evaluation for PiT-B.
+- [x] Generate 1000 adversarial images for Visformer-S.
+- [x] Run the complete transfer evaluation for Visformer-S.
+- [x] Verify zero skipped images for every target and source configuration.
+- [x] Verify every attack directory contains exactly 1000 adversarial PNGs,
   `attack_params.json`, `gradient_diagnostics.json`, and
   `replay_manifest.json`.
-- [ ] Record Overall, Transformer, CNN, and strict black-box ASR.
-- [ ] Record all thirteen per-target ASRs.
-- [ ] Compare each result with its corresponding previous 1000-image baseline.
-- [ ] Audit configuration provenance before promoting any new default.
+- [x] Record Overall, Transformer, CNN, and strict black-box ASR.
+- [x] Record all thirteen per-target ASRs.
+- [x] Compare each result with its corresponding previous 1000-image baseline.
+- [x] Audit configuration provenance before promoting any new default.
 
 ## Interpretation guardrails
 
@@ -70,3 +71,50 @@ the full 1000-image set; results must not be extrapolated from earlier runs.
   complementary at 192 images: GAP projection and opponent strength 0.4.
 - Do not promote a 192-image lead unless it persists on this 1000-image
   validation under the same ASR definition.
+
+## Completed 1000-image results
+
+| Source | Overall | Transformer | CNN | Strict black-box | Previous Overall | Overall gain |
+|---|---:|---:|---:|---:|---:|---:|
+| ViT-B/16 | **84.35%** | 89.39% | 78.48% | **84.35%** | 80.28% | **+4.07pp** |
+| CaiT-S24 | **86.20%** | 90.39% | **81.32%** | **85.22%** | 84.15% | **+2.05pp** |
+| PiT-B | **84.88%** | **91.21%** | 77.50% | **83.73%** | 80.44% | **+4.45pp** |
+| Visformer-S | 79.77% | 83.16% | 75.82% | 78.13% | 74.25% | **+5.52pp** |
+
+Strict black-box excludes the target with the same architecture as the source.
+ViT-B/16 itself is not in the target list, so its strict value equals Overall,
+matching the established reporting convention.
+
+All four 192-image winners retained substantial positive Overall gains at 1000
+images. The corresponding strict gains versus the prior selected records are
++4.07pp for ViT, +2.20pp for CaiT, +4.87pp for PiT, and +6.01pp for
+Visformer. This confirms that none of the gains is explained only by the
+same-architecture target.
+
+## Per-target transfer ASR
+
+| Target | ViT source | CaiT source | PiT source | Visformer source |
+|---|---:|---:|---:|---:|
+| LeViT-256 | 86.50% | 88.50% | 87.20% | 87.20% |
+| PiT-B/224 | 87.70% | 88.50% | 98.80% | 83.20% |
+| DeiT-B/16 | 90.10% | 90.20% | 91.60% | 76.50% |
+| TNT-S/16 | 90.20% | 90.00% | 90.90% | 84.90% |
+| ConViT-B | 88.40% | 89.20% | 90.90% | 73.70% |
+| Visformer-S | 87.90% | 88.30% | 90.80% | 99.40% |
+| CaiT-S24 | 94.90% | 98.00% | 88.30% | 77.20% |
+| Inception-v3 | 80.10% | 84.10% | 83.00% | 83.80% |
+| Inception-v4 | 78.00% | 81.70% | 80.00% | 83.90% |
+| Inception-ResNet-v2 | 78.30% | 81.40% | 78.50% | 76.90% |
+| ResNet-101 | 82.70% | 83.90% | 81.20% | 82.90% |
+| Inception-v3-adv | 78.30% | 80.80% | 75.10% | 72.50% |
+| Inception-ResNet-v2-adv | 73.50% | 76.00% | 67.20% | 54.90% |
+
+## Retained artifacts
+
+Each attack directory contains 1000 PNGs and the three required metadata
+files. The complete transfer records are:
+
+- `outputs/csv/outputs_attack_newconfig1000_vit_b3_b10_c10_10_s1000_offset0_seed20260907.csv`
+- `outputs/csv/outputs_attack_newconfig1000_cait_b17_b23_c02_28_projection_s1000_offset0_seed20260907.csv`
+- `outputs/csv/outputs_attack_newconfig1000_pit_s2b1_s3b2_s3b3_c05_02_06_opp04_s1000_offset0_seed20260907.csv`
+- `outputs/csv/outputs_attack_newconfig1000_vis_s2b1_s3b1_c41_10_projection_opp04_s1000_offset0_seed20260907.csv`
