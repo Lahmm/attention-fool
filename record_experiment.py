@@ -9,6 +9,7 @@ from typing import Any
 
 
 MODEL_COLS = [
+    "vit_base_patch16_224",
     "levit_256",
     "pit_b_224",
     "deit_base_patch16_224",
@@ -25,8 +26,8 @@ MODEL_COLS = [
     "inception_v3_adv_3",
     "inception_v3_adv_4",
 ]
-VIT_MODEL_COLS = set(MODEL_COLS[:7])
-CNN_MODEL_COLS = set(MODEL_COLS[7:])
+VIT_MODEL_COLS = set(MODEL_COLS[:8])
+CNN_MODEL_COLS = set(MODEL_COLS[8:])
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 

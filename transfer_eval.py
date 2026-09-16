@@ -23,6 +23,7 @@ from record_experiment import record_results
 from utils import DEVICE
 
 DEFAULT_VIT_BLACK_BOX_MODELS = [
+    "vit_base_patch16_224",
     "levit_256",
     "pit_b_224",
     "deit_base_patch16_224",
@@ -43,6 +44,7 @@ DEFAULT_BLACK_BOX_MODELS = DEFAULT_VIT_BLACK_BOX_MODELS + DEFAULT_CNN_BLACK_BOX_
 ASR_DEFINITION = "1 - adversarial accuracy"
 
 MODEL_ALIASES = {
+    "ViT-B/16": "vit_base_patch16_224",
     "LeViT-256": "levit_256",
     "PiT-B": "pit_b_224",
     "DeiT-B": "deit_base_patch16_224",

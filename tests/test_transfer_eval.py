@@ -22,8 +22,9 @@ class HuggingFaceTransferModelTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             transfer_eval.adversarial_accuracy_to_asr(correct=11, total=10)
 
-    def test_default_suite_is_thirteen_real_huggingface_models(self):
-        self.assertEqual(len(transfer_eval.DEFAULT_BLACK_BOX_MODELS), 13)
+    def test_default_suite_is_fourteen_real_huggingface_models(self):
+        self.assertEqual(len(transfer_eval.DEFAULT_BLACK_BOX_MODELS), 14)
+        self.assertIn("vit_base_patch16_224", transfer_eval.DEFAULT_BLACK_BOX_MODELS)
         self.assertIn("inception_v3_adv", transfer_eval.DEFAULT_BLACK_BOX_MODELS)
         self.assertIn("inception_resnet_v2_adv", transfer_eval.DEFAULT_BLACK_BOX_MODELS)
         self.assertNotIn("inception_v3_adv_3", transfer_eval.DEFAULT_BLACK_BOX_MODELS)
