@@ -27,7 +27,8 @@ class CaiTS24WithHook(WhiteBoxWithHook):
         "block24_class": 24,
     }
     _PROGRESSIVE_LAYERS = tuple(f"block{index}_gap" for index in range(1, 25))
-    _DEFAULT_PROGRESSIVE_LAYERS = ("block5_gap", "block17_gap", "block23_gap")
+    _DEFAULT_PROGRESSIVE_LAYERS = ("block17_gap", "block23_gap")
+    _DEFAULT_PROGRESSIVE_DROP_RATIOS = (0.010204081633, 0.142857142857)
 
     def _feature_modules(self):
         return sequential_modules(getattr(self.model, "blocks", None))
@@ -112,6 +113,12 @@ class CaiTS24WithHook(WhiteBoxWithHook):
 
     def default_progressive_checkpoints(self) -> tuple[str, ...]:
         return self._DEFAULT_PROGRESSIVE_LAYERS
+
+    def default_progressive_drop_ratios(self) -> tuple[float, ...]:
+        return self._DEFAULT_PROGRESSIVE_DROP_RATIOS
+
+    def default_progressive_score_mode(self) -> str:
+        return "gap_projection"
 
     def begin_progressive_forward(self, x: torch.Tensor) -> ProgressiveAttackState:
         initial = self.prepare_attack_feature_state(x)

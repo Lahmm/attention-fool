@@ -26,7 +26,7 @@ class ViTWithHook(WhiteBoxWithHook):
         "block12": 12,
     }
     _PROGRESSIVE_LAYERS = tuple(f"block{index}" for index in range(1, 12))
-    _DEFAULT_PROGRESSIVE_LAYERS = ("block3", "block11")
+    _DEFAULT_PROGRESSIVE_LAYERS = ("block3", "block10")
     _DEFAULT_PROGRESSIVE_DROP_RATIOS = (0.051020408163, 0.051020408163)
 
     def _feature_modules(self):

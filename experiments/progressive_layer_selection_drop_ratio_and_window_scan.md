@@ -2,6 +2,10 @@
 
 Date: 2026-09-15
 
+Status: historical tuning record. Its constrained-ASR defaults were superseded
+on 2026-09-16 by the score/opponent-strength follow-ups promoted in
+`experiments/progressive_cross_arch_mainline_s1000.md`.
+
 Code revision for every run in this document: `eb17588` (adds the
 `--score-window-ratio` CLI parameter; default 0.5 is bitwise-identical to the
 previous hard-coded behaviour, verified by matching replay-manifest event
@@ -160,7 +164,7 @@ three-point mechanism. That decision was subsequently superseded by the
 constrained-ASR default selection below. The explicit ViT `(3,7,11)` schedule
 remains the canonical mechanism-validation reference and is still supported.
 
-### 2.4 Current constrained-ASR defaults
+### 2.4 Then-selected constrained-ASR defaults
 
 The production defaults maximise completed 1000-image Overall ASR subject to
 `selector=high`, `score-window-ratio=0.5`, and `K>1`:
@@ -345,9 +349,10 @@ On the schedules used by the window sweep, the best shared window is `w=1.00`
 at **81.13%**, versus 80.31% at `w=0.50`. Those numbers are controlled window
 evidence rather than current-default results because the ViT sweep used 15/15.
 
-**Current production defaults:** `high`, `w=0.5`, `K>1`, with per-model
+**Then-selected production defaults:** `high`, `w=0.5`, `K>1`, with per-model
 1000-image winners: ViT K2 10/10, CaiT K3 10/10/10, PiT K3 5/2/6, and
-Visformer K2 41/10. Their four-source mean is **79.78%**.
+Visformer K2 41/10. Their four-source mean is **79.78%**. These were superseded
+by the later full-scale defaults recorded in the mainline report.
 
 ---
 

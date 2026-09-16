@@ -2,12 +2,14 @@
 
 Initial formal matrix: 2026-09-07
 
-Checkpoint, ratio, and selector follow-ups audited through: 2026-09-15
+Checkpoint, ratio, score, and opponent-strength follow-ups audited through: 2026-09-16
 
 Code revisions used for the formal runs include: initial matrix `cf4b9ada`,
 CaiT block6/18/22 follow-up `c17d9ab5`, block6/17/23 follow-up `3dd43259`,
 block5/17/23 follow-up `3abd7c0b`, and the generalized-selector revision
 `552f03b` used by the ViT extreme-high follow-up.
+The promoted four-source defaults and their full transfer records were validated
+at `dedd7c05` and recorded at `5229210`.
 
 ## Mainline definition
 
@@ -41,12 +43,12 @@ only the architecture-specific hidden-state traversal:
 - apply a local-token mask;
 - finish the native forward.
 
-| Source | Default checkpoints | Global representation | Native grids | Drop counts |
-| --- | --- | --- | --- | --- |
-| ViT-B/16 | block3, block11 | CLS | 14×14, 14×14 | 10, 10 |
-| CaiT-S24 | block5, block17, block23 | GAP | 14×14, 14×14, 14×14 | 10, 10, 10 |
-| PiT-B | stage2/block1, stage3/block2, stage3/block3 | CLS | 16×16, 8×8, 8×8 | 5, 2, 6 |
-| Visformer-S | stage2/block1, stage3/block1 | GAP | 14×14, 7×7 | 41, 10 |
+| Source | Default checkpoints | Score | Native grids | Drop counts | Opponent |
+| --- | --- | --- | --- | --- | ---: |
+| ViT-B/16 | block3, block10 | cosine | 14×14, 14×14 | 10, 10 | 0.2 |
+| CaiT-S24 | block17, block23 | GAP projection | 14×14, 14×14 | 2, 28 | 0.2 |
+| PiT-B | stage2/block1, stage3/block2, stage3/block3 | cosine | 16×16, 8×8, 8×8 | 5, 2, 6 | 0.4 |
+| Visformer-S | stage2/block1, stage3/block1 | GAP projection | 14×14, 7×7 | 41, 10 | 0.4 |
 
 For cross-scale models, every checkpoint mask retains its own grid. Phase
 transforms happen in image space and are projected back with count-preserving
@@ -83,7 +85,7 @@ projection.
   full-scale checkpoint/selector follow-ups complete 1000 images. Every formal
   directory has 1000 adversarial PNGs; K2/K3 runs record 200/300 checkpoint
   selections per image and maximum saved-PNG L-infinity 16/255.
-- Test suite: 70 tests pass; four optional/real tests are skipped in the default
+- Test suite: 71 tests pass; four optional/real tests are skipped in the default
   run, and the four-model real adapter test passes when explicitly enabled.
 
 ## Formal cross-architecture transfer results
@@ -94,23 +96,45 @@ seven Transformer and six CNN models.
 
 | Source | Overall ASR | Transformer avg | CNN avg | Strict black-box overall* |
 | --- | ---: | ---: | ---: | ---: |
-| ViT-B/16 | **80.28%** | 85.43% | 74.28% | **80.28%** |
-| CaiT-S24 | **84.15%** | **87.97%** | **79.68%** | **83.02%** |
-| PiT-B | 80.44% | **88.87%** | 70.60% | 78.86% |
-| Visformer-S | 74.25% | 78.99% | 68.73% | 72.13% |
+| ViT-B/16 | **84.35%** | 89.39% | 78.48% | **84.35%** |
+| CaiT-S24 | **86.20%** | 90.39% | **81.32%** | **85.22%** |
+| PiT-B | **84.88%** | **91.21%** | 77.50% | **83.73%** |
+| Visformer-S | 79.77% | 83.16% | 75.82% | 78.13% |
 
 `*` For CaiT, PiT and Visformer, strict black-box averages exclude the target
 with the same architecture as the source. ViT-B/16 is not in the target list.
 
 The per-target auditable records are:
 
-- `outputs/csv/outputs_attack_scanD_vit_k2_budget20_confirm_s1000_offset0_seed20260907.csv`
-- `outputs/csv/outputs_attack_progressive_cait_b5_b17_b23_s1000_seed20260907.csv`
-- `outputs/csv/outputs_attack_progressive_pit_l2_s1000_seed20260907.csv`
-- `outputs/csv/outputs_attack_scanD_visformer_k2eqr_s2b1_s3b1_confirm_s1000_offset0_seed20260907.csv`
+- `outputs/csv/outputs_attack_newconfig1000_vit_b3_b10_c10_10_s1000_offset0_seed20260907.csv`
+- `outputs/csv/outputs_attack_newconfig1000_cait_b17_b23_c02_28_projection_s1000_offset0_seed20260907.csv`
+- `outputs/csv/outputs_attack_newconfig1000_pit_s2b1_s3b2_s3b3_c05_02_06_opp04_s1000_offset0_seed20260907.csv`
+- `outputs/csv/outputs_attack_newconfig1000_vis_s2b1_s3b1_c41_10_projection_opp04_s1000_offset0_seed20260907.csv`
 
-The initial adapter defaults and the final selected defaults are both retained
-for auditability:
+### Per-target ASR of the promoted defaults
+
+| Transfer model | ViT source | CaiT source | PiT source | Visformer source |
+| --- | ---: | ---: | ---: | ---: |
+| LeViT-256 | 86.50% | 88.50% | 87.20% | 87.20% |
+| PiT-B/224 | 87.70% | 88.50% | 98.80% | 83.20% |
+| DeiT-B/16 | 90.10% | 90.20% | 91.60% | 76.50% |
+| TNT-S/16 | 90.20% | 90.00% | 90.90% | 84.90% |
+| ConViT-B | 88.40% | 89.20% | 90.90% | 73.70% |
+| Visformer-S | 87.90% | 88.30% | 90.80% | 99.40% |
+| CaiT-S24 | 94.90% | 98.00% | 88.30% | 77.20% |
+| Inception-v3 | 80.10% | 84.10% | 83.00% | 83.80% |
+| Inception-v4 | 78.00% | 81.70% | 80.00% | 83.90% |
+| Inception-ResNet-v2 | 78.30% | 81.40% | 78.50% | 76.90% |
+| ResNet-101 | 82.70% | 83.90% | 81.20% | 82.90% |
+| Inception-v3-adv | 78.30% | 80.80% | 75.10% | 72.50% |
+| Inception-ResNet-v2-adv | 73.50% | 76.00% | 67.20% | 54.90% |
+
+The sections below retain the preceding tuning generation and controlled
+ablations as historical evidence; their selected rows are not the current
+adapter defaults.
+
+The initial adapter defaults and the preceding 2026-09-15 selected defaults are
+both retained for auditability:
 
 | Source | Initial Overall | Selected Overall | Gain | Initial strict | Selected strict | Gain |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -288,7 +312,7 @@ Both A1 and I3 were then run on all 1000 images:
 | Initial V0 | 71.46% | 76.83% | 65.20% | 69.12% |
 | A1, s1b1/s2b2/s3b3 | 72.78% | **78.33%** | 66.30% | 70.54% |
 | I3 former K3 default, s1b1/s2b1/s3b1 | 73.16% | 78.24% | 67.23% | 70.97% |
-| **Current K2 default, s2b1/s3b1, 41/10** | **74.25%** | **78.99%** | **68.73%** | **72.13%** |
+| **Previous K2 default, s2b1/s3b1, 41/10** | **74.25%** | **78.99%** | **68.73%** | **72.13%** |
 
 I3 won the original K3 comparison, while the later equal-ratio K2 follow-up
 became the constrained-ASR default. The auditable full records are

@@ -6,7 +6,7 @@
 
 主线由两个核心机制组成：
 
-1. **patch-score-guided patch drop**：用 global/local 表示余弦关系提供 label-free、gradient-independent 的语义坐标，决定在哪里扰动；
+1. **patch-score-guided patch drop**：用 adapter-specific global/local 表示关系（CLS 架构为 cosine，GAP 架构为 projection）提供 label-free、gradient-independent 的语义坐标，决定在哪里扰动；
 2. **RGB opponent-channel noise**：在亮度、红绿和黄蓝方向采样，再经过模型首层 RGB projection，决定如何扰动保留证据。
 
 当前研究主线已经晋升为 progressive high-score attack。已验证的 ViT-B/16 配置在
@@ -46,13 +46,18 @@ python vit_progressive_patch_score_attack.py \
 mask selection。
 
 `main.py` 已通过 architecture adapters 承载 ViT、CaiT、PiT 和 Visformer 的
-progressive 主线。ViT-B/16 默认使用 `block3,block11`，drop ratios 为
+progressive 主线。ViT-B/16 默认使用 `block3,block10`，drop ratios 为
 `0.051020408163,0.051020408163`（实际 drop 数 `10,10`）。CaiT-S24 默认使用
-`block5_gap,block17_gap,block23_gap`。PiT-B 当前默认使用筛选出的 L2 配置
+`block17_gap,block23_gap`，drop ratios 为
+`0.010204081633,0.142857142857`（实际 drop 数 `2,28`），score 为
+`gap_projection`。PiT-B 当前默认使用筛选出的 L2 配置
 `stage2_block1,stage3_block2,stage3_block3`，对应 drop ratios
-`0.02081165,0.03125,0.09375`（实际 drop 数 `5,2,6`）。Visformer-S 默认使用
+`0.02081165,0.03125,0.09375`（实际 drop 数 `5,2,6`），opponent strength 为
+`0.4`。Visformer-S 默认使用
 `stage2_block1,stage3_block1`，drop ratios 为
-`0.209183673469,0.204081632653`（实际 drop 数 `41,10`）。四个默认配置均已完成
+`0.209183673469,0.204081632653`（实际 drop 数 `41,10`），score 为
+`gap_projection`，opponent strength 为 `0.4`。ViT/CaiT opponent strength 为
+`0.2`。四个默认配置均已完成
 1000 图验证。
 
 默认数据位于 `data/clean_resized_images`，标签为 `data/image_name_to_class_id_and_name.json`，模型从 `data/huggingface` 离线缓存读取。
@@ -95,12 +100,10 @@ noise 与 Gaussian residual 是已完成控制变量的支撑因素，不作为�
 
 `progressive_attack.py` 已作为独立生产主线接入 `main.py`，不再继承或导入
 `attack.py`。ViT、CaiT、PiT、Visformer 四个源模型均已完成 1000 图攻击和 13 目标迁移；
-Overall ASR 分别为 80.28%、84.15%、80.44% 和 74.25%。其中 CaiT 使用
-`block5,block17,block23`，相对初始 `block6,block14,block22` 配置提升 8.40pp
-Overall 和 8.67pp strict black-box Overall；PiT L2 相对初始配置提升
-4.92pp Overall。当前 ViT 和 Visformer 默认相对先前 K=3 默认分别提高 0.71pp 和
-1.09pp Overall。每图均动态生成 100 个 schedule；K=2/K=3 配置分别执行 200/300
-次 checkpoint mask 选择。
+Overall ASR 分别为 **84.35%、86.20%、84.88% 和 79.77%**；Transformer/CNN
+均值分别为 89.39/78.48、90.39/81.32、91.21/77.50 和 83.16/75.82。每图均动态
+生成 100 个 schedule；K=2/K=3 配置分别执行 200/300 次 checkpoint mask 选择。
+完整逐迁移模型结果见 `experiments/progressive_cross_arch_mainline_s1000.md`。
 
 ViT 的同 seed 控制显示：RGB opponent noise 的 Overall/CNN ASR 为 79.58%/73.32%，
 IID Gaussian 为 78.42%/70.28%，noise-off 为 62.52%/51.95%。progressive high 相对旧

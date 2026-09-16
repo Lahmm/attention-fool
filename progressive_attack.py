@@ -107,10 +107,10 @@ class ProgressivePatchScoreAttacker:
         drop_ratios: tuple[float, ...] | None = None,
         patch_selector: str = "high",
         score_window_ratio: float = 0.5,
-        progressive_score_mode: str = "cosine",
+        progressive_score_mode: str | None = None,
         score_global_noise_strength: float | None = None,
         score_cls_noise_strength: float | None = None,
-        opponent_noise_strength: float = 0.2,
+        opponent_noise_strength: float | None = None,
         feature_noise_type: str = "opponent_projected",
         epsilon: float = 16.0 / 255.0,
         step_size: float | None = None,
@@ -166,6 +166,18 @@ class ProgressivePatchScoreAttacker:
             )
         if not 0.0 < float(score_window_ratio) <= 1.0:
             raise ValueError("score_window_ratio must satisfy 0 < ratio <= 1.")
+        if progressive_score_mode is None:
+            score_mode_provider = getattr(model, "default_progressive_score_mode", None)
+            progressive_score_mode = (
+                score_mode_provider() if callable(score_mode_provider) else "cosine"
+            )
+        if opponent_noise_strength is None:
+            opponent_provider = getattr(
+                model, "default_progressive_opponent_noise_strength", None
+            )
+            opponent_noise_strength = (
+                opponent_provider() if callable(opponent_provider) else 0.2
+            )
         if progressive_score_mode not in PROGRESSIVE_SCORE_MODES:
             raise ValueError(
                 f"progressive_score_mode must be one of {PROGRESSIVE_SCORE_MODES}."

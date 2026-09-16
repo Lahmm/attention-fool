@@ -175,6 +175,12 @@ class VisformerSmallWithHook(WhiteBoxWithHook):
     def default_progressive_drop_ratios(self) -> tuple[float, ...]:
         return self._DEFAULT_PROGRESSIVE_DROP_RATIOS
 
+    def default_progressive_score_mode(self) -> str:
+        return "gap_projection"
+
+    def default_progressive_opponent_noise_strength(self) -> float:
+        return 0.4
+
     def begin_progressive_forward(self, x: torch.Tensor) -> ProgressiveAttackState:
         initial = self.prepare_attack_feature_state(x)
         return ProgressiveAttackState(

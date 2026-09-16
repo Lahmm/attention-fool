@@ -8,9 +8,9 @@ finished with zero skipped images on 2026-09-16.
 ## Objective
 
 Validate on 1000 images the highest-ASR configuration found for each of the
-four source architectures in the fixed 192-image screen. These are screening
-winners, not yet promoted defaults. Each configuration must be regenerated on
-the full 1000-image set; results must not be extrapolated from earlier runs.
+four source architectures in the fixed 192-image screen. These screening
+winners were regenerated on the full 1000-image set and promoted as the
+architecture-specific defaults on 2026-09-16.
 
 ## Candidate configurations
 

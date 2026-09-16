@@ -15,14 +15,14 @@ from progressive_attack import ProgressivePatchScoreAttacker
 
 class ProgressiveAdapterContractTests(unittest.TestCase):
     EXPECTED_DEFAULTS = {
-        ViTWithHook: ("block3", "block11"),
-        CaiTS24WithHook: ("block5_gap", "block17_gap", "block23_gap"),
+        ViTWithHook: ("block3", "block10"),
+        CaiTS24WithHook: ("block17_gap", "block23_gap"),
         PiTB224WithHook: ("stage2_block1", "stage3_block2", "stage3_block3"),
         VisformerSmallWithHook: ("stage2_block1", "stage3_block1"),
     }
     EXPECTED_DEFAULT_COUNTS = {
         ViTWithHook: ((196, 196), (10, 10)),
-        CaiTS24WithHook: ((196, 196, 196), (10, 10, 10)),
+        CaiTS24WithHook: ((196, 196), (2, 28)),
         PiTB224WithHook: ((256, 64, 64), (5, 2, 6)),
         VisformerSmallWithHook: ((196, 49), (41, 10)),
     }
@@ -39,7 +39,7 @@ class ProgressiveAdapterContractTests(unittest.TestCase):
     def test_architecture_specific_default_drop_ratios(self):
         expected_ratios = {
             ViTWithHook: (0.051020408163, 0.051020408163),
-            CaiTS24WithHook: (0.05, 0.05, 0.05),
+            CaiTS24WithHook: (0.010204081633, 0.142857142857),
             PiTB224WithHook: (0.02081165, 0.03125, 0.09375),
             VisformerSmallWithHook: (0.209183673469, 0.204081632653),
         }
@@ -59,6 +59,21 @@ class ProgressiveAdapterContractTests(unittest.TestCase):
                 self.assertEqual(
                     tuple(round(tokens * ratio) for tokens, ratio in zip(token_counts, ratios)),
                     expected_counts,
+                )
+
+    def test_architecture_specific_score_and_opponent_defaults(self):
+        expected = {
+            ViTWithHook: ("cosine", 0.2),
+            CaiTS24WithHook: ("gap_projection", 0.2),
+            PiTB224WithHook: ("cosine", 0.4),
+            VisformerSmallWithHook: ("gap_projection", 0.4),
+        }
+        for adapter, defaults in expected.items():
+            with self.subTest(adapter=adapter.__name__):
+                instance = object.__new__(adapter)
+                self.assertEqual(instance.default_progressive_score_mode(), defaults[0])
+                self.assertEqual(
+                    instance.default_progressive_opponent_noise_strength(), defaults[1]
                 )
 
     def test_main_has_no_top_level_legacy_attack_import(self):

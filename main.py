@@ -225,8 +225,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--progressive-score-mode",
         choices=PROGRESSIVE_SCORE_MODES,
-        default="cosine",
-        help="Label-free, gradient-independent score used to rank progressive local tokens.",
+        default=None,
+        help=(
+            "Label-free, gradient-independent score used to rank progressive local "
+            "tokens; omitted values use the source adapter default."
+        ),
     )
     parser.add_argument("--score-global-noise-strength", type=float, default=None)
     parser.add_argument(
@@ -235,7 +238,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Deprecated ViT-compatible alias for --score-global-noise-strength.",
     )
-    parser.add_argument("--opponent-noise-strength", type=float, default=0.2)
+    parser.add_argument(
+        "--opponent-noise-strength",
+        type=float,
+        default=None,
+        help="Opponent-channel noise strength; omitted values use the source adapter default.",
+    )
     parser.add_argument("--patch-dropout-ratio", type=float, default=0.3)
     parser.add_argument("--patch-dropout-score-mode", choices=("high", "low", "all"), default="high")
     parser.add_argument("--patch-dropout-sampling-mode", choices=("random", "bernoulli", "extreme", "score_weighted"), default="random")
@@ -435,7 +443,11 @@ def main(args: argparse.Namespace) -> None:
         ),
         "input_diversity_phase_shift_set": [list(shift) for shift in args.input_diversity_phase_shift_set],
         "guide_aug_strength": args.guide_aug_strength,
-        "checkpoints": list(args.checkpoints) if args.checkpoints is not None else None,
+        "checkpoints": (
+            list(attacker.progressive_checkpoints)
+            if args.attack_method == "progressive"
+            else list(args.checkpoints) if args.checkpoints is not None else None
+        ),
         "drop_ratios": (
             list(attacker.progressive_drop_ratios)
             if args.attack_method == "progressive"
@@ -443,7 +455,11 @@ def main(args: argparse.Namespace) -> None:
         ),
         "progressive_patch_selector": args.progressive_patch_selector,
         "score_window_ratio": args.score_window_ratio,
-        "progressive_score_mode": args.progressive_score_mode,
+        "progressive_score_mode": (
+            attacker.progressive_score_mode
+            if args.attack_method == "progressive"
+            else args.progressive_score_mode or "cosine"
+        ),
         "score_global_noise_strength": (
             args.score_global_noise_strength
             if args.score_global_noise_strength is not None
@@ -452,7 +468,13 @@ def main(args: argparse.Namespace) -> None:
             else 0.2
         ),
         "score_cls_noise_strength_cli_alias": args.score_cls_noise_strength,
-        "opponent_noise_strength": args.opponent_noise_strength,
+        "opponent_noise_strength": (
+            attacker.opponent_noise_strength
+            if args.attack_method == "progressive"
+            else args.opponent_noise_strength
+            if args.opponent_noise_strength is not None
+            else 0.2
+        ),
         "patch_dropout_ratio": args.patch_dropout_ratio,
         "patch_dropout_score_mode": args.patch_dropout_score_mode,
         "patch_dropout_sampling_mode": args.patch_dropout_sampling_mode,

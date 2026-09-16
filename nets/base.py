@@ -214,6 +214,14 @@ class WhiteBoxWithHook(nn.Module):
         """Return architecture-specific per-checkpoint drop ratios."""
         return (0.05, 0.05, 0.05)
 
+    def default_progressive_score_mode(self) -> str:
+        """Return the architecture-specific local/global routing score."""
+        return "cosine"
+
+    def default_progressive_opponent_noise_strength(self) -> float:
+        """Return the architecture-specific opponent-channel noise strength."""
+        return 0.2
+
     def begin_progressive_forward(self, x: torch.Tensor) -> ProgressiveAttackState:
         raise NotImplementedError(
             f"progressive forward preparation is not implemented for {self.model_name}."
