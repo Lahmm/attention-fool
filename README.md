@@ -99,9 +99,11 @@ noise 与 Gaussian residual 是已完成控制变量的支撑因素，不作为�
 ## 主线结果
 
 `progressive_attack.py` 已作为独立生产主线接入 `main.py`，不再继承或导入
-`attack.py`。ViT、CaiT、PiT、Visformer 四个源模型均已完成 1000 图攻击和 13 目标迁移；
-Overall ASR 分别为 **84.35%、86.20%、84.88% 和 79.77%**；Transformer/CNN
-均值分别为 89.39/78.48、90.39/81.32、91.21/77.50 和 83.16/75.82。每图均动态
+`attack.py`。ViT、CaiT、PiT、Visformer 四个源模型均已完成 1000 图攻击和完整的
+14 目标复评（8 Transformer，包括 ViT-B/16；6 CNN）；Overall ASR 分别为
+**85.26%、86.09%、84.79% 和 78.52%**；Transformer/CNN 均值分别为
+90.34/78.48、89.68/81.32、90.25/77.50 和 80.54/75.83。四个源模型对自身架构的
+ASR 分别为 **97.0%、98.0%、98.8% 和 99.4%**。每图均动态
 生成 100 个 schedule；K=2/K=3 配置分别执行 200/300 次 checkpoint mask 选择。
 完整逐迁移模型结果见 `experiments/progressive_cross_arch_mainline_s1000.md`。
 

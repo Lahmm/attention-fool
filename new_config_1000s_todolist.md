@@ -2,8 +2,8 @@
 
 Date: 2026-09-15
 
-Status: complete. All four attacks and thirteen-target transfer evaluations
-finished with zero skipped images on 2026-09-16.
+Status: complete. All four attacks and complete fourteen-target transfer
+evaluations finished with zero skipped images on 2026-09-16.
 
 ## Objective
 
@@ -38,7 +38,7 @@ architecture-specific defaults on 2026-09-16.
   checkpoint
 - sample from the score-high half and hard-zero selected local tokens
 - permit the same spatial position to be selected again at later checkpoints
-- evaluate all seven Transformer and six CNN targets
+- evaluate all eight Transformer and six CNN targets, including ViT-B/16
 - define ASR as `1 - adversarial accuracy` over all evaluated adversarial
   samples, without clean-correct filtering
 
@@ -57,7 +57,7 @@ architecture-specific defaults on 2026-09-16.
   `attack_params.json`, `gradient_diagnostics.json`, and
   `replay_manifest.json`.
 - [x] Record Overall, Transformer, CNN, and strict black-box ASR.
-- [x] Record all thirteen per-target ASRs.
+- [x] Record all fourteen per-target ASRs.
 - [x] Compare each result with its corresponding previous 1000-image baseline.
 - [x] Audit configuration provenance before promoting any new default.
 
@@ -74,27 +74,30 @@ architecture-specific defaults on 2026-09-16.
 
 ## Completed 1000-image results
 
-| Source | Overall | Transformer | CNN | Strict black-box | Previous Overall | Overall gain |
-|---|---:|---:|---:|---:|---:|---:|
-| ViT-B/16 | **84.35%** | 89.39% | 78.48% | **84.35%** | 80.28% | **+4.07pp** |
-| CaiT-S24 | **86.20%** | 90.39% | **81.32%** | **85.22%** | 84.15% | **+2.05pp** |
-| PiT-B | **84.88%** | **91.21%** | 77.50% | **83.73%** | 80.44% | **+4.45pp** |
-| Visformer-S | 79.77% | 83.16% | 75.82% | 78.13% | 74.25% | **+5.52pp** |
+| Source | Overall (14 targets) | Transformer (8) | CNN (6) | Strict black-box (13) | Source-self ASR |
+|---|---:|---:|---:|---:|---:|
+| ViT-B/16 | **85.26%** | **90.34%** | 78.48% | **84.35%** | 97.00% |
+| CaiT-S24 | **86.09%** | 89.68% | **81.32%** | **85.18%** | 98.00% |
+| PiT-B | **84.79%** | 90.25% | 77.50% | **83.71%** | 98.80% |
+| Visformer-S | 78.52% | 80.54% | 75.83% | 76.92% | 99.40% |
 
-Strict black-box excludes the target with the same architecture as the source.
-ViT-B/16 itself is not in the target list, so its strict value equals Overall,
-matching the established reporting convention.
+Overall is the mean over the complete 14-model target set and therefore includes
+the source-matched target. Strict black-box excludes that target and averages
+the other 13 models. The earlier 13-target Overall values were 84.35%, 86.20%,
+84.88%, and 79.77%; they should not be compared directly with the new Overall
+column because the target set changed.
 
-All four 192-image winners retained substantial positive Overall gains at 1000
-images. The corresponding strict gains versus the prior selected records are
-+4.07pp for ViT, +2.20pp for CaiT, +4.87pp for PiT, and +6.01pp for
-Visformer. This confirms that none of the gains is explained only by the
-same-architecture target.
+Under the original 13-target protocol, all four 192-image winners retained
+positive Overall gains at 1000 images: +4.07pp for ViT, +2.05pp for CaiT,
++4.45pp for PiT, and +5.52pp for Visformer. Those historical comparisons remain
+valid within that fixed target set; the table above is the newer complete
+14-target report.
 
 ## Per-target transfer ASR
 
 | Target | ViT source | CaiT source | PiT source | Visformer source |
 |---|---:|---:|---:|---:|
+| ViT-B/16 | 97.00% | 84.70% | 83.50% | 62.20% |
 | LeViT-256 | 86.50% | 88.50% | 87.20% | 87.20% |
 | PiT-B/224 | 87.70% | 88.50% | 98.80% | 83.20% |
 | DeiT-B/16 | 90.10% | 90.20% | 91.60% | 76.50% |

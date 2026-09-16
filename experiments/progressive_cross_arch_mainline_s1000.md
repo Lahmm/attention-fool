@@ -8,8 +8,9 @@ Code revisions used for the formal runs include: initial matrix `cf4b9ada`,
 CaiT block6/18/22 follow-up `c17d9ab5`, block6/17/23 follow-up `3dd43259`,
 block5/17/23 follow-up `3abd7c0b`, and the generalized-selector revision
 `552f03b` used by the ViT extreme-high follow-up.
-The promoted four-source defaults and their full transfer records were validated
-at `dedd7c05` and recorded at `5229210`.
+The promoted four-source defaults were validated at `dedd7c05`. Their original
+13-target records were recorded at `5229210`; the complete 14-target re-evaluation,
+which adds ViT-B/16, was run and recorded with evaluation revision `9644c38`.
 
 ## Mainline definition
 
@@ -92,17 +93,20 @@ projection.
 
 ASR is `1 - adversarial accuracy` over all 1000 evaluated adversarial samples.
 No target-clean-correct filtering is used. The default target set contains
-seven Transformer and six CNN models.
+eight Transformer and six CNN models, including ViT-B/16. Overall therefore
+means the complete 14-target mean and can include the source architecture;
+strict black-box excludes that source-matched target.
 
 | Source | Overall ASR | Transformer avg | CNN avg | Strict black-box overall* |
 | --- | ---: | ---: | ---: | ---: |
-| ViT-B/16 | **84.35%** | 89.39% | 78.48% | **84.35%** |
-| CaiT-S24 | **86.20%** | 90.39% | **81.32%** | **85.22%** |
-| PiT-B | **84.88%** | **91.21%** | 77.50% | **83.73%** |
-| Visformer-S | 79.77% | 83.16% | 75.82% | 78.13% |
+| ViT-B/16 | **85.26%** | **90.34%** | 78.48% | **84.35%** |
+| CaiT-S24 | **86.09%** | 89.68% | **81.32%** | **85.18%** |
+| PiT-B | **84.79%** | 90.25% | 77.50% | **83.71%** |
+| Visformer-S | 78.52% | 80.54% | 75.83% | 76.92% |
 
-`*` For CaiT, PiT and Visformer, strict black-box averages exclude the target
-with the same architecture as the source. ViT-B/16 is not in the target list.
+`*` Strict black-box averages the other 13 targets after excluding the target
+with the same architecture as the source. Every one of the 56 source-target
+evaluations used all 1000 adversarial samples and recorded zero skipped images.
 
 The per-target auditable records are:
 
@@ -115,6 +119,7 @@ The per-target auditable records are:
 
 | Transfer model | ViT source | CaiT source | PiT source | Visformer source |
 | --- | ---: | ---: | ---: | ---: |
+| ViT-B/16 | 97.00% | 84.70% | 83.50% | 62.20% |
 | LeViT-256 | 86.50% | 88.50% | 87.20% | 87.20% |
 | PiT-B/224 | 87.70% | 88.50% | 98.80% | 83.20% |
 | DeiT-B/16 | 90.10% | 90.20% | 91.60% | 76.50% |
