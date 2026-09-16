@@ -118,3 +118,30 @@ files. The complete transfer records are:
 - `outputs/csv/outputs_attack_newconfig1000_cait_b17_b23_c02_28_projection_s1000_offset0_seed20260907.csv`
 - `outputs/csv/outputs_attack_newconfig1000_pit_s2b1_s3b2_s3b3_c05_02_06_opp04_s1000_offset0_seed20260907.csv`
 - `outputs/csv/outputs_attack_newconfig1000_vis_s2b1_s3b1_c41_10_projection_opp04_s1000_offset0_seed20260907.csv`
+
+## CaiT GAP-projection schedule follow-ups
+
+Two additional 1000-image CaiT runs isolate projection on the former K3
+schedule and test a balanced K2 schedule. All use opponent strength 0.2,
+`selector=high`, `w=0.5`, and the fixed protocol above.
+
+| Checkpoints | Drop counts | Score | Overall | Transformer | CNN | Strict black-box |
+|---|---:|---|---:|---:|---:|---:|
+| block5/17/23 | 10/10/10 | cosine | 84.15% | 87.97% | 79.68% | 83.02% |
+| block5/17/23 | 10/10/10 | gap_projection | **84.78%** | **88.81%** | **80.07%** | **83.68%** |
+| block17/23 | 15/15 | cosine | 83.48% | 87.77% | 78.48% | 82.23% |
+| block17/23 | 15/15 | gap_projection | **83.90%** | **87.83%** | **79.32%** | **82.70%** |
+| block17/23 | 2/28 | gap_projection | **86.20%** | **90.39%** | **81.32%** | **85.22%** |
+
+Projection improves the former 10/10/10 default by 0.63pp Overall and 0.67pp
+strict. On 15/15 it improves Overall by 0.42pp and strict by 0.48pp, below the
+0.5pp screening threshold. Redistributing the same K2 total budget from 15/15
+to 2/28 is much more important: it adds 2.30pp Overall, 2.56pp Transformer,
+2.00pp CNN, and 2.52pp strict. The full-set evidence therefore confirms both
+that projection generalizes to CaiT and that CaiT's dominant schedule effect is
+strong final-checkpoint concentration.
+
+The added auditable records are:
+
+- `outputs/csv/outputs_attack_caitproj1000_k3_b5_b17_b23_c10_10_10_s1000_offset0_seed20260907.csv`
+- `outputs/csv/outputs_attack_caitproj1000_k2_b17_b23_c15_15_s1000_offset0_seed20260907.csv`
