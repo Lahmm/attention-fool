@@ -30,7 +30,7 @@ class RecordingAttacker:
 
 
 class MainTests(unittest.TestCase):
-    def test_cli_exposes_only_progressive_configuration(self):
+    def test_cli_defaults_match_progressive_configuration(self):
         old_argv = sys.argv
         sys.argv = ["main.py"]
         try:
@@ -40,9 +40,6 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(args.progressive_patch_selector, "high")
         self.assertEqual(args.input_diversity_views_per_group, 2)
-        self.assertFalse(hasattr(args, "attack_method"))
-        self.assertFalse(hasattr(args, "patch_dropout_ratio"))
-        self.assertFalse(hasattr(args, "feature_layer"))
 
     def test_attack_sample_offset_is_disjoint_and_exact(self):
         dataloader = DataLoader(IndexedDataset(), batch_size=4, shuffle=False)

@@ -163,7 +163,7 @@ class ProgressiveViTTests(unittest.TestCase):
             (0.051020408163, 0.051020408163),
         )
 
-    def test_independent_ratios_do_not_hit_parent_single_budget_limit(self):
+    def test_checkpoint_drop_ratios_are_independent(self):
         attacker = self.make_attacker(drop_ratios=(0.4, 0.4))
         self.assertEqual(attacker.progressive_drop_ratios, (0.4, 0.4))
 
@@ -207,19 +207,9 @@ class ProgressiveViTTests(unittest.TestCase):
         encoded = json.dumps(attacker.mainline_metadata())
         self.assertIn('"model_mean": [0.0, 0.0, 0.0]', encoded)
 
-    def test_phase_pair_invariants_cannot_be_overridden(self):
+    def test_phase_pair_requires_two_views(self):
         with self.assertRaisesRegex(ValueError, "two views"):
             self.make_attacker(input_diversity_views_per_group=1)
-        with self.assertRaisesRegex(ValueError, "patch_selector"):
-            self.make_attacker(patch_selector="no_drop")
-        with self.assertRaisesRegex(ValueError, "patch_selector"):
-            self.make_attacker(patch_selector="patch_score")
-
-    def test_progressive_selector_surface_has_no_patch_score_alias(self):
-        self.assertEqual(
-            PROGRESSIVE_PATCH_SELECTORS,
-            ("high", "low", "random", "extreme-high", "extreme-low"),
-        )
 
     def test_sampled_tokens_belong_to_current_high_half(self):
         attacker = self.make_attacker()

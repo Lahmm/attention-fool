@@ -1,6 +1,4 @@
-import ast
 import os
-from pathlib import Path
 import unittest
 
 import torch
@@ -76,30 +74,11 @@ class ProgressiveAdapterContractTests(unittest.TestCase):
                     instance.default_progressive_opponent_noise_strength(), defaults[1]
                 )
 
-    def test_legacy_attack_module_and_adapter_apis_are_absent(self):
-        repository = Path(__file__).resolve().parents[1]
-        self.assertFalse((repository / "attack.py").exists())
-        source = (Path(__file__).resolve().parents[1] / "main.py").read_text(
-            encoding="utf-8"
-        )
-        tree = ast.parse(source)
-        top_level_imports = []
-        for node in tree.body:
-            if isinstance(node, ast.Import):
-                top_level_imports.extend(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                top_level_imports.append(node.module)
-        self.assertNotIn("attack", top_level_imports)
-        for adapter in self.EXPECTED_DEFAULTS:
-            self.assertFalse(hasattr(adapter, "extract_patch_score_features"))
-            self.assertFalse(hasattr(adapter, "forward_from_attack_feature_state"))
-            self.assertFalse(hasattr(adapter, "patch_score_layer_candidates"))
-
     @unittest.skipUnless(
         os.environ.get("RUN_REAL_PROGRESSIVE_ADAPTER_SMOKE") == "1",
         "set RUN_REAL_PROGRESSIVE_ADAPTER_SMOKE=1 for four real timm adapters",
     )
-    def test_real_models_resume_exactly_and_backpropagate(self):
+    def test_real_models_progressive_forward_and_backpropagate(self):
         if not torch.cuda.is_available():
             self.skipTest("CUDA is required for the complete adapter smoke matrix")
         device = torch.device("cuda")

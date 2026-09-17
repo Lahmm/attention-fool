@@ -78,7 +78,7 @@ projection.
   full-scale checkpoint/selector follow-ups complete 1000 images. Every formal
   directory has 1000 adversarial PNGs; K2/K3 runs record 200/300 checkpoint
   selections per image and maximum saved-PNG L-infinity 16/255.
-- Test suite: 46 tests pass; two optional real-model tests are skipped in the
+- Test suite: 43 tests pass; two optional real-model tests are skipped in the
   default run, and the four-model real adapter test passes when explicitly
   enabled.
 

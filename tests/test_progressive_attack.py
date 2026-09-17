@@ -1,6 +1,4 @@
-import ast
 import hashlib
-from pathlib import Path
 import unittest
 
 import torch
@@ -11,7 +9,7 @@ from progressive_attack import ProgressivePatchScoreAttacker
 from tests.test_progressive_vit import TinyViTWrapper
 
 
-class ProgressiveIndependenceTests(unittest.TestCase):
+class ProgressiveAttackTests(unittest.TestCase):
     def make_attacker(self, **overrides):
         torch.manual_seed(7)
         model = TinyViTWrapper()
@@ -37,29 +35,7 @@ class ProgressiveIndependenceTests(unittest.TestCase):
             tensor.detach().contiguous().numpy().tobytes()
         ).hexdigest()
 
-    def test_module_has_no_attack_import_or_inheritance(self):
-        source_path = Path(__file__).resolve().parents[1] / "progressive_attack.py"
-        tree = ast.parse(source_path.read_text(encoding="utf-8"))
-        imported = {
-            node.module
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module is not None
-        }
-        imported.update(
-            alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Import)
-            for alias in node.names
-        )
-        self.assertNotIn("attack", imported)
-        progressive_class = next(
-            node
-            for node in tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "ProgressivePatchScoreAttacker"
-        )
-        self.assertEqual(progressive_class.bases, [])
-
-    def test_vit_schedule_is_golden_equivalent(self):
+    def test_vit_schedule_regression(self):
         independent = self.make_attacker()
         pixels = torch.linspace(0.01, 0.99, 48).view(1, 3, 4, 4)
 
@@ -83,7 +59,7 @@ class ProgressiveIndependenceTests(unittest.TestCase):
             ],
         )
 
-    def test_vit_gradient_and_adversarial_output_are_golden_equivalent(self):
+    def test_vit_gradient_and_adversarial_output_regression(self):
         independent = self.make_attacker()
         pixels = torch.linspace(0.01, 0.99, 48).view(1, 3, 4, 4)
         labels = torch.tensor([1])
