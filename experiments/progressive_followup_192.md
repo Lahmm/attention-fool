@@ -2,12 +2,12 @@
 
 Date: 2026-09-15
 
-Status: 34-run base matrix complete; CaiT GAP-projection two-level replication
+Status: retained 32-run base matrix complete; CaiT GAP-projection two-level replication
 complete; remaining adaptive opponent-strength runs pending.
 
 ## Fixed protocol
 
-All runs use the first 192 annotated images (`sample-offset=0`), seed 20260907,
+All runs use the first 192 sorted annotated images, seed 20260907,
 10 attack steps, 10 augmentation groups, two phase-paired views, MI, Gaussian
 residual sigma 4/alpha 0.75, and `selector=high` over the fixed score-high half.
 Schedules are rebuilt from current adversarial pixels
@@ -20,18 +20,17 @@ filtering.
 The primary selection metric is Overall ASR. Transformer, CNN, per-target and
 strict black-box ASR are retained as diagnostics. Deltas below 0.5pp are treated
 as screening ties, 0.5--1.0pp as weak leads, and at least 1.0pp as meaningful
-screening leads. Runs from different offsets are not compared.
+screening leads.
 
 ## Matrix
 
 The executable matrix is `experiments/run_progressive_followup_192.sh`. It has
-34 unique base runs:
+32 unique base runs:
 
 - four same-revision architecture baselines;
 - seven new CaiT late-heavy schedules: four K2 splits at block17/23 and three
   K3 splits at block5/17/23, all with total drop count 30;
-- three alternative Visformer GAP score definitions at the current 41/10 K2
-  schedule;
+- the retained Visformer GAP projection at the current 41/10 K2 schedule;
 - sixteen opponent-strength runs completing a five-point
   `0.0/0.1/0.2/0.3/0.4` sweep on all four sources, with 0.2 shared by the
   baselines;
@@ -39,15 +38,9 @@ The executable matrix is `experiments/run_progressive_followup_192.sh`. It has
 - four Visformer equal-ratio alternatives at approximately 10%, 15%, 25% and
   30%, with the current approximately 20% schedule shared by the baseline.
 
-The three added GAP score modes preserve label-free, gradient-independent
-routing:
-
-- `gap_leave_one_out_cosine`: compare each token with the mean of all other
-  tokens;
-- `gap_projection`: rank by norm-sensitive projection onto the noisy GAP
-  representation;
-- `gap_channel_rms_cosine`: channel-RMS-normalize local/global features before
-  cosine scoring.
+The retained `gap_projection` mode preserves label-free, gradient-independent
+routing by ranking tokens with their norm-sensitive projection onto the noisy
+GAP representation.
 
 The default `cosine` path retains golden replay, gradient and adversarial-output
 parity.
@@ -56,16 +49,16 @@ parity.
 
 After the base matrix:
 
-1. replicate the best non-cosine Visformer score on CaiT K3 if it improves
+1. replicate Visformer GAP projection on CaiT K3 if it improves
    Overall by at least 0.8pp without a material strict-black-box reversal;
 2. add two neighboring opponent strengths per model when the coarse winner
    improves on 0.2 by at least 0.5pp or lies at a scanned boundary;
 3. keep all subsequent ViT validation fixed at `block3,block10` so that no
    alternate checkpoint schedule is promoted as a reference or default.
 
-At most ten adaptive runs are added, for an overall ceiling of 44 runs. The
-noise-off point is a control and cannot be promoted. GAP score variants remain
-the same patch-score routing mechanism; no unrelated attack module is added.
+At most ten adaptive runs are added, for an overall ceiling of 42 runs. The
+noise-off point is a control and cannot be promoted. GAP projection remains the
+same patch-score routing mechanism; no unrelated attack module is added.
 
 ## Required artifacts
 

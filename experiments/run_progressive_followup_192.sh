@@ -39,7 +39,6 @@ run_one() {
       --opponent-noise-strength "$opponent_strength" \
       --batch-size "$batch_size" \
       --max-attacked-samples 192 \
-      --sample-offset 0 \
       --seed "$TASK_SEED" \
       --output-dir "$attack_dir"
   fi
@@ -69,10 +68,8 @@ run_one e1_cait_k3_c05_10_15 cait_s24_224 48 block5_gap,block17_gap,block23_gap 
 run_one e1_cait_k3_c05_05_20 cait_s24_224 48 block5_gap,block17_gap,block23_gap 0.025510204082,0.025510204082,0.102040816327 cosine 0.2
 run_one e1_cait_k3_c10_05_15 cait_s24_224 48 block5_gap,block17_gap,block23_gap 0.051020408163,0.025510204082,0.076530612245 cosine 0.2
 
-# E3: label-free, gradient-independent GAP score definitions on Visformer.
-run_one e3_vis_score_loo visformer_small 48 stage2_block1,stage3_block1 0.209183673469,0.204081632653 gap_leave_one_out_cosine 0.2
+# E3: retained label-free, gradient-independent GAP projection on Visformer.
 run_one e3_vis_score_projection visformer_small 48 stage2_block1,stage3_block1 0.209183673469,0.204081632653 gap_projection 0.2
-run_one e3_vis_score_channel_rms visformer_small 48 stage2_block1,stage3_block1 0.209183673469,0.204081632653 gap_channel_rms_cosine 0.2
 
 # E4: opponent noise coarse sweep. Strength 0.2 is shared with each baseline.
 for strength in 0.0 0.1 0.3 0.4; do

@@ -97,33 +97,18 @@ def attack_all_samples(
     attacker,
     output_dir: Path,
     max_attacked_samples: int | None,
-    sample_offset: int = 0,
     replay: GradientReplay | None = None,
 ) -> list[str]:
     total = len(dataloader.dataset)
-    if sample_offset < 0 or sample_offset >= total:
-        raise ValueError(f"sample_offset must be in [0, {total}), got {sample_offset}.")
-    available = total - sample_offset
-    limit = available if max_attacked_samples is None else min(available, max_attacked_samples)
+    limit = total if max_attacked_samples is None else min(total, max_attacked_samples)
     progress = tqdm(total=limit, desc="Attacking samples")
     attacked = 0
     saved_count = 0
-    seen = 0
     all_sample_ids: list[str] = []
 
     for images, labels, indices in dataloader:
         if attacked >= limit:
             break
-        batch_end = seen + images.size(0)
-        if batch_end <= sample_offset:
-            seen = batch_end
-            continue
-        if seen < sample_offset:
-            start = sample_offset - seen
-            images = images[start:]
-            labels = labels[start:]
-            indices = indices[start:]
-        seen = batch_end
         remaining = limit - attacked
         images = images[:remaining]
         labels = labels[:remaining]
@@ -160,12 +145,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--attack-method", choices=ATTACK_METHODS, default="progressive")
     parser.add_argument("--whitebox-model", choices=WHITEBOX_MODEL_CHOICES, default=DEFAULT_MODEL_NAME)
     parser.add_argument("--max-attacked-samples", type=int, default=1000)
-    parser.add_argument(
-        "--sample-offset",
-        type=int,
-        default=0,
-        help="Skip this many sorted annotated samples before attacking.",
-    )
     parser.add_argument("--epsilon", type=float, default=16.0 / 255.0)
     parser.add_argument("--step-size", type=float, default=None)
     parser.add_argument("--steps", type=int, default=10)
@@ -284,7 +263,6 @@ def main(args: argparse.Namespace) -> None:
         attacker,
         output_dir,
         args.max_attacked_samples,
-        sample_offset=args.sample_offset,
         replay=replay,
     )
     if replay is not None:
@@ -301,7 +279,6 @@ def main(args: argparse.Namespace) -> None:
         "attack_method": args.attack_method,
         "whitebox_model": args.whitebox_model,
         "max_attacked_samples": args.max_attacked_samples,
-        "sample_offset": args.sample_offset,
         "epsilon": args.epsilon,
         "step_size": args.step_size if args.step_size is not None else args.epsilon / args.steps,
         "steps": args.steps,

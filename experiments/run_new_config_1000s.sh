@@ -40,7 +40,6 @@ run_one() {
       --opponent-noise-strength "$opponent_strength" \
       --batch-size "$batch_size" \
       --max-attacked-samples 1000 \
-      --sample-offset 0 \
       --seed "$TASK_SEED" \
       --output-dir "$attack_dir"
   fi

@@ -45,7 +45,7 @@ class MainTests(unittest.TestCase):
         self.assertEqual(args.progressive_patch_selector, "high")
         self.assertEqual(args.input_diversity_views_per_group, 2)
 
-    def test_attack_sample_offset_is_disjoint_and_exact(self):
+    def test_attack_sample_limit_is_exact(self):
         dataloader = DataLoader(IndexedDataset(), batch_size=4, shuffle=False)
         attacker = RecordingAttacker()
         with tempfile.TemporaryDirectory() as directory:
@@ -54,10 +54,9 @@ class MainTests(unittest.TestCase):
                 attacker,
                 Path(directory),
                 max_attacked_samples=2,
-                sample_offset=3,
                 replay=object(),
             )
-        self.assertEqual(ids, ["image_3.png", "image_4.png"])
+        self.assertEqual(ids, ["image_0.png", "image_1.png"])
         self.assertEqual(attacker.ids, ids)
 
 

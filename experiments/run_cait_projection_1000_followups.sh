@@ -34,7 +34,6 @@ run_one() {
       --opponent-noise-strength 0.2 \
       --batch-size 48 \
       --max-attacked-samples 1000 \
-      --sample-offset 0 \
       --seed "$TASK_SEED" \
       --output-dir "$attack_dir"
   fi

@@ -5,11 +5,14 @@ import torch
 
 from gradient_replay import GradientReplay
 from nets.base import PatchScoreFeatures
-from progressive_attack import ProgressivePatchScoreAttacker
+from progressive_attack import PROGRESSIVE_SCORE_MODES, ProgressivePatchScoreAttacker
 from tests.test_progressive_vit import TinyViTWrapper
 
 
 class ProgressiveAttackTests(unittest.TestCase):
+    def test_only_retained_score_modes_are_exposed(self):
+        self.assertEqual(PROGRESSIVE_SCORE_MODES, ("cosine", "gap_projection"))
+
     def make_attacker(self, **overrides):
         torch.manual_seed(7)
         model = TinyViTWrapper()
@@ -92,7 +95,7 @@ class ProgressiveAttackTests(unittest.TestCase):
         self.assertIsInstance(metadata["score_global_noise_active"], bool)
         self.assertEqual(metadata["score_global_noise_strength"], 0.0)
 
-    def test_gap_score_modes_match_their_definitions(self):
+    def test_retained_score_modes_match_their_definitions(self):
         local = torch.tensor(
             [[[2.0, 0.0], [0.0, 1.0], [1.0, 2.0]]], dtype=torch.float32
         )
@@ -117,18 +120,6 @@ class ProgressiveAttackTests(unittest.TestCase):
             )
         )
 
-        leave_one_out = self.make_attacker(
-            progressive_score_mode="gap_leave_one_out_cosine",
-            score_global_noise_strength=0.0,
-        )._score_at_checkpoint(features)
-        expected_loo_global = (local.size(1) * global_token - local) / (local.size(1) - 1)
-        self.assertTrue(
-            torch.allclose(
-                leave_one_out,
-                torch.nn.functional.cosine_similarity(local, expected_loo_global, dim=-1),
-            )
-        )
-
         projection = self.make_attacker(
             progressive_score_mode="gap_projection", score_global_noise_strength=0.0
         )._score_at_checkpoint(features)
@@ -136,22 +127,6 @@ class ProgressiveAttackTests(unittest.TestCase):
             torch.allclose(
                 projection,
                 (local * global_token).sum(dim=-1) / (local.size(-1) ** 0.5),
-            )
-        )
-
-        channel_rms = local.square().mean(dim=1, keepdim=True).sqrt().clamp_min(1e-6)
-        rms_cosine = self.make_attacker(
-            progressive_score_mode="gap_channel_rms_cosine",
-            score_global_noise_strength=0.0,
-        )._score_at_checkpoint(features)
-        self.assertTrue(
-            torch.allclose(
-                rms_cosine,
-                torch.nn.functional.cosine_similarity(
-                    local / channel_rms,
-                    global_token.expand_as(local) / channel_rms,
-                    dim=-1,
-                ),
             )
         )
 

@@ -25,9 +25,7 @@ PROGRESSIVE_PATCH_SELECTORS = (
 PROGRESSIVE_FEATURE_NOISE_TYPES = ("opponent_projected", "gaussian")
 PROGRESSIVE_SCORE_MODES = (
     "cosine",
-    "gap_leave_one_out_cosine",
     "gap_projection",
-    "gap_channel_rms_cosine",
 )
 
 
@@ -281,23 +279,7 @@ class ProgressivePatchScoreAttacker:
             raise ValueError(
                 f"score mode {self.progressive_score_mode!r} requires GAP features."
             )
-        if self.progressive_score_mode == "gap_leave_one_out_cosine":
-            token_count = local.size(1)
-            if token_count <= 1:
-                raise ValueError("leave-one-out GAP score requires at least two local tokens.")
-            leave_one_out = (
-                token_count * clean_global.expand_as(local) - local
-            ) / (token_count - 1)
-            leave_one_out = leave_one_out + global_noise.expand_as(local)
-            return F.cosine_similarity(local, leave_one_out, dim=-1)
-        if self.progressive_score_mode == "gap_projection":
-            return (local * global_token.expand_as(local)).sum(dim=-1) / (local.size(-1) ** 0.5)
-        channel_rms = local.square().mean(dim=1, keepdim=True).sqrt().clamp_min(1e-6)
-        return F.cosine_similarity(
-            local / channel_rms,
-            global_token.expand_as(local) / channel_rms,
-            dim=-1,
-        )
+        return (local * global_token.expand_as(local)).sum(dim=-1) / (local.size(-1) ** 0.5)
 
     def _sample_half_random_mask(
         self, scores: torch.Tensor, ratio: float, checkpoint: str, *, largest: bool
