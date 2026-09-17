@@ -2,7 +2,7 @@
 
 Date: 2026-09-15
 
-Status: 38-run base matrix complete; CaiT GAP-projection two-level replication
+Status: 34-run base matrix complete; CaiT GAP-projection two-level replication
 complete; remaining adaptive opponent-strength runs pending.
 
 ## Fixed protocol
@@ -25,7 +25,7 @@ screening leads. Runs from different offsets are not compared.
 ## Matrix
 
 The executable matrix is `experiments/run_progressive_followup_192.sh`. It has
-38 unique base runs:
+34 unique base runs:
 
 - four same-revision architecture baselines;
 - seven new CaiT late-heavy schedules: four K2 splits at block17/23 and three
@@ -35,8 +35,7 @@ The executable matrix is `experiments/run_progressive_followup_192.sh`. It has
 - sixteen opponent-strength runs completing a five-point
   `0.0/0.1/0.2/0.3/0.4` sweep on all four sources, with 0.2 shared by the
   baselines;
-- four ViT late-checkpoint alternatives at block7--10, with block11 shared by
-  the baseline and block3/10/10 fixed;
+- the retained ViT baseline at `block3,block10` with 10/10 drops;
 - four Visformer equal-ratio alternatives at approximately 10%, 15%, 25% and
   30%, with the current approximately 20% schedule shared by the baseline.
 
@@ -61,10 +60,10 @@ After the base matrix:
    Overall by at least 0.8pp without a material strict-black-box reversal;
 2. add two neighboring opponent strengths per model when the coarse winner
    improves on 0.2 by at least 0.5pp or lies at a scanned boundary;
-3. test ViT block3/block6 only if block3/block7 is the late-layer boundary
-   winner.
+3. keep all subsequent ViT validation fixed at `block3,block10` so that no
+   alternate checkpoint schedule is promoted as a reference or default.
 
-At most ten adaptive runs are added, for an overall ceiling of 48 runs. The
+At most ten adaptive runs are added, for an overall ceiling of 44 runs. The
 noise-off point is a control and cannot be promoted. GAP score variants remain
 the same patch-score routing mechanism; no unrelated attack module is added.
 

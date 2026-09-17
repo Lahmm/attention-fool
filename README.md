@@ -9,19 +9,19 @@
 1. **patch-score-guided patch drop**：用 adapter-specific global/local 表示关系（CLS 架构为 cosine，GAP 架构为 projection）提供 label-free、gradient-independent 的语义坐标，决定在哪里扰动；
 2. **RGB opponent-channel noise**：在亮度、红绿和黄蓝方向采样，再经过模型首层 RGB projection，决定如何扰动保留证据。
 
-当前研究主线已经晋升为 progressive high-score attack。已验证的 ViT-B/16 配置在
-`(3, 7, 11)` 三个 checkpoint boundary 上依次计算当前 global/local patch score，每次从
-high-score half 随机抽取 5% local tokens 并 hard-zero；后续 checkpoint 在已经过前序
-drop 的 token 状态上继续计算，允许不同 checkpoint 重复选择同一位置。
+当前研究主线是 progressive high-score attack。ViT-B/16 统一使用 `block3,block10`
+两个 checkpoint boundary，在每个 checkpoint 从 high-score half 随机抽取 10/196 个
+local tokens（`drop_ratio=0.051020408163`）并 hard-zero；后续 checkpoint 在已经过
+前序 drop 的 token 状态上继续计算，允许重复选择同一位置。
 
-每个 attack step、每个 augmentation group 都从当前对抗像素构造新的三级 schedule。
+每个 attack step、每个 augmentation group 都从当前对抗像素构造新的两级 ViT schedule。
 original view 使用该 schedule，phase view 使用空间变换后的对应 schedule。默认 10 steps ×
-10 groups，因此每张图构造 100 个 schedule、执行 300 次 checkpoint mask selection。
+10 groups，因此每张 ViT 图构造 100 个 schedule、执行 200 次 checkpoint mask selection。
 
 ```text
 current adversarial pixels
-→ sequential global/local scores at checkpoint boundaries 3, 7, 11
-→ 5% high-tail local-token drop at each checkpoint
+→ sequential global/local scores at block3 and block10
+→ 10/196 high-score-window local-token drop at each checkpoint
 → original schedule / spatially transformed phase schedule
 → kept-only opponent noise at the initial RGB projection
 → raw 20-view gradient mean
@@ -29,18 +29,19 @@ current adversarial pixels
 → MI update
 ```
 
-当前主线的可执行参考仍位于独立的 ViT 文件中：
+当前 ViT 主线只通过 `main.py` 执行：
 
 ```bash
-python vit_progressive_patch_score_attack.py \
-  --checkpoints 3,7,11 \
-  --drop-ratios 0.05,0.05,0.05 \
+python main.py \
+  --attack-method progressive \
+  --whitebox-model vit_base_patch16_224 \
+  --checkpoints block3,block10 \
+  --drop-ratios 0.051020408163,0.051020408163 \
   --progressive-patch-selector high
 ```
 
-上述三 checkpoint 配置保留为 ViT 机制验证参考。`main.py` 的架构默认则采用
-`selector=high`、`score-window-ratio=0.5`、`K>1` 约束下各源模型已完成 1000 图验证的
-最高 Overall ASR 配置。实验接口支持任意非零数量的、严格递增的 checkpoint，并要求
+`main.py` 的 ViT 默认、文档参考和测试基准均为上述 `block3,block10` 配置，不再保留
+另一套 ViT reference schedule。实验接口支持任意非零数量的、严格递增的 checkpoint，并要求
 `--drop-ratios` 提供完全相同数量的逐层比例；不对这些比例的总和施加额外限制。自定义
 `N` 个 checkpoint 时，默认 10 steps × 10 groups 对应每张图 `100 × N` 次 checkpoint
 mask selection。
@@ -104,15 +105,13 @@ noise 与 Gaussian residual 是已完成控制变量的支撑因素，不作为�
 **85.26%、86.09%、84.79% 和 78.52%**；Transformer/CNN 均值分别为
 90.34/78.48、89.68/81.32、90.25/77.50 和 80.54/75.83。四个源模型对自身架构的
 ASR 分别为 **97.0%、98.0%、98.8% 和 99.4%**。每图均动态
-生成 100 个 schedule；K=2/K=3 配置分别执行 200/300 次 checkpoint mask 选择。
+生成 100 个 schedule；当前 ViT K=2 配置执行 200 次 checkpoint mask 选择。
 完整逐迁移模型结果见 `experiments/progressive_cross_arch_mainline_s1000.md`。
 
-ViT 的同 seed 控制显示：RGB opponent noise 的 Overall/CNN ASR 为 79.58%/73.32%，
-IID Gaussian 为 78.42%/70.28%，noise-off 为 62.52%/51.95%。progressive high 相对旧
-final-layer 路由提升 1.31pp Overall，相对 progressive random 提升 0.59pp。
-相同 `(3,7,11)` 下，`high`/`low`/`random` 的 1000 图 Overall ASR 分别为
-79.75%/79.26%/79.16%；另一组同 seed 对照中，`extreme-high` 为
-77.82%，低于 `high` 的 79.58%。`extreme-low` 尚无 1000 图正式结果。
+ViT 当前正式配置为 `block3,block10`、10/10 drops、`selector=high`、
+`score-window-ratio=0.5` 和 opponent strength 0.2；其 1000 图完整 14-target Overall
+ASR 为 85.26%。旧 checkpoint schedule 上得到的 selector/noise 数值不再作为当前 ViT
+攻击设置陈述。
 
 完整的架构契约、测试门禁、逐源结果、控制变量和梯度诊断见
 `experiments/progressive_cross_arch_mainline_s1000.md`。旧四白盒 final-layer 证据仍保留在

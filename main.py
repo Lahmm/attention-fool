@@ -18,7 +18,6 @@ from tqdm import tqdm
 from gradient_replay import GradientReplay
 from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, build_whitebox_model
 from progressive_attack import (
-    DEFAULT_DROP_RATIOS,
     PROGRESSIVE_PATCH_SELECTORS,
     PROGRESSIVE_SCORE_MODES,
     ProgressivePatchScoreAttacker,
@@ -451,7 +450,7 @@ def main(args: argparse.Namespace) -> None:
         "drop_ratios": (
             list(attacker.progressive_drop_ratios)
             if args.attack_method == "progressive"
-            else list(args.drop_ratios or DEFAULT_DROP_RATIOS)
+            else list(args.drop_ratios) if args.drop_ratios is not None else None
         ),
         "progressive_patch_selector": args.progressive_patch_selector,
         "score_window_ratio": args.score_window_ratio,

@@ -56,7 +56,7 @@ run_one() {
 }
 
 # Same-revision public baselines.
-run_one b_vit vit_base_patch16_224 96 block3,block11 0.051020408163,0.051020408163 cosine 0.2
+run_one b_vit vit_base_patch16_224 96 block3,block10 0.051020408163,0.051020408163 cosine 0.2
 run_one b_cait cait_s24_224 48 block5_gap,block17_gap,block23_gap 0.051020408163,0.051020408163,0.051020408163 cosine 0.2
 run_one b_pit pit_b_224 96 stage2_block1,stage3_block2,stage3_block3 0.02081165,0.03125,0.09375 cosine 0.2
 run_one b_vis visformer_small 48 stage2_block1,stage3_block1 0.209183673469,0.204081632653 cosine 0.2
@@ -78,15 +78,10 @@ run_one e3_vis_score_channel_rms visformer_small 48 stage2_block1,stage3_block1 
 # E4: opponent noise coarse sweep. Strength 0.2 is shared with each baseline.
 for strength in 0.0 0.1 0.3 0.4; do
   tag=${strength/./}
-  run_one "e4_vit_opp_${tag}" vit_base_patch16_224 96 block3,block11 0.051020408163,0.051020408163 cosine "$strength"
+  run_one "e4_vit_opp_${tag}" vit_base_patch16_224 96 block3,block10 0.051020408163,0.051020408163 cosine "$strength"
   run_one "e4_cait_opp_${tag}" cait_s24_224 48 block5_gap,block17_gap,block23_gap 0.051020408163,0.051020408163,0.051020408163 cosine "$strength"
   run_one "e4_pit_opp_${tag}" pit_b_224 96 stage2_block1,stage3_block2,stage3_block3 0.02081165,0.03125,0.09375 cosine "$strength"
   run_one "e4_vis_opp_${tag}" visformer_small 48 stage2_block1,stage3_block1 0.209183673469,0.204081632653 cosine "$strength"
-done
-
-# E5: ViT late-checkpoint local scan; block11 is shared with the baseline.
-for late_block in 7 8 9 10; do
-  run_one "e5_vit_late_b${late_block}" vit_base_patch16_224 96 "block3,block${late_block}" 0.051020408163,0.051020408163 cosine 0.2
 done
 
 # E6: Visformer K2 equal-ratio strength scan; 41/10 is the shared baseline.

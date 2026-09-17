@@ -34,9 +34,6 @@ PROGRESSIVE_SCORE_MODES = (
     "gap_projection",
     "gap_channel_rms_cosine",
 )
-DEFAULT_DROP_RATIOS = (0.05, 0.05, 0.05)
-
-
 @dataclass(frozen=True)
 class ProgressiveMaskSelection:
     checkpoint: str
@@ -208,9 +205,11 @@ class ProgressivePatchScoreAttacker:
         canonical = tuple(self._canonical_checkpoint(model, value) for value in requested)
         if drop_ratios is None:
             ratio_provider = getattr(model, "default_progressive_drop_ratios", None)
-            drop_ratios = (
-                ratio_provider() if callable(ratio_provider) else DEFAULT_DROP_RATIOS
-            )
+            if not callable(ratio_provider):
+                raise ValueError(
+                    "the model adapter must define default_progressive_drop_ratios()."
+                )
+            drop_ratios = ratio_provider()
         ratios = tuple(float(value) for value in drop_ratios)
         if not canonical:
             raise ValueError("at least one progressive checkpoint is required.")
@@ -286,7 +285,7 @@ class ProgressivePatchScoreAttacker:
     def _canonical_checkpoint(model, value: str | int) -> str:
         if isinstance(value, int):
             if getattr(model, "model_name", "") != "vit_base_patch16_224":
-                raise ValueError("integer checkpoints are supported only by the ViT compatibility API.")
+                raise ValueError("integer checkpoint shorthand is supported only for ViT.")
             return f"block{value}"
         return str(value)
 

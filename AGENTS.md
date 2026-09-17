@@ -7,9 +7,9 @@
 ## Current research mainline
 
 - The paper mainline has exactly two core mechanisms: **patch-score-guided patch drop** and **RGB opponent-channel random noise**. Do not stack unrelated attack modules onto the main claim.
-- The only retained attack is the progressive high-score attack implemented by `progressive_attack.py` and dispatched by `main.py`. `vit_progressive_patch_score_attack.py` is not an authoritative implementation and does not need to be preserved as a compatibility entry point.
-- The validated ViT-B/16 reference configuration uses checkpoint boundaries `(3, 7, 11)`, independently drops 5% of local tokens at each checkpoint, and permits the same position to be selected again later in the schedule.
-- At every attack step and augmentation group, build a fresh three-checkpoint schedule from the current adversarial pixels. At each checkpoint, recompute global/local patch scores on the sequentially updated token state, sample from the score-high half, and hard-zero the selected local tokens. The original view uses that schedule and the phase view uses its spatially transformed counterpart. The default 10 steps × 10 groups produces 100 schedules and 300 checkpoint mask selections per image.
+- The only retained attack is the progressive high-score attack implemented by `progressive_attack.py` and dispatched by `main.py`.
+- The validated ViT-B/16 configuration uses checkpoint boundaries `block3` and `block10`, independently drops 10 of 196 local tokens at each checkpoint (`drop_ratio=0.051020408163`), and permits the same position to be selected again later in the schedule. This is the only ViT attack configuration that should be described as current or used by current executable examples and tests.
+- At every attack step and augmentation group, build a fresh two-checkpoint ViT schedule from the current adversarial pixels. At each checkpoint, recompute global/local patch scores on the sequentially updated token state, sample from the score-high half, and hard-zero the selected local tokens. The original view uses that schedule and the phase view uses its spatially transformed counterpart. The default 10 steps × 10 groups produces 100 schedules and 200 checkpoint mask selections per ViT image.
 - Patch-score is a label-free, gradient-independent global/local representation routing coordinate for deciding **where** to perturb.
 - Opponent-channel noise decides **how** to perturb kept evidence: sample luminance, red-green, and yellow-blue RGB directions, project through the initial RGB projection, and RMS-match in feature space.
 - Validate complementarity with transferable-gradient diagnostics and transfer ASR defined as `1 - adversarial accuracy` over all evaluated adversarial samples; do not filter to a target-clean-correct subset.
@@ -19,7 +19,7 @@
 
 - Retain only the current progressive high-score attack behavior in `progressive_attack.py`, the minimal `main.py` execution path needed to run it, and the progressive portions of the four architecture adapters in `nets/`.
 - Retain only utility, test, configuration, and documentation code that is directly required to execute or verify that progressive attack.
-- The protected behavior is: fresh sequential checkpoint schedules from current adversarial pixels, high-score-window sampling, local-token hard zeroing, transformed phase-pair schedules, kept-only RGB opponent-channel projected noise, and the projected iterative update used by the current progressive attack.
+- The protected behavior is: fresh sequential checkpoint schedules from current adversarial pixels, the ViT `block3,block10` schedule, high-score-window sampling, local-token hard zeroing, transformed phase-pair schedules, kept-only RGB opponent-channel projected noise, and the projected iterative update used by the current progressive attack.
 - Code is not protected merely because it is currently imported, exposed by the CLI, covered by a test, mentioned in an old report, or needed to reproduce a superseded experiment.
 
 ## Removable scope

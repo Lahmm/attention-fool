@@ -212,7 +212,9 @@ class WhiteBoxWithHook(nn.Module):
 
     def default_progressive_drop_ratios(self) -> tuple[float, ...]:
         """Return architecture-specific per-checkpoint drop ratios."""
-        return (0.05, 0.05, 0.05)
+        raise NotImplementedError(
+            f"progressive drop-ratio defaults are not implemented for {self.model_name}."
+        )
 
     def default_progressive_score_mode(self) -> str:
         """Return the architecture-specific local/global routing score."""

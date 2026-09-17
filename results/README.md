@@ -6,11 +6,10 @@ ignored by default.
 
 ## Promoted research mainline
 
-The promoted research mainline is the progressive high-score attack represented
-by `vit_progressive_patch_score_attack.py`, with the validated ViT-B/16 schedule
-at checkpoint boundaries `(3, 7, 11)` and independent 5% local-token drops.
-Its selector, checkpoint, and CLS-noise/gradient-residual transfer records are
-retained under `outputs/csv/`.
+The promoted research mainline is the progressive high-score attack implemented
+by `progressive_attack.py` and dispatched by `main.py`. ViT-B/16 uniformly uses
+`block3,block10` with independent `0.051020408163` local-token drop ratios
+(10 tokens at each checkpoint). No separate ViT reference schedule is retained.
 
 The independent progressive implementation is integrated into `main.py`
 through architecture adapters for ViT, CaiT, PiT, and Visformer. All four
@@ -20,7 +19,7 @@ results, and auditable CSV paths are recorded in
 `experiments/progressive_cross_arch_mainline_s1000.md`.
 
 The `main.py` defaults are selected under `high`, `score-window-ratio=0.5`, and
-`K>1`: ViT block3/11 with 10/10 drops, CaiT block5/17/23 with 10/10/10, PiT
+`K>1`: ViT block3/10 with 10/10 drops, CaiT block17/23 with 2/28, PiT
 stage2-block1/stage3-block2/stage3-block3 with 5/2/6, and Visformer
 stage2-block1/stage3-block1 with 41/10.
 

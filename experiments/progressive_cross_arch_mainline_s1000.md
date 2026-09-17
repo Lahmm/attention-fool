@@ -30,7 +30,8 @@ strengths remain numeric.
 
 `progressive_attack.py` does not import, inherit or call `attack.py`.
 `main.py` imports the legacy attacker only inside a non-progressive branch.
-`vit_progressive_patch_score_attack.py` is now a thin CLI compatibility layer.
+ViT has no separate compatibility entry point; current attacks run through
+`main.py` with `block3,block10`.
 
 ## Adapter contract and defaults
 
@@ -86,7 +87,7 @@ projection.
   full-scale checkpoint/selector follow-ups complete 1000 images. Every formal
   directory has 1000 adversarial PNGs; K2/K3 runs record 200/300 checkpoint
   selections per image and maximum saved-PNG L-infinity 16/255.
-- Test suite: 71 tests pass; four optional/real tests are skipped in the default
+- Test suite: 70 tests pass; four optional/real tests are skipped in the default
   run, and the four-model real adapter test passes when explicitly enabled.
 
 ## Formal cross-architecture transfer results
@@ -326,97 +327,18 @@ became the constrained-ASR default. The auditable full records are
 with the current K2 record at
 `outputs/csv/outputs_attack_scanD_visformer_k2eqr_s2b1_s3b1_confirm_s1000_offset0_seed20260907.csv`.
 
-### Progressive routing versus historical final-layer routing
+### ViT configuration policy
 
-These same-seed 20260903 ViT experiments predate the generic adapter but are
-covered by the bitwise golden parity gate.
+The only current ViT-B/16 attack configuration is `block3,block10` with
+10/10 drops (`0.051020408163` at each checkpoint), `selector=high`,
+`score-window-ratio=0.5`, and opponent strength 0.2. Its complete 14-target
+1000-image result is the promoted ViT row above (85.26% Overall).
 
-| Routing | Overall | Transformer | CNN |
-| --- | ---: | ---: | ---: |
-| historical final layer | 78.45% | 83.56% | 72.48% |
-| progressive block3/7/11 high | **79.75%** | **85.04%** | **73.58%** |
-
-Progressive improves by 1.31pp Overall, 1.49pp Transformer and 1.10pp CNN.
-
-For completeness, the older cross-architecture final-layer records and the
-then-selected progressive results are summarized below. Only the ViT pair above is
-a same-seed controlled routing comparison. The other historical rows use seed
-20260716 and raw-gradient final-layer runs, whereas the progressive rows use
-seed 20260907 and the promoted optimization stack; their deltas are context,
-not causal estimates of routing quality.
-
-| Source | Historical final-layer Overall | Then-selected progressive Overall | Difference |
-| --- | ---: | ---: | ---: |
-| ViT-B/16, controlled pair | 78.45% | **79.75%** | +1.31pp |
-| CaiT-S24, historical context | **87.00%** | 84.15% | -2.85pp |
-| PiT-B, historical context | **82.78%** | 80.44% | -2.34pp |
-| Visformer-S, historical context | **75.22%** | 73.16% | -2.06pp |
-
-The historical provenance remains documented separately in
-`experiments/mainline_data_aug_gaussian_story_s1000.md`.
-
-### ViT progressive selector controls
-
-| Selector | Overall | Transformer | CNN |
-| --- | ---: | ---: | ---: |
-| high-half random (`high`) | **79.75%** | **85.04%** | **73.58%** |
-| low-half random (`low`) | 79.26% | 84.84% | 72.75% |
-| all-token uniform (`random`) | 79.16% | 84.36% | 73.10% |
-
-These three block3/7/11 runs use the same 1000 images and seed 20260903. With
-all other settings fixed, high improves over random by 0.59pp Overall, 0.69pp
-Transformer, and 0.48pp CNN. Low remains close on Transformer targets but is
-0.83pp below high on CNN targets.
-
-After the selector interface was generalized, an extreme-high follow-up was
-run on block3/7/11 with seed 20260907 and compared with the formal high run at
-the same seed:
-
-| Selector, seed 20260907 | Overall | Transformer | CNN |
-| --- | ---: | ---: | ---: |
-| high-half random (`high`) | **79.58%** | **84.94%** | **73.32%** |
-| exact top-score tail (`extreme-high`) | 77.82% | 83.11% | 71.63% |
-
-Extreme-high is lower by 1.76pp Overall, 1.83pp Transformer, and 1.68pp CNN;
-all 13 individual target ASRs decrease. This indicates that score guidance is
-most useful together with stochastic coverage of the high-score half, rather
-than repeatedly taking only each checkpoint's current top-ranked tail. Patch
-scores are recomputed on the sequentially updated state at every checkpoint,
-so this result does not imply that block3, block7, and block11 select identical
-spatial positions. Extreme-low has implementation and smoke coverage but no
-1000-image transfer result and is therefore not ranked here.
-
-The extreme-high record is
-`outputs/csv/outputs_attack_progressive_vit_extreme_high_c3711_s1000_seed20260907.csv`.
-
-### Score noise and Gaussian residual controls
-
-| Score-global noise | Gradient residual | Overall | Transformer | CNN |
-| --- | --- | ---: | ---: | ---: |
-| on | on | **79.75%** | **85.04%** | **73.58%** |
-| on | off | 79.17% | 84.41% | 73.05% |
-| off | on | 79.36% | 84.89% | 72.92% |
-| off | off | 79.08% | 84.21% | 73.10% |
-
-These factors are retained as supporting improvements, not additional paper
-mechanisms.
-
-### Opponent noise versus IID Gaussian and noise-off
-
-All rows use seed 20260907 and the same progressive masks, score noise, phase
-pairs, gradient residual and optimization budget.
-
-| Kept-only feature noise | Overall | Transformer | CNN |
-| --- | ---: | ---: | ---: |
-| none | 62.52% | 71.57% | 51.95% |
-| IID Gaussian, RMS matched | 78.42% | **85.39%** | 70.28% |
-| RGB opponent projection, RMS matched | **79.58%** | 84.94% | **73.32%** |
-
-Opponent noise improves over noise-off by 17.05pp Overall, 13.37pp
-Transformer and 21.37pp CNN. Against IID Gaussian it improves 1.16pp Overall
-and 3.03pp CNN, while IID Gaussian is 0.44pp higher on the Transformer subset.
-The supported claim is therefore stronger cross-family/CNN transfer and higher
-overall ASR, not uniform superiority on every target family.
+Selector, score-noise, feature-noise, and checkpoint comparisons produced on
+superseded ViT schedules are historical tuning evidence, not current attack
+settings, and have therefore been removed from this active mainline report.
+New ViT controls must keep `block3,block10` fixed unless the project explicitly
+changes the single canonical configuration again.
 
 ## Gradient complementarity diagnostics
 

@@ -8,9 +8,7 @@ import torch
 from gradient_replay import GradientReplay
 from nets.base import PatchScoreFeatures
 from progressive_attack import ProgressivePatchScoreAttacker
-from tests.vit_progressive_patch_score_attack_cases import (
-    TinyViTWrapper,
-)
+from tests.test_progressive_vit import TinyViTWrapper
 
 
 class ProgressiveIndependenceTests(unittest.TestCase):
@@ -18,8 +16,8 @@ class ProgressiveIndependenceTests(unittest.TestCase):
         torch.manual_seed(7)
         model = TinyViTWrapper()
         common = {
-            "checkpoints": (3, 6, 9),
-            "drop_ratios": (0.25, 0.25, 0.25),
+            "checkpoints": (3, 10),
+            "drop_ratios": (0.25, 0.25),
             "score_cls_noise_strength": 0.2,
             "opponent_noise_strength": 0.2,
             "steps": 1,
@@ -76,13 +74,12 @@ class ProgressiveIndependenceTests(unittest.TestCase):
                 attacker._gradient_replay = None
 
         independent_schedule = schedule(independent)
-        self.assertEqual(independent_schedule.counts, (1, 1, 1))
+        self.assertEqual(independent_schedule.counts, (1, 1))
         self.assertEqual(
             [self.digest(mask) for mask in independent_schedule.masks],
             [
                 "b40711a88c7039756fb8a73827eabe2c0fe5a0346ca7e0a104adc0fc764f528d",
                 "bf5e8ffa51a9e748985800c1d3d7f1a2a6ae7435136593ca8d9637e3f87c699c",
-                "b40711a88c7039756fb8a73827eabe2c0fe5a0346ca7e0a104adc0fc764f528d",
             ],
         )
 
@@ -99,9 +96,9 @@ class ProgressiveIndependenceTests(unittest.TestCase):
         self.assertEqual(
             {key: self.digest(value) for key, value in independent_probe.items()},
             {
-                "view_gradients": "e97a182ec0d9da128e8bc76c4b814664b4c7ea9547fcbaac2f39a95d773b8a85",
-                "raw_mean": "df11a2ddecceaf795868b2d882cdbf37be6c1c01ba2dda73986c63c257daee7d",
-                "processed": "df11a2ddecceaf795868b2d882cdbf37be6c1c01ba2dda73986c63c257daee7d",
+                "view_gradients": "21d1dc53cbb3d48afacecc2ce9d650460f1001808afa778a5f1358bb7cd1777d",
+                "raw_mean": "b4b69f2bfd55216daaa2d47244a49cfc206e55b08704af26bfd61bf37b7be560",
+                "processed": "b4b69f2bfd55216daaa2d47244a49cfc206e55b08704af26bfd61bf37b7be560",
             },
         )
         independent_adv = independent.attack_batch(
@@ -199,8 +196,11 @@ class ProgressiveIndependenceTests(unittest.TestCase):
             attacker._score_at_checkpoint(features)
 
     def test_model_specific_default_drop_ratios_are_used_when_omitted(self):
-        attacker = self.make_attacker(drop_ratios=None)
-        self.assertEqual(attacker.progressive_drop_ratios, (0.05, 0.05, 0.05))
+        attacker = self.make_attacker(checkpoints=None, drop_ratios=None)
+        self.assertEqual(
+            attacker.progressive_drop_ratios,
+            (0.051020408163, 0.051020408163),
+        )
 
     def test_gaussian_feature_noise_is_rms_matched_and_noise_off_is_explicit(self):
         attacker = self.make_attacker(
@@ -225,7 +225,7 @@ class ProgressiveIndependenceTests(unittest.TestCase):
             "block3", torch.tensor([[True, False, False, False]]), 1, (2, 2)
         )
         second = ProgressiveMaskSelection(
-            "block6", torch.tensor([[True, False, False, False, False, False]]), 1, (2, 3)
+            "block10", torch.tensor([[True, False, False, False, False, False]]), 1, (2, 3)
         )
         schedule = ProgressiveMaskSchedule((first, second))
         shifted = attacker._phase_mask_schedule(schedule, [(1, 1)], height=8, width=8)
