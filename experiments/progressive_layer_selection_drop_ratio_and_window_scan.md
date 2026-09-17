@@ -22,7 +22,6 @@ Reproduce the retained setting with:
 
 ```bash
 python main.py \
-  --attack-method progressive \
   --whitebox-model vit_base_patch16_224 \
   --checkpoints block3,block10 \
   --drop-ratios 0.051020408163,0.051020408163 \

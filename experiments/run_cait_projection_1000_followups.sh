@@ -24,7 +24,6 @@ run_one() {
     echo "Attack already complete: $name"
   else
     "$TASK_PY" main.py \
-      --attack-method progressive \
       --whitebox-model cait_s24_224 \
       --checkpoints "$checkpoints" \
       --drop-ratios "$ratios" \

@@ -18,7 +18,7 @@ class ProgressiveIndependenceTests(unittest.TestCase):
         common = {
             "checkpoints": (3, 10),
             "drop_ratios": (0.25, 0.25),
-            "score_cls_noise_strength": 0.2,
+            "score_global_noise_strength": 0.2,
             "opponent_noise_strength": 0.2,
             "steps": 1,
             "input_diversity_groups": 1,
@@ -110,7 +110,7 @@ class ProgressiveIndependenceTests(unittest.TestCase):
         )
 
     def test_score_noise_metadata_is_boolean_and_canonical_strength_is_numeric(self):
-        attacker = self.make_attacker(score_cls_noise_strength=0.0)
+        attacker = self.make_attacker(score_global_noise_strength=0.0)
         metadata = attacker.mainline_metadata()
         self.assertIs(metadata["score_global_noise_active"], False)
         self.assertIsInstance(metadata["score_global_noise_active"], bool)
@@ -130,7 +130,7 @@ class ProgressiveIndependenceTests(unittest.TestCase):
             global_mode="gap",
         )
         cosine = self.make_attacker(
-            progressive_score_mode="cosine", score_cls_noise_strength=0.0
+            progressive_score_mode="cosine", score_global_noise_strength=0.0
         )._score_at_checkpoint(features)
         self.assertTrue(
             torch.allclose(
@@ -143,7 +143,7 @@ class ProgressiveIndependenceTests(unittest.TestCase):
 
         leave_one_out = self.make_attacker(
             progressive_score_mode="gap_leave_one_out_cosine",
-            score_cls_noise_strength=0.0,
+            score_global_noise_strength=0.0,
         )._score_at_checkpoint(features)
         expected_loo_global = (local.size(1) * global_token - local) / (local.size(1) - 1)
         self.assertTrue(
@@ -154,7 +154,7 @@ class ProgressiveIndependenceTests(unittest.TestCase):
         )
 
         projection = self.make_attacker(
-            progressive_score_mode="gap_projection", score_cls_noise_strength=0.0
+            progressive_score_mode="gap_projection", score_global_noise_strength=0.0
         )._score_at_checkpoint(features)
         self.assertTrue(
             torch.allclose(
@@ -166,7 +166,7 @@ class ProgressiveIndependenceTests(unittest.TestCase):
         channel_rms = local.square().mean(dim=1, keepdim=True).sqrt().clamp_min(1e-6)
         rms_cosine = self.make_attacker(
             progressive_score_mode="gap_channel_rms_cosine",
-            score_cls_noise_strength=0.0,
+            score_global_noise_strength=0.0,
         )._score_at_checkpoint(features)
         self.assertTrue(
             torch.allclose(
@@ -181,7 +181,7 @@ class ProgressiveIndependenceTests(unittest.TestCase):
 
     def test_gap_only_score_modes_reject_cls_features(self):
         attacker = self.make_attacker(
-            progressive_score_mode="gap_projection", score_cls_noise_strength=0.0
+            progressive_score_mode="gap_projection", score_global_noise_strength=0.0
         )
         local = torch.ones(1, 2, 3)
         features = PatchScoreFeatures(
@@ -206,7 +206,7 @@ class ProgressiveIndependenceTests(unittest.TestCase):
         attacker = self.make_attacker(
             feature_noise_type="gaussian", opponent_noise_strength=0.25
         )
-        state = attacker.model.prepare_attack_feature_state(torch.rand(1, 3, 4, 4))
+        state = attacker.model.prepare_progressive_input(torch.rand(1, 3, 4, 4))
         noise = attacker._kept_feature_noise(state)
         token_rms = state.local_tokens.square().mean(dim=(1, 2)).sqrt()
         noise_rms = noise.square().mean(dim=(1, 2)).sqrt()

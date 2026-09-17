@@ -33,7 +33,6 @@ current adversarial pixels
 
 ```bash
 python main.py \
-  --attack-method progressive \
   --whitebox-model vit_base_patch16_224 \
   --checkpoints block3,block10 \
   --drop-ratios 0.051020408163,0.051020408163 \
@@ -65,42 +64,22 @@ progressive 主线。ViT-B/16 默认使用 `block3,block10`，drop ratios 为
 
 ## 保留的攻击接口
 
-| 类别 | 当前保留接口 | 定位 |
-| --- | --- | --- |
-| 当前研究主线 | `main.py` | 四架构 adapter progressive high-score schedule |
-| 历史跨架构基线 | `original_score_postdrop_phase_pair` | final-layer 动态 pixel drop；暂由 `main.py` 保留 |
-| 基础路径 | `none` | 无 patch drop 的优化基线 |
-| 像素对照 | `patch_dropout` | 通用 pixel patch dropout |
-| token 对照 | `token_patch_dropout` | ViT token patch dropout |
-| 优化与增强 | MI、NI、DIM、TI | 支撑机制和受控消融，不是新的论文主机制 |
-| Progressive selector | `high`、`low`、`random`、`extreme-high`、`extreme-low` | 主线 high 与受控路由对照 |
+项目只保留由 `main.py` 调用的 progressive attack。四个架构 adapter 只实现
+progressive checkpoint traversal、score feature、mask application、forward completion
+以及初始 RGB projection 元数据，不再提供 final-layer legacy score、token hook 或旧式
+resumable-forward API。
 
 `high`/`low` 分别从 patch-score 高/低半区随机抽取当前层预算；`extreme-high`/
 `extreme-low` 直接按 score 排序选取最高/最低的当前层预算；`random` 从全部 local
-tokens 均匀随机抽取。Progressive 接口不再接受历史 `patch_score` selector 别名。
+tokens 均匀随机抽取。
 
-`none`、pixel `patch_dropout`、token `patch_dropout` 与 NI/DIM/TI 的示例：
-
-```bash
-python main.py --attack-method none --dim --ni --ti-sigma 1.0 \
-  --gaussian-alpha 0 --output-dir outputs/attack/dim_ti_ni
-
-python main.py --attack-method patch_dropout --guide-aug-copies 20 \
-  --feature-layer -1 --gaussian-alpha 0 \
-  --output-dir outputs/attack/pixel_patch_dropout
-
-python main.py --attack-method token_patch_dropout \
-  --input-diversity-groups 20 --input-diversity-views-per-group 1 \
-  --gaussian-alpha 0 --output-dir outputs/attack/token_patch_dropout
-```
-
-默认 progressive phase-pair 不与 DIM 组合，每步为 20 个实际 model views。CLS score
-noise 与 Gaussian residual 是已完成控制变量的支撑因素，不作为新增论文核心机制。
+默认 progressive phase-pair 每步为 20 个实际 model views。Score-global noise 与
+Gaussian residual 是已完成控制变量的支撑因素，不作为新增论文核心机制。
 
 ## 主线结果
 
-`progressive_attack.py` 已作为独立生产主线接入 `main.py`，不再继承或导入
-`attack.py`。ViT、CaiT、PiT、Visformer 四个源模型均已完成 1000 图攻击和完整的
+`progressive_attack.py` 是 `main.py` 唯一调用的攻击实现。ViT、CaiT、PiT、Visformer
+四个源模型均已完成 1000 图攻击和完整的
 14 目标复评（8 Transformer，包括 ViT-B/16；6 CNN）；Overall ASR 分别为
 **85.26%、86.09%、84.79% 和 78.52%**；Transformer/CNN 均值分别为
 90.34/78.48、89.68/81.32、90.25/77.50 和 80.54/75.83。四个源模型对自身架构的
@@ -114,8 +93,7 @@ ASR 为 85.26%。旧 checkpoint schedule 上得到的 selector/noise 数值不�
 攻击设置陈述。
 
 完整的架构契约、测试门禁、逐源结果、控制变量和梯度诊断见
-`experiments/progressive_cross_arch_mainline_s1000.md`。旧四白盒 final-layer 证据仍保留在
-`experiments/mainline_data_aug_gaussian_story_s1000.md`，仅作为历史边界与基线。
+`experiments/progressive_cross_arch_mainline_s1000.md`。
 
 ## 迁移评估与测试
 

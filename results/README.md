@@ -23,21 +23,6 @@ The `main.py` defaults are selected under `high`, `score-window-ratio=0.5`, and
 stage2-block1/stage3-block2/stage3-block3 with 5/2/6, and Visformer
 stage2-block1/stage3-block1 with 41/10.
 
-## Historical cross-architecture baseline
-
-The final-layer dynamic-mask `original_score_postdrop_phase_pair` pipeline is
-retained as the four-source cross-architecture baseline.  Its report is
-`experiments/mainline_data_aug_gaussian_story_s1000.md`.
-
-The four 1000-image source-model runs and their Gaussian-residual counterparts
-remain available as baseline CSV records. Smaller historical subsets and
-alternate view/noise attack records have been removed.
-
-Only the ViT Gaussian-residual comparison is part of the current written
-paper-level conclusion.  CaiT, PiT, and Visformer Gaussian directories and CSV
-records exist locally, but their provenance must be audited before they are
-promoted into the paper narrative.
-
 ## Archived negative or historical explorations
 
 The executable code for the following directions has been removed from the

@@ -23,15 +23,10 @@ The production mainline is the independent `ProgressivePatchScoreAttacker` in
    model's initial RGB convolution and RMS-matched in feature space.
 
 Score-global noise, phase pairs, Gaussian gradient residual, IID Gaussian
-feature noise and random routing remain supporting controls. For ViT, the
-canonical score-global setting is exposed under the old `score_cls_*` names as
-a compatibility alias. The `*_active` metadata fields are derived booleans;
-strengths remain numeric.
-
-`progressive_attack.py` does not import, inherit or call `attack.py`.
-`main.py` imports the legacy attacker only inside a non-progressive branch.
-ViT has no separate compatibility entry point; current attacks run through
-`main.py` with `block3,block10`.
+feature noise and random routing remain supporting controls. The `*_active`
+metadata fields are derived booleans; strengths remain numeric. `main.py`
+dispatches only this progressive implementation; no legacy attack module or
+adapter compatibility API is retained.
 
 ## Adapter contract and defaults
 
@@ -60,13 +55,11 @@ projection.
 
 ## Completed verification gates
 
-- Golden ViT parity: fixed-replay masks, every view gradient, raw mean,
-  processed gradient and final adversarial pixels are bitwise identical to the
-  pre-migration implementation. The golden hashes are retained in tests.
-- Static independence: AST checks reject an `attack` import or parent class in
-  `progressive_attack.py` and reject a top-level legacy import in `main.py`.
-- Physical independence: moving `attack.py` outside the repository still
-  permits imports and a complete progressive attack.
+- Golden ViT regression: fixed-replay masks, every view gradient, raw mean,
+  processed gradient and final adversarial pixels are pinned by hashes in the
+  test suite.
+- Static scope: tests require the legacy attack module and its adapter APIs to
+  be absent.
 - Adapter parity: all four real timm models produce bitwise-equal native and
   no-mask resumed logits.
 - Real gradients: all four adapters complete a two-view backward pass with
@@ -80,15 +73,14 @@ projection.
   2 views. Every saved PNG has an observed maximum perturbation of 16/255.
 - Small transfer: each smoke directory evaluates successfully on DeiT-B and
   ResNet-101.
-- Legacy dispatch: the historical phase-pair branch completes a real one-image
-  attack through `main.py`.
 - Formal scale: the selected defaults for all four sources, the initial
   cross-architecture matrix, two ViT noise controls, and the retained
   full-scale checkpoint/selector follow-ups complete 1000 images. Every formal
   directory has 1000 adversarial PNGs; K2/K3 runs record 200/300 checkpoint
   selections per image and maximum saved-PNG L-infinity 16/255.
-- Test suite: 70 tests pass; four optional/real tests are skipped in the default
-  run, and the four-model real adapter test passes when explicitly enabled.
+- Test suite: 46 tests pass; two optional real-model tests are skipped in the
+  default run, and the four-model real adapter test passes when explicitly
+  enabled.
 
 ## Formal cross-architecture transfer results
 
@@ -366,8 +358,6 @@ rank, and the matched 1000-image iterative transfer gains above.
 
 ## Conclusion
 
-All implementation, isolation, adapter, regression, full-budget, formal
-1000-image, transfer and control-variable gates in the migration plan are
-complete. The independent progressive attack replaces the historical
-final-layer route as the project mainline, while `attack.py` remains an
-isolated legacy implementation.
+All implementation, adapter, regression, full-budget, formal 1000-image,
+transfer and control-variable gates are complete. The progressive attack is
+the repository's sole attack implementation.

@@ -18,6 +18,7 @@ from tqdm import tqdm
 from gradient_replay import GradientReplay
 from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, build_whitebox_model
 from progressive_attack import (
+    PROGRESSIVE_FEATURE_NOISE_TYPES,
     PROGRESSIVE_PATCH_SELECTORS,
     PROGRESSIVE_SCORE_MODES,
     ProgressivePatchScoreAttacker,
@@ -27,22 +28,6 @@ from utils import DEVICE, load_data, save_adversarial_images
 
 IMAGE_DIR = "data/clean_resized_images"
 ANNOTATIONS_PATH = "data/image_name_to_class_id_and_name.json"
-ATTACK_METHODS = (
-    "progressive",
-    "original_score_postdrop_phase_pair",
-    "none",
-    "patch_dropout",
-    "token_patch_dropout",
-)
-PATCH_SELECTORS = ("patch_score", "random", "no_drop")
-POST_DROPOUT_NOISE_TYPES = ("gaussian", "opponent_projected")
-
-
-def parse_float_range(value: str) -> tuple[float, float]:
-    values = tuple(float(item.strip()) for item in value.split(",") if item.strip())
-    if len(values) != 2 or not 0.0 < values[0] <= values[1] <= 1.0:
-        raise argparse.ArgumentTypeError("range must satisfy 0 < low <= high <= 1")
-    return values
 
 
 def parse_phase_shift(value: str) -> tuple[int, int]:
@@ -171,7 +156,6 @@ def attack_all_samples(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Progressive patch-score routing attack")
-    parser.add_argument("--attack-method", choices=ATTACK_METHODS, default="progressive")
     parser.add_argument("--whitebox-model", choices=WHITEBOX_MODEL_CHOICES, default=DEFAULT_MODEL_NAME)
     parser.add_argument("--max-attacked-samples", type=int, default=1000)
     parser.add_argument(
@@ -190,13 +174,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mi-decay", type=float, default=1.0)
     parser.add_argument("--ni", action="store_true")
     parser.add_argument("--ti-sigma", type=float, default=0.0)
-    parser.add_argument("--dim", action="store_true")
-    parser.add_argument("--dim-resize-range", type=parse_float_range, default=(0.85, 1.0))
-    parser.add_argument("--guide-aug-copies", type=int, default=20)
     parser.add_argument("--input-diversity-groups", type=int, default=10)
     parser.add_argument("--input-diversity-views-per-group", type=int, default=2)
     parser.add_argument("--input-diversity-phase-shift-set", type=parse_phase_shift_set, default=((4, 4), (8, 8), (12, 12)))
-    parser.add_argument("--guide-aug-strength", type=float, default=0.2)
     parser.add_argument(
         "--checkpoints",
         type=parse_checkpoint_list,
@@ -232,60 +212,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--score-global-noise-strength", type=float, default=None)
     parser.add_argument(
-        "--score-cls-noise-strength",
-        type=float,
-        default=None,
-        help="Deprecated ViT-compatible alias for --score-global-noise-strength.",
-    )
-    parser.add_argument(
         "--opponent-noise-strength",
         type=float,
         default=None,
         help="Opponent-channel noise strength; omitted values use the source adapter default.",
     )
-    parser.add_argument("--patch-dropout-ratio", type=float, default=0.3)
-    parser.add_argument("--patch-dropout-score-mode", choices=("high", "low", "all"), default="high")
-    parser.add_argument("--patch-dropout-sampling-mode", choices=("random", "bernoulli", "extreme", "score_weighted"), default="random")
-    parser.add_argument("--patch-dropout-score-quantile-jitter", type=float, default=0.0)
-    parser.add_argument("--patch-dropout-score-noise", type=float, default=0.0)
-    parser.add_argument("--patch-dropout-noise-mode", choices=("gaussian", "opponent_channel_gaussian"), default="opponent_channel_gaussian")
-    parser.add_argument("--token-cls-noise", action="store_true")
-    parser.add_argument("--token-score-cls-noise", dest="token_score_cls_noise", action="store_true")
-    parser.add_argument("--no-token-score-cls-noise", dest="token_score_cls_noise", action="store_false")
-    parser.set_defaults(token_score_cls_noise=True)
-    parser.add_argument("--token-score-cls-mode", choices=("learned", "gaussian"), default="learned")
-    parser.add_argument("--token-score-patch-noise", action="store_true")
-    parser.add_argument("--token-cls-noise-mode", choices=("gaussian", "mahalanobis"), default="gaussian")
-    parser.add_argument("--token-cls-noise-strength", type=float, default=None)
-    parser.add_argument("--post-dropout-phase-token-noise", dest="post_dropout_phase_token_noise", action="store_true")
-    parser.add_argument("--no-post-dropout-phase-token-noise", dest="post_dropout_phase_token_noise", action="store_false")
-    parser.set_defaults(post_dropout_phase_token_noise=True)
     parser.add_argument(
-        "--post-dropout-feature-noise-strength",
-        type=float,
-        default=None,
-        help="Strength of kept-only post-dropout feature noise; omitted preserves guide-aug strength.",
-    )
-    parser.add_argument(
-        "--post-dropout-feature-noise-type",
-        choices=POST_DROPOUT_NOISE_TYPES,
+        "--feature-noise-type",
+        choices=PROGRESSIVE_FEATURE_NOISE_TYPES,
         default="opponent_projected",
-    )
-    parser.add_argument(
-        "--feature-layer",
-        type=int,
-        default=12,
-        help="Legacy patch/token-dropout layer; the generalized mainline uses each model's final semantic layer.",
-    )
-    parser.add_argument(
-        "--patch-score-layer",
-        default="final",
-        help="Registered routing checkpoint for the selected white-box model.",
-    )
-    parser.add_argument(
-        "--patch-selector",
-        choices=PATCH_SELECTORS,
-        default="patch_score",
     )
     parser.add_argument(
         "--gaussian-sigma",
@@ -324,80 +259,32 @@ def main(args: argparse.Namespace) -> None:
         prefetch_factor=args.prefetch_factor,
     )
     model = build_whitebox_model(num_classes=num_classes, model_name=args.whitebox_model)
-    if args.attack_method == "progressive":
-        if args.input_diversity_views_per_group != 2:
-            raise ValueError("the progressive mainline requires exactly two views per group.")
-        attacker = ProgressivePatchScoreAttacker(
-            model=model,
-            checkpoints=args.checkpoints,
-            drop_ratios=args.drop_ratios,
-            patch_selector=args.progressive_patch_selector,
-            score_window_ratio=args.score_window_ratio,
-            progressive_score_mode=args.progressive_score_mode,
-            score_global_noise_strength=args.score_global_noise_strength,
-            score_cls_noise_strength=args.score_cls_noise_strength,
-            opponent_noise_strength=args.opponent_noise_strength,
-            feature_noise_type=args.post_dropout_feature_noise_type,
-            epsilon=args.epsilon,
-            step_size=args.step_size,
-            steps=args.steps,
-            use_momentum=args.mi,
-            momentum_decay=args.mi_decay,
-            nesterov=args.ni,
-            ti_sigma=args.ti_sigma,
-            input_diversity_groups=args.input_diversity_groups,
-            input_diversity_views_per_group=2,
-            input_diversity_phase_shift_set=args.input_diversity_phase_shift_set,
-            post_dropout_phase_token_noise=args.post_dropout_phase_token_noise,
-            gaussian_sigma=args.gaussian_sigma,
-            gaussian_alpha=args.gaussian_alpha,
-            device=DEVICE,
-        )
-    else:
-        # The legacy implementation is intentionally imported only inside the
-        # legacy branch.  Progressive execution therefore remains functional
-        # when attack.py is absent.
-        from attack import PatchScoreAttacker
-
-        attacker = PatchScoreAttacker(
-            model=model,
-            epsilon=args.epsilon,
-            step_size=args.step_size,
-            steps=args.steps,
-            attack_method=args.attack_method,
-            use_momentum=args.mi,
-            momentum_decay=args.mi_decay,
-            nesterov=args.ni,
-            ti_sigma=args.ti_sigma,
-            input_diversity=args.dim,
-            dim_resize_range=args.dim_resize_range,
-            guide_aug_copies=args.guide_aug_copies,
-            input_diversity_groups=args.input_diversity_groups,
-            input_diversity_views_per_group=args.input_diversity_views_per_group,
-            input_diversity_phase_shift_set=args.input_diversity_phase_shift_set,
-            guide_aug_strength=args.guide_aug_strength,
-            patch_dropout_ratio=args.patch_dropout_ratio,
-            patch_dropout_score_mode=args.patch_dropout_score_mode,
-            patch_dropout_sampling_mode=args.patch_dropout_sampling_mode,
-            patch_dropout_score_quantile_jitter=args.patch_dropout_score_quantile_jitter,
-            patch_dropout_score_noise=args.patch_dropout_score_noise,
-            patch_dropout_noise_mode=args.patch_dropout_noise_mode,
-            token_cls_noise=args.token_cls_noise,
-            token_score_cls_noise=args.token_score_cls_noise,
-            token_score_cls_mode=args.token_score_cls_mode,
-            token_score_patch_noise=args.token_score_patch_noise,
-            token_cls_noise_mode=args.token_cls_noise_mode,
-            token_cls_noise_strength=args.token_cls_noise_strength,
-            post_dropout_phase_token_noise=args.post_dropout_phase_token_noise,
-            post_dropout_feature_noise_strength=args.post_dropout_feature_noise_strength,
-            post_dropout_feature_noise_type=args.post_dropout_feature_noise_type,
-            feature_layer=args.feature_layer,
-            patch_score_layer=args.patch_score_layer,
-            patch_selector=args.patch_selector,
-            gaussian_sigma=args.gaussian_sigma,
-            gaussian_alpha=args.gaussian_alpha,
-            device=DEVICE,
-        )
+    if args.input_diversity_views_per_group != 2:
+        raise ValueError("the progressive attack requires exactly two views per group.")
+    attacker = ProgressivePatchScoreAttacker(
+        model=model,
+        checkpoints=args.checkpoints,
+        drop_ratios=args.drop_ratios,
+        patch_selector=args.progressive_patch_selector,
+        score_window_ratio=args.score_window_ratio,
+        progressive_score_mode=args.progressive_score_mode,
+        score_global_noise_strength=args.score_global_noise_strength,
+        opponent_noise_strength=args.opponent_noise_strength,
+        feature_noise_type=args.feature_noise_type,
+        epsilon=args.epsilon,
+        step_size=args.step_size,
+        steps=args.steps,
+        use_momentum=args.mi,
+        momentum_decay=args.mi_decay,
+        nesterov=args.ni,
+        ti_sigma=args.ti_sigma,
+        input_diversity_groups=args.input_diversity_groups,
+        input_diversity_views_per_group=2,
+        input_diversity_phase_shift_set=args.input_diversity_phase_shift_set,
+        gaussian_sigma=args.gaussian_sigma,
+        gaussian_alpha=args.gaussian_alpha,
+        device=DEVICE,
+    )
 
     clear_directory_contents(output_dir)
     replay = GradientReplay(args.seed) if args.seed is not None else None
@@ -420,7 +307,7 @@ def main(args: argparse.Namespace) -> None:
     )
 
     params = {
-        "attack_method": args.attack_method,
+        "attack_method": "progressive_patch_score",
         "whitebox_model": args.whitebox_model,
         "max_attacked_samples": args.max_attacked_samples,
         "sample_offset": args.sample_offset,
@@ -432,75 +319,21 @@ def main(args: argparse.Namespace) -> None:
         "mi_decay": args.mi_decay,
         "ni": args.ni,
         "ti_sigma": args.ti_sigma,
-        "dim": args.dim,
-        "dim_resize_range": list(args.dim_resize_range),
-        "guide_aug_copies": args.guide_aug_copies,
         "input_diversity_groups": args.input_diversity_groups,
         "input_diversity_views_per_group": args.input_diversity_views_per_group,
         "input_diversity_total_views": (
             args.input_diversity_groups * args.input_diversity_views_per_group
         ),
         "input_diversity_phase_shift_set": [list(shift) for shift in args.input_diversity_phase_shift_set],
-        "guide_aug_strength": args.guide_aug_strength,
-        "checkpoints": (
-            list(attacker.progressive_checkpoints)
-            if args.attack_method == "progressive"
-            else list(args.checkpoints) if args.checkpoints is not None else None
-        ),
-        "drop_ratios": (
-            list(attacker.progressive_drop_ratios)
-            if args.attack_method == "progressive"
-            else list(args.drop_ratios) if args.drop_ratios is not None else None
-        ),
+        "checkpoints": list(attacker.progressive_checkpoints),
+        "drop_ratios": list(attacker.progressive_drop_ratios),
         "progressive_patch_selector": args.progressive_patch_selector,
         "score_window_ratio": args.score_window_ratio,
-        "progressive_score_mode": (
-            attacker.progressive_score_mode
-            if args.attack_method == "progressive"
-            else args.progressive_score_mode or "cosine"
-        ),
-        "score_global_noise_strength": (
-            args.score_global_noise_strength
-            if args.score_global_noise_strength is not None
-            else args.score_cls_noise_strength
-            if args.score_cls_noise_strength is not None
-            else 0.2
-        ),
-        "score_cls_noise_strength_cli_alias": args.score_cls_noise_strength,
-        "opponent_noise_strength": (
-            attacker.opponent_noise_strength
-            if args.attack_method == "progressive"
-            else args.opponent_noise_strength
-            if args.opponent_noise_strength is not None
-            else 0.2
-        ),
-        "patch_dropout_ratio": args.patch_dropout_ratio,
-        "patch_dropout_score_mode": args.patch_dropout_score_mode,
-        "patch_dropout_sampling_mode": args.patch_dropout_sampling_mode,
-        "patch_dropout_score_quantile_jitter": args.patch_dropout_score_quantile_jitter,
-        "patch_dropout_score_noise": args.patch_dropout_score_noise,
-        "patch_dropout_noise_mode": args.patch_dropout_noise_mode,
-        "token_cls_noise": args.token_cls_noise,
-        "token_score_cls_noise": args.token_score_cls_noise,
-        "token_score_cls_mode": args.token_score_cls_mode,
-        "token_score_patch_noise": args.token_score_patch_noise,
-        "token_cls_noise_mode": args.token_cls_noise_mode,
-        "token_cls_noise_strength": (
-            args.token_cls_noise_strength
-            if args.token_cls_noise_strength is not None
-            else args.guide_aug_strength
-        ),
-        "post_dropout_phase_token_noise": args.post_dropout_phase_token_noise,
-        "post_dropout_feature_noise_strength": (
-            args.post_dropout_feature_noise_strength
-            if args.post_dropout_feature_noise_strength is not None
-            else args.guide_aug_strength
-        ),
-        "post_dropout_feature_noise_type": args.post_dropout_feature_noise_type,
-        "post_dropout_feature_noise_position": "initial",
-        "feature_layer": args.feature_layer,
-        "patch_score_layer": args.patch_score_layer,
-        "patch_selector": args.patch_selector,
+        "progressive_score_mode": attacker.progressive_score_mode,
+        "score_global_noise_strength": attacker.score_global_noise_strength,
+        "opponent_noise_strength": attacker.opponent_noise_strength,
+        "feature_noise_type": args.feature_noise_type,
+        "feature_noise_position": "initial_rgb_projection",
         "gradient_postprocess": (
             "raw_mean_plus_gaussian_residual"
             if args.gaussian_alpha != 0

@@ -3,36 +3,26 @@ from __future__ import annotations
 import torch
 
 from .base import (
-    AttackFeatureState,
     DEFAULT_PRETRAINED,
     PatchScoreFeatures,
+    ProgressiveAdapter,
     ProgressiveAttackState,
-    WhiteBoxWithHook,
-    conv2d_attack_metadata,
-    sequential_modules,
+    ProgressiveInputState,
+    conv2d_progressive_metadata,
 )
 
 
 DEFAULT_MODEL_NAME = "vit_base_patch16_224"
 
 
-class ViTWithHook(WhiteBoxWithHook):
+class ViTAdapter(ProgressiveAdapter):
     default_model_name = DEFAULT_MODEL_NAME
 
-    _PATCH_SCORE_LAYERS = {
-        "block3": 3,
-        "block6": 6,
-        "block9": 9,
-        "block12": 12,
-    }
     _PROGRESSIVE_LAYERS = tuple(f"block{index}" for index in range(1, 12))
     _DEFAULT_PROGRESSIVE_LAYERS = ("block3", "block10")
     _DEFAULT_PROGRESSIVE_DROP_RATIOS = (0.051020408163, 0.051020408163)
 
-    def _feature_modules(self):
-        return sequential_modules(getattr(self.model, "blocks", None))
-
-    def prepare_attack_feature_state(self, x: torch.Tensor) -> AttackFeatureState:
+    def prepare_progressive_input(self, x: torch.Tensor) -> ProgressiveInputState:
         base = self.model
         tokens = base.patch_embed(x)
         grid_size = tuple(int(value) for value in base.patch_embed.grid_size)
@@ -40,57 +30,14 @@ class ViTWithHook(WhiteBoxWithHook):
         tokens = base.patch_drop(tokens)
         tokens = base.norm_pre(tokens)
         prefix_count = int(getattr(base, "num_prefix_tokens", 1))
-        state = AttackFeatureState(
+        state = ProgressiveInputState(
             local_tokens=tokens[:, prefix_count:],
             grid_size=grid_size,
             context={"prefix_tokens": tokens[:, :prefix_count]},
-            **conv2d_attack_metadata(base.patch_embed.proj),
+            **conv2d_progressive_metadata(base.patch_embed.proj),
         )
         state.validate()
         return state
-
-    def patch_score_layer_candidates(self) -> tuple[str, ...]:
-        return tuple(self._PATCH_SCORE_LAYERS)
-
-    def extract_patch_score_features(
-        self,
-        x: torch.Tensor,
-        *,
-        score_layer: str = "final",
-    ) -> PatchScoreFeatures:
-        canonical = "block12" if score_layer == "final" else score_layer
-        if canonical not in self._PATCH_SCORE_LAYERS:
-            raise ValueError(
-                f"unsupported ViT patch score layer: {score_layer!r}; "
-                f"choose from {self.patch_score_layer_candidates()} or 'final'."
-            )
-        state = self.prepare_attack_feature_state(x)
-        tokens = torch.cat((state.context["prefix_tokens"], state.local_tokens), dim=1)
-        block_count = self._PATCH_SCORE_LAYERS[canonical]
-        for block in self.model.blocks[:block_count]:
-            tokens = block(tokens)
-        features = PatchScoreFeatures(
-            local_tokens=tokens[:, -state.local_tokens.size(1):],
-            global_token=tokens[:, :1],
-            grid_size=state.grid_size,
-            source_name=f"blocks[{block_count - 1}]",
-            layer_id=canonical,
-            global_mode="cls",
-        )
-        features.validate()
-        return features
-
-    def forward_from_attack_feature_state(
-        self,
-        state: AttackFeatureState,
-        local_tokens: torch.Tensor,
-    ) -> torch.Tensor:
-        state.validate()
-        if local_tokens.shape != state.local_tokens.shape:
-            raise ValueError("replacement ViT local tokens do not match the attack state.")
-        tokens = torch.cat((state.context["prefix_tokens"], local_tokens), dim=1)
-        tokens = self.model.blocks(tokens)
-        return self.model.forward_head(self.model.norm(tokens))
 
     def progressive_checkpoint_candidates(self) -> tuple[str, ...]:
         return self._PROGRESSIVE_LAYERS
@@ -102,7 +49,7 @@ class ViTWithHook(WhiteBoxWithHook):
         return self._DEFAULT_PROGRESSIVE_DROP_RATIOS
 
     def begin_progressive_forward(self, x: torch.Tensor) -> ProgressiveAttackState:
-        initial = self.prepare_attack_feature_state(x)
+        initial = self.prepare_progressive_input(x)
         state = ProgressiveAttackState(
             local_tokens=initial.local_tokens,
             grid_size=initial.grid_size,
@@ -173,5 +120,5 @@ def build_vit_model(
     model_name: str = DEFAULT_MODEL_NAME,
     pretrained: bool = DEFAULT_PRETRAINED,
     device=None,
-) -> ViTWithHook:
-    return ViTWithHook(model_name=model_name, num_classes=num_classes, pretrained=pretrained, device=device)
+) -> ViTAdapter:
+    return ViTAdapter(model_name=model_name, num_classes=num_classes, pretrained=pretrained, device=device)

@@ -6,25 +6,25 @@ import unittest
 import torch
 
 from nets import WHITEBOX_MODEL_CHOICES, build_whitebox_model
-from nets.cait import CaiTS24WithHook
-from nets.pit import PiTB224WithHook
-from nets.visformer import VisformerSmallWithHook
-from nets.vit import ViTWithHook
+from nets.cait import CaiTS24Adapter
+from nets.pit import PiTB224Adapter
+from nets.visformer import VisformerSmallAdapter
+from nets.vit import ViTAdapter
 from progressive_attack import ProgressivePatchScoreAttacker
 
 
 class ProgressiveAdapterContractTests(unittest.TestCase):
     EXPECTED_DEFAULTS = {
-        ViTWithHook: ("block3", "block10"),
-        CaiTS24WithHook: ("block17_gap", "block23_gap"),
-        PiTB224WithHook: ("stage2_block1", "stage3_block2", "stage3_block3"),
-        VisformerSmallWithHook: ("stage2_block1", "stage3_block1"),
+        ViTAdapter: ("block3", "block10"),
+        CaiTS24Adapter: ("block17_gap", "block23_gap"),
+        PiTB224Adapter: ("stage2_block1", "stage3_block2", "stage3_block3"),
+        VisformerSmallAdapter: ("stage2_block1", "stage3_block1"),
     }
     EXPECTED_DEFAULT_COUNTS = {
-        ViTWithHook: ((196, 196), (10, 10)),
-        CaiTS24WithHook: ((196, 196), (2, 28)),
-        PiTB224WithHook: ((256, 64, 64), (5, 2, 6)),
-        VisformerSmallWithHook: ((196, 49), (41, 10)),
+        ViTAdapter: ((196, 196), (10, 10)),
+        CaiTS24Adapter: ((196, 196), (2, 28)),
+        PiTB224Adapter: ((256, 64, 64), (5, 2, 6)),
+        VisformerSmallAdapter: ((196, 49), (41, 10)),
     }
 
     def test_each_adapter_registers_ordered_defaults(self):
@@ -38,10 +38,10 @@ class ProgressiveAdapterContractTests(unittest.TestCase):
 
     def test_architecture_specific_default_drop_ratios(self):
         expected_ratios = {
-            ViTWithHook: (0.051020408163, 0.051020408163),
-            CaiTS24WithHook: (0.010204081633, 0.142857142857),
-            PiTB224WithHook: (0.02081165, 0.03125, 0.09375),
-            VisformerSmallWithHook: (0.209183673469, 0.204081632653),
+            ViTAdapter: (0.051020408163, 0.051020408163),
+            CaiTS24Adapter: (0.010204081633, 0.142857142857),
+            PiTB224Adapter: (0.02081165, 0.03125, 0.09375),
+            VisformerSmallAdapter: (0.209183673469, 0.204081632653),
         }
         for adapter in self.EXPECTED_DEFAULTS:
             with self.subTest(adapter=adapter.__name__):
@@ -63,10 +63,10 @@ class ProgressiveAdapterContractTests(unittest.TestCase):
 
     def test_architecture_specific_score_and_opponent_defaults(self):
         expected = {
-            ViTWithHook: ("cosine", 0.2),
-            CaiTS24WithHook: ("gap_projection", 0.2),
-            PiTB224WithHook: ("cosine", 0.4),
-            VisformerSmallWithHook: ("gap_projection", 0.4),
+            ViTAdapter: ("cosine", 0.2),
+            CaiTS24Adapter: ("gap_projection", 0.2),
+            PiTB224Adapter: ("cosine", 0.4),
+            VisformerSmallAdapter: ("gap_projection", 0.4),
         }
         for adapter, defaults in expected.items():
             with self.subTest(adapter=adapter.__name__):
@@ -76,7 +76,9 @@ class ProgressiveAdapterContractTests(unittest.TestCase):
                     instance.default_progressive_opponent_noise_strength(), defaults[1]
                 )
 
-    def test_main_has_no_top_level_legacy_attack_import(self):
+    def test_legacy_attack_module_and_adapter_apis_are_absent(self):
+        repository = Path(__file__).resolve().parents[1]
+        self.assertFalse((repository / "attack.py").exists())
         source = (Path(__file__).resolve().parents[1] / "main.py").read_text(
             encoding="utf-8"
         )
@@ -88,6 +90,10 @@ class ProgressiveAdapterContractTests(unittest.TestCase):
             elif isinstance(node, ast.ImportFrom) and node.module:
                 top_level_imports.append(node.module)
         self.assertNotIn("attack", top_level_imports)
+        for adapter in self.EXPECTED_DEFAULTS:
+            self.assertFalse(hasattr(adapter, "extract_patch_score_features"))
+            self.assertFalse(hasattr(adapter, "forward_from_attack_feature_state"))
+            self.assertFalse(hasattr(adapter, "patch_score_layer_candidates"))
 
     @unittest.skipUnless(
         os.environ.get("RUN_REAL_PROGRESSIVE_ADAPTER_SMOKE") == "1",

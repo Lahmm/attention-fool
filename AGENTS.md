@@ -22,10 +22,10 @@
 - The protected behavior is: fresh sequential checkpoint schedules from current adversarial pixels, the ViT `block3,block10` schedule, high-score-window sampling, local-token hard zeroing, transformed phase-pair schedules, kept-only RGB opponent-channel projected noise, and the projected iterative update used by the current progressive attack.
 - Code is not protected merely because it is currently imported, exposed by the CLI, covered by a test, mentioned in an old report, or needed to reproduce a superseded experiment.
 
-## Removable scope
+## Removed scope
 
-- All non-progressive attack implementations and compatibility paths may be removed, including `attack.py`, `original_score_postdrop_phase_pair`, `none`, `patch_dropout`, and `token_patch_dropout`.
-- Legacy adapter APIs may be removed, including final-layer patch-score extraction, resumable legacy forwards, token hooks, and legacy checkpoint registries, provided the progressive adapter contract remains complete for all four supported architectures.
+- Do not restore non-progressive attack implementations or compatibility paths, including the deleted `attack.py`, `original_score_postdrop_phase_pair`, `none`, `patch_dropout`, and `token_patch_dropout` paths.
+- Do not restore legacy adapter APIs, including final-layer patch-score extraction, resumable legacy forwards, token hooks, or legacy checkpoint registries. The adapters expose only the progressive contract.
 - Non-mainline selectors, score modes, augmentation modules, gradient post-processing variants, diagnostics, replay helpers, transfer-evaluation helpers, result-recording utilities, completed experiment runners, compatibility wrappers, historical tests, archived reports, and generated artifacts may be removed when they are not required by the retained progressive attack.
 - Backward CLI compatibility and reproduction of historical experiments are not cleanup requirements. Remove stale parameters and metadata instead of preserving no-op or legacy options.
 - Update or delete tests and documentation together with removed functionality so that the remaining repository describes only the retained progressive attack.

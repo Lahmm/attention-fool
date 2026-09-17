@@ -1,9 +1,4 @@
-"""Architecture-neutral progressive patch-score mainline.
-
-This module is deliberately independent from :mod:`attack`.  It owns the
-complete attack lifecycle and relies only on the progressive adapter contract
-implemented by ``nets/``.
-"""
+"""Architecture-neutral progressive patch-score attack implementation."""
 
 from __future__ import annotations
 
@@ -34,6 +29,8 @@ PROGRESSIVE_SCORE_MODES = (
     "gap_projection",
     "gap_channel_rms_cosine",
 )
+
+
 @dataclass(frozen=True)
 class ProgressiveMaskSelection:
     checkpoint: str
@@ -106,7 +103,6 @@ class ProgressivePatchScoreAttacker:
         score_window_ratio: float = 0.5,
         progressive_score_mode: str | None = None,
         score_global_noise_strength: float | None = None,
-        score_cls_noise_strength: float | None = None,
         opponent_noise_strength: float | None = None,
         feature_noise_type: str = "opponent_projected",
         epsilon: float = 16.0 / 255.0,
@@ -123,21 +119,10 @@ class ProgressivePatchScoreAttacker:
             (8, 8),
             (12, 12),
         ),
-        post_dropout_phase_token_noise: bool = True,
         gaussian_sigma: float = 4.0,
         gaussian_alpha: float = 0.75,
         device: torch.device | None = None,
-        attack_method: str | None = None,
-        input_diversity: bool = False,
-        **unsupported,
     ) -> None:
-        if unsupported:
-            names = ", ".join(sorted(unsupported))
-            raise TypeError(f"unsupported progressive attack arguments: {names}.")
-        if attack_method not in (None, "progressive", "original_score_postdrop_phase_pair"):
-            raise ValueError("the progressive attacker does not execute a legacy attack method.")
-        if input_diversity:
-            raise ValueError("the progressive phase-pair mainline does not combine with DIM.")
         if epsilon < 0 or steps <= 0:
             raise ValueError("epsilon must be non-negative and steps must be positive.")
         if step_size is not None and step_size <= 0:
@@ -179,14 +164,9 @@ class ProgressivePatchScoreAttacker:
             raise ValueError(
                 f"progressive_score_mode must be one of {PROGRESSIVE_SCORE_MODES}."
             )
-        if score_global_noise_strength is not None and score_cls_noise_strength is not None:
-            if float(score_global_noise_strength) != float(score_cls_noise_strength):
-                raise ValueError("score noise aliases disagree.")
         resolved_score_noise = (
             score_global_noise_strength
             if score_global_noise_strength is not None
-            else score_cls_noise_strength
-            if score_cls_noise_strength is not None
             else 0.2
         )
         if resolved_score_noise < 0 or opponent_noise_strength < 0:
@@ -237,14 +217,8 @@ class ProgressivePatchScoreAttacker:
         self.score_window_ratio = float(score_window_ratio)
         self.progressive_score_mode = progressive_score_mode
         self.score_global_noise_strength = float(resolved_score_noise)
-        # Compatibility name is metadata-only; the canonical setting is global
-        # because GAP-based adapters do not have a CLS token.
-        self.score_cls_noise_strength = self.score_global_noise_strength
         self.opponent_noise_strength = float(opponent_noise_strength)
         self.feature_noise_type = feature_noise_type
-        self.post_dropout_phase_token_noise = bool(post_dropout_phase_token_noise)
-        self.post_dropout_feature_noise_strength = self.opponent_noise_strength
-        self.patch_dropout_ratio = 0.0
         self.epsilon = float(epsilon)
         self.steps = int(steps)
         self.step_size = float(step_size) if step_size is not None else self.epsilon / self.steps
@@ -601,13 +575,13 @@ class ProgressivePatchScoreAttacker:
         self, pixels: torch.Tensor, labels: torch.Tensor, schedule: ProgressiveMaskSchedule
     ) -> torch.Tensor:
         normalized = self._normalize(pixels)
-        initial = self.model.prepare_attack_feature_state(normalized)
+        initial = self.model.prepare_progressive_input(normalized)
         initial.validate()
         state = self.model.begin_progressive_forward(normalized)
         if state.local_tokens.shape != initial.local_tokens.shape:
             raise ValueError("progressive and RGB-projection initial states disagree.")
         local = state.local_tokens
-        if self.post_dropout_phase_token_noise and self.opponent_noise_strength > 0:
+        if self.opponent_noise_strength > 0:
             image_union = self._schedule_image_union(
                 schedule, pixels.size(-2), pixels.size(-1)
             ).to(pixels)
@@ -855,8 +829,6 @@ class ProgressivePatchScoreAttacker:
             "score_reference": score_reference,
             "score_global_noise_active": score_noise_active,
             "score_global_noise_strength": self.score_global_noise_strength,
-            "score_cls_noise_active": score_noise_active,
-            "score_cls_noise_strength": self.score_global_noise_strength,
             "token_intervention": "local_patch_tokens_hard_zero_after_checkpoint",
             "mask_schedule_policy": "current_attack_iterate_per_step_group",
             "mask_schedule_count_per_image": self.steps * self.input_diversity_groups,
