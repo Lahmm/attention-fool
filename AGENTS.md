@@ -7,24 +7,25 @@
 ## Current research mainline
 
 - The paper mainline has exactly two core mechanisms: **patch-score-guided patch drop** and **RGB opponent-channel random noise**. Do not stack unrelated attack modules onto the main claim.
-- The promoted research mainline is the progressive high-score attack currently implemented by `vit_progressive_patch_score_attack.py`. Its validated ViT-B/16 reference configuration uses checkpoint boundaries `(3, 7, 11)`, independently drops 5% of local tokens at each checkpoint, and permits the same position to be selected again later in the schedule.
+- The only retained attack is the progressive high-score attack implemented by `progressive_attack.py` and dispatched by `main.py`. `vit_progressive_patch_score_attack.py` is not an authoritative implementation and does not need to be preserved as a compatibility entry point.
+- The validated ViT-B/16 reference configuration uses checkpoint boundaries `(3, 7, 11)`, independently drops 5% of local tokens at each checkpoint, and permits the same position to be selected again later in the schedule.
 - At every attack step and augmentation group, build a fresh three-checkpoint schedule from the current adversarial pixels. At each checkpoint, recompute global/local patch scores on the sequentially updated token state, sample from the score-high half, and hard-zero the selected local tokens. The original view uses that schedule and the phase view uses its spatially transformed counterpart. The default 10 steps × 10 groups produces 100 schedules and 300 checkpoint mask selections per image.
 - Patch-score is a label-free, gradient-independent global/local representation routing coordinate for deciding **where** to perturb.
 - Opponent-channel noise decides **how** to perturb kept evidence: sample luminance, red-green, and yellow-blue RGB directions, project through the initial RGB projection, and RMS-match in feature space.
 - Validate complementarity with transferable-gradient diagnostics and transfer ASR defined as `1 - adversarial accuracy` over all evaluated adversarial samples; do not filter to a target-clean-correct subset.
-- CLS score noise, phase pairs, raw multi-view mean, Gaussian residual, MI/NI/DIM/TI, and the `none`/pixel-drop/token-drop paths are supporting mechanisms or controlled ablations.
-- The final-layer pixel-drop `original_score_postdrop_phase_pair` behavior is now a historical cross-architecture baseline, not the current research mainline.
-- Migration into `main.py` must preserve support for ViT-B/16, CaiT-S24, PiT-B, and Visformer-S through architecture adapters. Do not encode ViT block assumptions as a nominally cross-architecture implementation.
+- Preserve support for ViT-B/16, CaiT-S24, PiT-B, and Visformer-S through architecture adapters. Do not encode ViT block assumptions as a nominally cross-architecture implementation.
 
 ## Retained executable scope
 
-- Promoted mainline reference: `vit_progressive_patch_score_attack.py` (currently ViT-only and pending migration into `main.py`).
-- Shared and legacy attack code: `main.py`, `attack.py`, `gradient_replay.py`, `transfer_eval.py`.
-- Legacy attack methods: `original_score_postdrop_phase_pair`, `none`, `patch_dropout`, `token_patch_dropout`.
-- Progressive mainline selector: `high`; controlled selector ablations: `low`, `random`.
-- Model adapters: `nets/`.
+- Retain only the current progressive high-score attack behavior in `progressive_attack.py`, the minimal `main.py` execution path needed to run it, and the progressive portions of the four architecture adapters in `nets/`.
+- Retain only utility, test, configuration, and documentation code that is directly required to execute or verify that progressive attack.
+- The protected behavior is: fresh sequential checkpoint schedules from current adversarial pixels, high-score-window sampling, local-token hard zeroing, transformed phase-pair schedules, kept-only RGB opponent-channel projected noise, and the projected iterative update used by the current progressive attack.
+- Code is not protected merely because it is currently imported, exposed by the CLI, covered by a test, mentioned in an old report, or needed to reproduce a superseded experiment.
 
-## Archived evidence
+## Removable scope
 
-- Historical semantic-gradient E4-E10 results remain boundary evidence only.
-- Do not claim Gaussian-residual results for models whose completed provenance has not been audited.
+- All non-progressive attack implementations and compatibility paths may be removed, including `attack.py`, `original_score_postdrop_phase_pair`, `none`, `patch_dropout`, and `token_patch_dropout`.
+- Legacy adapter APIs may be removed, including final-layer patch-score extraction, resumable legacy forwards, token hooks, and legacy checkpoint registries, provided the progressive adapter contract remains complete for all four supported architectures.
+- Non-mainline selectors, score modes, augmentation modules, gradient post-processing variants, diagnostics, replay helpers, transfer-evaluation helpers, result-recording utilities, completed experiment runners, compatibility wrappers, historical tests, archived reports, and generated artifacts may be removed when they are not required by the retained progressive attack.
+- Backward CLI compatibility and reproduction of historical experiments are not cleanup requirements. Remove stale parameters and metadata instead of preserving no-op or legacy options.
+- Update or delete tests and documentation together with removed functionality so that the remaining repository describes only the retained progressive attack.
