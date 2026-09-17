@@ -18,7 +18,7 @@ evaluation. The implementation contract, selected configurations, screening
 results, and auditable CSV paths are recorded in
 `experiments/progressive_cross_arch_mainline_s1000.md`.
 
-The `main.py` defaults are selected under `high`, `score-window-ratio=0.5`, and
+The `main.py` defaults use `high` selection from the fixed score-high half and
 `K>1`: ViT block3/10 with 10/10 drops, CaiT block17/23 with 2/28, PiT
 stage2-block1/stage3-block2/stage3-block3 with 5/2/6, and Visformer
 stage2-block1/stage3-block1 with 41/10.

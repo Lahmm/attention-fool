@@ -9,8 +9,8 @@ complete; remaining adaptive opponent-strength runs pending.
 
 All runs use the first 192 annotated images (`sample-offset=0`), seed 20260907,
 10 attack steps, 10 augmentation groups, two phase-paired views, MI, Gaussian
-residual sigma 4/alpha 0.75, `selector=high`, and
-`score-window-ratio=0.5`. Schedules are rebuilt from current adversarial pixels
+residual sigma 4/alpha 0.75, and `selector=high` over the fixed score-high half.
+Schedules are rebuilt from current adversarial pixels
 at every step/group; scores are recomputed on sequentially updated checkpoint
 states; selected tokens are hard-zeroed and positions may be selected again at
 later checkpoints. Transfer ASR is `1 - adversarial accuracy` over all samples

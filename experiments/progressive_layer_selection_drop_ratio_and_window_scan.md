@@ -9,7 +9,7 @@ The current and only retained ViT-B/16 progressive attack setting is:
 - drop ratios: `0.051020408163,0.051020408163`;
 - drop counts: `10,10` on the 14 x 14 token grid;
 - selector: `high`;
-- score window ratio: `0.5`;
+- selection pool: fixed score-high half;
 - opponent noise strength: `0.2`.
 
 With 10 attack steps and 10 augmentation groups, this configuration builds
@@ -22,6 +22,7 @@ Reproduce the retained setting with:
 
 ```bash
 python main.py \
+  --attack-method progressive \
   --whitebox-model vit_base_patch16_224 \
   --checkpoints block3,block10 \
   --drop-ratios 0.051020408163,0.051020408163 \

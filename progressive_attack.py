@@ -100,7 +100,6 @@ class ProgressivePatchScoreAttacker:
         checkpoints: tuple[str | int, ...] | None = None,
         drop_ratios: tuple[float, ...] | None = None,
         patch_selector: str = "high",
-        score_window_ratio: float = 0.5,
         progressive_score_mode: str | None = None,
         score_global_noise_strength: float | None = None,
         opponent_noise_strength: float | None = None,
@@ -110,8 +109,6 @@ class ProgressivePatchScoreAttacker:
         steps: int = 10,
         use_momentum: bool = True,
         momentum_decay: float = 1.0,
-        nesterov: bool = False,
-        ti_sigma: float = 0.0,
         input_diversity_groups: int = 10,
         input_diversity_views_per_group: int = 2,
         input_diversity_phase_shift_set: tuple[tuple[int, int], ...] = (
@@ -127,10 +124,6 @@ class ProgressivePatchScoreAttacker:
             raise ValueError("epsilon must be non-negative and steps must be positive.")
         if step_size is not None and step_size <= 0:
             raise ValueError("step_size must be positive.")
-        if nesterov and not use_momentum:
-            raise ValueError("Nesterov requires momentum.")
-        if ti_sigma < 0:
-            raise ValueError("ti_sigma must be non-negative.")
         if input_diversity_groups <= 0 or input_diversity_views_per_group != 2:
             raise ValueError("progressive requires positive groups and exactly two views per group.")
         if input_diversity_groups * input_diversity_views_per_group > 20:
@@ -146,8 +139,6 @@ class ProgressivePatchScoreAttacker:
                 f"patch_selector must be one of {PROGRESSIVE_PATCH_SELECTORS}, "
                 f"got {patch_selector!r}."
             )
-        if not 0.0 < float(score_window_ratio) <= 1.0:
-            raise ValueError("score_window_ratio must satisfy 0 < ratio <= 1.")
         if progressive_score_mode is None:
             score_mode_provider = getattr(model, "default_progressive_score_mode", None)
             progressive_score_mode = (
@@ -214,7 +205,6 @@ class ProgressivePatchScoreAttacker:
         self.progressive_checkpoints = canonical
         self.progressive_drop_ratios = ratios
         self.progressive_patch_selector = patch_selector
-        self.score_window_ratio = float(score_window_ratio)
         self.progressive_score_mode = progressive_score_mode
         self.score_global_noise_strength = float(resolved_score_noise)
         self.opponent_noise_strength = float(opponent_noise_strength)
@@ -224,8 +214,6 @@ class ProgressivePatchScoreAttacker:
         self.step_size = float(step_size) if step_size is not None else self.epsilon / self.steps
         self.use_momentum = bool(use_momentum)
         self.decay = float(momentum_decay)
-        self.nesterov = bool(nesterov)
-        self.ti_sigma = float(ti_sigma)
         self.input_diversity_groups = int(input_diversity_groups)
         self.input_diversity_views_per_group = 2
         self.input_diversity_phase_shift_set = tuple(
@@ -253,7 +241,6 @@ class ProgressivePatchScoreAttacker:
             "effective_rank": [],
             "mi_cumulative_cosine": [],
         }
-        self._ti_kernel = self._build_ti_kernel(self.ti_sigma) if self.ti_sigma > 0 else None
 
     @staticmethod
     def _canonical_checkpoint(model, value: str | int) -> str:
@@ -284,7 +271,7 @@ class ProgressivePatchScoreAttacker:
         if self.score_global_noise_strength > 0:
             token_rms = local.detach().square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
             noise = self._randn_like(
-                clean_global, f"progressive_score_cls_{features.layer_id}"
+                clean_global, f"progressive_score_global_{features.layer_id}"
             )
             global_noise = self.score_global_noise_strength * token_rms * noise
         global_token = clean_global + global_noise
@@ -316,7 +303,7 @@ class ProgressivePatchScoreAttacker:
         self, scores: torch.Tensor, ratio: float, checkpoint: str, *, largest: bool
     ) -> torch.Tensor:
         batch_size, token_count = scores.shape
-        candidate_count = max(1, int(round(token_count * self.score_window_ratio)))
+        candidate_count = max(1, int(round(token_count * 0.5)))
         drop_count = max(1, int(round(token_count * ratio)))
         if drop_count > candidate_count:
             raise ValueError("drop budget exceeds the selected score half.")
@@ -662,25 +649,6 @@ class ProgressivePatchScoreAttacker:
                 summary[name] = sum(values) / len(values)
         return summary
 
-    @staticmethod
-    def _build_ti_kernel(sigma: float) -> torch.Tensor:
-        radius = int(3 * sigma)
-        axis = torch.arange(-radius, radius + 1, dtype=torch.float32)
-        gaussian = torch.exp(-0.5 * (axis / sigma).square())
-        gaussian = gaussian / gaussian.sum()
-        return (gaussian[:, None] @ gaussian[None, :]).view(1, 1, -1, gaussian.numel())
-
-    def _smooth_grad(self, grad: torch.Tensor) -> torch.Tensor:
-        if self._ti_kernel is None:
-            return grad
-        kernel = self._ti_kernel.to(grad.device, grad.dtype).repeat(grad.size(1), 1, 1, 1)
-        padding = kernel.size(-1) // 2
-        return F.conv2d(
-            F.pad(grad, (padding, padding, padding, padding), mode="reflect"),
-            kernel,
-            groups=grad.size(1),
-        )
-
     def _apply_gaussian_residual(self, grad: torch.Tensor) -> torch.Tensor:
         if self.gaussian_alpha == 0:
             return grad
@@ -710,7 +678,7 @@ class ProgressivePatchScoreAttacker:
         views = torch.stack(gradients, dim=0)
         raw_mean = self._aggregate_gradients(views)
         self._record_gradient_diagnostics(views, raw_mean)
-        processed = self._smooth_grad(self._apply_gaussian_residual(raw_mean))
+        processed = self._apply_gaussian_residual(raw_mean)
         return views, raw_mean, processed
 
     def _check_view_count(self) -> None:
@@ -771,12 +739,7 @@ class ProgressivePatchScoreAttacker:
                 if replay is not None:
                     replay.set_context(step=step_index, group=-1, view=-1)
                 self._actual_forward_view_count = 0
-                gradient_pixels = adversarial.detach()
-                if self.nesterov and step_index > 0:
-                    gradient_pixels = gradient_pixels + self.decay * self.step_size * momentum.sign()
-                    delta = torch.clamp(gradient_pixels - clean, -self.epsilon, self.epsilon)
-                    gradient_pixels = torch.clamp(clean + delta, 0.0, 1.0)
-                gradient_pixels = gradient_pixels.detach().requires_grad_(True)
+                gradient_pixels = adversarial.detach().requires_grad_(True)
                 _, _, gradient = self._processed_gradient(gradient_pixels, labels)
                 self._check_view_count()
                 if self.use_momentum:
@@ -814,10 +777,9 @@ class ProgressivePatchScoreAttacker:
         else:
             score_reference = "none_uniform_all_local_tokens"
         return {
-            "attack_method": "progressive_patch_score",
+            "attack_method": "progressive",
             "whitebox_model": getattr(self.model, "model_name", "unknown"),
             "patch_selector": self.progressive_patch_selector,
-            "score_window_ratio": self.score_window_ratio,
             "progressive_score_mode": self.progressive_score_mode,
             "drop_map_policy": drop_map_policy,
             "progressive_checkpoints": list(self.progressive_checkpoints),

@@ -29,11 +29,11 @@ run_one() {
     echo "Attack already complete: $name"
   else
     "$TASK_PY" main.py \
+      --attack-method progressive \
       --whitebox-model "$model" \
       --checkpoints "$checkpoints" \
       --drop-ratios "$ratios" \
       --progressive-patch-selector high \
-      --score-window-ratio 0.5 \
       --progressive-score-mode "$score_mode" \
       --score-global-noise-strength 0.2 \
       --opponent-noise-strength "$opponent_strength" \

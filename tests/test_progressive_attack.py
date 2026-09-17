@@ -54,7 +54,7 @@ class ProgressiveAttackTests(unittest.TestCase):
         self.assertEqual(
             [self.digest(mask) for mask in independent_schedule.masks],
             [
-                "b40711a88c7039756fb8a73827eabe2c0fe5a0346ca7e0a104adc0fc764f528d",
+                "6b1e73a0094b7b812d3b9e22cffb4f8239319847522c4fa103753b6950020f93",
                 "bf5e8ffa51a9e748985800c1d3d7f1a2a6ae7435136593ca8d9637e3f87c699c",
             ],
         )
@@ -72,9 +72,9 @@ class ProgressiveAttackTests(unittest.TestCase):
         self.assertEqual(
             {key: self.digest(value) for key, value in independent_probe.items()},
             {
-                "view_gradients": "21d1dc53cbb3d48afacecc2ce9d650460f1001808afa778a5f1358bb7cd1777d",
-                "raw_mean": "b4b69f2bfd55216daaa2d47244a49cfc206e55b08704af26bfd61bf37b7be560",
-                "processed": "b4b69f2bfd55216daaa2d47244a49cfc206e55b08704af26bfd61bf37b7be560",
+                "view_gradients": "31ff886157ee7cc60585e602713cb728765c4a29b18f69ea6812f927e2b226d1",
+                "raw_mean": "8c636cd48e1e9ec5d3fdb422ec9865b696f80a662ca6c6a2e23af4ca50c094ea",
+                "processed": "8c636cd48e1e9ec5d3fdb422ec9865b696f80a662ca6c6a2e23af4ca50c094ea",
             },
         )
         independent_adv = independent.attack_batch(

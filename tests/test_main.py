@@ -6,7 +6,7 @@ import unittest
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from main import attack_all_samples, parse_args
+from main import ATTACK_METHODS, attack_all_samples, parse_args
 
 
 class IndexedDataset(Dataset):
@@ -30,6 +30,9 @@ class RecordingAttacker:
 
 
 class MainTests(unittest.TestCase):
+    def test_progressive_is_the_only_attack_method(self):
+        self.assertEqual(ATTACK_METHODS, ("progressive",))
+
     def test_cli_defaults_match_progressive_configuration(self):
         old_argv = sys.argv
         sys.argv = ["main.py"]
@@ -38,6 +41,7 @@ class MainTests(unittest.TestCase):
         finally:
             sys.argv = old_argv
 
+        self.assertEqual(args.attack_method, "progressive")
         self.assertEqual(args.progressive_patch_selector, "high")
         self.assertEqual(args.input_diversity_views_per_group, 2)
 

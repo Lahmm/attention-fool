@@ -21,7 +21,7 @@ original view 使用该 schedule，phase view 使用空间变换后的对应 sch
 ```text
 current adversarial pixels
 → sequential global/local scores at block3 and block10
-→ 10/196 high-score-window local-token drop at each checkpoint
+→ 10/196 score-high-half local-token drop at each checkpoint
 → original schedule / spatially transformed phase schedule
 → kept-only opponent noise at the initial RGB projection
 → raw 20-view gradient mean
@@ -33,6 +33,7 @@ current adversarial pixels
 
 ```bash
 python main.py \
+  --attack-method progressive \
   --whitebox-model vit_base_patch16_224 \
   --checkpoints block3,block10 \
   --drop-ratios 0.051020408163,0.051020408163 \
@@ -88,7 +89,7 @@ ASR 分别为 **97.0%、98.0%、98.8% 和 99.4%**。每图均动态
 完整逐迁移模型结果见 `experiments/progressive_cross_arch_mainline_s1000.md`。
 
 ViT 当前正式配置为 `block3,block10`、10/10 drops、`selector=high`、
-`score-window-ratio=0.5` 和 opponent strength 0.2；其 1000 图完整 14-target Overall
+固定 score-high-half 候选集和 opponent strength 0.2；其 1000 图完整 14-target Overall
 ASR 为 85.26%。旧 checkpoint schedule 上得到的 selector/noise 数值不再作为当前 ViT
 攻击设置陈述。
 

@@ -293,7 +293,7 @@ class ProgressiveViTTests(unittest.TestCase):
         self.assertEqual(schedule.counts, (1, 1))
         schedule.validate(batch_size=2, token_count=4)
         metadata = attacker.mainline_metadata()
-        self.assertEqual(metadata["attack_method"], "progressive_patch_score")
+        self.assertEqual(metadata["attack_method"], "progressive")
         self.assertEqual(metadata["patch_selector"], "random")
         self.assertEqual(metadata["score_reference"], "none_uniform_all_local_tokens")
         self.assertFalse(metadata["score_global_noise_active"])

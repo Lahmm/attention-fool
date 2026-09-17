@@ -19,7 +19,7 @@
 
 - Retain only the current progressive high-score attack behavior in `progressive_attack.py`, the minimal `main.py` execution path needed to run it, and the progressive portions of the four architecture adapters in `nets/`.
 - Retain only utility, test, configuration, and documentation code that is directly required to execute or verify that progressive attack.
-- The protected behavior is: fresh sequential checkpoint schedules from current adversarial pixels, the ViT `block3,block10` schedule, high-score-window sampling, local-token hard zeroing, transformed phase-pair schedules, kept-only RGB opponent-channel projected noise, and the projected iterative update used by the current progressive attack.
+- The protected behavior is: fresh sequential checkpoint schedules from current adversarial pixels, the ViT `block3,block10` schedule, fixed score-high-half sampling, local-token hard zeroing, transformed phase-pair schedules, kept-only RGB opponent-channel projected noise, and the projected iterative update used by the current progressive attack.
 - Code is not protected merely because it is currently imported, exposed by the CLI, covered by a test, mentioned in an old report, or needed to reproduce a superseded experiment.
 
 ## Removed scope

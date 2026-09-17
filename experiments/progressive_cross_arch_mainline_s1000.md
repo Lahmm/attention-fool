@@ -323,7 +323,7 @@ with the current K2 record at
 
 The only current ViT-B/16 attack configuration is `block3,block10` with
 10/10 drops (`0.051020408163` at each checkpoint), `selector=high`,
-`score-window-ratio=0.5`, and opponent strength 0.2. Its complete 14-target
+the fixed score-high-half candidate set, and opponent strength 0.2. Its complete 14-target
 1000-image result is the promoted ViT row above (85.26% Overall).
 
 Selector, score-noise, feature-noise, and checkpoint comparisons produced on

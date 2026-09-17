@@ -28,6 +28,7 @@ from utils import DEVICE, load_data, save_adversarial_images
 
 IMAGE_DIR = "data/clean_resized_images"
 ANNOTATIONS_PATH = "data/image_name_to_class_id_and_name.json"
+ATTACK_METHODS = ("progressive",)
 
 
 def parse_phase_shift(value: str) -> tuple[int, int]:
@@ -156,6 +157,7 @@ def attack_all_samples(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Progressive patch-score routing attack")
+    parser.add_argument("--attack-method", choices=ATTACK_METHODS, default="progressive")
     parser.add_argument("--whitebox-model", choices=WHITEBOX_MODEL_CHOICES, default=DEFAULT_MODEL_NAME)
     parser.add_argument("--max-attacked-samples", type=int, default=1000)
     parser.add_argument(
@@ -172,8 +174,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-mi", dest="mi", action="store_false")
     parser.set_defaults(mi=True)
     parser.add_argument("--mi-decay", type=float, default=1.0)
-    parser.add_argument("--ni", action="store_true")
-    parser.add_argument("--ti-sigma", type=float, default=0.0)
     parser.add_argument("--input-diversity-groups", type=int, default=10)
     parser.add_argument("--input-diversity-views-per-group", type=int, default=2)
     parser.add_argument("--input-diversity-phase-shift-set", type=parse_phase_shift_set, default=((4, 4), (8, 8), (12, 12)))
@@ -194,12 +194,6 @@ def parse_args() -> argparse.Namespace:
         choices=PROGRESSIVE_PATCH_SELECTORS,
         default="high",
         help="Progressive drop-map construction policy.",
-    )
-    parser.add_argument(
-        "--score-window-ratio",
-        type=float,
-        default=0.5,
-        help="Fraction of top/bottom-scoring tokens the progressive drop samples from.",
     )
     parser.add_argument(
         "--progressive-score-mode",
@@ -266,7 +260,6 @@ def main(args: argparse.Namespace) -> None:
         checkpoints=args.checkpoints,
         drop_ratios=args.drop_ratios,
         patch_selector=args.progressive_patch_selector,
-        score_window_ratio=args.score_window_ratio,
         progressive_score_mode=args.progressive_score_mode,
         score_global_noise_strength=args.score_global_noise_strength,
         opponent_noise_strength=args.opponent_noise_strength,
@@ -276,8 +269,6 @@ def main(args: argparse.Namespace) -> None:
         steps=args.steps,
         use_momentum=args.mi,
         momentum_decay=args.mi_decay,
-        nesterov=args.ni,
-        ti_sigma=args.ti_sigma,
         input_diversity_groups=args.input_diversity_groups,
         input_diversity_views_per_group=2,
         input_diversity_phase_shift_set=args.input_diversity_phase_shift_set,
@@ -307,7 +298,7 @@ def main(args: argparse.Namespace) -> None:
     )
 
     params = {
-        "attack_method": "progressive_patch_score",
+        "attack_method": args.attack_method,
         "whitebox_model": args.whitebox_model,
         "max_attacked_samples": args.max_attacked_samples,
         "sample_offset": args.sample_offset,
@@ -317,8 +308,6 @@ def main(args: argparse.Namespace) -> None:
         "seed": args.seed,
         "mi": args.mi,
         "mi_decay": args.mi_decay,
-        "ni": args.ni,
-        "ti_sigma": args.ti_sigma,
         "input_diversity_groups": args.input_diversity_groups,
         "input_diversity_views_per_group": args.input_diversity_views_per_group,
         "input_diversity_total_views": (
@@ -328,7 +317,6 @@ def main(args: argparse.Namespace) -> None:
         "checkpoints": list(attacker.progressive_checkpoints),
         "drop_ratios": list(attacker.progressive_drop_ratios),
         "progressive_patch_selector": args.progressive_patch_selector,
-        "score_window_ratio": args.score_window_ratio,
         "progressive_score_mode": attacker.progressive_score_mode,
         "score_global_noise_strength": attacker.score_global_noise_strength,
         "opponent_noise_strength": attacker.opponent_noise_strength,
