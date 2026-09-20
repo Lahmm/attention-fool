@@ -4,7 +4,7 @@ set -euo pipefail
 TASK_PY=/root/miniconda3/envs/att-atk/bin/python
 TASK_PREFIX=selectorgnoise1000
 TASK_SEED=20260920
-TOTAL_RUNS=40
+TOTAL_RUNS=36
 RUN_INDEX=0
 
 TARGET_MODELS=(
@@ -117,10 +117,13 @@ run_source() {
   local model=$2
   local batch_size=$3
   local selector
-  for selector in high low random extreme-high extreme-low; do
+  for selector in high low extreme-high extreme-low; do
     run_one "$source" "$model" "$batch_size" "$selector" off 0.0
     run_one "$source" "$model" "$batch_size" "$selector" on 0.2
   done
+  # Uniform random routing never reads the global score token, so score-global
+  # noise is inapplicable. Run this control once with its strength set to zero.
+  run_one "$source" "$model" "$batch_size" random ignored 0.0
 }
 
 echo "Starting ${TOTAL_RUNS} attacks and transfer evaluations with seed ${TASK_SEED}."

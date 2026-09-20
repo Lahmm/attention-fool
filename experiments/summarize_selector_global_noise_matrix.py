@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 SEED = 20260920
-SELECTORS = ("high", "low", "random", "extreme-high", "extreme-low")
+SCORE_SELECTORS = ("high", "low", "extreme-high", "extreme-low")
 TRANSFORMER_MODELS = (
     "vit_base_patch16_224",
     "levit_256",
@@ -147,14 +147,15 @@ def build_report(repo_root: Path) -> str:
         "",
         f"Seed: `{SEED}`. ASR is `1 - adversarial accuracy` over all 1000 "
         "adversarial samples and the same 14 transfer targets. Delta is global "
-        "noise on minus off; on uses strength 0.2.",
+        "noise on minus off; on uses strength 0.2. Random routing is evaluated "
+        "once because it does not read the global score token.",
         "",
-        "| Source | Selector | Metric | Noise off | Noise on | Delta |",
+        "| Source | Selector | Metric | Noise off / standalone | Noise on | Delta |",
         "| --- | --- | --- | ---: | ---: | ---: |",
     ]
     detail: list[str] = []
     for source in SOURCES:
-        for selector in SELECTORS:
+        for selector in SCORE_SELECTORS:
             off = load_run(repo_root, source, selector, "off")
             on = load_run(repo_root, source, selector, "on")
             off_summary = summaries(off, source.model)
@@ -180,6 +181,24 @@ def build_report(repo_root: Path) -> str:
                     f"| {model} | {percent(off[model])} | {percent(on[model])} | "
                     f"{delta_pp(on[model], off[model])} |"
                 )
+        random = load_run(repo_root, source, "random", "ignored")
+        random_summary = summaries(random, source.model)
+        for metric in ("Overall", "Transformer", "CNN", "Strict black-box"):
+            lines.append(
+                f"| {source.display_name} | random | {metric} | "
+                f"{percent(random_summary[metric])} | — | — |"
+            )
+        detail.extend(
+            [
+                "",
+                f"## {source.display_name} / random",
+                "",
+                "| Target | Standalone ASR |",
+                "| --- | ---: |",
+            ]
+        )
+        for model in TARGET_MODELS:
+            detail.append(f"| {model} | {percent(random[model])} |")
     return "\n".join(lines + detail) + "\n"
 
 
