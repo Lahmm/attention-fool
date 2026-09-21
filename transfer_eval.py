@@ -316,7 +316,7 @@ def evaluate(
     prefetch_factor: int,
     use_amp: bool,
     pre_cache: bool = True,
-) -> Tuple[int, int, int]:
+) -> Tuple[int, int, int, List[str], List[int], List[int]]:
     model, transform = build_black_box_model(model_name)
     samples, skipped = build_transfer_samples(
         image_paths=image_paths,
@@ -324,7 +324,7 @@ def evaluate(
         prefix=prefix,
     )
     if not samples:
-        return 0, 0, skipped
+        return 0, 0, skipped, [], [], []
 
     if pre_cache:
         images_cached, labels_cached = pre_cache_tensors(samples, transform, num_workers=num_workers)
@@ -344,6 +344,8 @@ def evaluate(
 
     correct = 0
     total = 0
+    observed_targets: List[int] = []
+    predictions: List[int] = []
 
     autocast_context = (
         torch.cuda.amp.autocast if DEVICE.type == "cuda" and use_amp else nullcontext
@@ -359,11 +361,17 @@ def evaluate(
             preds = logits.argmax(dim=1)
             correct += (preds == targets).sum().item()
             total += targets.size(0)
+            observed_targets.extend(int(value) for value in targets.detach().cpu().tolist())
+            predictions.extend(int(value) for value in preds.detach().cpu().tolist())
 
             if total > 0:
                 progress.set_postfix(acc=f"{correct / total:.4f}")
 
-    return correct, total, skipped
+    sample_ids = [extract_original_name(path.name, prefix) for path, _ in samples]
+    expected_targets = [int(target) for _, target in samples]
+    if observed_targets != expected_targets:
+        raise RuntimeError("transfer prediction order does not match the evaluated samples")
+    return correct, total, skipped, sample_ids, observed_targets, predictions
 
 
 def main(
@@ -380,6 +388,7 @@ def main(
     exp_name: str | None,
     pre_cache: bool = True,
     skip_unavailable: bool = True,
+    predictions_output: str | None = None,
 ) -> None:
     configure_eval_runtime(use_tf32=use_tf32)
     image_dir_path = Path(image_dir)
@@ -401,10 +410,13 @@ def main(
 
     asr_by_model: Dict[str, float] = {}
     metrics_by_model: Dict[str, Dict[str, float | int]] = {}
+    prediction_sample_ids: List[str] | None = None
+    prediction_labels: List[int] | None = None
+    predictions_by_model: Dict[str, List[int]] = {}
 
     for black_model in model_names:
         try:
-            correct, total, skipped = evaluate(
+            correct, total, skipped, sample_ids, labels, predictions = evaluate(
                 image_paths=image_paths,
                 annotations=annotations,
                 prefix=prefix,
@@ -420,6 +432,12 @@ def main(
                 raise
             print(f"model={black_model} unavailable: {exc}")
             continue
+        if prediction_sample_ids is None:
+            prediction_sample_ids = sample_ids
+            prediction_labels = labels
+        elif sample_ids != prediction_sample_ids or labels != prediction_labels:
+            raise RuntimeError("transfer models evaluated different ordered sample sets")
+        predictions_by_model[black_model] = predictions
         acc = correct / total if total > 0 else 0.0
         asr = adversarial_accuracy_to_asr(correct, total)
         asr_by_model[black_model] = asr
@@ -455,6 +473,24 @@ def main(
             for model_name, metrics in metrics_by_model.items()
         }
     )
+
+    if predictions_output is not None:
+        output_path = Path(predictions_output).expanduser()
+        if not output_path.is_absolute():
+            output_path = Path.cwd() / output_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        prediction_artifact = {
+            "asr_definition": ASR_DEFINITION,
+            "image_dir": str(image_dir_path.resolve()),
+            "prefix": prefix,
+            "sample_ids": prediction_sample_ids or [],
+            "labels": prediction_labels or [],
+            "predictions": predictions_by_model,
+        }
+        output_path.write_text(
+            json.dumps(prediction_artifact, ensure_ascii=False), encoding="utf-8"
+        )
+        print(f"Saved per-sample transfer predictions to: {output_path}")
 
     if record_excel:
         repo_path = Path(__file__).resolve().parent
@@ -509,6 +545,11 @@ if __name__ == "__main__":
     parser.add_argument("--no-pre-cache", action="store_true", help="Disable pre-caching images in RAM (slower, lower memory).")
     parser.add_argument("--strict-model-loading", action="store_true", help="Fail instead of skipping unavailable optional models such as adversarial CNN checkpoints.")
     parser.add_argument(
+        "--predictions-output",
+        default=None,
+        help="Optional JSON path for ordered sample IDs, labels, and per-model predictions.",
+    )
+    parser.add_argument(
         "--model-name",
         type=parse_model_names,
         default=DEFAULT_BLACK_BOX_MODELS,
@@ -529,4 +570,5 @@ if __name__ == "__main__":
         exp_name=args.exp_name,
         pre_cache=not args.no_pre_cache,
         skip_unavailable=not args.strict_model_loading,
+        predictions_output=args.predictions_output,
     )
