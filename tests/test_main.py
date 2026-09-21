@@ -45,6 +45,20 @@ class MainTests(unittest.TestCase):
         self.assertEqual(args.progressive_patch_selector, "high")
         self.assertEqual(args.input_diversity_views_per_group, 2)
 
+    def test_cli_accepts_rank_transition_selector(self):
+        old_argv = sys.argv
+        sys.argv = [
+            "main.py",
+            "--progressive-patch-selector",
+            "rank-transition",
+        ]
+        try:
+            args = parse_args()
+        finally:
+            sys.argv = old_argv
+
+        self.assertEqual(args.progressive_patch_selector, "rank-transition")
+
     def test_attack_sample_limit_is_exact(self):
         dataloader = DataLoader(IndexedDataset(), batch_size=4, shuffle=False)
         attacker = RecordingAttacker()

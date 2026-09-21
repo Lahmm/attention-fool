@@ -172,7 +172,11 @@ def parse_args() -> argparse.Namespace:
         "--progressive-patch-selector",
         choices=PROGRESSIVE_PATCH_SELECTORS,
         default="high",
-        help="Progressive drop-map construction policy.",
+        help=(
+            "Progressive drop-map construction policy; rank-transition uses "
+            "current percentile rank at the first checkpoint and percentile-rank "
+            "gain at later checkpoints."
+        ),
     )
     parser.add_argument(
         "--progressive-score-mode",

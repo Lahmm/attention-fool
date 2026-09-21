@@ -19,6 +19,7 @@ PROGRESSIVE_PATCH_SELECTORS = (
     "high",
     "low",
     "random",
+    "rank-transition",
     "extreme-high",
     "extreme-low",
 )
@@ -281,6 +282,42 @@ class ProgressivePatchScoreAttacker:
             )
         return (local * global_token.expand_as(local)).sum(dim=-1) / (local.size(-1) ** 0.5)
 
+    @staticmethod
+    def _percentile_rank(scores: torch.Tensor) -> torch.Tensor:
+        if scores.ndim != 2:
+            raise ValueError("patch scores must have shape [B,N].")
+        token_count = scores.size(1)
+        if token_count == 0:
+            raise ValueError("patch scores must contain at least one local token.")
+        if token_count == 1:
+            return torch.ones_like(scores)
+        order = torch.argsort(scores, dim=1, stable=True)
+        percentiles = torch.linspace(
+            0.0,
+            1.0,
+            token_count,
+            device=scores.device,
+            dtype=scores.dtype,
+        ).expand_as(scores)
+        ranks = torch.empty_like(scores)
+        ranks.scatter_(1, order, percentiles)
+        return ranks
+
+    @classmethod
+    def _align_percentile_rank(
+        cls,
+        ranks: torch.Tensor,
+        source_grid: tuple[int, int],
+        target_grid: tuple[int, int],
+    ) -> torch.Tensor:
+        if ranks.shape[1] != source_grid[0] * source_grid[1]:
+            raise ValueError("previous percentile ranks do not match their source grid.")
+        if source_grid == target_grid:
+            return ranks
+        spatial = ranks.view(ranks.size(0), 1, *source_grid)
+        aligned = F.interpolate(spatial, size=target_grid, mode="area").flatten(1)
+        return cls._percentile_rank(aligned)
+
     def _sample_half_random_mask(
         self, scores: torch.Tensor, ratio: float, checkpoint: str, *, largest: bool
     ) -> torch.Tensor:
@@ -302,6 +339,44 @@ class ProgressivePatchScoreAttacker:
                     device=scores.device,
                 )
             mask[batch_index, candidates[batch_index, order[:drop_count]]] = True
+        return mask.detach()
+
+    def _sample_rank_transition_mask(
+        self, routing_scores: torch.Tensor, ratio: float, checkpoint: str
+    ) -> torch.Tensor:
+        """Sample the high transition half with unbiased cutoff tie handling."""
+        batch_size, token_count = routing_scores.shape
+        candidate_count = max(1, int(round(token_count * 0.5)))
+        drop_count = max(1, int(round(token_count * ratio)))
+        if drop_count > candidate_count:
+            raise ValueError("drop budget exceeds the selected transition half.")
+        mask = torch.zeros_like(routing_scores, dtype=torch.bool)
+        for batch_index in range(batch_size):
+            if self._gradient_replay is None:
+                tie_order = torch.randperm(token_count, device=routing_scores.device)
+                sample_order = torch.randperm(
+                    candidate_count, device=routing_scores.device
+                )
+            else:
+                tie_order = self._gradient_replay.randperm(
+                    token_count,
+                    f"progressive_rank_transition_tie_{checkpoint}",
+                    batch_index,
+                    device=routing_scores.device,
+                )
+                sample_order = self._gradient_replay.randperm(
+                    candidate_count,
+                    f"progressive_drop_{checkpoint}",
+                    batch_index,
+                    device=routing_scores.device,
+                )
+            ranked = torch.argsort(
+                routing_scores[batch_index, tie_order],
+                descending=True,
+                stable=True,
+            )
+            candidates = tie_order[ranked[:candidate_count]]
+            mask[batch_index, candidates[sample_order[:drop_count]]] = True
         return mask.detach()
 
     @staticmethod
@@ -345,6 +420,8 @@ class ProgressivePatchScoreAttacker:
             state = self.model.begin_progressive_forward(self._normalize(pixels.detach()))
             selections: list[ProgressiveMaskSelection] = []
             global_modes: list[str] = []
+            previous_rank: torch.Tensor | None = None
+            previous_grid: tuple[int, int] | None = None
             for checkpoint, ratio in zip(
                 self.progressive_checkpoints, self.progressive_drop_ratios
             ):
@@ -360,6 +437,26 @@ class ProgressivePatchScoreAttacker:
                         checkpoint=checkpoint,
                         device=features.local_tokens.device,
                     )
+                elif self.progressive_patch_selector == "rank-transition":
+                    current_rank = self._percentile_rank(
+                        self._score_at_checkpoint(features)
+                    )
+                    if previous_rank is None:
+                        routing_scores = current_rank
+                    else:
+                        if previous_grid is None:
+                            raise RuntimeError("rank-transition grid history is missing.")
+                        aligned_previous = self._align_percentile_rank(
+                            previous_rank,
+                            previous_grid,
+                            features.grid_size,
+                        )
+                        routing_scores = current_rank - aligned_previous
+                    mask = self._sample_rank_transition_mask(
+                        routing_scores, ratio, checkpoint
+                    )
+                    previous_rank = current_rank.detach()
+                    previous_grid = features.grid_size
                 elif self.progressive_patch_selector in ("extreme-high", "extreme-low"):
                     scores = self._score_at_checkpoint(features)
                     mask = self._sample_extreme_mask(
@@ -748,6 +845,7 @@ class ProgressivePatchScoreAttacker:
             "high": "score_high_half_random",
             "low": "score_low_half_random",
             "random": "uniform_random",
+            "rank-transition": "score_rank_transition_high_half_random",
             "extreme-high": "score_extreme_high",
             "extreme-low": "score_extreme_low",
         }[self.progressive_patch_selector]
@@ -770,6 +868,12 @@ class ProgressivePatchScoreAttacker:
             "progressive_grids": [list(grid) for grid in self._progressive_mask_grids],
             "progressive_global_modes": list(self._progressive_global_modes),
             "progressive_repeated_positions": True,
+            "rank_transition_active": self.progressive_patch_selector == "rank-transition",
+            "rank_transition_reference": (
+                "previous_checkpoint_percentile_rank_spatially_aligned"
+                if self.progressive_patch_selector == "rank-transition"
+                else "none"
+            ),
             "score_reference": score_reference,
             "score_global_noise_active": score_noise_active,
             "score_global_noise_strength": self.score_global_noise_strength,

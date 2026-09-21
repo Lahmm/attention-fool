@@ -249,6 +249,88 @@ class ProgressiveViTTests(unittest.TestCase):
         self.assertEqual(schedule.counts, (1, 1))
         self.assertEqual(attacker.mainline_metadata()["patch_selector"], "high")
 
+    def test_percentile_rank_is_normalized_per_sample(self):
+        attacker = self.make_attacker(patch_selector="rank-transition")
+        scores = torch.tensor(
+            [[4.0, 1.0, 3.0, 2.0], [-2.0, 5.0, 1.0, 9.0]]
+        )
+        ranks = attacker._percentile_rank(scores)
+        expected = torch.tensor(
+            [[1.0, 0.0, 2.0 / 3.0, 1.0 / 3.0], [0.0, 2.0 / 3.0, 1.0 / 3.0, 1.0]]
+        )
+        self.assertTrue(torch.allclose(ranks, expected))
+
+    def test_rank_transition_uses_rank_gain_after_first_checkpoint(self):
+        attacker = self.make_attacker(patch_selector="rank-transition")
+        pixels = torch.rand(1, 3, 4, 4)
+        checkpoint_scores = iter(
+            (
+                torch.tensor([[0.0, 1.0, 2.0, 3.0]]),
+                torch.tensor([[3.0, 2.0, 1.0, 0.0]]),
+            )
+        )
+        routing_scores = {}
+
+        def fixed_scores(_self, _features):
+            return next(checkpoint_scores)
+
+        def capture_routing(_self, scores, _ratio, checkpoint):
+            routing_scores[checkpoint] = scores.detach().clone()
+            mask = torch.zeros_like(scores, dtype=torch.bool)
+            mask.scatter_(1, scores.argmax(dim=1, keepdim=True), True)
+            return mask
+
+        attacker._score_at_checkpoint = types.MethodType(fixed_scores, attacker)
+        attacker._sample_rank_transition_mask = types.MethodType(
+            capture_routing, attacker
+        )
+        schedule = attacker._build_mask_schedule(pixels)
+
+        first_rank = torch.tensor([[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]])
+        second_rank = torch.tensor([[1.0, 2.0 / 3.0, 1.0 / 3.0, 0.0]])
+        self.assertTrue(torch.allclose(routing_scores["block3"], first_rank))
+        self.assertTrue(
+            torch.allclose(routing_scores["block10"], second_rank - first_rank)
+        )
+        self.assertTrue(schedule.masks[0][0, 3])
+        self.assertTrue(schedule.masks[1][0, 0])
+        metadata = attacker.mainline_metadata()
+        self.assertEqual(
+            metadata["drop_map_policy"],
+            "score_rank_transition_high_half_random",
+        )
+        self.assertTrue(metadata["rank_transition_active"])
+
+    def test_rank_transition_aligns_and_reranks_cross_scale_grids(self):
+        attacker = self.make_attacker(patch_selector="rank-transition")
+        ranks = torch.arange(16, dtype=torch.float32).view(1, 16) / 15.0
+        aligned = attacker._align_percentile_rank(ranks, (4, 4), (2, 2))
+        expected = torch.tensor([[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]])
+        self.assertTrue(torch.allclose(aligned, expected))
+
+    def test_rank_transition_replay_resolves_cutoff_ties_reproducibly(self):
+        attacker = self.make_attacker(patch_selector="rank-transition")
+        routing_scores = torch.zeros(2, 16)
+
+        def sample():
+            replay = GradientReplay(20260921)
+            replay.begin_batch(["first.png", "second.png"])
+            replay.set_context(step=1, group=2, view=-1)
+            attacker._gradient_replay = replay
+            try:
+                return attacker._sample_rank_transition_mask(
+                    routing_scores, 0.25, "block10"
+                )
+            finally:
+                attacker._gradient_replay = None
+
+        first = sample()
+        second = sample()
+        self.assertTrue(torch.equal(first, second))
+        self.assertTrue(
+            torch.equal(first.sum(dim=1), torch.full((2,), 4, dtype=torch.long))
+        )
+
     def test_extreme_selectors_take_exact_score_tails(self):
         scores = torch.tensor(
             [
