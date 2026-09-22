@@ -1,4 +1,4 @@
-"""Architecture-neutral progressive patch-score attack implementation."""
+"""Architecture-neutral Progressive Route Disruption attack."""
 
 from __future__ import annotations
 
@@ -13,21 +13,6 @@ from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
 
 if TYPE_CHECKING:
     from gradient_replay import GradientReplay
-
-
-PROGRESSIVE_PATCH_SELECTORS = (
-    "high",
-    "low",
-    "random",
-    "rank-transition",
-    "extreme-high",
-    "extreme-low",
-)
-PROGRESSIVE_FEATURE_NOISE_TYPES = ("opponent_projected", "gaussian")
-PROGRESSIVE_SCORE_MODES = (
-    "cosine",
-    "gap_projection",
-)
 
 
 @dataclass(frozen=True)
@@ -89,8 +74,8 @@ class ProgressiveMaskSchedule:
         return grids[0]
 
 
-class ProgressivePatchScoreAttacker:
-    """Complete progressive attack implementation with model-owned traversal."""
+class ProgressiveRouteDisruptionAttacker:
+    """Randomly disrupt evolving token routes at sequential checkpoints."""
 
     def __init__(
         self,
@@ -98,11 +83,7 @@ class ProgressivePatchScoreAttacker:
         *,
         checkpoints: tuple[str | int, ...] | None = None,
         drop_ratios: tuple[float, ...] | None = None,
-        patch_selector: str = "high",
-        progressive_score_mode: str | None = None,
-        score_global_noise_strength: float | None = None,
         opponent_noise_strength: float | None = None,
-        feature_noise_type: str = "opponent_projected",
         epsilon: float = 16.0 / 255.0,
         step_size: float | None = None,
         steps: int = 10,
@@ -133,16 +114,6 @@ class ProgressivePatchScoreAttacker:
             raise ValueError("Gaussian parameters must be non-negative.")
         if gaussian_alpha > 0 and gaussian_sigma == 0:
             raise ValueError("gaussian_sigma must be positive when gaussian_alpha is enabled.")
-        if patch_selector not in PROGRESSIVE_PATCH_SELECTORS:
-            raise ValueError(
-                f"patch_selector must be one of {PROGRESSIVE_PATCH_SELECTORS}, "
-                f"got {patch_selector!r}."
-            )
-        if progressive_score_mode is None:
-            score_mode_provider = getattr(model, "default_progressive_score_mode", None)
-            progressive_score_mode = (
-                score_mode_provider() if callable(score_mode_provider) else "cosine"
-            )
         if opponent_noise_strength is None:
             opponent_provider = getattr(
                 model, "default_progressive_opponent_noise_strength", None
@@ -150,21 +121,8 @@ class ProgressivePatchScoreAttacker:
             opponent_noise_strength = (
                 opponent_provider() if callable(opponent_provider) else 0.2
             )
-        if progressive_score_mode not in PROGRESSIVE_SCORE_MODES:
-            raise ValueError(
-                f"progressive_score_mode must be one of {PROGRESSIVE_SCORE_MODES}."
-            )
-        resolved_score_noise = (
-            score_global_noise_strength
-            if score_global_noise_strength is not None
-            else 0.2
-        )
-        if resolved_score_noise < 0 or opponent_noise_strength < 0:
-            raise ValueError("score and opponent noise strengths must be non-negative.")
-        if feature_noise_type not in PROGRESSIVE_FEATURE_NOISE_TYPES:
-            raise ValueError(
-                f"feature_noise_type must be one of {PROGRESSIVE_FEATURE_NOISE_TYPES}."
-            )
+        if opponent_noise_strength < 0:
+            raise ValueError("opponent noise strength must be non-negative.")
 
         candidates = tuple(model.progressive_checkpoint_candidates())
         requested = (
@@ -203,11 +161,7 @@ class ProgressivePatchScoreAttacker:
         self.device = device if device is not None else DEVICE
         self.progressive_checkpoints = canonical
         self.progressive_drop_ratios = ratios
-        self.progressive_patch_selector = patch_selector
-        self.progressive_score_mode = progressive_score_mode
-        self.score_global_noise_strength = float(resolved_score_noise)
         self.opponent_noise_strength = float(opponent_noise_strength)
-        self.feature_noise_type = feature_noise_type
         self.epsilon = float(epsilon)
         self.steps = int(steps)
         self.step_size = float(step_size) if step_size is not None else self.epsilon / self.steps
@@ -230,10 +184,8 @@ class ProgressivePatchScoreAttacker:
         self._actual_forward_view_count = 0
         self._progressive_mask_counts: tuple[int, ...] = ()
         self._progressive_mask_grids: tuple[tuple[int, int], ...] = ()
-        self._progressive_global_modes: tuple[str, ...] = ()
         self._progressive_schedule_count = 0
         self._progressive_checkpoint_selection_count = 0
-        self._feature_noise_type = ""
         self._gradient_diagnostics: dict[str, list[float]] = {
             "view_cosine_to_final": [],
             "sign_agreement": [],
@@ -263,134 +215,6 @@ class ProgressivePatchScoreAttacker:
             return self._gradient_replay.randn_like(tensor, event)
         return torch.randn_like(tensor)
 
-    def _score_at_checkpoint(self, features) -> torch.Tensor:
-        local = features.local_tokens
-        clean_global = features.global_token
-        global_noise = torch.zeros_like(clean_global)
-        if self.score_global_noise_strength > 0:
-            token_rms = local.detach().square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
-            noise = self._randn_like(
-                clean_global, f"progressive_score_global_{features.layer_id}"
-            )
-            global_noise = self.score_global_noise_strength * token_rms * noise
-        global_token = clean_global + global_noise
-        if self.progressive_score_mode == "cosine":
-            return F.cosine_similarity(local, global_token.expand_as(local), dim=-1)
-        if features.global_mode != "gap":
-            raise ValueError(
-                f"score mode {self.progressive_score_mode!r} requires GAP features."
-            )
-        return (local * global_token.expand_as(local)).sum(dim=-1) / (local.size(-1) ** 0.5)
-
-    @staticmethod
-    def _percentile_rank(scores: torch.Tensor) -> torch.Tensor:
-        if scores.ndim != 2:
-            raise ValueError("patch scores must have shape [B,N].")
-        token_count = scores.size(1)
-        if token_count == 0:
-            raise ValueError("patch scores must contain at least one local token.")
-        if token_count == 1:
-            return torch.ones_like(scores)
-        order = torch.argsort(scores, dim=1, stable=True)
-        percentiles = torch.linspace(
-            0.0,
-            1.0,
-            token_count,
-            device=scores.device,
-            dtype=scores.dtype,
-        ).expand_as(scores)
-        ranks = torch.empty_like(scores)
-        ranks.scatter_(1, order, percentiles)
-        return ranks
-
-    @classmethod
-    def _align_percentile_rank(
-        cls,
-        ranks: torch.Tensor,
-        source_grid: tuple[int, int],
-        target_grid: tuple[int, int],
-    ) -> torch.Tensor:
-        if ranks.shape[1] != source_grid[0] * source_grid[1]:
-            raise ValueError("previous percentile ranks do not match their source grid.")
-        if source_grid == target_grid:
-            return ranks
-        spatial = ranks.view(ranks.size(0), 1, *source_grid)
-        aligned = F.interpolate(spatial, size=target_grid, mode="area").flatten(1)
-        return cls._percentile_rank(aligned)
-
-    def _sample_half_random_mask(
-        self, scores: torch.Tensor, ratio: float, checkpoint: str, *, largest: bool
-    ) -> torch.Tensor:
-        batch_size, token_count = scores.shape
-        candidate_count = max(1, int(round(token_count * 0.5)))
-        drop_count = max(1, int(round(token_count * ratio)))
-        if drop_count > candidate_count:
-            raise ValueError("drop budget exceeds the selected score half.")
-        candidates = torch.topk(scores, candidate_count, dim=1, largest=largest).indices
-        mask = torch.zeros_like(scores, dtype=torch.bool)
-        for batch_index in range(batch_size):
-            if self._gradient_replay is None:
-                order = torch.randperm(candidate_count, device=scores.device)
-            else:
-                order = self._gradient_replay.randperm(
-                    candidate_count,
-                    f"progressive_drop_{checkpoint}",
-                    batch_index,
-                    device=scores.device,
-                )
-            mask[batch_index, candidates[batch_index, order[:drop_count]]] = True
-        return mask.detach()
-
-    def _sample_rank_transition_mask(
-        self, routing_scores: torch.Tensor, ratio: float, checkpoint: str
-    ) -> torch.Tensor:
-        """Sample the high transition half with unbiased cutoff tie handling."""
-        batch_size, token_count = routing_scores.shape
-        candidate_count = max(1, int(round(token_count * 0.5)))
-        drop_count = max(1, int(round(token_count * ratio)))
-        if drop_count > candidate_count:
-            raise ValueError("drop budget exceeds the selected transition half.")
-        mask = torch.zeros_like(routing_scores, dtype=torch.bool)
-        for batch_index in range(batch_size):
-            if self._gradient_replay is None:
-                tie_order = torch.randperm(token_count, device=routing_scores.device)
-                sample_order = torch.randperm(
-                    candidate_count, device=routing_scores.device
-                )
-            else:
-                tie_order = self._gradient_replay.randperm(
-                    token_count,
-                    f"progressive_rank_transition_tie_{checkpoint}",
-                    batch_index,
-                    device=routing_scores.device,
-                )
-                sample_order = self._gradient_replay.randperm(
-                    candidate_count,
-                    f"progressive_drop_{checkpoint}",
-                    batch_index,
-                    device=routing_scores.device,
-                )
-            ranked = torch.argsort(
-                routing_scores[batch_index, tie_order],
-                descending=True,
-                stable=True,
-            )
-            candidates = tie_order[ranked[:candidate_count]]
-            mask[batch_index, candidates[sample_order[:drop_count]]] = True
-        return mask.detach()
-
-    @staticmethod
-    def _sample_extreme_mask(
-        scores: torch.Tensor, ratio: float, *, largest: bool
-    ) -> torch.Tensor:
-        batch_size, token_count = scores.shape
-        drop_count = max(1, int(round(token_count * ratio)))
-        order = torch.argsort(scores, dim=1, descending=largest, stable=True)
-        selected = order[:, :drop_count]
-        mask = torch.zeros(batch_size, token_count, dtype=torch.bool, device=scores.device)
-        mask.scatter_(1, selected, True)
-        return mask.detach()
-
     def _sample_random_mask(
         self,
         *,
@@ -419,69 +243,27 @@ class ProgressivePatchScoreAttacker:
         with torch.no_grad():
             state = self.model.begin_progressive_forward(self._normalize(pixels.detach()))
             selections: list[ProgressiveMaskSelection] = []
-            global_modes: list[str] = []
-            previous_rank: torch.Tensor | None = None
-            previous_grid: tuple[int, int] | None = None
             for checkpoint, ratio in zip(
                 self.progressive_checkpoints, self.progressive_drop_ratios
             ):
                 state = self.model.advance_progressive_state(state, checkpoint)
-                features = self.model.progressive_score_features(state, checkpoint)
-                features.validate()
-                global_modes.append(features.global_mode)
-                if self.progressive_patch_selector == "random":
-                    mask = self._sample_random_mask(
-                        batch_size=features.local_tokens.size(0),
-                        token_count=features.local_tokens.size(1),
-                        ratio=ratio,
-                        checkpoint=checkpoint,
-                        device=features.local_tokens.device,
-                    )
-                elif self.progressive_patch_selector == "rank-transition":
-                    current_rank = self._percentile_rank(
-                        self._score_at_checkpoint(features)
-                    )
-                    if previous_rank is None:
-                        routing_scores = current_rank
-                    else:
-                        if previous_grid is None:
-                            raise RuntimeError("rank-transition grid history is missing.")
-                        aligned_previous = self._align_percentile_rank(
-                            previous_rank,
-                            previous_grid,
-                            features.grid_size,
-                        )
-                        routing_scores = current_rank - aligned_previous
-                    mask = self._sample_rank_transition_mask(
-                        routing_scores, ratio, checkpoint
-                    )
-                    previous_rank = current_rank.detach()
-                    previous_grid = features.grid_size
-                elif self.progressive_patch_selector in ("extreme-high", "extreme-low"):
-                    scores = self._score_at_checkpoint(features)
-                    mask = self._sample_extreme_mask(
-                        scores,
-                        ratio,
-                        largest=self.progressive_patch_selector == "extreme-high",
-                    )
-                else:
-                    scores = self._score_at_checkpoint(features)
-                    mask = self._sample_half_random_mask(
-                        scores,
-                        ratio,
-                        checkpoint,
-                        largest=self.progressive_patch_selector == "high",
-                    )
+                state.validate()
+                mask = self._sample_random_mask(
+                    batch_size=state.local_tokens.size(0),
+                    token_count=state.local_tokens.size(1),
+                    ratio=ratio,
+                    checkpoint=checkpoint,
+                    device=state.local_tokens.device,
+                )
                 count = int(mask.sum(dim=1)[0].item())
                 selections.append(
-                    ProgressiveMaskSelection(checkpoint, mask, count, features.grid_size)
+                    ProgressiveMaskSelection(checkpoint, mask, count, state.grid_size)
                 )
                 state = self.model.apply_progressive_mask(state, mask)
         schedule = ProgressiveMaskSchedule(tuple(selections))
         schedule.validate(batch_size=pixels.size(0))
         self._progressive_mask_counts = schedule.counts
         self._progressive_mask_grids = schedule.grid_sizes
-        self._progressive_global_modes = tuple(global_modes)
         self._progressive_schedule_count += 1
         self._progressive_checkpoint_selection_count += len(selections)
         return schedule
@@ -619,23 +401,7 @@ class ProgressivePatchScoreAttacker:
         feature_noise = pixel_noise.matmul(projection.t())
         token_rms = local.detach().square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
         noise_rms = feature_noise.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
-        self._feature_noise_type = "opponent_channel_rgb_projection"
         return self.opponent_noise_strength * feature_noise * (token_rms / noise_rms)
-
-    def _kept_feature_noise(self, state) -> torch.Tensor:
-        if self.feature_noise_type == "opponent_projected":
-            return self._strict_opponent_feature_noise(state)
-        raw_noise = self._randn_like(state.local_tokens, "mainline_feature_gaussian")
-        token_rms = (
-            state.local_tokens.detach()
-            .square()
-            .mean(dim=(1, 2), keepdim=True)
-            .sqrt()
-            .clamp_min(1e-6)
-        )
-        noise_rms = raw_noise.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
-        self._feature_noise_type = "feature_iid_gaussian"
-        return self.opponent_noise_strength * raw_noise * (token_rms / noise_rms)
 
     def _forward_with_schedule(
         self, pixels: torch.Tensor, labels: torch.Tensor, schedule: ProgressiveMaskSchedule
@@ -652,7 +418,7 @@ class ProgressivePatchScoreAttacker:
                 schedule, pixels.size(-2), pixels.size(-1)
             ).to(pixels)
             initial_drop = self._image_mask_to_projection_drop_mask(image_union, initial)
-            noise = self._kept_feature_noise(initial)
+            noise = self._strict_opponent_feature_noise(initial)
             local = torch.where((~initial_drop).unsqueeze(-1), local + noise, local)
         state = self.model.replace_progressive_local_tokens(state, local)
         for item in schedule.selections:
@@ -840,43 +606,15 @@ class ProgressivePatchScoreAttacker:
             self._gradient_replay = None
 
     def mainline_metadata(self) -> dict[str, object]:
-        score_based = self.progressive_patch_selector != "random"
-        drop_map_policy = {
-            "high": "score_high_half_random",
-            "low": "score_low_half_random",
-            "random": "uniform_random",
-            "rank-transition": "score_rank_transition_high_half_random",
-            "extreme-high": "score_extreme_high",
-            "extreme-low": "score_extreme_low",
-        }[self.progressive_patch_selector]
-        score_noise_active = score_based and self.score_global_noise_strength > 0
-        if score_noise_active:
-            score_reference = "current_global_plus_checkpoint_gaussian_noise"
-        elif score_based:
-            score_reference = "current_global_without_noise"
-        else:
-            score_reference = "none_uniform_all_local_tokens"
         return {
-            "attack_method": "progressive",
+            "attack_method": "progressive_route_disruption",
             "whitebox_model": getattr(self.model, "model_name", "unknown"),
-            "patch_selector": self.progressive_patch_selector,
-            "progressive_score_mode": self.progressive_score_mode,
-            "drop_map_policy": drop_map_policy,
+            "drop_map_policy": "uniform_random_all_local_tokens",
             "progressive_checkpoints": list(self.progressive_checkpoints),
             "progressive_drop_ratios": list(self.progressive_drop_ratios),
             "progressive_drop_counts": list(self._progressive_mask_counts),
             "progressive_grids": [list(grid) for grid in self._progressive_mask_grids],
-            "progressive_global_modes": list(self._progressive_global_modes),
             "progressive_repeated_positions": True,
-            "rank_transition_active": self.progressive_patch_selector == "rank-transition",
-            "rank_transition_reference": (
-                "previous_checkpoint_percentile_rank_spatially_aligned"
-                if self.progressive_patch_selector == "rank-transition"
-                else "none"
-            ),
-            "score_reference": score_reference,
-            "score_global_noise_active": score_noise_active,
-            "score_global_noise_strength": self.score_global_noise_strength,
             "token_intervention": "local_patch_tokens_hard_zero_after_checkpoint",
             "mask_schedule_policy": "current_attack_iterate_per_step_group",
             "mask_schedule_count_per_image": self.steps * self.input_diversity_groups,
@@ -887,12 +625,11 @@ class ProgressivePatchScoreAttacker:
             "phase_mask_transform": "image_reflect_shift_then_native_grid_occupancy_topk",
             "opponent_noise": (
                 "initial_rgb_projection_kept_image_union_only"
-                if self.feature_noise_type == "opponent_projected"
-                and self.opponent_noise_strength > 0
+                if self.opponent_noise_strength > 0
                 else "disabled"
             ),
             "opponent_noise_strength": self.opponent_noise_strength,
-            "feature_noise_type": self.feature_noise_type,
+            "feature_noise_type": "opponent_channel_rgb_projection",
             "feature_noise_cls": False,
             "asr_definition": "1 - adversarial accuracy over all evaluated samples",
             "model_mean": self.model_mean.flatten().tolist(),

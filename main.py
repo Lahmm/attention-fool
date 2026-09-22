@@ -17,12 +17,7 @@ from tqdm import tqdm
 
 from gradient_replay import GradientReplay
 from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, build_whitebox_model
-from progressive_attack import (
-    PROGRESSIVE_FEATURE_NOISE_TYPES,
-    PROGRESSIVE_PATCH_SELECTORS,
-    PROGRESSIVE_SCORE_MODES,
-    ProgressivePatchScoreAttacker,
-)
+from progressive_attack import ProgressiveRouteDisruptionAttacker
 from utils import DEVICE, load_data, save_adversarial_images
 
 
@@ -141,7 +136,7 @@ def attack_all_samples(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Progressive patch-score routing attack")
+    parser = argparse.ArgumentParser(description="Progressive Route Disruption attack")
     parser.add_argument("--attack-method", choices=ATTACK_METHODS, default="progressive")
     parser.add_argument("--whitebox-model", choices=WHITEBOX_MODEL_CHOICES, default=DEFAULT_MODEL_NAME)
     parser.add_argument("--max-attacked-samples", type=int, default=1000)
@@ -169,35 +164,10 @@ def parse_args() -> argparse.Namespace:
         help="One ratio per checkpoint; omitted values use the source adapter defaults.",
     )
     parser.add_argument(
-        "--progressive-patch-selector",
-        choices=PROGRESSIVE_PATCH_SELECTORS,
-        default="high",
-        help=(
-            "Progressive drop-map construction policy; rank-transition uses "
-            "current percentile rank at the first checkpoint and percentile-rank "
-            "gain at later checkpoints."
-        ),
-    )
-    parser.add_argument(
-        "--progressive-score-mode",
-        choices=PROGRESSIVE_SCORE_MODES,
-        default=None,
-        help=(
-            "Label-free, gradient-independent score used to rank progressive local "
-            "tokens; omitted values use the source adapter default."
-        ),
-    )
-    parser.add_argument("--score-global-noise-strength", type=float, default=None)
-    parser.add_argument(
         "--opponent-noise-strength",
         type=float,
         default=None,
         help="Opponent-channel noise strength; omitted values use the source adapter default.",
-    )
-    parser.add_argument(
-        "--feature-noise-type",
-        choices=PROGRESSIVE_FEATURE_NOISE_TYPES,
-        default="opponent_projected",
     )
     parser.add_argument(
         "--gaussian-sigma",
@@ -216,7 +186,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=96)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--prefetch-factor", type=int, default=4)
-    parser.add_argument("--output-dir", default="outputs/attack/progressive_patch_score")
+    parser.add_argument("--output-dir", default="outputs/attack/progressive_route_disruption")
     return parser.parse_args()
 
 
@@ -238,15 +208,11 @@ def main(args: argparse.Namespace) -> None:
     model = build_whitebox_model(num_classes=num_classes, model_name=args.whitebox_model)
     if args.input_diversity_views_per_group != 2:
         raise ValueError("the progressive attack requires exactly two views per group.")
-    attacker = ProgressivePatchScoreAttacker(
+    attacker = ProgressiveRouteDisruptionAttacker(
         model=model,
         checkpoints=args.checkpoints,
         drop_ratios=args.drop_ratios,
-        patch_selector=args.progressive_patch_selector,
-        progressive_score_mode=args.progressive_score_mode,
-        score_global_noise_strength=args.score_global_noise_strength,
         opponent_noise_strength=args.opponent_noise_strength,
-        feature_noise_type=args.feature_noise_type,
         epsilon=args.epsilon,
         step_size=args.step_size,
         steps=args.steps,
@@ -297,11 +263,8 @@ def main(args: argparse.Namespace) -> None:
         "input_diversity_phase_shift_set": [list(shift) for shift in args.input_diversity_phase_shift_set],
         "checkpoints": list(attacker.progressive_checkpoints),
         "drop_ratios": list(attacker.progressive_drop_ratios),
-        "progressive_patch_selector": args.progressive_patch_selector,
-        "progressive_score_mode": attacker.progressive_score_mode,
-        "score_global_noise_strength": attacker.score_global_noise_strength,
         "opponent_noise_strength": attacker.opponent_noise_strength,
-        "feature_noise_type": args.feature_noise_type,
+        "feature_noise_type": "opponent_channel_rgb_projection",
         "feature_noise_position": "initial_rgb_projection",
         "gradient_postprocess": (
             "raw_mean_plus_gaussian_residual"

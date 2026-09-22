@@ -8,17 +8,15 @@ from torch import nn
 
 from gradient_replay import GradientReplay
 from nets.base import (
-    PatchScoreFeatures,
     ProgressiveAttackState,
     ProgressiveInputState,
     conv2d_progressive_metadata,
 )
 from nets.vit import DEFAULT_MODEL_NAME
 from progressive_attack import (
-    PROGRESSIVE_PATCH_SELECTORS,
     ProgressiveMaskSchedule,
     ProgressiveMaskSelection,
-    ProgressivePatchScoreAttacker,
+    ProgressiveRouteDisruptionAttacker,
 )
 
 
@@ -112,16 +110,6 @@ class TinyViTWrapper(nn.Module):
             {"prefix_tokens": tokens[:, :1], "block_index": target},
         )
 
-    def progressive_score_features(self, state, checkpoint_id):
-        return PatchScoreFeatures(
-            state.local_tokens,
-            state.context["prefix_tokens"],
-            state.grid_size,
-            f"blocks[{state.context['block_index'] - 1}]",
-            checkpoint_id,
-            "cls",
-        )
-
     def apply_progressive_mask(self, state, mask):
         local = torch.where(mask.unsqueeze(-1), torch.zeros_like(state.local_tokens), state.local_tokens)
         return ProgressiveAttackState(local, state.grid_size, dict(state.context))
@@ -142,7 +130,6 @@ class ProgressiveViTTests(unittest.TestCase):
         arguments = {
             "checkpoints": (3, 10),
             "drop_ratios": (0.25, 0.25),
-            "score_global_noise_strength": 0.0,
             "opponent_noise_strength": 0.0,
             "steps": 1,
             "input_diversity_groups": 1,
@@ -153,7 +140,7 @@ class ProgressiveViTTests(unittest.TestCase):
             "device": torch.device("cpu"),
         }
         arguments.update(overrides)
-        return ProgressivePatchScoreAttacker(TinyViTWrapper(), **arguments)
+        return ProgressiveRouteDisruptionAttacker(TinyViTWrapper(), **arguments)
 
     def test_vit_defaults_are_block3_and_block10(self):
         attacker = self.make_attacker(checkpoints=None, drop_ratios=None)
@@ -211,205 +198,37 @@ class ProgressiveViTTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "two views"):
             self.make_attacker(input_diversity_views_per_group=1)
 
-    def test_sampled_tokens_belong_to_current_high_half(self):
+    def test_random_drop_uses_all_local_tokens_and_exact_budget(self):
         attacker = self.make_attacker()
-        scores = torch.tensor(
-            [[0.0, 1.0, 2.0, 3.0], [8.0, 3.0, 5.0, 1.0]]
-        )
-        mask = attacker._sample_half_random_mask(
-            scores, 0.25, "block3", largest=True
-        )
-        high_half = torch.zeros_like(mask)
-        high_half.scatter_(1, torch.topk(scores, 2, dim=1).indices, True)
-        self.assertFalse(bool(torch.any(mask & ~high_half)))
-        self.assertTrue(torch.equal(mask.sum(dim=1), torch.ones(2, dtype=torch.long)))
-
-    def test_sampled_tokens_belong_to_current_low_half(self):
-        attacker = self.make_attacker(
-            patch_selector="low",
-            score_global_noise_strength=0.2,
-        )
-        scores = torch.tensor(
-            [[0.0, 1.0, 2.0, 3.0], [8.0, 3.0, 5.0, 1.0]]
-        )
-        mask = attacker._sample_half_random_mask(
-            scores, 0.25, "block3", largest=False
-        )
-        low_half = torch.zeros_like(mask)
-        low_half.scatter_(1, torch.topk(scores, 2, dim=1, largest=False).indices, True)
-        self.assertFalse(bool(torch.any(mask & ~low_half)))
-        self.assertTrue(torch.equal(mask.sum(dim=1), torch.ones(2, dtype=torch.long)))
-        metadata = attacker.mainline_metadata()
-        self.assertEqual(metadata["patch_selector"], "low")
-        self.assertTrue(metadata["score_global_noise_active"])
-
-    def test_high_is_the_default_progressive_selection(self):
-        attacker = self.make_attacker()
-        schedule = attacker._build_mask_schedule(torch.rand(1, 3, 4, 4))
-        self.assertEqual(schedule.counts, (1, 1))
-        self.assertEqual(attacker.mainline_metadata()["patch_selector"], "high")
-
-    def test_percentile_rank_is_normalized_per_sample(self):
-        attacker = self.make_attacker(patch_selector="rank-transition")
-        scores = torch.tensor(
-            [[4.0, 1.0, 3.0, 2.0], [-2.0, 5.0, 1.0, 9.0]]
-        )
-        ranks = attacker._percentile_rank(scores)
-        expected = torch.tensor(
-            [[1.0, 0.0, 2.0 / 3.0, 1.0 / 3.0], [0.0, 2.0 / 3.0, 1.0 / 3.0, 1.0]]
-        )
-        self.assertTrue(torch.allclose(ranks, expected))
-
-    def test_rank_transition_uses_rank_gain_after_first_checkpoint(self):
-        attacker = self.make_attacker(patch_selector="rank-transition")
-        pixels = torch.rand(1, 3, 4, 4)
-        checkpoint_scores = iter(
-            (
-                torch.tensor([[0.0, 1.0, 2.0, 3.0]]),
-                torch.tensor([[3.0, 2.0, 1.0, 0.0]]),
-            )
-        )
-        routing_scores = {}
-
-        def fixed_scores(_self, _features):
-            return next(checkpoint_scores)
-
-        def capture_routing(_self, scores, _ratio, checkpoint):
-            routing_scores[checkpoint] = scores.detach().clone()
-            mask = torch.zeros_like(scores, dtype=torch.bool)
-            mask.scatter_(1, scores.argmax(dim=1, keepdim=True), True)
-            return mask
-
-        attacker._score_at_checkpoint = types.MethodType(fixed_scores, attacker)
-        attacker._sample_rank_transition_mask = types.MethodType(
-            capture_routing, attacker
-        )
-        schedule = attacker._build_mask_schedule(pixels)
-
-        first_rank = torch.tensor([[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]])
-        second_rank = torch.tensor([[1.0, 2.0 / 3.0, 1.0 / 3.0, 0.0]])
-        self.assertTrue(torch.allclose(routing_scores["block3"], first_rank))
-        self.assertTrue(
-            torch.allclose(routing_scores["block10"], second_rank - first_rank)
-        )
-        self.assertTrue(schedule.masks[0][0, 3])
-        self.assertTrue(schedule.masks[1][0, 0])
-        metadata = attacker.mainline_metadata()
-        self.assertEqual(
-            metadata["drop_map_policy"],
-            "score_rank_transition_high_half_random",
-        )
-        self.assertTrue(metadata["rank_transition_active"])
-
-    def test_rank_transition_aligns_and_reranks_cross_scale_grids(self):
-        attacker = self.make_attacker(patch_selector="rank-transition")
-        ranks = torch.arange(16, dtype=torch.float32).view(1, 16) / 15.0
-        aligned = attacker._align_percentile_rank(ranks, (4, 4), (2, 2))
-        expected = torch.tensor([[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]])
-        self.assertTrue(torch.allclose(aligned, expected))
-
-    def test_rank_transition_replay_resolves_cutoff_ties_reproducibly(self):
-        attacker = self.make_attacker(patch_selector="rank-transition")
-        routing_scores = torch.zeros(2, 16)
-
-        def sample():
-            replay = GradientReplay(20260921)
-            replay.begin_batch(["first.png", "second.png"])
-            replay.set_context(step=1, group=2, view=-1)
-            attacker._gradient_replay = replay
-            try:
-                return attacker._sample_rank_transition_mask(
-                    routing_scores, 0.25, "block10"
-                )
-            finally:
-                attacker._gradient_replay = None
-
-        first = sample()
-        second = sample()
-        self.assertTrue(torch.equal(first, second))
-        self.assertTrue(
-            torch.equal(first.sum(dim=1), torch.full((2,), 4, dtype=torch.long))
-        )
-
-    def test_extreme_selectors_take_exact_score_tails(self):
-        scores = torch.tensor(
-            [
-                [0.0, 7.0, 2.0, 5.0, 1.0, 6.0, 3.0, 4.0],
-                [8.0, 3.0, 5.0, 1.0, 7.0, 2.0, 6.0, 4.0],
-            ]
-        )
-        high = self.make_attacker(patch_selector="extreme-high")
-        high_mask = high._sample_extreme_mask(scores, 0.25, largest=True)
-        expected_high = torch.zeros_like(high_mask)
-        expected_high[0, [1, 5]] = True
-        expected_high[1, [0, 4]] = True
-        self.assertTrue(torch.equal(high_mask, expected_high))
-        self.assertEqual(high.mainline_metadata()["drop_map_policy"], "score_extreme_high")
-
-        low = self.make_attacker(patch_selector="extreme-low")
-        low_mask = low._sample_extreme_mask(scores, 0.25, largest=False)
-        expected_low = torch.zeros_like(low_mask)
-        expected_low[0, [0, 4]] = True
-        expected_low[1, [3, 5]] = True
-        self.assertTrue(torch.equal(low_mask, expected_low))
-        self.assertEqual(low.mainline_metadata()["drop_map_policy"], "score_extreme_low")
-
-    def test_zero_score_global_noise_is_recorded_as_inactive(self):
-        attacker = self.make_attacker(
-            patch_selector="high",
-            score_global_noise_strength=0.0,
-        )
-        metadata = attacker.mainline_metadata()
-        self.assertFalse(metadata["score_global_noise_active"])
-        self.assertEqual(metadata["score_global_noise_strength"], 0.0)
-        self.assertEqual(metadata["score_reference"], "current_global_without_noise")
-
-    def test_random_selector_skips_scores_and_uses_full_patch_budget(self):
-        attacker = self.make_attacker(patch_selector="random")
-
-        def score_must_not_run(*_args, **_kwargs):
-            raise AssertionError("random progressive selection must not compute patch scores")
-
-        attacker._score_at_checkpoint = score_must_not_run
         schedule = attacker._build_mask_schedule(torch.rand(2, 3, 4, 4))
         self.assertEqual(schedule.counts, (1, 1))
         schedule.validate(batch_size=2, token_count=4)
         metadata = attacker.mainline_metadata()
-        self.assertEqual(metadata["attack_method"], "progressive")
-        self.assertEqual(metadata["patch_selector"], "random")
-        self.assertEqual(metadata["score_reference"], "none_uniform_all_local_tokens")
-        self.assertFalse(metadata["score_global_noise_active"])
+        self.assertEqual(metadata["attack_method"], "progressive_route_disruption")
+        self.assertEqual(metadata["drop_map_policy"], "uniform_random_all_local_tokens")
 
     def test_schedule_is_sequential_and_can_repeat_positions(self):
         attacker = self.make_attacker()
         pixels = torch.rand(1, 3, 4, 4)
-        checkpoint_inputs = {}
 
-        def record_scores(_self, features):
-            checkpoint_inputs[features.layer_id] = features.local_tokens.detach().clone()
-            return torch.arange(features.local_tokens.size(1), device=features.local_tokens.device)[None].expand(
-                features.local_tokens.size(0), -1
-            )
-
-        def repeat_first_position(_self, scores, _ratio, checkpoint, *, largest):
-            del checkpoint, largest
-            mask = torch.zeros_like(scores, dtype=torch.bool)
+        def repeat_first_position(
+            _self, *, batch_size, token_count, ratio, checkpoint, device
+        ):
+            del ratio, checkpoint
+            mask = torch.zeros(batch_size, token_count, dtype=torch.bool, device=device)
             mask[:, 0] = True
             return mask
 
-        attacker._score_at_checkpoint = types.MethodType(record_scores, attacker)
-        attacker._sample_half_random_mask = types.MethodType(repeat_first_position, attacker)
+        attacker._sample_random_mask = types.MethodType(repeat_first_position, attacker)
         schedule = attacker._build_mask_schedule(pixels)
 
         self.assertTrue(all(bool(mask[0, 0]) for mask in schedule.masks))
         with torch.no_grad():
             state = attacker.model.begin_progressive_forward(attacker._normalize(pixels))
             at_three = attacker.model.advance_progressive_state(state, "block3")
-            self.assertTrue(torch.allclose(checkpoint_inputs["block3"], at_three.local_tokens))
             after_three = attacker.model.apply_progressive_mask(at_three, schedule.masks[0])
             at_ten = attacker.model.advance_progressive_state(after_three, "block10")
             uninterrupted_ten = attacker.model.advance_progressive_state(at_three, "block10")
-            self.assertTrue(torch.allclose(checkpoint_inputs["block10"], at_ten.local_tokens))
             self.assertFalse(torch.allclose(at_ten.local_tokens, uninterrupted_ten.local_tokens))
 
     def test_phase_schedule_preserves_counts(self):
@@ -482,32 +301,13 @@ class ProgressiveViTTests(unittest.TestCase):
         self.assertEqual(metadata["checkpoint_mask_selection_count_per_image"], 200)
 
     def test_replay_reproduces_checkpoint_masks(self):
-        attacker = self.make_attacker(score_global_noise_strength=0.2)
+        attacker = self.make_attacker()
         pixels = torch.rand(1, 3, 4, 4)
 
         def replayed_schedule():
             replay = GradientReplay(1234)
             replay.begin_batch(["sample.png"])
             replay.set_context(step=2, group=4, view=-1)
-            attacker._gradient_replay = replay
-            try:
-                return attacker._build_mask_schedule(pixels)
-            finally:
-                attacker._gradient_replay = None
-
-        first = replayed_schedule()
-        second = replayed_schedule()
-        for first_mask, second_mask in zip(first.masks, second.masks):
-            self.assertTrue(torch.equal(first_mask, second_mask))
-
-    def test_replay_reproduces_random_checkpoint_masks(self):
-        attacker = self.make_attacker(patch_selector="random")
-        pixels = torch.rand(1, 3, 4, 4)
-
-        def replayed_schedule():
-            replay = GradientReplay(4321)
-            replay.begin_batch(["sample.png"])
-            replay.set_context(step=3, group=5, view=-1)
             attacker._gradient_replay = replay
             try:
                 return attacker._build_mask_schedule(pixels)
@@ -551,25 +351,22 @@ class ProgressiveViTTests(unittest.TestCase):
             pretrained=False,
             device=torch.device("cpu"),
         )
-        for patch_selector in PROGRESSIVE_PATCH_SELECTORS:
-            with self.subTest(patch_selector=patch_selector):
-                attacker = ProgressivePatchScoreAttacker(
-                    model,
-                    patch_selector=patch_selector,
-                    steps=1,
-                    input_diversity_groups=1,
-                    input_diversity_views_per_group=2,
-                    use_momentum=False,
-                    gaussian_alpha=0.0,
-                    device=torch.device("cpu"),
-                )
-                pixels = torch.rand(1, 3, 224, 224, requires_grad=True)
-                labels = torch.zeros(1, dtype=torch.long)
-                schedule = attacker._build_mask_schedule(pixels)
-                loss = attacker._forward_with_schedule(pixels, labels, schedule)
-                gradient = torch.autograd.grad(loss, pixels)[0]
-                self.assertEqual(schedule.counts, (10, 10))
-                self.assertTrue(torch.isfinite(gradient).all())
+        attacker = ProgressiveRouteDisruptionAttacker(
+            model,
+            steps=1,
+            input_diversity_groups=1,
+            input_diversity_views_per_group=2,
+            use_momentum=False,
+            gaussian_alpha=0.0,
+            device=torch.device("cpu"),
+        )
+        pixels = torch.rand(1, 3, 224, 224, requires_grad=True)
+        labels = torch.zeros(1, dtype=torch.long)
+        schedule = attacker._build_mask_schedule(pixels)
+        loss = attacker._forward_with_schedule(pixels, labels, schedule)
+        gradient = torch.autograd.grad(loss, pixels)[0]
+        self.assertEqual(schedule.counts, (10, 10))
+        self.assertTrue(torch.isfinite(gradient).all())
 
 
 if __name__ == "__main__":

@@ -8,13 +8,13 @@ from nets.cait import CaiTS24Adapter
 from nets.pit import PiTB224Adapter
 from nets.visformer import VisformerSmallAdapter
 from nets.vit import ViTAdapter
-from progressive_attack import ProgressivePatchScoreAttacker
+from progressive_attack import ProgressiveRouteDisruptionAttacker
 
 
 class ProgressiveAdapterContractTests(unittest.TestCase):
     EXPECTED_DEFAULTS = {
         ViTAdapter: ("block3", "block10"),
-        CaiTS24Adapter: ("block17_gap", "block23_gap"),
+        CaiTS24Adapter: ("block17", "block23"),
         PiTB224Adapter: ("stage2_block1", "stage3_block2", "stage3_block3"),
         VisformerSmallAdapter: ("stage2_block1", "stage3_block1"),
     }
@@ -59,19 +59,18 @@ class ProgressiveAdapterContractTests(unittest.TestCase):
                     expected_counts,
                 )
 
-    def test_architecture_specific_score_and_opponent_defaults(self):
+    def test_architecture_specific_opponent_defaults(self):
         expected = {
-            ViTAdapter: ("cosine", 0.2),
-            CaiTS24Adapter: ("gap_projection", 0.2),
-            PiTB224Adapter: ("cosine", 0.4),
-            VisformerSmallAdapter: ("gap_projection", 0.4),
+            ViTAdapter: 0.2,
+            CaiTS24Adapter: 0.2,
+            PiTB224Adapter: 0.4,
+            VisformerSmallAdapter: 0.4,
         }
-        for adapter, defaults in expected.items():
+        for adapter, default in expected.items():
             with self.subTest(adapter=adapter.__name__):
                 instance = object.__new__(adapter)
-                self.assertEqual(instance.default_progressive_score_mode(), defaults[0])
                 self.assertEqual(
-                    instance.default_progressive_opponent_noise_strength(), defaults[1]
+                    instance.default_progressive_opponent_noise_strength(), default
                 )
 
     @unittest.skipUnless(
@@ -96,7 +95,7 @@ class ProgressiveAdapterContractTests(unittest.TestCase):
                     state = model.begin_progressive_forward(pixels)
                     resumed = model.finish_progressive_forward(state)
                 self.assertTrue(torch.equal(native, resumed))
-                attacker = ProgressivePatchScoreAttacker(
+                attacker = ProgressiveRouteDisruptionAttacker(
                     model,
                     steps=1,
                     input_diversity_groups=1,

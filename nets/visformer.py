@@ -4,7 +4,6 @@ import torch
 
 from .base import (
     DEFAULT_PRETRAINED,
-    PatchScoreFeatures,
     ProgressiveAdapter,
     ProgressiveAttackState,
     ProgressiveInputState,
@@ -63,9 +62,6 @@ class VisformerSmallAdapter(ProgressiveAdapter):
 
     def default_progressive_drop_ratios(self) -> tuple[float, ...]:
         return self._DEFAULT_PROGRESSIVE_DROP_RATIOS
-
-    def default_progressive_score_mode(self) -> str:
-        return "gap_projection"
 
     def default_progressive_opponent_noise_strength(self) -> float:
         return 0.4
@@ -149,22 +145,6 @@ class VisformerSmallAdapter(ProgressiveAdapter):
             block_index = 0
             prepared = False
         raise RuntimeError("Visformer progressive checkpoint was not reached.")
-
-    def progressive_score_features(
-        self, state: ProgressiveAttackState, checkpoint_id: str
-    ) -> PatchScoreFeatures:
-        stage_index = int(state.context["stage_index"])
-        block_index = int(state.context["block_index"])
-        features = PatchScoreFeatures(
-            local_tokens=state.local_tokens,
-            global_token=state.local_tokens.mean(dim=1, keepdim=True),
-            grid_size=state.grid_size,
-            source_name=f"stage{stage_index}[{block_index - 1}]+gap",
-            layer_id=checkpoint_id,
-            global_mode="gap",
-        )
-        features.validate()
-        return features
 
     def apply_progressive_mask(
         self, state: ProgressiveAttackState, mask: torch.Tensor

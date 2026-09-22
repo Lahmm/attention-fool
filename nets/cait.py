@@ -4,7 +4,6 @@ import torch
 
 from .base import (
     DEFAULT_PRETRAINED,
-    PatchScoreFeatures,
     ProgressiveAdapter,
     ProgressiveAttackState,
     ProgressiveInputState,
@@ -18,8 +17,8 @@ DEFAULT_MODEL_NAME = "cait_s24_224"
 class CaiTS24Adapter(ProgressiveAdapter):
     default_model_name = DEFAULT_MODEL_NAME
 
-    _PROGRESSIVE_LAYERS = tuple(f"block{index}_gap" for index in range(1, 25))
-    _DEFAULT_PROGRESSIVE_LAYERS = ("block17_gap", "block23_gap")
+    _PROGRESSIVE_LAYERS = tuple(f"block{index}" for index in range(1, 25))
+    _DEFAULT_PROGRESSIVE_LAYERS = ("block17", "block23")
     _DEFAULT_PROGRESSIVE_DROP_RATIOS = (0.010204081633, 0.142857142857)
 
     def prepare_progressive_input(self, x: torch.Tensor) -> ProgressiveInputState:
@@ -45,9 +44,6 @@ class CaiTS24Adapter(ProgressiveAdapter):
     def default_progressive_drop_ratios(self) -> tuple[float, ...]:
         return self._DEFAULT_PROGRESSIVE_DROP_RATIOS
 
-    def default_progressive_score_mode(self) -> str:
-        return "gap_projection"
-
     def begin_progressive_forward(self, x: torch.Tensor) -> ProgressiveAttackState:
         initial = self.prepare_progressive_input(x)
         return ProgressiveAttackState(
@@ -66,7 +62,7 @@ class CaiTS24Adapter(ProgressiveAdapter):
     ) -> ProgressiveAttackState:
         if checkpoint_id not in self._PROGRESSIVE_LAYERS:
             raise ValueError(f"unsupported CaiT progressive checkpoint: {checkpoint_id!r}.")
-        target = int(checkpoint_id.removeprefix("block").removesuffix("_gap"))
+        target = int(checkpoint_id.removeprefix("block"))
         start = int(state.context["block_index"])
         if target <= start:
             raise ValueError("CaiT progressive checkpoints must be strictly increasing.")
@@ -74,20 +70,6 @@ class CaiTS24Adapter(ProgressiveAdapter):
         for block in self.model.blocks[start:target]:
             local = block(local)
         return ProgressiveAttackState(local, state.grid_size, {"block_index": target})
-
-    def progressive_score_features(
-        self, state: ProgressiveAttackState, checkpoint_id: str
-    ) -> PatchScoreFeatures:
-        features = PatchScoreFeatures(
-            local_tokens=state.local_tokens,
-            global_token=state.local_tokens.mean(dim=1, keepdim=True),
-            grid_size=state.grid_size,
-            source_name=f"blocks[{state.context['block_index'] - 1}]+gap",
-            layer_id=checkpoint_id,
-            global_mode="gap",
-        )
-        features.validate()
-        return features
 
     def apply_progressive_mask(
         self, state: ProgressiveAttackState, mask: torch.Tensor

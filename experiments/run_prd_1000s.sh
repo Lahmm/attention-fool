@@ -2,7 +2,7 @@
 set -euo pipefail
 
 TASK_PY=/root/miniconda3/envs/att-atk/bin/python
-TASK_PREFIX=newconfig1000
+TASK_PREFIX=prd1000
 TASK_SEED=20260907
 
 run_one() {
@@ -11,12 +11,10 @@ run_one() {
   local batch_size=$3
   local checkpoints=$4
   local ratios=$5
-  local score_mode=$6
-  local opponent_strength=$7
-  local attack_dir="outputs/attack/${TASK_PREFIX}_${name}_s1000_offset0_seed${TASK_SEED}"
-  local csv_path="outputs/csv/outputs_attack_${TASK_PREFIX}_${name}_s1000_offset0_seed${TASK_SEED}.csv"
+  local opponent_strength=$6
+  local attack_dir="outputs/attack/${TASK_PREFIX}_${name}_seed${TASK_SEED}"
+  local csv_path="outputs/csv/outputs_attack_${TASK_PREFIX}_${name}_seed${TASK_SEED}.csv"
 
-  echo "===== ${name}: attack ====="
   if [[ -d "$attack_dir" ]]; then
     local image_count
     image_count=$(find "$attack_dir" -maxdepth 1 -type f -name 'adv_*.png' | wc -l)
@@ -27,16 +25,12 @@ run_one() {
       echo "Refusing to overwrite incomplete attack directory: $attack_dir" >&2
       return 1
     fi
-    echo "Attack already complete: ${name}"
   else
     "$TASK_PY" main.py \
       --attack-method progressive \
       --whitebox-model "$model" \
       --checkpoints "$checkpoints" \
       --drop-ratios "$ratios" \
-      --progressive-patch-selector high \
-      --progressive-score-mode "$score_mode" \
-      --score-global-noise-strength 0.2 \
       --opponent-noise-strength "$opponent_strength" \
       --batch-size "$batch_size" \
       --max-attacked-samples 1000 \
@@ -44,33 +38,30 @@ run_one() {
       --output-dir "$attack_dir"
   fi
 
-  echo "===== ${name}: transfer ====="
-  if [[ -f "$csv_path" ]]; then
-    echo "Transfer CSV already complete: ${name}"
-  else
+  if [[ ! -f "$csv_path" ]]; then
     "$TASK_PY" transfer_eval.py \
       --image-dir "$attack_dir" \
       --amp \
-      --exp-name "${TASK_PREFIX}_${name}_s1000_offset0_seed${TASK_SEED}"
+      --exp-name "${TASK_PREFIX}_${name}_seed${TASK_SEED}"
   fi
 }
 
-run_one vit_b3_b10_c10_10 vit_base_patch16_224 96 \
+run_one vit vit_base_patch16_224 96 \
   block3,block10 \
   0.051020408163,0.051020408163 \
-  cosine 0.2
+  0.2
 
-run_one cait_b17_b23_c02_28_projection cait_s24_224 48 \
-  block17_gap,block23_gap \
+run_one cait cait_s24_224 48 \
+  block17,block23 \
   0.010204081633,0.142857142857 \
-  gap_projection 0.2
+  0.2
 
-run_one pit_s2b1_s3b2_s3b3_c05_02_06_opp04 pit_b_224 96 \
+run_one pit pit_b_224 96 \
   stage2_block1,stage3_block2,stage3_block3 \
   0.02081165,0.03125,0.09375 \
-  cosine 0.4
+  0.4
 
-run_one vis_s2b1_s3b1_c41_10_projection_opp04 visformer_small 48 \
+run_one visformer visformer_small 48 \
   stage2_block1,stage3_block1 \
   0.209183673469,0.204081632653 \
-  gap_projection 0.4
+  0.4

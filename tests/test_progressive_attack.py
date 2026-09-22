@@ -4,22 +4,17 @@ import unittest
 import torch
 
 from gradient_replay import GradientReplay
-from nets.base import PatchScoreFeatures
-from progressive_attack import PROGRESSIVE_SCORE_MODES, ProgressivePatchScoreAttacker
+from progressive_attack import ProgressiveRouteDisruptionAttacker
 from tests.test_progressive_vit import TinyViTWrapper
 
 
 class ProgressiveAttackTests(unittest.TestCase):
-    def test_only_retained_score_modes_are_exposed(self):
-        self.assertEqual(PROGRESSIVE_SCORE_MODES, ("cosine", "gap_projection"))
-
     def make_attacker(self, **overrides):
         torch.manual_seed(7)
         model = TinyViTWrapper()
         common = {
             "checkpoints": (3, 10),
             "drop_ratios": (0.25, 0.25),
-            "score_global_noise_strength": 0.2,
             "opponent_noise_strength": 0.2,
             "steps": 1,
             "input_diversity_groups": 1,
@@ -30,7 +25,7 @@ class ProgressiveAttackTests(unittest.TestCase):
             "device": torch.device("cpu"),
         }
         common.update(overrides)
-        return ProgressivePatchScoreAttacker(model, **common)
+        return ProgressiveRouteDisruptionAttacker(model, **common)
 
     @staticmethod
     def digest(tensor):
@@ -75,9 +70,9 @@ class ProgressiveAttackTests(unittest.TestCase):
         self.assertEqual(
             {key: self.digest(value) for key, value in independent_probe.items()},
             {
-                "view_gradients": "31ff886157ee7cc60585e602713cb728765c4a29b18f69ea6812f927e2b226d1",
-                "raw_mean": "8c636cd48e1e9ec5d3fdb422ec9865b696f80a662ca6c6a2e23af4ca50c094ea",
-                "processed": "8c636cd48e1e9ec5d3fdb422ec9865b696f80a662ca6c6a2e23af4ca50c094ea",
+                "view_gradients": "4a6a7b6275aba41ef2e1ff6521b743202478f549d2c0a940e183a5c5100b4cd3",
+                "raw_mean": "98632b0b70d1e50a550317135378b7e78a50ad28a6ebec253b078e1abb80899a",
+                "processed": "98632b0b70d1e50a550317135378b7e78a50ad28a6ebec253b078e1abb80899a",
             },
         )
         independent_adv = independent.attack_batch(
@@ -88,63 +83,11 @@ class ProgressiveAttackTests(unittest.TestCase):
             "df31fe9923f1e00f0a40bc8c8bab0af159eb3f6e3e3d310cbdef9e1f7c8c1463",
         )
 
-    def test_score_noise_metadata_is_boolean_and_canonical_strength_is_numeric(self):
-        attacker = self.make_attacker(score_global_noise_strength=0.0)
+    def test_metadata_records_uniform_random_route_disruption(self):
+        attacker = self.make_attacker()
         metadata = attacker.mainline_metadata()
-        self.assertIs(metadata["score_global_noise_active"], False)
-        self.assertIsInstance(metadata["score_global_noise_active"], bool)
-        self.assertEqual(metadata["score_global_noise_strength"], 0.0)
-
-    def test_retained_score_modes_match_their_definitions(self):
-        local = torch.tensor(
-            [[[2.0, 0.0], [0.0, 1.0], [1.0, 2.0]]], dtype=torch.float32
-        )
-        global_token = local.mean(dim=1, keepdim=True)
-        features = PatchScoreFeatures(
-            local_tokens=local,
-            global_token=global_token,
-            grid_size=(1, 3),
-            source_name="gap-test",
-            layer_id="gap-test",
-            global_mode="gap",
-        )
-        cosine = self.make_attacker(
-            progressive_score_mode="cosine", score_global_noise_strength=0.0
-        )._score_at_checkpoint(features)
-        self.assertTrue(
-            torch.allclose(
-                cosine,
-                torch.nn.functional.cosine_similarity(
-                    local, global_token.expand_as(local), dim=-1
-                ),
-            )
-        )
-
-        projection = self.make_attacker(
-            progressive_score_mode="gap_projection", score_global_noise_strength=0.0
-        )._score_at_checkpoint(features)
-        self.assertTrue(
-            torch.allclose(
-                projection,
-                (local * global_token).sum(dim=-1) / (local.size(-1) ** 0.5),
-            )
-        )
-
-    def test_gap_only_score_modes_reject_cls_features(self):
-        attacker = self.make_attacker(
-            progressive_score_mode="gap_projection", score_global_noise_strength=0.0
-        )
-        local = torch.ones(1, 2, 3)
-        features = PatchScoreFeatures(
-            local_tokens=local,
-            global_token=local[:, :1],
-            grid_size=(1, 2),
-            source_name="cls-test",
-            layer_id="cls-test",
-            global_mode="cls",
-        )
-        with self.assertRaisesRegex(ValueError, "requires GAP"):
-            attacker._score_at_checkpoint(features)
+        self.assertEqual(metadata["attack_method"], "progressive_route_disruption")
+        self.assertEqual(metadata["drop_map_policy"], "uniform_random_all_local_tokens")
 
     def test_model_specific_default_drop_ratios_are_used_when_omitted(self):
         attacker = self.make_attacker(checkpoints=None, drop_ratios=None)
@@ -153,17 +96,7 @@ class ProgressiveAttackTests(unittest.TestCase):
             (0.051020408163, 0.051020408163),
         )
 
-    def test_gaussian_feature_noise_is_rms_matched_and_noise_off_is_explicit(self):
-        attacker = self.make_attacker(
-            feature_noise_type="gaussian", opponent_noise_strength=0.25
-        )
-        state = attacker.model.prepare_progressive_input(torch.rand(1, 3, 4, 4))
-        noise = attacker._kept_feature_noise(state)
-        token_rms = state.local_tokens.square().mean(dim=(1, 2)).sqrt()
-        noise_rms = noise.square().mean(dim=(1, 2)).sqrt()
-        self.assertTrue(torch.allclose(noise_rms, 0.25 * token_rms, rtol=1e-5))
-        self.assertEqual(attacker._feature_noise_type, "feature_iid_gaussian")
-
+    def test_noise_off_is_explicit(self):
         disabled = self.make_attacker(opponent_noise_strength=0.0)
         metadata = disabled.mainline_metadata()
         self.assertEqual(metadata["opponent_noise"], "disabled")

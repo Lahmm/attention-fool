@@ -4,7 +4,6 @@ import torch
 
 from .base import (
     DEFAULT_PRETRAINED,
-    PatchScoreFeatures,
     ProgressiveAdapter,
     ProgressiveAttackState,
     ProgressiveInputState,
@@ -162,22 +161,6 @@ class PiTB224Adapter(ProgressiveAdapter):
             block_index = 0
             prepared = False
         raise RuntimeError("PiT progressive checkpoint was not reached.")
-
-    def progressive_score_features(
-        self, state: ProgressiveAttackState, checkpoint_id: str
-    ) -> PatchScoreFeatures:
-        stage_index = int(state.context["stage_index"])
-        block_index = int(state.context["block_index"])
-        features = PatchScoreFeatures(
-            local_tokens=state.local_tokens,
-            global_token=state.context["cls_token"][:, :1],
-            grid_size=state.grid_size,
-            source_name=f"transformers[{stage_index}].blocks[{block_index - 1}]",
-            layer_id=checkpoint_id,
-            global_mode="cls",
-        )
-        features.validate()
-        return features
 
     def apply_progressive_mask(
         self, state: ProgressiveAttackState, mask: torch.Tensor

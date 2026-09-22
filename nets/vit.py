@@ -4,7 +4,6 @@ import torch
 
 from .base import (
     DEFAULT_PRETRAINED,
-    PatchScoreFeatures,
     ProgressiveAdapter,
     ProgressiveAttackState,
     ProgressiveInputState,
@@ -84,20 +83,6 @@ class ViTAdapter(ProgressiveAdapter):
             grid_size=state.grid_size,
             context={"prefix_tokens": tokens[:, :prefix_count], "block_index": target},
         )
-
-    def progressive_score_features(
-        self, state: ProgressiveAttackState, checkpoint_id: str
-    ) -> PatchScoreFeatures:
-        features = PatchScoreFeatures(
-            local_tokens=state.local_tokens,
-            global_token=state.context["prefix_tokens"][:, :1],
-            grid_size=state.grid_size,
-            source_name=f"blocks[{state.context['block_index'] - 1}]",
-            layer_id=checkpoint_id,
-            global_mode="cls",
-        )
-        features.validate()
-        return features
 
     def apply_progressive_mask(
         self, state: ProgressiveAttackState, mask: torch.Tensor

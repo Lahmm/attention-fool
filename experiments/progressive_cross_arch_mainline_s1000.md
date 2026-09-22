@@ -1,363 +1,78 @@
-# Progressive cross-architecture mainline: implementation and 1000-image validation
+# Progressive Route Disruption: 1000-image cross-architecture validation
 
-Initial formal matrix: 2026-09-07
+## Research position
 
-Checkpoint, ratio, score, and opponent-strength follow-ups audited through: 2026-09-16
+Patch-score analysis revealed that local-token semantic rankings reorganize substantially across depth. PRD turns that observation into a direct intervention: it repeatedly disrupts the evolving computation path with uniformly random local-token masks.
 
-Code revisions used for the formal runs include: initial matrix `cf4b9ada`,
-CaiT block6/18/22 follow-up `c17d9ab5`, block6/17/23 follow-up `3dd43259`,
-block5/17/23 follow-up `3abd7c0b`, and the generalized-selector revision
-`552f03b` used by the ViT extreme-high follow-up.
-The promoted four-source defaults were validated at `dedd7c05`. Their original
-13-target records were recorded at `5229210`; the complete 14-target re-evaluation,
-which adds ViT-B/16, was run and recorded with evaluation revision `9644c38`.
+The attack contains exactly two paper mechanisms:
 
-## Mainline definition
+1. checkpoint-wise progressive random local-token hard zeroing;
+2. kept-only RGB opponent-channel noise projected through the source model's initial RGB convolution and RMS-matched in feature space.
 
-The production mainline is the independent `ProgressivePatchScoreAttacker` in
-`progressive_attack.py`. It contains exactly the two paper mechanisms:
+Phase pairing, raw multi-view gradient averaging, the Gaussian gradient residual, momentum, replay, and the projected pixel update are supporting implementation components.
 
-1. patch-score-guided progressive hard-zero routing at architecture-specific
-   checkpoint schedules;
-2. kept-only RGB opponent-channel random noise projected through the source
-   model's initial RGB convolution and RMS-matched in feature space.
+## Progressive contract
 
-Score-global noise, phase pairs, Gaussian gradient residual, IID Gaussian
-feature noise and random routing remain supporting controls. The `*_active`
-metadata fields are derived booleans; strengths remain numeric. `main.py`
-dispatches only this progressive implementation; no legacy attack module or
-adapter compatibility API is retained.
+For every attack step and augmentation group, PRD generates a fresh schedule. During both schedule construction and differentiable replay, checkpoints are traversed sequentially. Each mask is sampled uniformly from every local-token position on that checkpoint's native grid, applied immediately, and the modified state continues to the next checkpoint. The original view uses the schedule directly; the phase view uses a count-preserving spatial transformation of the same schedule.
 
-## Adapter contract and defaults
+| Source | Default checkpoints | Native grids | Drop counts | Opponent |
+| --- | --- | --- | --- | ---: |
+| ViT-B/16 | block3, block10 | 14×14, 14×14 | 10, 10 | 0.2 |
+| CaiT-S24 | block17, block23 | 14×14, 14×14 | 2, 28 | 0.2 |
+| PiT-B | stage2/block1, stage3/block2, stage3/block3 | 16×16, 8×8, 8×8 | 5, 2, 6 | 0.4 |
+| Visformer-S | stage2/block1, stage3/block1 | 14×14, 7×7 | 41, 10 | 0.4 |
 
-The attack owns selection, noise, phase pairing, replay, gradient aggregation,
-MI/NI/TI, Gaussian residual and the projected pixel update. Each adapter owns
-only the architecture-specific hidden-state traversal:
+The adapters expose only initial RGB-projection metadata, checkpoint traversal, token replacement/masking, and native forward completion. They do not expose local/global scoring features.
 
-- begin from the initial RGB-projected state;
-- advance to a registered checkpoint;
-- expose local/global score features;
-- apply a local-token mask;
-- finish the native forward.
+For cross-scale models, every selection retains its native grid. Phase transforms happen in image space and are mapped back with count-preserving top-k occupancy. Kept-only opponent noise uses the image-space union of all checkpoint masks and the true receptive-field geometry of the initial RGB projection.
 
-| Source | Default checkpoints | Score | Native grids | Drop counts | Opponent |
-| --- | --- | --- | --- | --- | ---: |
-| ViT-B/16 | block3, block10 | cosine | 14×14, 14×14 | 10, 10 | 0.2 |
-| CaiT-S24 | block17, block23 | GAP projection | 14×14, 14×14 | 2, 28 | 0.2 |
-| PiT-B | stage2/block1, stage3/block2, stage3/block3 | cosine | 16×16, 8×8, 8×8 | 5, 2, 6 | 0.4 |
-| Visformer-S | stage2/block1, stage3/block1 | GAP projection | 14×14, 7×7 | 41, 10 | 0.4 |
+## Formal transfer results
 
-For cross-scale models, every checkpoint mask retains its own grid. Phase
-transforms happen in image space and are projected back with count-preserving
-top-k occupancy. Kept-only opponent noise uses the image-space union of all
-checkpoint masks, mapped through the true receptive fields of the initial RGB
-projection.
+ASR is `1 - adversarial accuracy` over all 1000 evaluated adversarial samples. No target-clean-correct filtering is used. The target set contains eight Transformer and six CNN models. Overall is the complete 14-target mean; strict black-box excludes the source-matched target.
 
-## Completed verification gates
-
-- Golden ViT regression: fixed-replay masks, every view gradient, raw mean,
-  processed gradient and final adversarial pixels are pinned by hashes in the
-  test suite.
-- Static scope: tests require the legacy attack module and its adapter APIs to
-  be absent.
-- Adapter parity: all four real timm models produce bitwise-equal native and
-  no-mask resumed logits.
-- Real gradients: all four adapters complete a two-view backward pass with
-  finite gradients.
-- Unit coverage: score-high/low/random sampling, replay, score noise metadata,
-  opponent projection, Gaussian RMS matching, kept-only union, cross-grid
-  phase count preservation, gradient aggregation and epsilon projection pass.
-  The current suite also covers arbitrary nonzero checkpoint counts, exact
-  checkpoint/ratio cardinality, and extreme-high/extreme-low construction.
-- Full-budget smoke: each source completes 8 images at 10 steps × 10 groups ×
-  2 views. Every saved PNG has an observed maximum perturbation of 16/255.
-- Small transfer: each smoke directory evaluates successfully on DeiT-B and
-  ResNet-101.
-- Formal scale: the selected defaults for all four sources, the initial
-  cross-architecture matrix, two ViT noise controls, and the retained
-  full-scale checkpoint/selector follow-ups complete 1000 images. Every formal
-  directory has 1000 adversarial PNGs; K2/K3 runs record 200/300 checkpoint
-  selections per image and maximum saved-PNG L-infinity 16/255.
-- Test suite: 43 tests pass; two optional real-model tests are skipped in the
-  default run, and the four-model real adapter test passes when explicitly
-  enabled.
-
-## Formal cross-architecture transfer results
-
-ASR is `1 - adversarial accuracy` over all 1000 evaluated adversarial samples.
-No target-clean-correct filtering is used. The default target set contains
-eight Transformer and six CNN models, including ViT-B/16. Overall therefore
-means the complete 14-target mean and can include the source architecture;
-strict black-box excludes that source-matched target.
-
-| Source | Overall ASR | Transformer avg | CNN avg | Strict black-box overall* |
+| Source | Overall ASR | Transformer avg | CNN avg | Strict black-box overall |
 | --- | ---: | ---: | ---: | ---: |
-| ViT-B/16 | **85.26%** | **90.34%** | 78.48% | **84.35%** |
-| CaiT-S24 | **86.09%** | 89.68% | **81.32%** | **85.18%** |
-| PiT-B | **84.79%** | 90.25% | 77.50% | **83.71%** |
-| Visformer-S | 78.52% | 80.54% | 75.83% | 76.92% |
+| ViT-B/16 | 85.20% | 90.45% | 78.20% | 84.29% |
+| CaiT-S24 | 86.41% | 89.99% | 81.63% | 85.46% |
+| PiT-B | 84.34% | 89.91% | 76.92% | 83.25% |
+| Visformer-S | 80.66% | 83.19% | 77.28% | 79.19% |
+| **Four-source mean** | **84.15%** | **88.39%** | **78.51%** | **83.05%** |
 
-`*` Strict black-box averages the other 13 targets after excluding the target
-with the same architecture as the source. Every one of the 56 source-target
-evaluations used all 1000 adversarial samples and recorded zero skipped images.
+Every one of the 56 source-target evaluations used all 1000 adversarial samples and recorded zero skipped images.
 
-The per-target auditable records are:
+### Per-target ASR
 
-- `outputs/csv/outputs_attack_newconfig1000_vit_b3_b10_c10_10_s1000_offset0_seed20260907.csv`
-- `outputs/csv/outputs_attack_newconfig1000_cait_b17_b23_c02_28_projection_s1000_offset0_seed20260907.csv`
-- `outputs/csv/outputs_attack_newconfig1000_pit_s2b1_s3b2_s3b3_c05_02_06_opp04_s1000_offset0_seed20260907.csv`
-- `outputs/csv/outputs_attack_newconfig1000_vis_s2b1_s3b1_c41_10_projection_opp04_s1000_offset0_seed20260907.csv`
-
-### Per-target ASR of the promoted defaults
-
-| Transfer model | ViT source | CaiT source | PiT source | Visformer source |
+| Target | ViT source | CaiT source | PiT source | Visformer source |
 | --- | ---: | ---: | ---: | ---: |
-| ViT-B/16 | 97.00% | 84.70% | 83.50% | 62.20% |
-| LeViT-256 | 86.50% | 88.50% | 87.20% | 87.20% |
-| PiT-B/224 | 87.70% | 88.50% | 98.80% | 83.20% |
-| DeiT-B/16 | 90.10% | 90.20% | 91.60% | 76.50% |
-| TNT-S/16 | 90.20% | 90.00% | 90.90% | 84.90% |
-| ConViT-B | 88.40% | 89.20% | 90.90% | 73.70% |
-| Visformer-S | 87.90% | 88.30% | 90.80% | 99.40% |
-| CaiT-S24 | 94.90% | 98.00% | 88.30% | 77.20% |
-| Inception-v3 | 80.10% | 84.10% | 83.00% | 83.80% |
-| Inception-v4 | 78.00% | 81.70% | 80.00% | 83.90% |
-| Inception-ResNet-v2 | 78.30% | 81.40% | 78.50% | 76.90% |
-| ResNet-101 | 82.70% | 83.90% | 81.20% | 82.90% |
-| Inception-v3-adv | 78.30% | 80.80% | 75.10% | 72.50% |
-| Inception-ResNet-v2-adv | 73.50% | 76.00% | 67.20% | 54.90% |
+| ViT-B/16 | 97.00% | 85.40% | 83.30% | 64.90% |
+| LeViT-256 | 87.00% | 89.00% | 87.40% | 88.60% |
+| PiT-B/224 | 88.00% | 88.40% | 98.50% | 87.10% |
+| DeiT-B/16 | 90.10% | 90.70% | 91.30% | 80.20% |
+| TNT-S/16 | 90.50% | 90.10% | 90.80% | 86.70% |
+| ConViT-B | 88.20% | 89.60% | 89.70% | 77.70% |
+| Visformer-S | 88.10% | 88.00% | 90.20% | 99.70% |
+| CaiT-S24 | 94.70% | 98.70% | 88.10% | 80.60% |
+| Inception-v3 | 80.50% | 84.70% | 82.20% | 85.40% |
+| Inception-v4 | 77.70% | 82.50% | 79.80% | 85.00% |
+| Inception-ResNet-v2 | 78.20% | 82.40% | 78.10% | 78.90% |
+| ResNet-101 | 81.30% | 84.40% | 80.10% | 84.60% |
+| Inception-v3-adv | 77.80% | 80.90% | 75.20% | 73.10% |
+| Inception-ResNet-v2-adv | 73.70% | 74.90% | 66.10% | 56.70% |
 
-The sections below retain the preceding tuning generation and controlled
-ablations as historical evidence; their selected rows are not the current
-adapter defaults.
+## Auditable records
 
-The initial adapter defaults and the preceding 2026-09-15 selected defaults are
-both retained for auditability:
+The completed runs are consolidated without changing their measurements into two PRD records:
 
-| Source | Initial Overall | Selected Overall | Gain | Initial strict | Selected strict | Gain |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| ViT-B/16 | 79.58% | **80.28%** | +0.71pp | 79.58% | **80.28%** | +0.71pp |
-| CaiT-S24 | 75.75% | **84.15%** | +8.40pp | 74.35% | **83.02%** | +8.67pp |
-| PiT-B | 75.52% | **80.44%** | +4.92pp | 73.69% | **78.86%** | +5.17pp |
-| Visformer-S | 71.46% | **74.25%** | +2.79pp | 69.12% | **72.13%** | +3.01pp |
+- `results/prd_cross_arch_s1000.csv`: all 56 source-target ASRs, target families, source-match flags, and evaluated image counts;
+- `results/prd_gradient_diagnostics_s1000.csv`: 20-view effective ranks and schedule/selection counts.
 
-## Controlled comparisons
+The four sources have effective ranks 19.51, 19.34, 19.46, and 18.39 respectively. Every formal run contains 1000 adversarial samples and records the expected 200/300 checkpoint selections per image for K2/K3 schedules.
 
-### CaiT progressive checkpoint retuning
+## Verification boundary
 
-The initial cross-architecture matrix used CaiT checkpoints block6/14/22.
-Same-seed 1000-image follow-ups first moved the middle checkpoint to block18,
-then identified block17, and finally moved the late checkpoint from block22 to
-block23 and refined the early checkpoint from block6 to block5. Historical runs
-that recorded the former `patch_score` selector used the same behavior as
-`high`; the current progressive CLI retains only the explicit `high` spelling.
-
-| CaiT checkpoints | Overall | Transformer | CNN | Strict black-box overall |
-| --- | ---: | ---: | ---: | ---: |
-| block16/20/24 | 63.87% | 70.03% | 56.68% | 61.11% |
-| block6/14/22 | 75.75% | 79.63% | 71.22% | 74.35% |
-| block6/18/22 | 77.63% | 81.46% | 73.17% | 76.28% |
-| block6/17/22 | 81.44% | 85.37% | 76.85% | 80.21% |
-| block6/17/23 | 83.81% | 87.70% | 79.27% | 82.68% |
-| block5/17/23 | **84.15%** | **87.97%** | **79.68%** | **83.02%** |
-
-Relative to block6/17/23, the selected block5/17/23 schedule improves Overall
-by 0.34pp, Transformer by 0.27pp, CNN by 0.42pp and strict black-box Overall by
-0.34pp. Nine of thirteen individual targets improve. Relative to the initial
-block6/14/22 schedule, the full-run gains are 8.40pp Overall and 8.67pp strict
-black-box Overall. The original record remains at
-`outputs/csv/outputs_attack_progressive_mainline_cait_s1000_seed20260907.csv`.
-
-Moving only the final checkpoint to block24 was a clear negative control on the
-same 192-image screening subset: strict black-box Overall fell from 76.22% to
-63.80%, while source CaiT ASR increased. This is retained as evidence that
-terminal routing can overfit the source rather than improve transfer.
-
-After block6/17/23 was established, the early checkpoint was screened on the
-same 192-image offset-576 subset while block17/23 and all other settings were
-fixed:
-
-| Early checkpoint | Overall | Strict black-box overall |
-| --- | ---: | ---: |
-| block4 | 84.13% | 82.99% |
-| **block5** | **85.02%** | **83.90%** |
-| block6 | 84.13% | 82.90% |
-| block7 | 83.81% | 82.73% |
-| block8 | 82.25% | 81.08% |
-| block10 | 83.21% | 81.99% |
-
-This subset selected block5, which then retained a +0.34pp Overall advantage
-over block6 in the full 1000-image verification.
-
-### PiT ratio and checkpoint retuning
-
-PiT pooling changes the local-token count from 31×31 to 16×16 and then 8×8.
-The first screen therefore redistributed the per-stage drop budget instead of
-forcing equal token counts. All five rows below use the initial
-stage1/block3, stage2/block5, stage3/block3 checkpoints and the same 192-image
-offset-0 subset.
-
-| Ratio plan | Drop counts | Overall | Strict black-box overall |
-| --- | ---: | ---: | ---: |
-| A, early-heavy | 70/11/2 | 78.29% | 76.74% |
-| B, uniform 5% | 48/13/3 | 77.56% | 75.87% |
-| C, mild-late | 29/14/4 | 78.85% | 77.26% |
-| **D, strong-late** | **20/8/6** | **79.17%** | **77.47%** |
-| E, very-late | 11/6/7 | 78.81% | 77.13% |
-
-On the independent offset-192 subset, D remained above C (74.08% versus
-73.60% Overall; 72.22% versus 71.74% strict). Its 1000-image result was 76.58%
-Overall, 85.76% Transformer, 65.87% CNN, and 74.73% strict, compared with
-75.52%/84.30%/65.28%/73.69% for the initial uniform-ratio run.
-
-With D's ratios fixed, a local layer screen on offset 384 gave:
-
-| ID | Checkpoints | Overall | Strict black-box overall |
-| --- | --- | ---: | ---: |
-| P0 | s1b3 / s2b5 / s3b3 | 76.60% | 74.70% |
-| P1 | s1b3 / s2b4 / s3b3 | 76.80% | 74.96% |
-| **P2** | **s1b3 / s2b6 / s3b3** | **77.32%** | **75.48%** |
-| P3 | s1b3 / s2b5 / s3b2 | 72.52% | 70.31% |
-| P4 | s1b3 / s2b6 / s3b2 | 72.04% | 69.97% |
-
-The subsequent topology screen expanded beyond one checkpoint per stage on
-the offset-576 subset:
-
-| ID | Checkpoints | Overall | Strict black-box overall |
-| --- | --- | ---: | ---: |
-| Q0 | s1b3 / s2b6 / s3b3 | 78.49% | 76.78% |
-| Q1 | s2b1 / s2b6 / s3b3 | 79.73% | 78.12% |
-| Q2 | s2b3 / s2b6 / s3b3 | 79.29% | 77.69% |
-| Q3 | s1b3 / s3b1 / s3b3 | 80.65% | 79.08% |
-| **Q4** | **s2b1 / s3b1 / s3b3** | **82.25%** | **80.86%** |
-| Q5 | s2b3 / s3b1 / s3b3 | 79.81% | 78.21% |
-
-Q4 was then refined on offset 768. The layer variants used the D-derived
-ratios, which become native-grid counts 5/2/6 at these checkpoints:
-
-| ID | Checkpoints | Overall | Strict black-box overall |
-| --- | --- | ---: | ---: |
-| L0 | s2b1 / s3b1 / s3b3 | 77.40% | 75.61% |
-| L1 | s2b2 / s3b1 / s3b3 | 76.92% | 75.09% |
-| **L2** | **s2b1 / s3b2 / s3b3** | **79.93%** | **78.26%** |
-| L3 | s2b2 / s3b2 / s3b3 | 79.37% | 77.69% |
-
-Ratio-only refinements around L0 did not exceed L2: R1 through R5 obtained
-75.44%, 78.41%, 77.60%, 77.40%, and 75.44% Overall, respectively. Combining
-the best ratio-only candidate R2 (counts 5/4/4) with L2 reduced Overall to
-75.80% and strict Overall to 73.78%. The selected L2 therefore retains counts
-5/2/6 and completed the full verification:
-
-| PiT configuration, 1000 images | Overall | Transformer | CNN | Strict black-box overall |
-| --- | ---: | ---: | ---: | ---: |
-| Initial uniform | 75.52% | 84.30% | 65.28% | 73.69% |
-| D ratios, initial layers | 76.58% | 85.76% | 65.87% | 74.73% |
-| **L2 selected default** | **80.44%** | **88.87%** | **70.60%** | **78.86%** |
-
-The auditable L2 record is
-`outputs/csv/outputs_attack_progressive_pit_l2_s1000_seed20260907.csv`.
-
-### Visformer checkpoint and ratio retuning
-
-The initial six-way 192-image topology screen showed that moving all
-checkpoints late was not beneficial:
-
-| ID | Checkpoints | Overall | Strict black-box overall |
-| --- | --- | ---: | ---: |
-| V0 | s1b4 / s2b2 / s3b3 | 75.00% | 72.92% |
-| V1 | s1b7 / s2b4 / s3b3 | 74.00% | 71.83% |
-| V2 | s2b1 / s3b1 / s3b3 | 74.80% | 72.70% |
-| V3 | s2b1 / s3b2 / s3b3 | 73.72% | 71.53% |
-| V4 | s2b2 / s3b1 / s3b3 | 73.56% | 71.35% |
-| V5 | s2b2 / s3b2 / s3b3 | 72.64% | 70.36% |
-
-Keeping V0's layers and redistributing the nominal 15% ratio budget also
-failed to beat the uniform R0 allocation:
-
-| Ratio plan | Ratios | Overall | Strict black-box overall |
-| --- | ---: | ---: | ---: |
-| **R0** | **5% / 5% / 5%** | **75.00%** | **72.92%** |
-| R1 | 7% / 4% / 4% | 74.60% | 72.48% |
-| R2 | 6% / 6% / 3% | 73.92% | 71.74% |
-| R3 | 4% / 7% / 4% | 73.92% | 71.74% |
-| R4 | 4% / 5% / 6% | 74.84% | 72.74% |
-| R5 | 3% / 4% / 8% | 74.24% | 72.09% |
-
-R0 was therefore fixed while the early/middle/late layer neighborhoods and
-their interactions were expanded. The most relevant local moves on the first
-offset-0 screen were A1=s1b1/s2b2/s3b3 at 75.96% Overall, A2=s1b2/s2b2/s3b3
-at 75.88%, and the early-final C1=s1b4/s2b2/s3b1 at 75.12%; the remaining
-single-axis and late-only candidates ranged from 72.28% to 74.88%.
-
-The interaction screen then produced:
-
-| ID | Checkpoints | Overall | Strict black-box overall |
-| --- | --- | ---: | ---: |
-| I1 | s1b1 / s2b2 / s3b1 | 75.60% | 73.57% |
-| I2 | s1b1 / s2b1 / s3b3 | 75.52% | 73.48% |
-| **I3** | **s1b1 / s2b1 / s3b1** | **76.08%** | **74.09%** |
-| I4 | s1b2 / s2b2 / s3b1 | 74.60% | 72.53% |
-| I5 | s1b2 / s2b1 / s3b3 | 75.12% | 73.05% |
-| I6 | s1b2 / s2b1 / s3b1 | 75.64% | 73.65% |
-
-The offset-192 replication retained the ordering among the finalists: V0,
-A1, A2, and I3 obtained 68.83%, 68.99%, 68.55%, and 69.15% Overall,
-respectively; their strict scores were 66.23%, 66.45%, 65.97%, and 66.71%.
-Both A1 and I3 were then run on all 1000 images:
-
-| Visformer configuration, 1000 images | Overall | Transformer | CNN | Strict black-box overall |
-| --- | ---: | ---: | ---: | ---: |
-| Initial V0 | 71.46% | 76.83% | 65.20% | 69.12% |
-| A1, s1b1/s2b2/s3b3 | 72.78% | **78.33%** | 66.30% | 70.54% |
-| I3 former K3 default, s1b1/s2b1/s3b1 | 73.16% | 78.24% | 67.23% | 70.97% |
-| **Previous K2 default, s2b1/s3b1, 41/10** | **74.25%** | **78.99%** | **68.73%** | **72.13%** |
-
-I3 won the original K3 comparison, while the later equal-ratio K2 follow-up
-became the constrained-ASR default. The auditable full records are
-`outputs/csv/outputs_attack_progressive_visformer_a1_s1b1_s2b2_s3b3_s1000_seed20260907.csv`
-`outputs/csv/outputs_attack_progressive_visformer_i3_s1b1_s2b1_s3b1_s1000_seed20260907.csv`,
-with the current K2 record at
-`outputs/csv/outputs_attack_scanD_visformer_k2eqr_s2b1_s3b1_confirm_s1000_offset0_seed20260907.csv`.
-
-### ViT configuration policy
-
-The only current ViT-B/16 attack configuration is `block3,block10` with
-10/10 drops (`0.051020408163` at each checkpoint), `selector=high`,
-the fixed score-high-half candidate set, and opponent strength 0.2. Its complete 14-target
-1000-image result is the promoted ViT row above (85.26% Overall).
-
-Selector, score-noise, feature-noise, and checkpoint comparisons produced on
-superseded ViT schedules are historical tuning evidence, not current attack
-settings, and have therefore been removed from this active mainline report.
-New ViT controls must keep `block3,block10` fixed unless the project explicitly
-changes the single canonical configuration again.
-
-## Gradient complementarity diagnostics
-
-The 1000-image optimization diagnostics show that feature noise makes the
-actual 20-view gradient ensemble much less redundant:
-
-| Noise | View cosine to mean | Sign agreement | Effective rank | MI cumulative cosine |
-| --- | ---: | ---: | ---: | ---: |
-| none | 0.4382 | 0.6383 | 10.45 | 0.5577 |
-| IID Gaussian | 0.2671 | 0.5745 | 19.32 | 0.6037 |
-| opponent | 0.2611 | 0.5671 | **19.54** | **0.6134** |
-
-A fixed-replay 32-image diagnostic further found processed-gradient cosine of
-only 0.034 between opponent and noise-off, 0.162 between opponent and IID
-Gaussian, and 0.203 between score-high and random routing. Thus the routing and
-noise controls contribute materially different directions rather than nearly
-duplicating one another.
-
-Direct cosine against clean DeiT-B and ResNet-101 gradients was near zero for
-all methods, and one-step held-out loss changes did not predict the full
-iterative ASR ordering. Those measurements are retained as a negative result:
-they must not be used alone as evidence of transferability. The complementarity
-claim rests on the combination of distinct source directions, higher ensemble
-rank, and the matched 1000-image iterative transfer gains above.
-
-## Conclusion
-
-All implementation, adapter, regression, full-budget, formal 1000-image,
-transfer and control-variable gates are complete. The progressive attack is
-the repository's sole attack implementation.
+- ViT uses only `block3,block10` with independent 10/196 drops.
+- Every mask is uniformly random over all local-token positions.
+- Original/phase schedules preserve per-checkpoint counts.
+- Opponent noise is projected from RGB opponent directions and applied only outside the schedule's image-space drop union.
+- Saved adversarial images remain within the `16/255` L-infinity budget.
+- The implementation remains architecture-neutral across ViT, CaiT, PiT, and Visformer.

@@ -20,41 +20,6 @@ DEFAULT_PRETRAINED = True
 
 
 @dataclass
-class PatchScoreFeatures:
-    """Architecture-neutral local/global features at a progressive checkpoint."""
-
-    local_tokens: torch.Tensor
-    global_token: torch.Tensor
-    grid_size: tuple[int, int]
-    source_name: str
-    layer_id: str
-    global_mode: str
-
-    def validate(self) -> None:
-        if self.local_tokens.ndim != 3:
-            raise ValueError(
-                f"local_tokens must have shape [B,N,D], got {tuple(self.local_tokens.shape)}."
-            )
-        if self.global_token.ndim != 3 or self.global_token.size(1) != 1:
-            raise ValueError(
-                f"global_token must have shape [B,1,D], got {tuple(self.global_token.shape)}."
-            )
-        if self.local_tokens.size(0) != self.global_token.size(0):
-            raise ValueError("local and global feature batch sizes do not match.")
-        if self.local_tokens.size(2) != self.global_token.size(2):
-            raise ValueError("local and global feature dimensions do not match.")
-        if self.local_tokens.size(1) != self.grid_size[0] * self.grid_size[1]:
-            raise ValueError("local token count does not match grid_size.")
-        if not self.layer_id:
-            raise ValueError("layer_id must be non-empty.")
-        if self.global_mode not in {"cls", "gap"}:
-            raise ValueError(
-                "global_mode must be cls or gap, got "
-                f"{self.global_mode!r}."
-            )
-
-
-@dataclass
 class ProgressiveInputState:
     """Initial progressive representation and its RGB projection geometry."""
 
@@ -166,9 +131,6 @@ class ProgressiveAdapter(nn.Module):
             f"progressive drop-ratio defaults are not implemented for {self.model_name}."
         )
 
-    def default_progressive_score_mode(self) -> str:
-        return "cosine"
-
     def default_progressive_opponent_noise_strength(self) -> float:
         return 0.2
 
@@ -198,15 +160,6 @@ class ProgressiveAdapter(nn.Module):
     ) -> ProgressiveAttackState:
         raise NotImplementedError(
             f"progressive traversal is not implemented for {self.model_name}."
-        )
-
-    def progressive_score_features(
-        self,
-        state: ProgressiveAttackState,
-        checkpoint_id: str,
-    ) -> PatchScoreFeatures:
-        raise NotImplementedError(
-            f"progressive scoring is not implemented for {self.model_name}."
         )
 
     def apply_progressive_mask(
