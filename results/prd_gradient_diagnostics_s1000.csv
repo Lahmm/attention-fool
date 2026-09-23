@@ -1,5 +1,5 @@
 seed,source_model,gradient_views,effective_rank,schedules_per_image,checkpoint_selections_per_image
-20260907,vit_base_patch16_224,20,19.5129,100,200
-20260907,cait_s24_224,20,19.3433,100,200
-20260907,pit_b_224,20,19.4610,100,300
+20260907,vit_base_patch16_224,20,19.5131,100,200
+20260907,cait_s24_224,20,19.3441,100,200
+20260907,pit_b_224,20,19.4609,100,300
 20260907,visformer_small,20,18.3944,100,200

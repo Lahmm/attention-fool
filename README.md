@@ -52,10 +52,10 @@ ASR 定义为 `1 - adversarial accuracy`，分母是送入目标模型评估的�
 | Source | Overall ASR | Transformer avg | CNN avg | Strict black-box overall |
 | --- | ---: | ---: | ---: | ---: |
 | ViT-B/16 | 85.20% | 90.45% | 78.20% | 84.29% |
-| CaiT-S24 | 86.41% | 89.99% | 81.63% | 85.46% |
-| PiT-B | 84.34% | 89.91% | 76.92% | 83.25% |
-| Visformer-S | 80.66% | 83.19% | 77.28% | 79.19% |
-| **Four-source mean** | **84.15%** | **88.39%** | **78.51%** | **83.05%** |
+| CaiT-S24 | 86.58% | 90.06% | 81.93% | 85.66% |
+| PiT-B | 84.36% | 89.91% | 76.95% | 83.27% |
+| Visformer-S | 80.65% | 83.19% | 77.27% | 79.18% |
+| **Four-source mean** | **84.20%** | **88.40%** | **78.59%** | **83.10%** |
 
 Strict black-box 指标排除与 source 架构相同的 target。56 个 source-target evaluation 均使用完整 1000 张对抗样本且没有 skipped images。逐目标结果和规范化 CSV 记录见 `experiments/progressive_cross_arch_mainline_s1000.md`。
 

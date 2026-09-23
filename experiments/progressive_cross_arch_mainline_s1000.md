@@ -33,10 +33,10 @@ ASR is `1 - adversarial accuracy` over all 1000 evaluated adversarial samples. N
 | Source | Overall ASR | Transformer avg | CNN avg | Strict black-box overall |
 | --- | ---: | ---: | ---: | ---: |
 | ViT-B/16 | 85.20% | 90.45% | 78.20% | 84.29% |
-| CaiT-S24 | 86.41% | 89.99% | 81.63% | 85.46% |
-| PiT-B | 84.34% | 89.91% | 76.92% | 83.25% |
-| Visformer-S | 80.66% | 83.19% | 77.28% | 79.19% |
-| **Four-source mean** | **84.15%** | **88.39%** | **78.51%** | **83.05%** |
+| CaiT-S24 | 86.58% | 90.06% | 81.93% | 85.66% |
+| PiT-B | 84.36% | 89.91% | 76.95% | 83.27% |
+| Visformer-S | 80.65% | 83.19% | 77.27% | 79.18% |
+| **Four-source mean** | **84.20%** | **88.40%** | **78.59%** | **83.10%** |
 
 Every one of the 56 source-target evaluations used all 1000 adversarial samples and recorded zero skipped images.
 
@@ -45,28 +45,35 @@ Every one of the 56 source-target evaluations used all 1000 adversarial samples 
 | Target | ViT source | CaiT source | PiT source | Visformer source |
 | --- | ---: | ---: | ---: | ---: |
 | ViT-B/16 | 97.00% | 85.40% | 83.30% | 64.90% |
-| LeViT-256 | 87.00% | 89.00% | 87.40% | 88.60% |
-| PiT-B/224 | 88.00% | 88.40% | 98.50% | 87.10% |
-| DeiT-B/16 | 90.10% | 90.70% | 91.30% | 80.20% |
-| TNT-S/16 | 90.50% | 90.10% | 90.80% | 86.70% |
-| ConViT-B | 88.20% | 89.60% | 89.70% | 77.70% |
-| Visformer-S | 88.10% | 88.00% | 90.20% | 99.70% |
-| CaiT-S24 | 94.70% | 98.70% | 88.10% | 80.60% |
-| Inception-v3 | 80.50% | 84.70% | 82.20% | 85.40% |
-| Inception-v4 | 77.70% | 82.50% | 79.80% | 85.00% |
-| Inception-ResNet-v2 | 78.20% | 82.40% | 78.10% | 78.90% |
-| ResNet-101 | 81.30% | 84.40% | 80.10% | 84.60% |
-| Inception-v3-adv | 77.80% | 80.90% | 75.20% | 73.10% |
-| Inception-ResNet-v2-adv | 73.70% | 74.90% | 66.10% | 56.70% |
+| LeViT-256 | 87.00% | 89.40% | 87.40% | 88.60% |
+| PiT-B/224 | 88.00% | 89.20% | 98.50% | 87.10% |
+| DeiT-B/16 | 90.10% | 90.50% | 91.30% | 80.20% |
+| TNT-S/16 | 90.50% | 90.00% | 90.80% | 86.70% |
+| ConViT-B | 88.20% | 89.30% | 89.70% | 77.70% |
+| Visformer-S | 88.10% | 88.20% | 90.20% | 99.70% |
+| CaiT-S24 | 94.70% | 98.50% | 88.10% | 80.60% |
+| Inception-v3 | 80.50% | 84.90% | 82.40% | 85.40% |
+| Inception-v4 | 77.70% | 82.20% | 79.80% | 85.00% |
+| Inception-ResNet-v2 | 78.20% | 82.20% | 78.00% | 78.90% |
+| ResNet-101 | 81.30% | 85.00% | 80.10% | 84.60% |
+| Inception-v3-adv | 77.80% | 81.30% | 75.10% | 73.00% |
+| Inception-ResNet-v2-adv | 73.70% | 76.00% | 66.30% | 56.70% |
 
 ## Auditable records
 
-The completed runs are consolidated without changing their measurements into two PRD records:
+The current PRD implementation's completed runs are retained as four full transfer CSVs:
+
+- `outputs/csv/outputs_attack_prd1000_vit_seed20260907.csv`;
+- `outputs/csv/outputs_attack_prd1000_cait_seed20260907.csv`;
+- `outputs/csv/outputs_attack_prd1000_pit_seed20260907.csv`;
+- `outputs/csv/outputs_attack_prd1000_visformer_seed20260907.csv`.
+
+These runs are also consolidated without changing their measurements into two compact PRD records:
 
 - `results/prd_cross_arch_s1000.csv`: all 56 source-target ASRs, target families, source-match flags, and evaluated image counts;
 - `results/prd_gradient_diagnostics_s1000.csv`: 20-view effective ranks and schedule/selection counts.
 
-The four sources have effective ranks 19.51, 19.34, 19.46, and 18.39 respectively. Every formal run contains 1000 adversarial samples and records the expected 200/300 checkpoint selections per image for K2/K3 schedules.
+The four sources have effective ranks 19.51, 19.34, 19.46, and 18.39 respectively. Every formal run contains 1000 adversarial samples and records the expected 200/300 checkpoint selections per image for K2/K3 schedules. Their replay manifests contain the same 1000 unique sample IDs in the same order.
 
 ## Verification boundary
 
