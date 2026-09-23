@@ -59,6 +59,8 @@ ASR 定义为 `1 - adversarial accuracy`，分母是送入目标模型评估的�
 
 Strict black-box 指标排除与 source 架构相同的 target。56 个 source-target evaluation 均使用完整 1000 张对抗样本且没有 skipped images。逐目标结果和规范化 CSV 记录见 `experiments/progressive_cross_arch_mainline_s1000.md`。
 
+论文叙事、主实验记录与建议写作结构见 [PRD 论文叙事文档](experiments/prd_paper_story.md)。
+
 四个正式 PRD 运行的 20-view gradient effective rank 为 18.39–19.51。Opponent noise 是对 progressive route disruption 的保留证据扰动，而不是额外攻击主线。
 
 ## 运行与验证
