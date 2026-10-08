@@ -61,6 +61,8 @@ Strict black-box 指标排除与 source 架构相同的 target。56 个 source-t
 
 论文叙事、主实验记录与建议写作结构见 [PRD 论文叙事文档](experiments/prd_paper_story.md)。
 
+异地写作所需的逐文件用途、正式运行证据和未入 Git 的服务器数据下载清单见 [写作交接与文件清单](experiments/server_handoff_inventory.md)。
+
 四个正式 PRD 运行的 20-view gradient effective rank 为 18.39–19.51。Opponent noise 是对 progressive route disruption 的保留证据扰动，而不是额外攻击主线。
 
 ## 运行与验证

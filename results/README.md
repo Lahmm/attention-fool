@@ -17,3 +17,10 @@ Their measurements are consolidated into:
 - `prd_gradient_diagnostics_s1000.csv`: the corresponding ensemble-rank and progressive-schedule diagnostics.
 
 Aggregate and per-target results are documented in `experiments/progressive_cross_arch_mainline_s1000.md`.
+
+The exact attack parameters, gradient diagnostics, and losslessly compressed replay
+manifests of all four formal runs are in `prd_run_artifacts/`. The historical
+patch-rank observation is retained there as motivation only. The SHA256 list
+for the 4000 formal adversarial PNGs is `prd1000_image_sha256.tsv.gz`.
+`server_untracked_files.tsv.gz` lists every server-side file or symlink omitted
+from Git; see `experiments/server_handoff_inventory.md` for download guidance.

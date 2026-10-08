@@ -1,0 +1,7 @@
+{
+  "num_gradient_batches": 110,
+  "view_cosine_to_final": 0.2717042481357401,
+  "sign_agreement": 0.5708990741859783,
+  "effective_rank": 19.5130596334284,
+  "mi_cumulative_cosine": 0.6041005470535972
+}
