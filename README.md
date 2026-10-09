@@ -1,6 +1,6 @@
 # Progressive Route Disruption
 
-本项目研究面向黑盒迁移的 **Progressive Route Disruption（PRD）**。出发观察是：同一图像的 patch 语义排序会沿模型深度显著重组，因此攻击不再尝试预测一个全程有效的“重要 patch 集合”，而是在语义形成过程中反复随机切断局部 token 路径。
+本项目研究面向黑盒迁移的 **Progressive Route Disruption（PRD）**。我们观察到：同一个局部 token 与全局表示的余弦相似度会随网络深度发生明显变化，高 patch-score 的区域也随之迁移与更替。局部证据参与全局表示形成的过程是动态的。PRD 沿着这一过程，在多个 checkpoint 反复随机中断局部 token 的传播，并以 RGB 对手通道噪声扰动保留证据。
 
 Patch score 只用于得到上述研究观察；PRD 的执行完全由 checkpoint-wise random schedules 驱动。
 
@@ -16,9 +16,9 @@ PRD 只有两个核心机制：
 ```text
 current adversarial pixels
 → fresh uniformly random checkpoint schedule
-→ sequential local-token hard zeroing
 → original schedule / spatially transformed phase schedule
 → kept-only projected opponent-channel noise
+→ sequential checkpoint traversal and local-token hard zeroing
 → raw 20-view gradient mean
 → Gaussian residual (sigma=4, alpha=0.75)
 → MI projected update
@@ -63,7 +63,7 @@ Strict black-box 指标排除与 source 架构相同的 target。56 个 source-t
 
 异地写作所需的逐文件用途、正式运行证据和未入 Git 的服务器数据下载清单见 [写作交接与文件清单](experiments/server_handoff_inventory.md)。
 
-四个正式 PRD 运行的 20-view gradient effective rank 为 18.39–19.51。Opponent noise 是对 progressive route disruption 的保留证据扰动，而不是额外攻击主线。
+论文以 ASR 呈现迁移效果。梯度诊断保留为实验过程中的内部分析工具。写作结构、图表计划和表达约定见 [CVPR 2027 写作蓝图](experiments/cvpr2027_writing_blueprint.md)。
 
 ## 运行与验证
 

@@ -14,9 +14,12 @@ The current PRD implementation's four completed 1000-image runs are recorded in:
 Their measurements are consolidated into:
 
 - `prd_cross_arch_s1000.csv`: the complete 4-source × 14-target transfer table;
-- `prd_gradient_diagnostics_s1000.csv`: the corresponding ensemble-rank and progressive-schedule diagnostics.
+- `prd_gradient_diagnostics_s1000.csv`: internal experimental analysis records and progressive-schedule counts.
 
 Aggregate and per-target results are documented in `experiments/progressive_cross_arch_mainline_s1000.md`.
+
+Transfer ASR is the paper's measure of transferability. Gradient diagnostics,
+including effective rank, are retained as internal process records.
 
 The exact attack parameters, gradient diagnostics, and losslessly compressed replay
 manifests of all four formal runs are in `prd_run_artifacts/`. The historical

@@ -12,8 +12,19 @@
 - At every attack step and augmentation group, generate a fresh random checkpoint schedule. At each checkpoint, sample uniformly from all current local-token positions and hard-zero the selected tokens before continuing the same forward trajectory. The original view uses that schedule and the phase view uses its spatially transformed counterpart. The default 10 steps × 10 groups produces 100 schedules and 200 checkpoint mask selections per ViT image.
 - Patch score belongs only to the motivating observation that token semantic rankings reorganize across model depth. It is not an attack selector, runtime dependency, adapter API, CLI option, or claimed source of PRD's transferability.
 - Opponent-channel noise decides **how** to perturb kept evidence: sample luminance, red-green, and yellow-blue RGB directions, project through the initial RGB projection, and RMS-match in feature space.
-- Validate complementarity with transferable-gradient diagnostics and transfer ASR defined as `1 - adversarial accuracy` over all evaluated adversarial samples; do not filter to a target-clean-correct subset.
+- Evaluate transferability and component effects through transfer ASR defined as `1 - adversarial accuracy` over all evaluated adversarial samples; do not filter to a target-clean-correct subset. Gradient diagnostics, including effective rank, are internal experimental analysis tools and are not paper evidence for transferability.
 - Preserve support for ViT-B/16, CaiT-S24, PiT-B, and Visformer-S through architecture adapters. Do not encode ViT block assumptions as a nominally cross-architecture implementation.
+
+## Paper-writing objective and voice
+
+- Write a CVPR 2027 paper from the local `prd` branch, using the existing four-source, 1000-image, 14-target PRD results as the main experimental results.
+- Lead the motivation with the dynamic discovery: the same local token's cosine similarity to the global representation changes substantially across layers, and the locations of high-patch-score patches change with model depth. Show this process with patch-score visualizations of actual samples; keep Spearman statistics as supporting detail.
+- Build the story around evolving local evidence, progressive random checkpoint disruption, opponent-channel perturbation of kept evidence, and transfer ASR. Patch-score visualizations explain the discovery; checkpoint schedules drive the attack.
+- Use vivid, direct, affirmative language. Explain what we observed, why it is interesting, and how PRD acts on that process. Keep the narrative focused and engaging, with numerical results and method descriptions faithful to the records.
+- Avoid defensive clarifications about claims we do not make: causal patch importance, identified semantic causal paths, optimal random sampling, guaranteed superiority, and similar hypothetical objections. Do not repeatedly qualify the central discovery with unrelated limitations.
+- ASR is the paper's measure of transferability. Keep effective rank, gradient diversity, and source-target gradient diagnostics in internal process records; do not plan them as main-text or supplementary evidence for transferability.
+- Record implementation and provenance details as concise technical facts. Select paper content for its contribution to the story, method understanding, and ASR evaluation rather than exposing every diagnostic or code detail.
+- Apply these conventions consistently to the blueprint, story documents, repository summaries, and subsequent paper drafts. If a requested wording or change is unclear, leave that part unchanged and check with the user.
 
 ## Retained executable scope
 

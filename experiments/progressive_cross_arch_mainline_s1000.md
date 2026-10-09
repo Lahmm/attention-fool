@@ -2,7 +2,7 @@
 
 ## Research position
 
-Patch-score analysis revealed that local-token semantic rankings reorganize substantially across depth. PRD turns that observation into a direct intervention: it repeatedly disrupts the evolving computation path with uniformly random local-token masks.
+As an image propagates through the network, a local token's cosine similarity to the global representation changes substantially, and high-patch-score regions shift across layers. PRD acts along this evolving process, repeatedly disrupting local-token propagation with uniformly random checkpoint masks and perturbing the kept evidence with RGB opponent-channel noise. Sample-wise patch-score visualizations illustrate the discovery; transfer ASR measures the attack's transferability.
 
 The attack contains exactly two paper mechanisms:
 
@@ -71,11 +71,11 @@ The current PRD implementation's completed runs are retained as four full transf
 These runs are also consolidated without changing their measurements into two compact PRD records:
 
 - `results/prd_cross_arch_s1000.csv`: all 56 source-target ASRs, target families, source-match flags, and evaluated image counts;
-- `results/prd_gradient_diagnostics_s1000.csv`: 20-view effective ranks and schedule/selection counts.
+- `results/prd_gradient_diagnostics_s1000.csv`: internal experimental diagnostics and schedule/selection counts.
 
-The four sources have effective ranks 19.51, 19.34, 19.46, and 18.39 respectively. Every formal run contains 1000 adversarial samples and records the expected 200/300 checkpoint selections per image for K2/K3 schedules. Their replay manifests contain the same 1000 unique sample IDs in the same order.
+Every formal run contains 1000 adversarial samples and records the expected 200/300 checkpoint selections per image for K2/K3 schedules. Their replay manifests contain the same 1000 unique sample IDs in the same order. Gradient diagnostics are retained for internal experimental analysis; the paper reports transferability through ASR.
 
-## Verification boundary
+## Implementation checks
 
 - ViT uses only `block3,block10` with independent 10/196 drops.
 - Every mask is uniformly random over all local-token positions.
