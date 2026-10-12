@@ -70,9 +70,9 @@ class ProgressiveAttackTests(unittest.TestCase):
         self.assertEqual(
             {key: self.digest(value) for key, value in independent_probe.items()},
             {
-                "view_gradients": "4a6a7b6275aba41ef2e1ff6521b743202478f549d2c0a940e183a5c5100b4cd3",
-                "raw_mean": "98632b0b70d1e50a550317135378b7e78a50ad28a6ebec253b078e1abb80899a",
-                "processed": "98632b0b70d1e50a550317135378b7e78a50ad28a6ebec253b078e1abb80899a",
+                "view_gradients": "426bf61f8bf838c8e3ff3b46c07b5bbbd629a51167096d8816244726c5c74bc0",
+                "raw_mean": "aea265664c55c9ce86b08d9ccf7fb58b01dd7c9cacb9afbb9f185ca7ebbd7489",
+                "processed": "aea265664c55c9ce86b08d9ccf7fb58b01dd7c9cacb9afbb9f185ca7ebbd7489",
             },
         )
         independent_adv = independent.attack_batch(
@@ -88,6 +88,7 @@ class ProgressiveAttackTests(unittest.TestCase):
         metadata = attacker.mainline_metadata()
         self.assertEqual(metadata["attack_method"], "progressive_route_disruption")
         self.assertEqual(metadata["drop_map_policy"], "uniform_random_all_local_tokens")
+        self.assertEqual(metadata["opponent_noise"], "initial_rgb_projection_all_local_tokens")
 
     def test_model_specific_default_drop_ratios_are_used_when_omitted(self):
         attacker = self.make_attacker(checkpoints=None, drop_ratios=None)
@@ -101,7 +102,7 @@ class ProgressiveAttackTests(unittest.TestCase):
         metadata = disabled.mainline_metadata()
         self.assertEqual(metadata["opponent_noise"], "disabled")
 
-    def test_cross_grid_phase_and_union_preserve_each_budget(self):
+    def test_cross_grid_phase_preserves_each_budget(self):
         attacker = self.make_attacker()
         from progressive_attack import ProgressiveMaskSchedule, ProgressiveMaskSelection
 
@@ -114,8 +115,8 @@ class ProgressiveAttackTests(unittest.TestCase):
         schedule = ProgressiveMaskSchedule((first, second))
         shifted = attacker._phase_mask_schedule(schedule, [(1, 1)], height=8, width=8)
         self.assertEqual(shifted.counts, (1, 1))
-        union = attacker._schedule_image_union(shifted, 8, 8)
-        self.assertEqual(tuple(union.shape), (1, 1, 8, 8))
+        self.assertEqual(shifted.grid_sizes, ((2, 2), (2, 3)))
+        shifted.validate(batch_size=1)
 
 
 if __name__ == "__main__":

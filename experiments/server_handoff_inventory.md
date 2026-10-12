@@ -4,11 +4,13 @@
 
 ## 论文故事与材料分工
 
-**观察 → 方法 → 验证**：同一个局部 token 与全局表示的余弦相似度会随网络深度发生明显变化，高 patch-score 的位置随之迁移与更替。样本可视化呈现这一动态发现。PRD 沿着表示演化的过程，在多个 checkpoint 随机 hard-zero 局部 token，并用 RGB opponent-channel noise 扰动保留证据。每个 step/group 重新抽取 schedule，每个 checkpoint 从当前原生 local-token 网格的全部位置独立均匀抽样，允许跨 checkpoint 重复。相位视图使用原始 schedule 的空间变换。噪声在初始 RGB 特征处注入并按特征 RMS 匹配，随后顺序执行 checkpoint 干预。20 视图平均、Gaussian residual、动量和 `L∞` 投影更新组成完整运行流程；迁移效果通过 ASR 呈现。
+**观察 → 方法 → 验证**：同一个局部 token 与全局表示的余弦相似度会随网络深度发生明显变化，高 patch-score 的位置随之迁移与更替。样本可视化呈现这一动态发现。PRD 沿着表示演化的过程，在多个 checkpoint 随机 hard-zero 局部 token，并用 RGB opponent-channel noise 扰动全部初始局部特征。每个 step/group 重新抽取 schedule，每个 checkpoint 从当前原生 local-token 网格的全部位置独立均匀抽样，允许跨 checkpoint 重复。相位视图使用原始 schedule 的空间变换。当前噪声在全部初始 RGB 局部特征处注入并按特征 RMS 匹配，随后顺序执行 checkpoint 干预。20 视图平均、Gaussian residual、动量和 `L∞` 投影更新组成完整运行流程；迁移效果通过 ASR 呈现。
 
 动机的原始统计文件已提取为 [`results/prd_run_artifacts/patch_rank_observation_summary.json`](../results/prd_run_artifacts/patch_rank_observation_summary.json)：64 张图、offset 628、统一 7×7 网格，ViT/CaiT/PiT/Visformer 的早晚层 Spearman 约为 −0.071/0.182/0.063/0.12，作为动态发现的辅助统计。原数据来自 Git 历史 `d1ac809:outputs/research/patch_score_promotion_e1_e2/summary.json`。写作时优先准备真实样本的多层 patch-score 图和 token 分数变化曲线。
 
 ## 正式实验的可复核记录
+
+此处正式记录来自 `98cb7cf1` 的旧 kept-only 方式。2026-10-12 起当前代码采用 full-local 噪声，新方式 ASR 待评估；修改及交接约定见 [噪声方式变更记录](prd_noise_injection_change.md)。以下原始参数、CSV、manifest 和数字均保持旧运行记录。
 
 四个正式运行均使用 seed `20260907`、1000 张相同输入、`epsilon=16/255`、10 steps、step size `epsilon/10`、动量衰减 1、每步 10 groups × 2 views、相位平移集合 `(4,4),(8,8),(12,12)`、Gaussian `sigma=4, alpha=0.75`。生成命令逐字见 [`run_prd_1000s.sh`](run_prd_1000s.sh)；实际记录的全量参数见 `results/prd_run_artifacts/{vit,cait,pit,visformer}/attack_params.json`。四次原始 transfer CSV 的 `git_head` 均为 `98cb7cf1`，执行时间和评估参数在相应 CSV 中。此处版本号描述的是**实际运行时提交**，论文实现说明须同时参照现仓库代码。
 

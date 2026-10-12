@@ -1,5 +1,7 @@
 # Progressive Route Disruption: 1000-image cross-architecture validation
 
+This report records the completed kept-only runs at `98cb7cf1`. Its method and implementation checks describe that measured version. On 2026-10-12, the current code switched to noise on all initial local features; full-local transfer ASR awaits evaluation. See [noise injection change](prd_noise_injection_change.md).
+
 ## Research position
 
 As an image propagates through the network, a local token's cosine similarity to the global representation changes substantially, and high-patch-score regions shift across layers. PRD acts along this evolving process, repeatedly disrupting local-token propagation with uniformly random checkpoint masks and perturbing the kept evidence with RGB opponent-channel noise. Sample-wise patch-score visualizations illustrate the discovery; transfer ASR measures the attack's transferability.
@@ -61,7 +63,7 @@ Every one of the 56 source-target evaluations used all 1000 adversarial samples 
 
 ## Auditable records
 
-The current PRD implementation's completed runs are retained as four full transfer CSVs:
+The measured kept-only PRD version's completed runs are retained as four full transfer CSVs:
 
 - `outputs/csv/outputs_attack_prd1000_vit_seed20260907.csv`;
 - `outputs/csv/outputs_attack_prd1000_cait_seed20260907.csv`;

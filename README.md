@@ -1,6 +1,6 @@
 # Progressive Route Disruption
 
-本项目研究面向黑盒迁移的 **Progressive Route Disruption（PRD）**。我们观察到：同一个局部 token 与全局表示的余弦相似度会随网络深度发生明显变化，高 patch-score 的区域也随之迁移与更替。局部证据参与全局表示形成的过程是动态的。PRD 沿着这一过程，在多个 checkpoint 反复随机中断局部 token 的传播，并以 RGB 对手通道噪声扰动保留证据。
+本项目研究面向黑盒迁移的 **Progressive Route Disruption（PRD）**。我们观察到：同一个局部 token 与全局表示的余弦相似度会随网络深度发生明显变化，高 patch-score 的区域也随之迁移与更替。局部证据参与全局表示形成的过程是动态的。PRD 以 RGB 对手通道噪声扰动全部初始局部特征，并在多个 checkpoint 反复随机中断局部 token 的传播。
 
 Patch score 只用于得到上述研究观察；PRD 的执行完全由 checkpoint-wise random schedules 驱动。
 
@@ -9,7 +9,7 @@ Patch score 只用于得到上述研究观察；PRD 的执行完全由 checkpoin
 PRD 只有两个核心机制：
 
 1. **checkpoint-wise progressive random token drop**：在 architecture-specific checkpoints 从全部当前 local-token 位置中均匀随机采样并 hard-zero，随后在已经修改的 hidden state 上继续同一次前向传播；
-2. **kept-only RGB opponent-channel noise**：在亮度、红绿和黄蓝方向采样，经模型真实初始 RGB projection 映射并在特征空间 RMS matching，只扰动所有 checkpoint mask 的空间并集之外的保留证据。
+2. **full-local RGB opponent-channel noise**：在亮度、红绿和黄蓝方向采样，经模型真实初始 RGB projection 映射并在特征空间 RMS matching，注入全部初始局部特征，包括之后会被 drop 的位置；CLS/prefix 不加噪声。
 
 每个 attack step、每个 augmentation group 都生成新的随机 schedule。Original view 使用该 schedule，phase view 使用其空间变换后的对应 schedule。默认 10 steps × 10 groups × 2 views；ViT 的两个 checkpoint 因而对应每张图 100 条 schedule 和 200 次 mask selection。
 
@@ -17,7 +17,7 @@ PRD 只有两个核心机制：
 current adversarial pixels
 → fresh uniformly random checkpoint schedule
 → original schedule / spatially transformed phase schedule
-→ kept-only projected opponent-channel noise
+→ full-local projected opponent-channel noise at the initial features
 → sequential checkpoint traversal and local-token hard zeroing
 → raw 20-view gradient mean
 → Gaussian residual (sigma=4, alpha=0.75)
@@ -46,6 +46,8 @@ python main.py \
 `main.py` 只调度 `progressive_attack.py` 中的 `ProgressiveRouteDisruptionAttacker`。四个 architecture adapter 只负责初始 RGB projection 元数据、checkpoint traversal、local-token mask application 和原生 forward completion。
 
 ## 1000-image transfer results
+
+下表来自旧 kept-only 噪声方式的四次正式运行（`98cb7cf1`）。2026-10-12 起，当前代码采用 full-local 噪声；其 ASR 待重新评估。两种方式的区别、执行顺序和修改约定见 [噪声方式变更记录](experiments/prd_noise_injection_change.md)。
 
 ASR 定义为 `1 - adversarial accuracy`，分母是送入目标模型评估的全部对抗样本，不筛选 target-clean-correct 子集。四个随机 PRD source 均在相同的 14 个目标模型（8 Transformer、6 CNN）上完成评估：
 

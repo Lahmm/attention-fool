@@ -241,7 +241,7 @@ class ProgressiveViTTests(unittest.TestCase):
         for original, phase in zip(schedule.masks, shifted.masks):
             self.assertEqual(int(original.sum()), int(phase.sum()))
 
-    def test_opponent_noise_is_local_and_union_kept_only(self):
+    def test_opponent_noise_reaches_future_drop_positions_before_checkpoint_zeroing(self):
         attacker = self.make_attacker(opponent_noise_strength=1.0)
         pixels = torch.rand(1, 3, 4, 4)
         labels = torch.zeros(1, dtype=torch.long)
@@ -261,9 +261,23 @@ class ProgressiveViTTests(unittest.TestCase):
         block_input = attacker.model.model.blocks[0].last_input
 
         self.assertTrue(torch.equal(block_input[:, :1], state.context["prefix_tokens"]))
-        expected_local = state.local_tokens.clone()
-        expected_local[:, 2:] += 1.0
+        expected_local = state.local_tokens + 1.0
         self.assertTrue(torch.allclose(block_input[:, 1:], expected_local))
+        after_first_drop = attacker.model.model.blocks[3].last_input[:, 1:]
+        after_late_drop = attacker.model.model.blocks[10].last_input[:, 1:]
+        self.assertTrue(torch.equal(after_first_drop[:, 0], torch.zeros_like(after_first_drop[:, 0])))
+        self.assertTrue(torch.equal(after_late_drop[:, 1], torch.zeros_like(after_late_drop[:, 1])))
+        self.assertTrue(torch.any(after_late_drop[:, 0] != 0))
+
+    def test_noise_disabled_leaves_initial_features_unchanged(self):
+        attacker = self.make_attacker(opponent_noise_strength=0.0)
+        pixels = torch.rand(1, 3, 4, 4)
+        labels = torch.zeros(1, dtype=torch.long)
+        schedule = attacker._build_mask_schedule(pixels)
+        initial = attacker.model.prepare_progressive_input(pixels)
+        attacker._forward_with_schedule(pixels, labels, schedule)
+        block_input = attacker.model.model.blocks[0].last_input
+        self.assertTrue(torch.equal(block_input[:, 1:], initial.local_tokens))
 
     def test_projected_opponent_noise_is_feature_rms_matched(self):
         attacker = self.make_attacker(opponent_noise_strength=0.25)

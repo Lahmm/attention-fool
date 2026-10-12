@@ -2,9 +2,9 @@
 
 The promoted research mainline is Progressive Route Disruption (PRD), implemented by `progressive_attack.py` and dispatched by `main.py`.
 
-PRD uses uniformly random local-token masks at architecture-specific checkpoints. The other paper mechanism is kept-only RGB opponent-channel noise projected through the source model's initial RGB convolution.
+PRD uses uniformly random local-token masks at architecture-specific checkpoints. The current implementation adds RGB opponent-channel noise to all initial local features before checkpoint traversal. The archived results below use the earlier kept-only policy; see `experiments/prd_noise_injection_change.md` for the change contract. Full-local transfer ASR has not yet been measured.
 
-The current PRD implementation's four completed 1000-image runs are recorded in:
+The earlier kept-only PRD version's four completed 1000-image runs (`98cb7cf1`) are recorded in:
 
 - `outputs/csv/outputs_attack_prd1000_vit_seed20260907.csv`;
 - `outputs/csv/outputs_attack_prd1000_cait_seed20260907.csv`;

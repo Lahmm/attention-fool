@@ -345,33 +345,6 @@ class ProgressiveRouteDisruptionAttacker:
         shifted_schedule.validate(batch_size=schedule.selections[0].mask.size(0))
         return shifted_schedule
 
-    def _schedule_image_union(
-        self, schedule: ProgressiveMaskSchedule, height: int, width: int
-    ) -> torch.Tensor:
-        image_masks = [
-            self._mask_to_image(item.mask, item.grid_size, height, width)
-            for item in schedule.selections
-        ]
-        return torch.stack(image_masks, dim=0).amax(dim=0)
-
-    @staticmethod
-    def _image_mask_to_projection_drop_mask(image_mask: torch.Tensor, state) -> torch.Tensor:
-        state.validate()
-        kernel = torch.ones(
-            1, 1, *state.projection_kernel, device=image_mask.device, dtype=image_mask.dtype
-        )
-        kwargs = {
-            "stride": state.projection_stride,
-            "padding": state.projection_padding,
-            "dilation": state.projection_dilation,
-        }
-        dropped_area = F.conv2d(image_mask, kernel, **kwargs)
-        valid_area = F.conv2d(torch.ones_like(image_mask), kernel, **kwargs).clamp_min(1.0)
-        fraction = dropped_area / valid_area
-        if tuple(fraction.shape[-2:]) != state.grid_size:
-            raise ValueError("projection mask grid does not match initial attack feature grid.")
-        return fraction.flatten(1).gt(0.5)
-
     def _strict_opponent_feature_noise(self, state) -> torch.Tensor:
         state.validate()
         local = state.local_tokens
@@ -414,12 +387,8 @@ class ProgressiveRouteDisruptionAttacker:
             raise ValueError("progressive and RGB-projection initial states disagree.")
         local = state.local_tokens
         if self.opponent_noise_strength > 0:
-            image_union = self._schedule_image_union(
-                schedule, pixels.size(-2), pixels.size(-1)
-            ).to(pixels)
-            initial_drop = self._image_mask_to_projection_drop_mask(image_union, initial)
-            noise = self._strict_opponent_feature_noise(initial)
-            local = torch.where((~initial_drop).unsqueeze(-1), local + noise, local)
+            # Noise reaches every initial local position before checkpoint drops.
+            local = local + self._strict_opponent_feature_noise(initial)
         state = self.model.replace_progressive_local_tokens(state, local)
         for item in schedule.selections:
             state = self.model.advance_progressive_state(state, item.checkpoint)
@@ -624,7 +593,7 @@ class ProgressiveRouteDisruptionAttacker:
             "mask_pair_sharing": "same_schedule_with_phase_transformed_masks",
             "phase_mask_transform": "image_reflect_shift_then_native_grid_occupancy_topk",
             "opponent_noise": (
-                "initial_rgb_projection_kept_image_union_only"
+                "initial_rgb_projection_all_local_tokens"
                 if self.opponent_noise_strength > 0
                 else "disabled"
             ),

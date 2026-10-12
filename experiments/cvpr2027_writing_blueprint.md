@@ -1,6 +1,6 @@
 # PRD：CVPR 2027 论文写作蓝图
 
-核对及表达约定更新日期：2026-10-09。当前本地分支：`prd`；最初阅读基准：`2f2213d`。四次正式运行记录的实现版本：`98cb7cf1`。后续提交归档正式结果与写作材料。
+核对及表达约定更新日期：2026-10-12。当前本地分支：`prd`；最初阅读基准：`2f2213d`。四次正式运行记录的实现版本：`98cb7cf1`。后续提交归档正式结果与写作材料。2026-10-12 将当前噪声注入范围改为全部初始局部特征；已有正式结果对应旧 kept-only 方式，新方式 ASR 待评估。修改约定见 [噪声方式变更记录](prd_noise_injection_change.md)。
 
 ## 1. 项目目标与本文档工作内容
 
@@ -60,26 +60,26 @@ PRD 将这一想法落实为逐 checkpoint 的随机局部中断：每一次中�
 
 Route 指局部表示沿后续网络计算传播的轨迹。Progressive 强调每一次中断之后，模型继续在已经改变的状态上前向传播。
 
-### 3.4 核心机制二：扰动保留证据的 RGB 对手通道投影噪声
+### 3.4 核心机制二：扰动初始局部表示的 RGB 对手通道投影噪声
 
-已选 schedule 决定各 checkpoint 的空间 drop 区域并集。噪声从亮度、红绿、黄蓝三个 RGB 方向采样，通过源模型真实的初始 RGB 卷积权重投影，并根据初始特征 RMS 匹配尺度；注入符合保留区域规则的初始局部特征。
+噪声从亮度、红绿、黄蓝三个 RGB 方向采样，通过源模型真实的初始 RGB 卷积权重投影，并根据初始特征 RMS 匹配尺度；在 checkpoint 遍历前注入全部初始局部特征，包括未来被 drop 的位置。CLS/prefix 保持原值。
 
 三个方向的采样方差为 0.5、1.25、1.25，为扰动赋予不同的亮度与色度能量。初始 RGB 投影把这一颜色结构映射到源模型的特征空间，RMS 匹配控制扰动强度。
 
-两项机制形成清楚的分工：progressive drop 中断局部证据的传播，opponent noise 扰动保留证据的表达。消融实验通过 ASR 呈现各项机制与组合的效果。
+两项机制形成清楚的分工：progressive drop 中断局部证据的传播，opponent noise 扰动初始局部表示。消融实验通过 ASR 呈现各项机制与组合的效果。
 
 ### 3.5 可用于后续引言的中心论点
 
-随着图像向网络深处传播，同一个局部 token 与全局表示的关联会发生明显变化，高 patch-score 的区域也不断更替。PRD 沿着这一演化过程，在多个 checkpoint 反复随机中断局部表示的传播，同时用 RGB 对手通道噪声扰动保留证据。四种源架构到 14 个目标模型的 ASR 结果呈现完整方法的迁移效果。
+随着图像向网络深处传播，同一个局部 token 与全局表示的关联会发生明显变化，高 patch-score 的区域也不断更替。PRD 沿着这一演化过程，在多个 checkpoint 反复随机中断局部表示的传播，同时用 RGB 对手通道噪声扰动初始局部表示。已有四种源架构到 14 个目标模型的 ASR 结果呈现旧 kept-only 版本的迁移效果；full-local 版本补充新评估。
 
 ## 4. 方法必须与实现一致
 
 ### 4.1 完整流程
 
 1. 从当前对抗像素开始，为本 step/group 构建 fresh schedule；构建过程遍历 checkpoint 并立即应用 mask，不计算 patch-score。
-2. 由原始 schedule 得到各 checkpoint mask 的图像空间并集；原始视图使用此 schedule。
+2. 保存各 checkpoint 的原生网格与 mask；原始视图使用此 schedule。
 3. 用反射填充的像素平移构造 phase view，把同一 schedule 的 mask 同步变换；映回各 checkpoint 原生网格时按 occupancy top-k 保持 drop 数量。
-4. 对每个视图，在初始 RGB 特征处注入该视图独立抽取的 opponent noise；然后顺序到达 checkpoint、hard-zero、继续前向并计算真实标签 CE loss。
+4. 对每个视图，在全部初始 RGB 局部特征处注入该视图独立抽取的 opponent noise；然后顺序到达 checkpoint、hard-zero、继续前向并计算真实标签 CE loss。
 5. 对两个视图的损失分别求关于当前像素的梯度；10 groups 提供 20 个梯度，直接取平均。
 6. 添加 Gaussian 平滑梯度残差；进行原始梯度的动量累积、sign 更新、相对干净输入的 L∞ 投影与 [0,1] 截断。
 7. 重复 10 steps，保存最终像素对抗图像；目标模型评估使用各自 timm transform。
@@ -106,7 +106,7 @@ checkpoint 干预写为：
 
 `η = W ξ_RGB`，`η_hat = β · RMS(H_0) / RMS(η) · η`。
 
-RMS 在单样本的全部初始 token 和通道上计算，并在保留区域门控之前匹配；实现中对特征 RMS 与投影权重使用 detach。
+RMS 在单样本的全部初始 token 和通道上计算；实现中对特征 RMS 与投影权重使用 detach。初始注入写为 `H_0^noise = H_0 + η_hat`，覆盖全部局部位置。
 
 像素梯度与更新写为：
 
@@ -120,15 +120,15 @@ RMS 在单样本的全部初始 token 和通道上计算，并在保留区域门
 
 动量直接累积处理后的梯度，更新过程按上述递推式描述。
 
-### 4.3 跨尺度保留区域的精确定义
+### 4.3 全部初始局部特征的噪声注入
 
-`_image_mask_to_projection_drop_mask` 根据初始 RGB 卷积的 kernel、stride、padding、dilation 计算每个感受野的被 drop 区域覆盖比例，比例严格大于 0.5 才标为 initial drop。噪声施加在其补集。
+噪声范围覆盖当前架构的全部初始局部特征，独立于后续 checkpoint mask。ViT/CaiT 在初始 patch 特征处注入；PiT/Visformer 在各自 adapter 定义的初始 RGB 特征处注入。随后按各 checkpoint 原生网格执行 hard-zero。
 
-在不重叠且对齐的 ViT patch 投影上，这对应 drop 并集之外的初始 token。重叠投影和跨尺度网格按上述感受野覆盖比例确定保留位置。
+每个可微视图在初始位置注入一次噪声，随后随特征传播。相位 mask 仍按图像空间平移与原生网格 occupancy 保持 drop 数量。此前用于 kept-only 门控的 drop 并集和覆盖比例阈值已移除。
 
-本节及前述 detach、卷积几何等细节作为实现备忘保存。正文以解释两项机制所需的定义和公式为主，完整实现细节按复现需要安排。
+两种方式的执行顺序和修改约定见 [噪声方式变更记录](prd_noise_injection_change.md)。
 
-### 4.4 当前唯一主实验配置
+### 4.4 已有主实验配置与当前执行默认值
 
 | Source | Checkpoints | 原生网格 | Drop 数量 | Opponent β | 生成 batch size |
 | --- | --- | --- | --- | ---: | ---: |
@@ -172,7 +172,7 @@ ASR = `1 − correct/total`，分母是全部评估的 1000 张对抗图像，�
 ### 5.3 建议的贡献组织
 
 1. **逐深度干预的攻击设计。** PRD 通过同一前向轨迹上的 fresh、uniform、checkpoint-wise hard-zero，干预演化中的局部证据；执行不依赖 patch-score。
-2. **保留证据的结构化扰动。** RGB 对手方向的非各向同性噪声经真实初始 RGB 投影并匹配特征 RMS，与 progressive drop 形成职责分工。
+2. **初始局部表示的结构化扰动。** RGB 对手方向的非各向同性噪声经真实初始 RGB 投影并匹配特征 RMS，与 progressive drop 形成职责分工。
 3. **跨架构实现与实证。** 在固定网格、池化层级和卷积式前端上保留同一遍历原则；四源×14 目标的现有主实验提供可复核的迁移结果。
 
 贡献段将动态发现、逐深度干预设计和 ASR 验证连接起来。四架构实例化呈现方法适用性。Related Work 围绕 PatchOut、深层 self-ensemble、token gradient regularization、surrogate/model augmentation 梳理具体差异。
@@ -190,7 +190,7 @@ ASR = `1 − correct/total`，分母是全部评估的 1000 张对抗图像，�
 | 3. Depth-wise Evidence Reorganization | 让读者看到动态发现，并自然进入方法 | 同一样本的多层 patch-score 图、固定 token 分数变化曲线、高分区域更替；附 score 定义与辅助统计 |
 | 4. Progressive Route Disruption | 给出能复现、能比较的方法 | 4.1 threat model/notation；4.2 progressive random schedule；4.3 opponent noise；4.4 phase pairing/gradient/update；4.5 architecture-specific instantiation |
 | 5. Experiments | 呈现完整方法与各机制的迁移效果 | 5.1 setup；5.2 现有主实验及方法比较；5.3 两机制的 ASR 消融；5.4 ASR 参数分析、效率与定性样本 |
-| 6. Conclusion | 以发现、方法和结果收束全文 | 动态局部证据→progressive 干预与保留证据扰动→主要 ASR 结果 |
+| 6. Conclusion | 以发现、方法和结果收束全文 | 动态局部证据→progressive 干预与初始局部表示扰动→主要 ASR 结果 |
 | Limitations / responsible use 段落 | 简洁交代方法适用范围与安全研究用途 | 参数选择、计算预算与目标范围；按篇幅及正式投稿要求安排 |
 | References | 提供研究来源，明确方法定位 | 引用实际使用的相关文献，核对题名、版本与结论 |
 
@@ -241,7 +241,7 @@ ASR = `1 − correct/total`，分母是全部评估的 1000 张对抗图像，�
 
 1. **动态发现的可视化。** 选取真实样本，排列不同深度的 patch-score 图，标出高分区域的更替；以固定位置 token 的分数曲线展示其沿深度的变化。
 2. **同协议 ASR 比较。** 使用相同 1000 样本、source/target 权重及预处理、ε=16/255 和 ASR 分母；共同报告计算预算。
-3. **两机制的 ASR 消融。** 配对 seed、固定支撑流程，比较共同优化底座、仅 progressive、仅 opponent 与完整 PRD。对照中的 schedule 和保留区域规则随实验设置说明。
+3. **两机制的 ASR 消融。** 配对 seed、固定支撑流程，比较共同优化底座、仅 progressive、仅 opponent 与完整 PRD。对照中的 schedule 和噪声施加范围随实验设置说明；旧 kept-only 与新 full-local 的结果分别记录。
 4. **Progressive 参数分析。** 在当前随机 PRD 配置下，用 ASR 对照呈现 checkpoint 位置、数量和 drop budget 的效果；按原生网格说明各项预算。
 5. **Opponent 参数分析。** 在相同注入位置与 feature RMS 下，围绕噪声结构、强度和区域准备 ASR 对照。
 6. **实验设置和过程记录。** 简洁记录参数选择：历史筛选使用过主实验图像的子集和目标 ASR，当前参数承接这些选择。正文设置或复现材料按实际过程说明。
@@ -259,7 +259,7 @@ ASR = `1 − correct/total`，分母是全部评估的 1000 张对抗图像，�
 - [Learning Transferable Adversarial Examples via Ghost Networks](https://arxiv.org/abs/1812.03413)：需要核对随机 surrogate 变体和梯度聚合的已有设计。
 - [ViT-EnsembleAttack（ICCV 2025）](https://openaccess.thecvf.com/content/ICCV2025/html/Cao_ViT-EnsembleAttack_Augmenting_Ensemble_Models_for_Stronger_Adversarial_Transferability_in_Vision_ICCV_2025_paper.html)：核对 model augmentation 与单 source PRD 的关系，比较时对齐 source 与计算预算。
 
-Related Work 说明已有方法如何处理 patch/token 和模型计算，以及 PRD 在干预位置、顺序传播与保留证据扰动上的设计特点。
+Related Work 说明已有方法如何处理 patch/token 和模型计算，以及 PRD 在干预位置、顺序传播与初始局部表示扰动上的设计特点。
 
 ## 10. 写作顺序与每一步完成标准
 
