@@ -1,0 +1,61 @@
+{
+  "python": "3.10.19 (main, Oct 21 2025, 16:43:05) [GCC 11.2.0]",
+  "torch": "2.10.0+cu128",
+  "timm": "1.0.24",
+  "git_head": "bf09224675093cd6a4fcccee2db10acae0eb5f4e",
+  "cuda": "12.8",
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "seed": 20260907,
+  "noise_policy": "initial_rgb_projection_all_local_tokens",
+  "baseline": "results/prd_cross_arch_s1000.csv",
+  "sources": [
+    [
+      "vit",
+      "vit_base_patch16_224",
+      96,
+      "block3,block10",
+      "0.051020408163,0.051020408163",
+      "0.2"
+    ],
+    [
+      "cait",
+      "cait_s24_224",
+      48,
+      "block17,block23",
+      "0.010204081633,0.142857142857",
+      "0.2"
+    ],
+    [
+      "pit",
+      "pit_b_224",
+      96,
+      "stage2_block1,stage3_block2,stage3_block3",
+      "0.02081165,0.03125,0.09375",
+      "0.4"
+    ],
+    [
+      "visformer",
+      "visformer_small",
+      48,
+      "stage2_block1,stage3_block1",
+      "0.209183673469,0.204081632653",
+      "0.4"
+    ]
+  ],
+  "targets": [
+    "vit_base_patch16_224",
+    "levit_256",
+    "pit_b_224",
+    "deit_base_patch16_224",
+    "tnt_s_patch16_224",
+    "convit_base",
+    "visformer_small",
+    "cait_s24_224",
+    "inception_v3",
+    "inception_v4",
+    "inception_resnet_v2",
+    "resnet101",
+    "inception_v3_adv",
+    "inception_resnet_v2_adv"
+  ]
+}
