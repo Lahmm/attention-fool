@@ -2,11 +2,11 @@
 
 核对及表达约定更新日期：2026-10-09。当前本地分支：`prd`；最初阅读基准：`2f2213d`。四次正式运行记录的实现版本：`98cb7cf1`。后续提交归档正式结果与写作材料。
 
-## 1. 项目目标与本轮工作内容
+## 1. 项目目标与本文档工作内容
 
 项目的主要任务是：依据本地 PRD 分支的实现与实验材料，以已有四源、1000 图像、14 目标结果作为主实验，撰写面向 CVPR 2027 投稿的论文。
 
-本对话承担写作前的整体理解、论证组织、章节设计与写作顺序规划。已有主实验是论文的事实基础；必要的补充比较和机制验证围绕这一基础开展。方法保持两个核心机制：checkpoint-wise progressive random token drop 与 RGB opponent-channel random noise。
+本文档承担写作前的整体理解、论证组织、章节设计与写作顺序规划。已有主实验是论文的事实基础；必要的补充比较和机制验证围绕这一基础开展。方法保持两个核心机制：checkpoint-wise progressive random token drop 与 RGB opponent-channel random noise。
 
 建议工作标题：**Progressive Route Disruption for Transferable Adversarial Attacks**。
 
