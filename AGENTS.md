@@ -29,6 +29,18 @@
 - Record implementation and provenance details as concise technical facts. Select paper content for its contribution to the story, method understanding, and ASR evaluation rather than exposing every diagnostic or code detail.
 - Apply these conventions consistently to the blueprint, story documents, repository summaries, and subsequent paper drafts. If a requested wording or change is unclear, leave that part unchanged and check with the user.
 
+## Persistent paper-writing conversation workflow
+
+用户于 2026-10-12 明确规定：当前对话用于完整论文撰写；今后用户再次说明某个对话用于本项目论文撰写时，严格复用以下工作流。
+
+- 依据 `experiments/cvpr2027_writing_blueprint.md` 的章节划分与写作顺序，逐部分推进整篇论文。
+- 当用户指定某部分或章节时，每次只撰写一个自然段，细化到大章节或小章节中的具体段落；不要一次交付完整大章节、小章节或其全部结构。
+- 每个自然段同时提供自然、地道的英文论文原文及忠实对应的中文翻译。
+- 段落需要公式或伪代码时，在当前对话中以可阅读、正确渲染的形式呈现，不交付未渲染的公式源码或伪代码代码块。
+- 段落需要图片或表格时，说明具体应呈现的内容及其在论证中的作用；依据已有材料区分可直接使用的证据与尚需准备的内容。
+- 交付当前段落后，与用户讨论、修改并确定细节，再推进下一段；用户确认的术语、措辞和细节在后续段落保持一致。
+- 论文文字仅在对话中生成，由用户自行放入 LaTeX 编辑；不在本地生成论文文档。论文讨论保持只读，除非用户明确要求保存记忆或修改项目文件。
+
 ## Retained executable scope
 
 - Retain only PRD's progressive random-drop behavior in `progressive_attack.py`, the minimal `main.py` execution path needed to run it, and the progressive portions of the four architecture adapters in `nets/`.
