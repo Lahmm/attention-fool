@@ -3,6 +3,7 @@
 - The assistant may use terminal commands in this repository except `rm` and commands that delete the Git repository.
 - After each completed modification to the current repository contents, the assistant should initiate a `git push`.
 - The assistant is allowed to use `git push` to push the change to the remote repository.
+- Discussions are read-only. Modify code or files only when the user explicitly requests those changes; a discussion of implementing an idea is not authorization to implement it.
 
 ## Current research mainline
 
@@ -11,14 +12,15 @@
 - The validated ViT-B/16 configuration uses checkpoint boundaries `block3` and `block10`, independently drops 10 of 196 local tokens at each checkpoint (`drop_ratio=0.051020408163`), and permits the same position to be selected again later in the schedule. This is the only ViT attack configuration that should be described as current or used by current executable examples and tests.
 - At every attack step and augmentation group, generate a fresh random checkpoint schedule. At each checkpoint, sample uniformly from all current local-token positions and hard-zero the selected tokens before continuing the same forward trajectory. The original view uses that schedule and the phase view uses its spatially transformed counterpart. The default 10 steps × 10 groups produces 100 schedules and 200 checkpoint mask selections per ViT image.
 - Patch score belongs only to the motivating observation that token semantic rankings reorganize across model depth. It is not an attack selector, runtime dependency, adapter API, CLI option, or claimed source of PRD's transferability.
-- Opponent-channel noise perturbs **all initial local features**: sample luminance, red-green, and yellow-blue RGB directions, project through the initial RGB projection, and RMS-match in feature space. Add this noise once per differentiable view before checkpoint traversal, including positions selected for later drops. Keep prefix/CLS tokens unchanged. Do not gate noise with checkpoint masks or compute a drop-union coverage threshold. See `experiments/prd_noise_injection_change.md` for the old/new distinction and implementation contract.
-- The archived four-source 1000-image results were generated with the earlier kept-only noise policy. Preserve their original parameters and ASRs as that version's measurements; full-local noise requires fresh transfer evaluation.
+- Opponent-channel noise perturbs **all initial local features**: sample luminance, red-green, and yellow-blue RGB directions, project through the initial RGB projection, and RMS-match in feature space. Add this noise once per differentiable view before checkpoint traversal, including positions selected for later drops. Keep prefix/CLS tokens unchanged. See `experiments/prd_method_contract.md` for the execution contract.
+- The sole main experiment is the four-source, 1000-image, 14-target run completed on 2026-10-12 at `bf092246`. Its transfer ASRs are in `results/prd_cross_arch_s1000.csv`, summaries in `results/prd_summary_s1000.csv`, and parameters and original transfer CSVs in `results/prd_run_artifacts/`. Four-source Overall ASR is 84.55%; strict black-box ASR is 83.49%.
+- Keep records and paper drafts focused on this single method and main experiment. Describe RGB opponent-channel noise on all initial local features followed by progressive checkpoint drops; do not introduce noise-policy version comparisons or a selection narrative.
 - Evaluate transferability and component effects through transfer ASR defined as `1 - adversarial accuracy` over all evaluated adversarial samples; do not filter to a target-clean-correct subset. Gradient diagnostics, including effective rank, are internal experimental analysis tools and are not paper evidence for transferability.
 - Preserve support for ViT-B/16, CaiT-S24, PiT-B, and Visformer-S through architecture adapters. Do not encode ViT block assumptions as a nominally cross-architecture implementation.
 
 ## Paper-writing objective and voice
 
-- Write a CVPR 2027 paper from the local `prd` branch, using the existing four-source, 1000-image, 14-target PRD results as the main experimental results.
+- Write a CVPR 2027 paper from the local `prd` branch, using the 2026-10-12 four-source, 1000-image, 14-target PRD results as the main experimental results.
 - Lead the motivation with the dynamic discovery: the same local token's cosine similarity to the global representation changes substantially across layers, and the locations of high-patch-score patches change with model depth. Show this process with patch-score visualizations of actual samples; keep Spearman statistics as supporting detail.
 - Build the story around evolving local evidence, opponent-channel perturbation of initial local features, progressive random checkpoint disruption, and transfer ASR. Patch-score visualizations explain the discovery; checkpoint schedules drive the attack.
 - Use vivid, direct, affirmative language. Explain what we observed, why it is interesting, and how PRD acts on that process. Keep the narrative focused and engaging, with numerical results and method descriptions faithful to the records.
@@ -31,7 +33,7 @@
 
 - Retain only PRD's progressive random-drop behavior in `progressive_attack.py`, the minimal `main.py` execution path needed to run it, and the progressive portions of the four architecture adapters in `nets/`.
 - Retain only utility, test, configuration, and documentation code that is directly required to execute or verify that progressive attack.
-- The protected behavior is: fresh uniformly random checkpoint schedules, the ViT `block3,block10` schedule, local-token hard zeroing during sequential checkpoint traversal, transformed phase-pair schedules, full-local RGB opponent-channel projected noise before traversal, and the projected iterative update used by PRD.
+- The protected behavior is: fresh uniformly random checkpoint schedules, the ViT `block3,block10` schedule, local-token hard zeroing during sequential checkpoint traversal, transformed phase-pair schedules, RGB opponent-channel projected noise on all initial local features before traversal, and the projected iterative update used by PRD.
 - Code is not protected merely because it is currently imported, exposed by the CLI, covered by a test, mentioned in an old report, or needed to reproduce a superseded experiment.
 
 ## Removed scope

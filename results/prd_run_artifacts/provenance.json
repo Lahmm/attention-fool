@@ -7,7 +7,6 @@
   "gpu": "NVIDIA GeForce RTX 4090",
   "seed": 20260907,
   "noise_policy": "initial_rgb_projection_all_local_tokens",
-  "baseline": "results/prd_cross_arch_s1000.csv",
   "sources": [
     [
       "vit",

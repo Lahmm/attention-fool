@@ -1,41 +1,18 @@
-# Result archive
+# PRD 主实验结果
 
-The promoted research mainline is Progressive Route Disruption (PRD), implemented by `progressive_attack.py` and dispatched by `main.py`.
+本目录记录 PRD 的当前方法与 2026-10-12 完成的主实验：全部初始局部特征注入 RGB 对手通道投影噪声，随后按随机 schedule 在多个 checkpoint 逐次清零局部 token。四种源架构分别攻击 1000 张图像，在相同的 14 个目标模型上评估。
 
-PRD uses uniformly random local-token masks at architecture-specific checkpoints. The current implementation adds RGB opponent-channel noise to all initial local features before checkpoint traversal. The archived results below use the earlier kept-only policy; see `experiments/prd_noise_injection_change.md` for the change contract. Full-local transfer ASR was measured on 2026-10-12 and is archived separately as an additional result for the new noise policy.
+四源平均 Overall ASR 为 **84.55%**，严格黑盒 ASR 为 **83.49%**；Transformer 平均为 **88.39%**，CNN 平均为 **79.44%**。ASR 定义为 `1 - adversarial accuracy`，分母为全部评估样本。
 
-The earlier kept-only PRD version's four completed 1000-image runs (`98cb7cf1`) are recorded in:
+| 文件 | 内容 |
+| --- | --- |
+| [prd_cross_arch_s1000.csv](prd_cross_arch_s1000.csv) | 56 项 source-target ASR、目标类别、source-match 标记、seed 和样本数 |
+| [prd_summary_s1000.csv](prd_summary_s1000.csv) | 四个源模型及四源宏平均的 Overall、Transformer、CNN 和严格黑盒 ASR |
+| [prd_run_artifacts/provenance.json](prd_run_artifacts/provenance.json) | 实际运行环境、实现提交、seed、源配置与目标集 |
+| `prd_run_artifacts/{vit,cait,pit,visformer}/attack_params.json` | 四次运行的完整攻击参数 |
+| `prd_run_artifacts/{vit,cait,pit,visformer}/transfer.csv` | 四份原始迁移 CSV，包含实际运行时间、参数和逐目标结果 |
+| [patch_rank_observation_summary.json](patch_rank_observation_summary.json) | 动机观察统计，呈现 token/global 关系随模型深度的变化 |
 
-- `outputs/csv/outputs_attack_prd1000_vit_seed20260907.csv`;
-- `outputs/csv/outputs_attack_prd1000_cait_seed20260907.csv`;
-- `outputs/csv/outputs_attack_prd1000_pit_seed20260907.csv`;
-- `outputs/csv/outputs_attack_prd1000_visformer_seed20260907.csv`.
+正式配置、结果表与计算规则见 [主实验报告](../experiments/progressive_cross_arch_mainline_s1000.md)。方法执行契约见 [PRD 方法记录](../experiments/prd_method_contract.md)。服务器上当前主实验图像、manifest 和日志的位置见 [写作交接](../experiments/server_handoff_inventory.md)。
 
-Their measurements are consolidated into:
-
-- `prd_cross_arch_s1000.csv`: the complete 4-source × 14-target transfer table;
-- `prd_gradient_diagnostics_s1000.csv`: internal experimental analysis records and progressive-schedule counts.
-
-Aggregate and per-target results are documented in `experiments/progressive_cross_arch_mainline_s1000.md`.
-
-Transfer ASR is the paper's measure of transferability. Gradient diagnostics,
-including effective rank, are retained as internal process records.
-
-The exact attack parameters, gradient diagnostics, and losslessly compressed replay
-manifests of all four formal runs are in `prd_run_artifacts/`. The historical
-patch-rank observation is retained there as motivation only. The SHA256 list
-for the 4000 formal adversarial PNGs is `prd1000_image_sha256.tsv.gz`.
-`server_untracked_files.tsv.gz` lists every server-side file or symlink omitted
-from Git; see `experiments/server_handoff_inventory.md` for download guidance.
-
-## Additional full-local results (2026-10-12)
-
-The new full-local policy was evaluated with the same four source configurations, seed `20260907`, and ordered 1000-image sample set. All 56 source-target evaluations used 1000 samples with zero skipped images. Four-source Overall ASR is 84.55% (kept-only: 84.20%; +0.36 percentage points); strict black-box ASR is 83.49% (kept-only: 83.10%; +0.39 points). CNN ASR rises from 78.59% to 79.44%, while Transformer ASR is essentially unchanged at 88.39%.
-
-- [Full-local report and configuration](prd_full_local_s1000.md).
-- [Full-local 56-pair transfer table](prd_full_local_cross_arch_s1000.csv).
-- [Per-target old/new comparison](prd_full_local_vs_kept_only_per_target_s1000.csv).
-- [Summary old/new comparison](prd_full_local_vs_kept_only_summary_s1000.csv).
-- `prd_full_local_run_artifacts/`: full-local run provenance, original attack parameters, and original transfer CSVs.
-
-The kept-only CSVs, reports and `prd_run_artifacts/` retain their original measurements. Full-local files provide the additional evaluation of the current method.
+论文统一通过 transfer ASR 呈现迁移性；patch-score 用于动机观察，梯度诊断用于实验内部分析。

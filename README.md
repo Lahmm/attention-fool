@@ -9,7 +9,7 @@ Patch score 只用于得到上述研究观察；PRD 的执行完全由 checkpoin
 PRD 只有两个核心机制：
 
 1. **checkpoint-wise progressive random token drop**：在 architecture-specific checkpoints 从全部当前 local-token 位置中均匀随机采样并 hard-zero，随后在已经修改的 hidden state 上继续同一次前向传播；
-2. **full-local RGB opponent-channel noise**：在亮度、红绿和黄蓝方向采样，经模型真实初始 RGB projection 映射并在特征空间 RMS matching，注入全部初始局部特征，包括之后会被 drop 的位置；CLS/prefix 不加噪声。
+2. **RGB opponent-channel random noise**：在亮度、红绿和黄蓝方向采样，经模型真实初始 RGB projection 映射并在特征空间 RMS matching，注入全部初始局部特征，包括之后会被 drop 的位置；CLS/prefix 不加噪声。
 
 每个 attack step、每个 augmentation group 都生成新的随机 schedule。Original view 使用该 schedule，phase view 使用其空间变换后的对应 schedule。默认 10 steps × 10 groups × 2 views；ViT 的两个 checkpoint 因而对应每张图 100 条 schedule 和 200 次 mask selection。
 
@@ -17,7 +17,7 @@ PRD 只有两个核心机制：
 current adversarial pixels
 → fresh uniformly random checkpoint schedule
 → original schedule / spatially transformed phase schedule
-→ full-local projected opponent-channel noise at the initial features
+→ RGB opponent-channel noise on all initial local features
 → sequential checkpoint traversal and local-token hard zeroing
 → raw 20-view gradient mean
 → Gaussian residual (sigma=4, alpha=0.75)
@@ -47,23 +47,23 @@ python main.py \
 
 ## 1000-image transfer results
 
-下表来自旧 kept-only 噪声方式的四次正式运行（`98cb7cf1`）。2026-10-12 起，当前代码采用 full-local 噪声；其 ASR 待重新评估。两种方式的区别、执行顺序和修改约定见 [噪声方式变更记录](experiments/prd_noise_injection_change.md)。
+主实验于 2026-10-12 完成，实际实现为 `bf092246`。下表统一使用当前全局初始噪声与 progressive drop 的四源结果。
 
-ASR 定义为 `1 - adversarial accuracy`，分母是送入目标模型评估的全部对抗样本，不筛选 target-clean-correct 子集。四个随机 PRD source 均在相同的 14 个目标模型（8 Transformer、6 CNN）上完成评估：
+ASR 定义为 `1 - adversarial accuracy`，分母是送入目标模型评估的全部对抗样本，不筛选 target-clean-correct 子集。四个 PRD source 均在相同的 14 个目标模型（8 Transformer、6 CNN）上完成评估：
 
 | Source | Overall ASR | Transformer avg | CNN avg | Strict black-box overall |
 | --- | ---: | ---: | ---: | ---: |
-| ViT-B/16 | 85.20% | 90.45% | 78.20% | 84.29% |
-| CaiT-S24 | 86.58% | 90.06% | 81.93% | 85.66% |
-| PiT-B | 84.36% | 89.91% | 76.95% | 83.27% |
-| Visformer-S | 80.65% | 83.19% | 77.27% | 79.18% |
-| **Four-source mean** | **84.20%** | **88.40%** | **78.59%** | **83.10%** |
+| ViT-B/16 | 85.06% | 89.96% | 78.52% | 84.18% |
+| CaiT-S24 | 87.64% | 90.89% | 83.32% | 86.79% |
+| PiT-B | 84.34% | 89.55% | 77.38% | 83.24% |
+| Visformer-S | 81.18% | 83.16% | 78.53% | 79.75% |
+| **Four-source mean** | 84.55% | 88.39% | 79.44% | 83.49% |
 
 Strict black-box 指标排除与 source 架构相同的 target。56 个 source-target evaluation 均使用完整 1000 张对抗样本且没有 skipped images。逐目标结果和规范化 CSV 记录见 `experiments/progressive_cross_arch_mainline_s1000.md`。
 
-论文叙事、主实验记录与建议写作结构见 [PRD 论文叙事文档](experiments/prd_paper_story.md)。
+方法执行顺序见 [PRD 方法记录](experiments/prd_method_contract.md)。论文叙事、主实验记录与建议写作结构见 [PRD 论文叙事文档](experiments/prd_paper_story.md)。
 
-异地写作所需的逐文件用途、正式运行证据和未入 Git 的服务器数据下载清单见 [写作交接与文件清单](experiments/server_handoff_inventory.md)。
+异地写作所需的当前主实验参数、原始记录和服务器材料位置见 [写作交接与文件清单](experiments/server_handoff_inventory.md)。
 
 论文以 ASR 呈现迁移效果。梯度诊断保留为实验过程中的内部分析工具。写作结构、图表计划和表达约定见 [CVPR 2027 写作蓝图](experiments/cvpr2027_writing_blueprint.md)。
 

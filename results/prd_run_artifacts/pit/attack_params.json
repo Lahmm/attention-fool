@@ -78,7 +78,7 @@
   "checkpoint_mask_selection_count_per_image": 300,
   "mask_pair_sharing": "same_schedule_with_phase_transformed_masks",
   "phase_mask_transform": "image_reflect_shift_then_native_grid_occupancy_topk",
-  "opponent_noise": "initial_rgb_projection_kept_image_union_only",
+  "opponent_noise": "initial_rgb_projection_all_local_tokens",
   "feature_noise_cls": false,
   "asr_definition": "1 - adversarial accuracy over all evaluated samples",
   "model_mean": [

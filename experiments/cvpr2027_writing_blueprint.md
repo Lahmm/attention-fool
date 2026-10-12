@@ -1,6 +1,6 @@
 # PRD：CVPR 2027 论文写作蓝图
 
-核对及表达约定更新日期：2026-10-12。当前本地分支：`prd`；最初阅读基准：`2f2213d`。四次正式运行记录的实现版本：`98cb7cf1`。后续提交归档正式结果与写作材料。2026-10-12 将当前噪声注入范围改为全部初始局部特征；已有正式结果对应旧 kept-only 方式，新方式 ASR 待评估。修改约定见 [噪声方式变更记录](prd_noise_injection_change.md)。
+材料统一日期：2026-10-12。当前本地分支：`prd`。主实验采用 2026-10-12 完成的四源、1000 图像、14 目标 PRD 运行，实际实现提交为 `bf092246`。方法执行契约见 [PRD 方法记录](prd_method_contract.md)，数据唯一入口为 `results/prd_cross_arch_s1000.csv` 和 `results/prd_summary_s1000.csv`。
 
 ## 1. 项目目标与本文档工作内容
 
@@ -12,29 +12,25 @@
 
 写作约定：直接讲发现、设计与结果，用鲜明的动态过程吸引读者。动机以同一样本的 token 分数变化和高 patch-score 区域的迁移为中心；ASR 呈现迁移效果。梯度诊断保留为内部分析工具。省去针对未提出主张的反复澄清，让每一段推进论文主线。长期约定已记录在 `AGENTS.md` 的 Paper-writing objective and voice。
 
-## 2. 已阅读材料与证据层级
+## 2. 材料与证据层级
 
 | 材料 | 用途 | 写作地位 |
 | --- | --- | --- |
-| `AGENTS.md`、`README.md` | 确认研究范围、当前配置与术语 | 当前主线约束 |
-| `progressive_attack.py`、`main.py`、`nets/*.py` | 核对 schedule、前向遍历、噪声、更新与架构适配 | 方法事实依据 |
-| `utils.py`、`transfer_eval.py`、`record_experiment.py`、`gradient_replay.py` | 核对数据、预处理、结果记录、ASR 与随机重放 | 实验协议依据 |
-| `tests/*.py` | 阅读已有实现验证及 optional real-model 验证条件 | 行为契约；本轮未重新执行测试 |
+| `AGENTS.md`、`README.md`、`experiments/prd_method_contract.md` | 确认单一方法、执行顺序、配置与术语 | 当前主线约束 |
+| `progressive_attack.py`、`main.py`、`nets/*.py` | 核对 schedule、噪声、遍历与更新 | 方法事实依据 |
+| `utils.py`、`transfer_eval.py`、`record_experiment.py`、`gradient_replay.py` | 核对数据、预处理、ASR 与随机记录 | 实验协议依据 |
+| `tests/*.py` | 当前执行行为与 optional real-model 验证 | 行为契约 |
 | `experiments/prd_paper_story.md` | 论文故事与表达约定 | 叙事起点 |
-| `experiments/progressive_cross_arch_mainline_s1000.md` | 正式配置、4×14 主表与验证记录 | 主实验说明 |
-| 四份 `outputs/csv/outputs_attack_prd1000_*.csv` | 原始模型结果、实际参数、实现版本和时间戳 | 主实验原始记录 |
-| `results/prd_cross_arch_s1000.csv` | 56 项 source-target 结果 | 制作主表的数值依据 |
-| `results/prd_run_artifacts/*/attack_params.json`、`replay_manifest.json.gz` | 实际参数、同序样本与随机事件 | 可复核性依据 |
-| `results/prd_run_artifacts/*/gradient_diagnostics.json` | 实验过程中的梯度诊断 | 内部分析记录 |
-| `results/prd_run_artifacts/patch_rank_observation_summary.json` | 64 图像深度排名重组观察 | 动机证据 |
-| `experiments/server_handoff_inventory.md`、两份压缩文件索引 | 区分本地已归档与仅在服务器上的材料 | 文件可用性依据 |
-| Git 历史中的动机文档、排序观察程序、checkpoint/drop 扫描、192 图像 follow-up、旧主实验报告 | 理解研究如何收敛到当前 PRD | 研究过程背景 |
+| `experiments/progressive_cross_arch_mainline_s1000.md` | 当前正式配置、汇总和 4×14 逐目标表 | 主实验说明 |
+| `results/prd_run_artifacts/{vit,cait,pit,visformer}/transfer.csv` | 原始结果、实际参数、实现版本与时间戳 | 主实验原始记录 |
+| `results/prd_cross_arch_s1000.csv`、`results/prd_summary_s1000.csv` | 56 项 source-target ASR 与四源汇总 | 制作主表的数值依据 |
+| `results/prd_run_artifacts/{vit,cait,pit,visformer}/attack_params.json`、`provenance.json` | 攻击参数、环境、源配置与目标集 | 可复核性依据 |
+| `results/patch_rank_observation_summary.json` | 64 图像深度关系变化观察 | 动机证据 |
+| `experiments/server_handoff_inventory.md` | 本地材料与服务器当前运行目录 | 文件可用性依据 |
 
-本轮独立复核了：56 项结果的均值；各项 ASR 与原始 CSV 一致；归档的完整参数与原始 CSV 中的参数一致；四份 manifest 含相同、同序的 1000 个唯一 sample ID；phase events 和随机事件数量符合配置。
+规范化表与四份原始 transfer CSV 的逐目标数值及实际参数一致；汇总从 56 条记录按目标类型和 source-match 标记计算。四次主实验使用相同的 1000 图像输入集、seed 20260907、全部样本 ASR 分母，记录的 skipped 为零。
 
-本机已有 1000 张干净输入，但没有正式对抗图像目录和模型缓存。因此本轮核对的是代码与归档证据，未重新生成对抗样本、复评模型或测量已保存 PNG 的扰动。
-
-交接文档记录的 `patch-score-routing-attack` 是服务器当时的分支名称；当前本地分支为 `prd`。主实验统一采用四份正式 `prd1000` 运行记录。
+当前主实验的对抗图像、replay manifests、逐样本预测和日志保存在服务器。本地保存完整结果 CSV、参数与环境记录；样本可视化和进一步逐样本分析从当前运行目录取得原件。
 
 ## 3. 研究故事：观察、设计问题、方法与验证
 
@@ -70,7 +66,7 @@ Route 指局部表示沿后续网络计算传播的轨迹。Progressive 强调�
 
 ### 3.5 可用于后续引言的中心论点
 
-随着图像向网络深处传播，同一个局部 token 与全局表示的关联会发生明显变化，高 patch-score 的区域也不断更替。PRD 沿着这一演化过程，在多个 checkpoint 反复随机中断局部表示的传播，同时用 RGB 对手通道噪声扰动初始局部表示。已有四种源架构到 14 个目标模型的 ASR 结果呈现旧 kept-only 版本的迁移效果；full-local 版本补充新评估。
+随着图像向网络深处传播，同一个局部 token 与全局表示的关联会发生明显变化，高 patch-score 的区域也不断更替。PRD 沿着这一演化过程，在多个 checkpoint 反复随机中断局部表示的传播，同时用 RGB 对手通道噪声扰动初始局部表示。四种源架构到 14 个目标模型的主实验取得 83.49% 的平均严格黑盒 ASR，呈现完整方法的迁移效果。
 
 ## 4. 方法必须与实现一致
 
@@ -124,11 +120,11 @@ RMS 在单样本的全部初始 token 和通道上计算；实现中对特征 RM
 
 噪声范围覆盖当前架构的全部初始局部特征，独立于后续 checkpoint mask。ViT/CaiT 在初始 patch 特征处注入；PiT/Visformer 在各自 adapter 定义的初始 RGB 特征处注入。随后按各 checkpoint 原生网格执行 hard-zero。
 
-每个可微视图在初始位置注入一次噪声，随后随特征传播。相位 mask 仍按图像空间平移与原生网格 occupancy 保持 drop 数量。此前用于 kept-only 门控的 drop 并集和覆盖比例阈值已移除。
+每个可微视图在初始位置注入一次噪声，随后随特征传播。到达 checkpoint 时，按随机 mask 清零局部 token；相位 mask 按图像空间平移与原生网格 occupancy 保持 drop 数量。
 
-两种方式的执行顺序和修改约定见 [噪声方式变更记录](prd_noise_injection_change.md)。
+完整执行顺序见 [PRD 方法记录](prd_method_contract.md)。
 
-### 4.4 已有主实验配置与当前执行默认值
+### 4.4 当前主实验配置
 
 | Source | Checkpoints | 原生网格 | Drop 数量 | Opponent β | 生成 batch size |
 | --- | --- | --- | --- | ---: | ---: |
@@ -149,15 +145,15 @@ ViT 各 checkpoint 的 drop ratio 均为 `0.051020408163`。四种架构按原�
 
 | Source | 14 目标 Overall | Transformer（8） | CNN（6） | 严格黑盒（13） |
 | --- | ---: | ---: | ---: | ---: |
-| ViT-B/16 | 85.20% | 90.45% | 78.20% | 84.29% |
-| CaiT-S24 | 86.58% | 90.06% | 81.93% | 85.66% |
-| PiT-B | 84.36% | 89.91% | 76.95% | 83.27% |
-| Visformer-S | 80.65% | 83.19% | 77.27% | 79.18% |
-| 四源宏平均 | 84.20% | 88.40% | 78.59% | 83.10% |
+| ViT-B/16 | 85.06% | 89.96% | 78.52% | 84.18% |
+| CaiT-S24 | 87.64% | 90.89% | 83.32% | 86.79% |
+| PiT-B | 84.34% | 89.55% | 77.38% | 83.24% |
+| Visformer-S | 81.18% | 83.16% | 78.53% | 79.75% |
+| 四源宏平均 | 84.55% | 88.39% | 79.44% | 83.49% |
 
-推荐摘要与引言优先报告 **83.10% 的四源平均严格黑盒 ASR**。84.20% 的 Overall 含 source-matched target，保留在主表并明确标注。
+推荐摘要与引言优先报告 **83.49% 的四源平均严格黑盒 ASR**。84.55% 的 Overall 含 source-matched target，保留在主表并明确标注。
 
-Transformer 的 88.40% 同样含各源的同架构目标；若叙述“跨模型 Transformer 迁移”，使用去除 source-matched target 后的四源平均 **86.97%**。CNN 的 78.59% 均为跨架构迁移。
+Transformer 的 88.39% 同样含各源的同架构目标；若叙述“跨模型 Transformer 迁移”，使用去除 source-matched target 后的四源平均 **86.97%**。CNN 的 79.44% 均为跨架构迁移。
 
 ASR = `1 − correct/total`，分母是全部评估的 1000 张对抗图像，不筛选 target-clean-correct 子集。因此 ASR 包含目标模型原本的分类错误；补报相同样本的 clean accuracy 有助于解释攻击增加了多少错误，但保持现有主指标定义。
 
@@ -184,7 +180,7 @@ ASR = `1 − correct/total`，分母是全部评估的 1000 张对抗图像，�
 | 章节 | 目的与作用 | 本文应写的内容与产物 |
 | --- | --- | --- |
 | Title | 让读者立即知道方法与任务 | PRD + transferable adversarial attacks |
-| Abstract | 用最短篇幅交代问题、方法、验证和意义 | 深度证据演化→两机制→四源/1000 图/14 目标→83.10% 严格黑盒；比较增益须等同协议结果 |
+| Abstract | 用最短篇幅交代问题、方法、验证和意义 | 深度证据演化→两机制→四源/1000 图/14 目标→83.49% 严格黑盒；比较增益须等同协议结果 |
 | 1. Introduction | 建立值得解决的问题，解释设计选择与贡献 | 迁移攻击场景；动态局部证据观察；干预演化轨迹的设计问题；两机制；贡献三点；开篇概念图 |
 | 2. Related Work | 把创新放入最接近的已有研究 | 迁移优化/输入变换；token/patch attack；self-ensemble/model augmentation；特征噪声。每类说明与 PRD 的具体关系 |
 | 3. Depth-wise Evidence Reorganization | 让读者看到动态发现，并自然进入方法 | 同一样本的多层 patch-score 图、固定 token 分数变化曲线、高分区域更替；附 score 定义与辅助统计 |
@@ -229,7 +225,7 @@ ASR = `1 − correct/total`，分母是全部评估的 1000 张对抗图像，�
 | Table 2 主实验与比较 | 对哪些目标可迁移，较基线改善多少？ | PRD 4×14 已有；公平外部比较尚未在当前归档中提供 |
 | Table 3 核心消融 | 两机制是否各有作用、是否互补？ | 当前 PRD 同协议完整因子结果尚未归档 |
 | Fig. 3 ASR 参数分析 | checkpoint、drop budget 和噪声强度怎样影响迁移效果？ | 按当前随机 PRD 配置准备对应 ASR 对照 |
-| Supplement qualitative cases | 对抗样本外观、成功与失败如何？ | 正式对抗图像在服务器；本地仅有哈希清单 |
+| Supplement qualitative cases | 对抗样本外观、成功与失败如何？ | 当前主实验对抗图像在服务器；本地有原始 CSV、参数与环境记录 |
 
 ## 8. 写作材料准备：围绕发现与 ASR 展开
 
@@ -241,10 +237,10 @@ ASR = `1 − correct/total`，分母是全部评估的 1000 张对抗图像，�
 
 1. **动态发现的可视化。** 选取真实样本，排列不同深度的 patch-score 图，标出高分区域的更替；以固定位置 token 的分数曲线展示其沿深度的变化。
 2. **同协议 ASR 比较。** 使用相同 1000 样本、source/target 权重及预处理、ε=16/255 和 ASR 分母；共同报告计算预算。
-3. **两机制的 ASR 消融。** 配对 seed、固定支撑流程，比较共同优化底座、仅 progressive、仅 opponent 与完整 PRD。对照中的 schedule 和噪声施加范围随实验设置说明；旧 kept-only 与新 full-local 的结果分别记录。
+3. **两机制的 ASR 消融。** 配对 seed、固定支撑流程，比较共同优化底座、仅 progressive、仅 opponent 与完整 PRD。消融使用当前方法定义，固定 schedule 与噪声构造的对应设置。
 4. **Progressive 参数分析。** 在当前随机 PRD 配置下，用 ASR 对照呈现 checkpoint 位置、数量和 drop budget 的效果；按原生网格说明各项预算。
-5. **Opponent 参数分析。** 在相同注入位置与 feature RMS 下，围绕噪声结构、强度和区域准备 ASR 对照。
-6. **实验设置和过程记录。** 简洁记录参数选择：历史筛选使用过主实验图像的子集和目标 ASR，当前参数承接这些选择。正文设置或复现材料按实际过程说明。
+5. **Opponent 参数分析。** 在全部初始局部特征的统一注入位置与 feature RMS 定义下，围绕颜色方向和噪声强度准备 ASR 分析。
+6. **实验设置和过程记录。** 简洁记录四架构 checkpoint、drop 数量、噪声强度、样本集、权重、环境和评估流程。
 7. **结果说明与计算代价。** 根据写作需要准备 clean accuracy、重复 seed、逐样本统计、生成时间和显存记录，配合已有 ASR 主表呈现实验结果。
 
 已有主表固定为论文的主实验。写作先推进方法与结果初稿，后续材料围绕动态发现、两项机制和 ASR 评价补充。
@@ -277,7 +273,7 @@ Related Work 说明已有方法如何处理 patch/token 和模型计算，以及
 | 5 | Introduction 初稿 | 此时方法、证据、近邻工作均已清楚 | 问题→观察→设计问题→两机制→验证→贡献，保持一条主线 |
 | 6 | Ablation/Analysis 与适用范围说明定稿 | 围绕两机制的效果、参数与成本展开 | 消融和参数分析以 ASR 呈现；过程细节简洁说明 |
 | 7 | Conclusion | 收束经过核验的结论 | 回答引言问题，没有新证据或超范围结论 |
-| 8 | Abstract 与 Title 定稿 | 准确压缩最终论文 | 首要指标用 83.10% strict；外部增益只在已有公平比较时写入 |
+| 8 | Abstract 与 Title 定稿 | 准确压缩最终论文 | 首要指标用 83.49% strict；外部增益只在已有公平比较时写入 |
 | 9 | Supplement 与全文核对 | 将可复现细节补齐，并检查各节一致性 | 术语、配置、指标、引用、图注、算法与代码对应一致 |
 
 第一轮写作的具体交付物应是：Method 草稿、Algorithm 1、流程图、Experimental Setup 草稿、主表及其说明。随后再产出观察段和 Introduction；无需等待所有补充实验才开始写这些已有事实。
