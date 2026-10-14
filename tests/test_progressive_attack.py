@@ -59,6 +59,15 @@ class ProgressiveAttackTests(unittest.TestCase):
                 self.assertEqual(metadata["mask_pair_sharing"], "not_applicable")
                 self.assertEqual(metadata["phase_mask_transform"], "disabled")
 
+    def test_gaussian_residual_is_disabled_by_default(self):
+        attacker = ProgressiveRouteDisruptionAttacker(
+            TinyViTWrapper(), device=torch.device("cpu")
+        )
+        gradient = torch.randn(1, 3, 4, 4)
+        self.assertEqual(attacker.gaussian_alpha, 0.0)
+        self.assertIs(attacker._apply_gaussian_residual(gradient), gradient)
+        self.assertEqual(attacker.mainline_metadata()["gaussian_alpha"], 0.0)
+
     def test_vit_schedule_regression(self):
         independent = self.make_attacker()
         pixels = torch.linspace(0.01, 0.99, 48).view(1, 3, 4, 4)

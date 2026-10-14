@@ -20,9 +20,10 @@ current adversarial pixels
 → RGB opponent-channel noise on all initial local features
 → sequential checkpoint traversal and local-token hard zeroing
 → raw 20-view gradient mean
-→ Gaussian residual (sigma=4, alpha=0.75)
 → MI projected update
 ```
+
+当前代码默认关闭 Gaussian residual（`gaussian_alpha=0`）；显式设置 `--gaussian-alpha 0.75` 可开启。2026-10-12 主实验实际使用 `sigma=4, alpha=0.75`，其历史参数与结果保持原记录。
 
 ## 当前配置
 

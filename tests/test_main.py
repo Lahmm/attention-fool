@@ -44,6 +44,7 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(args.attack_method, "progressive")
         self.assertEqual(args.input_diversity_views_per_group, 2)
+        self.assertEqual(args.gaussian_alpha, 0.0)
         self.assertIsNone(args.checkpoints)
         self.assertIsNone(args.drop_ratios)
 

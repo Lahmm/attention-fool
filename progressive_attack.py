@@ -97,7 +97,7 @@ class ProgressiveRouteDisruptionAttacker:
             (12, 12),
         ),
         gaussian_sigma: float = 4.0,
-        gaussian_alpha: float = 0.75,
+        gaussian_alpha: float = 0.0,
         device: torch.device | None = None,
     ) -> None:
         if epsilon < 0 or steps <= 0:

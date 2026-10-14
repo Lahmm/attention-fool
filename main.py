@@ -181,8 +181,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gaussian-alpha",
         type=float,
-        default=0.75,
-        help="Weight of the Gaussian-smoothed residual added before MI accumulation.",
+        default=0.0,
+        help="Weight of the Gaussian-smoothed residual added before MI accumulation; default 0 disables it.",
     )
     parser.add_argument("--image-dir", default=IMAGE_DIR)
     parser.add_argument("--annotations-path", default=ANNOTATIONS_PATH)

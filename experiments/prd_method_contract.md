@@ -8,9 +8,11 @@ PRD 仅包含两个核心机制：全部初始局部特征上的 RGB opponent-ch
 2. 原始可微视图从当前像素重新开始，在初始 RGB 投影后的全部局部特征上加入本视图独立采样的对手通道噪声。每个视图仅在这个位置注入一次，CLS/prefix 保持原值。
 3. 顺序到达 checkpoint，使用记录的 mask 清零局部 token 的全部通道，沿已改变的状态继续前向至 loss。不同 checkpoint 独立抽样，允许重复选中同一位置。
 4. 相位视图使用原始 schedule 的空间变换。图像空间反射平移后，按各 checkpoint 原生网格 occupancy top-k 保持 drop 数量；该视图独立采样初始噪声。
-5. 默认每个 step 有 10 groups × 2 views。对各视图求像素梯度并平均，添加 Gaussian residual，进行动量、sign 更新、相对干净输入的 L∞ 投影和 `[0,1]` 截断；重复 10 steps。
+5. 默认每个 step 有 10 groups × 2 views。对各视图求像素梯度并平均，进行动量、sign 更新、相对干净输入的 L∞ 投影和 `[0,1]` 截断；重复 10 steps。
 
 单视角消融接口：`--input-diversity-views-per-group 1` 仅使用当前对抗像素的原始视图，不采样 phase、不构造相位图像或变换 mask。每个 group 仍独立生成随机 schedule 并采样初始对手通道噪声。配合 `--input-diversity-groups 10`，每步平均 10 次原始视图梯度；配合 `--input-diversity-groups 1`，每步仅计算一次梯度。默认双视角配置保持不变。
+
+当前代码默认 `gaussian_alpha=0`，不添加 Gaussian residual；显式设置正值时在梯度平均后、动量累积前添加。2026-10-12 四源主实验实际使用 `sigma=4, alpha=0.75`，历史记录保持不变。
 
 ## 噪声定义
 
