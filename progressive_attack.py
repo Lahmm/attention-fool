@@ -97,8 +97,6 @@ class ProgressiveRouteDisruptionAttacker:
             (8, 8),
             (12, 12),
         ),
-        gaussian_sigma: float = 4.0,
-        gaussian_alpha: float = 0.0,
         device: torch.device | None = None,
     ) -> None:
         if epsilon < 0 or steps <= 0:
@@ -111,10 +109,6 @@ class ProgressiveRouteDisruptionAttacker:
             raise ValueError("actual progressive views must be <= 20.")
         if input_diversity_views_per_group == 2 and not input_diversity_phase_shift_set:
             raise ValueError("phase shift set cannot be empty.")
-        if gaussian_sigma < 0 or gaussian_alpha < 0:
-            raise ValueError("Gaussian parameters must be non-negative.")
-        if gaussian_alpha > 0 and gaussian_sigma == 0:
-            raise ValueError("gaussian_sigma must be positive when gaussian_alpha is enabled.")
         if opponent_noise_strength is None:
             opponent_provider = getattr(
                 model, "default_progressive_opponent_noise_strength", None
@@ -174,8 +168,6 @@ class ProgressiveRouteDisruptionAttacker:
         self.input_diversity_phase_shift_set = tuple(
             tuple(int(value) for value in shift) for shift in input_diversity_phase_shift_set
         )
-        self.gaussian_sigma = float(gaussian_sigma)
-        self.gaussian_alpha = float(gaussian_alpha)
         self.pixel_mean = torch.tensor(IMAGENET_MEAN, device=self.device).view(1, 3, 1, 1)
         self.pixel_std = torch.tensor(IMAGENET_STD, device=self.device).view(1, 3, 1, 1)
         model_mean = getattr(model, "model_mean", IMAGENET_MEAN)
@@ -475,26 +467,9 @@ class ProgressiveRouteDisruptionAttacker:
                 summary[name] = sum(values) / len(values)
         return summary
 
-    def _apply_gaussian_residual(self, grad: torch.Tensor) -> torch.Tensor:
-        if self.gaussian_alpha == 0:
-            return grad
-        radius = max(1, int(round(3 * self.gaussian_sigma)))
-        axis = torch.arange(-radius, radius + 1, device=grad.device, dtype=grad.dtype)
-        kernel_1d = torch.exp(-0.5 * (axis / self.gaussian_sigma).square())
-        kernel_1d = kernel_1d / kernel_1d.sum()
-        kernel = (kernel_1d[:, None] @ kernel_1d[None, :]).view(
-            1, 1, 2 * radius + 1, 2 * radius + 1
-        ).repeat(grad.size(1), 1, 1, 1)
-        smoothed = F.conv2d(
-            F.pad(grad, (radius, radius, radius, radius), mode="reflect"),
-            kernel,
-            groups=grad.size(1),
-        )
-        return grad + self.gaussian_alpha * smoothed
-
-    def _processed_gradient(
+    def _attack_gradients(
         self, pixels: torch.Tensor, labels: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         gradients = [
             torch.autograd.grad(loss, pixels, retain_graph=False)[0]
             for loss in self._iter_attack_losses(pixels, labels)
@@ -504,8 +479,7 @@ class ProgressiveRouteDisruptionAttacker:
         views = torch.stack(gradients, dim=0)
         raw_mean = self._aggregate_gradients(views)
         self._record_gradient_diagnostics(views, raw_mean)
-        processed = self._apply_gaussian_residual(raw_mean)
-        return views, raw_mean, processed
+        return views, raw_mean
 
     def _check_view_count(self) -> None:
         expected = self.input_diversity_groups * self.input_diversity_views_per_group
@@ -533,12 +507,11 @@ class ProgressiveRouteDisruptionAttacker:
         probe = pixels.to(self.device).detach().requires_grad_(True)
         labels = labels.to(self.device)
         try:
-            views, raw_mean, processed = self._processed_gradient(probe, labels)
+            views, raw_mean = self._attack_gradients(probe, labels)
             self._check_view_count()
             return {
                 "view_gradients": views.detach(),
                 "raw_mean": raw_mean.detach(),
-                "processed": processed.detach(),
             }
         finally:
             self._gradient_replay = None
@@ -566,7 +539,7 @@ class ProgressiveRouteDisruptionAttacker:
                     replay.set_context(step=step_index, group=-1, view=-1)
                 self._actual_forward_view_count = 0
                 gradient_pixels = adversarial.detach().requires_grad_(True)
-                _, _, gradient = self._processed_gradient(gradient_pixels, labels)
+                _, gradient = self._attack_gradients(gradient_pixels, labels)
                 self._check_view_count()
                 if self.use_momentum:
                     momentum = self.decay * momentum + gradient
@@ -622,6 +595,4 @@ class ProgressiveRouteDisruptionAttacker:
             "asr_definition": "1 - adversarial accuracy over all evaluated samples",
             "model_mean": self.model_mean.flatten().tolist(),
             "model_std": self.model_std.flatten().tolist(),
-            "gaussian_sigma": self.gaussian_sigma,
-            "gaussian_alpha": self.gaussian_alpha,
         }

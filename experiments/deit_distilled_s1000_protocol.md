@@ -10,12 +10,11 @@ Use `python experiments/run_prd_deit_fpr_targets.py` after caching
 `timm/deit_base_distilled_patch16_224.fb_in1k`. Downloaded HF revision:
 `ae7e500ba066fc77dcce2bf518f54a093b9f9c01`.
 
-Settings follow the recorded ViT experiment: seed 20260907, 1000 images,
+Settings use the current ViT PRD configuration: seed 20260907, 1000 images,
 epsilon 16/255, step size 1.6/255, ten steps, ten original/phase pairs per
 step, checkpoints `block3,block10`, drop ratios
 `0.051020408163,0.051020408163` (ten of 196 local tokens per checkpoint),
-opponent noise strength 0.2, momentum decay 1.0, Gaussian sigma 4.0 and
-alpha 0.75. Local batch size is eight, matching the new FPR-target ViT run.
+opponent noise strength 0.2 and momentum decay 1.0. Local batch size is eight, matching the new FPR-target ViT run.
 
 Evaluate the same thirteen FPR Table 2 targets with the existing FPR
 protocol, FP32 and TF32 disabled. None is the distilled DeiT-B source,

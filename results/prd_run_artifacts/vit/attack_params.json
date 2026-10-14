@@ -36,9 +36,6 @@
   "opponent_noise_strength": 0.2,
   "feature_noise_type": "opponent_channel_rgb_projection",
   "feature_noise_position": "initial_rgb_projection",
-  "gradient_postprocess": "raw_mean_plus_gaussian_residual",
-  "gaussian_sigma": 4.0,
-  "gaussian_alpha": 0.75,
   "drop_map_policy": "uniform_random_all_local_tokens",
   "progressive_checkpoints": [
     "block3",

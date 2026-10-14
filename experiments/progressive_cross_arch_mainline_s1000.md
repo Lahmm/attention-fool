@@ -15,7 +15,7 @@ PRD 的核心机制是 checkpoint-wise progressive random token drop 与 RGB opp
 | PiT-B | stage2_block1, stage3_block2, stage3_block3 | 16×16, 8×8, 8×8 | 5, 2, 6 | 0.4 | 96 |
 | Visformer-S | stage2_block1, stage3_block1 | 14×14, 7×7 | 41, 10 | 0.4 | 48 |
 
-共同约束：`epsilon=16/255`、10 steps、step size `epsilon/10`、动量系数 1、10 groups × 2 views、相位平移集合 `(4,4)/(8,8)/(12,12)`、Gaussian residual `sigma=4, alpha=0.75`。每张图像生成 100 套 schedule；ViT/CaiT/Visformer 进行 200 次 checkpoint mask selection，PiT 进行 300 次。四源 drop ratios 与完整参数见 `results/prd_run_artifacts/{vit,cait,pit,visformer}/attack_params.json`。
+共同约束：`epsilon=16/255`、10 steps、step size `epsilon/10`、动量系数 1、10 groups × 2 views、相位平移集合 `(4,4)/(8,8)/(12,12)`。每张图像生成 100 套 schedule；ViT/CaiT/Visformer 进行 200 次 checkpoint mask selection，PiT 进行 300 次。四源 drop ratios 与保留参数见 `results/prd_run_artifacts/{vit,cait,pit,visformer}/attack_params.json`。
 
 ## 迁移结果
 
@@ -55,9 +55,9 @@ ASR = `1 - adversarial accuracy`，分母是全部 1000 张评估的对抗图像
 - [逐目标规范化表](../results/prd_cross_arch_s1000.csv)：56 条结果。
 - [四源汇总](../results/prd_summary_s1000.csv)：各源及四源宏平均。
 - [运行环境与来源](../results/prd_run_artifacts/provenance.json)：实际实现、环境、seed、源配置和目标集。
-- `results/prd_run_artifacts/{vit,cait,pit,visformer}/attack_params.json`：完整参数。
-- `results/prd_run_artifacts/{vit,cait,pit,visformer}/transfer.csv`：原始 CSV，含时间戳、实际攻击参数与逐目标 ASR。
+- `results/prd_run_artifacts/{vit,cait,pit,visformer}/attack_params.json`：保留的 PRD 参数。
+- `results/prd_run_artifacts/{vit,cait,pit,visformer}/transfer.csv`：迁移 CSV，含时间戳、保留参数与逐目标 ASR。
 
 实际环境：Python 3.10.19、PyTorch 2.10.0+cu128、timm 1.0.24、CUDA 12.8、NVIDIA RTX 4090。目标评估启用 AMP 与 TF32，使用各目标模型自己的 transform。模型权重缓存位于 `data/huggingface/hub`。
 
-原始 CSV 和攻击参数保持运行时内容，实际服务器输出目录名称保留于原始记录中。主表与汇总由这些记录计算；迁移性论证统一使用 ASR。当前运行的对抗图像、replay manifests、逐样本预测和日志保存在服务器，下载位置见 [写作交接](server_handoff_inventory.md)。
+本地归档参数已于 2026-10-14 精简为保留的 PRD 内容，不再是完整运行时参数快照；逐目标 ASR、时间戳、实现提交和服务器输出目录名称保持原记录。现有结果来自上述历史运行，尚未用当前代码重新测量。主表与汇总由这些记录计算；迁移性论证统一使用 ASR。当前运行的对抗图像、replay manifests、逐样本预测和日志保存在服务器，下载位置见 [写作交接](server_handoff_inventory.md)。

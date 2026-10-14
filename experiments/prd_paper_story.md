@@ -1,6 +1,10 @@
 # PRD 论文叙事与主实验记录
 
-本文方法与主实验统一采用 2026-10-12 完成的 PRD 运行，实现为 `bf092246`。准确执行顺序见 [PRD 方法记录](prd_method_contract.md)。
+本文主实验采用 2026-10-12 完成的 PRD 运行，实现为 `bf092246`。
+
+本地归档参数已于 2026-10-14 精简为保留的 PRD 内容；历史 ASR 与实现提交保持原记录，尚未用当前代码重新测量。
+
+当前执行顺序见 [PRD 方法记录](prd_method_contract.md)。
 
 本文的中心贡献是 **Progressive Route Disruption（PRD）**：一种面向跨模型迁移的攻击方法。主线聚焦完整方法的设计与迁移效果，核心机制只有两个：沿模型深度的 checkpoint-wise progressive random token drop，以及施加在全部初始局部特征上的 RGB opponent-channel noise。
 
@@ -26,7 +30,7 @@ PRD 默认使用 10 个迭代 step、每步 10 个 augmentation group、每组 2
 | PiT-B | `stage2_block1,stage3_block2,stage3_block3` | 16×16、8×8、8×8 | 5、2、6 | 0.4 |
 | Visformer-S | `stage2_block1,stage3_block1` | 14×14、7×7 | 41、10 | 0.4 |
 
-相位配对、20-view 梯度平均、Gaussian residual、动量和投影更新属于攻击的实现流程；论文贡献陈述保持在上述两项核心机制上。
+相位配对、20-view 梯度平均、动量和投影更新属于攻击的实现流程；论文贡献陈述保持在上述两项核心机制上。
 
 ## 已完成的 1000 图像主实验
 

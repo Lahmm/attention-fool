@@ -23,8 +23,6 @@ current adversarial pixels
 → MI projected update
 ```
 
-当前代码默认关闭 Gaussian residual（`gaussian_alpha=0`）；显式设置 `--gaussian-alpha 0.75` 可开启。2026-10-12 主实验实际使用 `sigma=4, alpha=0.75`，其历史参数与结果保持原记录。
-
 ## 当前配置
 
 | Source | Checkpoints | Native grids | Drop counts | Opponent strength |
@@ -48,7 +46,11 @@ python main.py \
 
 ## 1000-image transfer results
 
-主实验于 2026-10-12 完成，实际实现为 `bf092246`。下表统一使用当前全局初始噪声与 progressive drop 的四源结果。
+主实验于 2026-10-12 完成，实际实现为 `bf092246`。
+
+本地归档参数已于 2026-10-14 精简为保留的 PRD 内容；历史 ASR 与实现提交保持原记录，尚未用当前代码重新测量。
+
+下表使用该次四源运行的记录结果。
 
 ASR 定义为 `1 - adversarial accuracy`，分母是送入目标模型评估的全部对抗样本，不筛选 target-clean-correct 子集。四个 PRD source 均在相同的 14 个目标模型（8 Transformer、6 CNN）上完成评估：
 

@@ -22,7 +22,6 @@ class ProgressiveAttackTests(unittest.TestCase):
             "input_diversity_views_per_group": 2,
             "input_diversity_phase_shift_set": ((0, 0),),
             "use_momentum": False,
-            "gaussian_alpha": 0.0,
             "device": torch.device("cpu"),
         }
         common.update(overrides)
@@ -58,15 +57,6 @@ class ProgressiveAttackTests(unittest.TestCase):
                 self.assertEqual(metadata["checkpoint_mask_selection_count_per_image"], groups * 2)
                 self.assertEqual(metadata["mask_pair_sharing"], "not_applicable")
                 self.assertEqual(metadata["phase_mask_transform"], "disabled")
-
-    def test_gaussian_residual_is_disabled_by_default(self):
-        attacker = ProgressiveRouteDisruptionAttacker(
-            TinyViTWrapper(), device=torch.device("cpu")
-        )
-        gradient = torch.randn(1, 3, 4, 4)
-        self.assertEqual(attacker.gaussian_alpha, 0.0)
-        self.assertIs(attacker._apply_gaussian_residual(gradient), gradient)
-        self.assertEqual(attacker.mainline_metadata()["gaussian_alpha"], 0.0)
 
     def test_vit_schedule_regression(self):
         independent = self.make_attacker()
@@ -107,7 +97,6 @@ class ProgressiveAttackTests(unittest.TestCase):
             {
                 "view_gradients": "426bf61f8bf838c8e3ff3b46c07b5bbbd629a51167096d8816244726c5c74bc0",
                 "raw_mean": "aea265664c55c9ce86b08d9ccf7fb58b01dd7c9cacb9afbb9f185ca7ebbd7489",
-                "processed": "aea265664c55c9ce86b08d9ccf7fb58b01dd7c9cacb9afbb9f185ca7ebbd7489",
             },
         )
         independent_adv = independent.attack_batch(

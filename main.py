@@ -178,18 +178,6 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Backpropagate through opponent noise feature-RMS matching (default: disabled).",
     )
-    parser.add_argument(
-        "--gaussian-sigma",
-        type=float,
-        default=4.0,
-        help="Sigma of the Gaussian gradient residual; use alpha=0 to disable it.",
-    )
-    parser.add_argument(
-        "--gaussian-alpha",
-        type=float,
-        default=0.0,
-        help="Weight of the Gaussian-smoothed residual added before MI accumulation; default 0 disables it.",
-    )
     parser.add_argument("--image-dir", default=IMAGE_DIR)
     parser.add_argument("--annotations-path", default=ANNOTATIONS_PATH)
     parser.add_argument("--batch-size", type=int, default=96)
@@ -229,8 +217,6 @@ def main(args: argparse.Namespace) -> None:
         input_diversity_groups=args.input_diversity_groups,
         input_diversity_views_per_group=args.input_diversity_views_per_group,
         input_diversity_phase_shift_set=args.input_diversity_phase_shift_set,
-        gaussian_sigma=args.gaussian_sigma,
-        gaussian_alpha=args.gaussian_alpha,
         device=DEVICE,
     )
 
@@ -277,13 +263,6 @@ def main(args: argparse.Namespace) -> None:
         "opponent_noise_strength": attacker.opponent_noise_strength,
         "feature_noise_type": "opponent_channel_rgb_projection",
         "feature_noise_position": "initial_rgb_projection",
-        "gradient_postprocess": (
-            "raw_mean_plus_gaussian_residual"
-            if args.gaussian_alpha != 0
-            else "raw_mean"
-        ),
-        "gaussian_sigma": args.gaussian_sigma,
-        "gaussian_alpha": args.gaussian_alpha,
     }
     params.update(attacker.mainline_metadata())
     (output_dir / "attack_params.json").write_text(

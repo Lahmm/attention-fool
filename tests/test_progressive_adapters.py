@@ -101,14 +101,13 @@ class ProgressiveAdapterContractTests(unittest.TestCase):
                     input_diversity_groups=1,
                     input_diversity_phase_shift_set=((0, 0),),
                     use_momentum=False,
-                    gaussian_alpha=0.0,
                     device=device,
                 )
                 probe = attacker.probe_attack_gradients(
                     pixels, torch.tensor([1], device=device)
                 )
                 self.assertEqual(probe["view_gradients"].size(0), 2)
-                self.assertTrue(torch.isfinite(probe["processed"]).all())
+                self.assertTrue(torch.isfinite(probe["raw_mean"]).all())
                 del probe, attacker, model, pixels, native, resumed, state
                 torch.cuda.empty_cache()
 

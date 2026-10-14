@@ -74,7 +74,11 @@ Route 指局部表示沿后续网络计算传播的轨迹。Progressive 强调�
 
 ## 4. 方法实现备忘：用于正文第 3 章
 
-本节整理完整执行事实、公式与配置。写作时按正文 §3.1–§3.4 的任务分配内容；四架构 checkpoint 与预算表安排在 Experimental Setup，adapter 细节安排在补充材料 B。
+本节整理当前执行流程、公式与配置。
+
+本地归档参数已于 2026-10-14 精简为保留的 PRD 内容；历史 ASR 与实现提交保持原记录，尚未用当前代码重新测量。
+
+写作时按正文 §3.1–§3.4 的任务分配内容；四架构 checkpoint 与预算表安排在 Experimental Setup，adapter 细节安排在补充材料 B。
 
 ### 4.1 完整流程
 
@@ -83,7 +87,7 @@ Route 指局部表示沿后续网络计算传播的轨迹。Progressive 强调�
 3. 为构建空间输入多样性，用反射填充的轻微像素平移构造 phase view，改变图像内容相对局部采样网格的对齐。把同一 schedule 的 mask 同步变换；映回各 checkpoint 原生网格时按 occupancy top-k 保持 drop 数量。
 4. 对每个视图，在全部初始 RGB 局部特征处注入该视图独立抽取的 opponent noise；然后顺序到达 checkpoint、hard-zero、继续前向并计算真实标签 CE loss。
 5. 对两个视图的损失分别求关于当前像素的梯度；10 groups 提供 20 个梯度，直接取平均。
-6. 添加 Gaussian 平滑梯度残差；进行原始梯度的动量累积、sign 更新、相对干净输入的 L∞ 投影与 [0,1] 截断。
+6. 直接对视图平均梯度进行动量累积、sign 更新、相对干净输入的 L∞ 投影与 [0,1] 截断。
 7. 重复 10 steps，保存最终像素对抗图像；目标模型评估使用各自 timm transform。
 
 流程图按实际执行顺序呈现：先采样 checkpoint mask，再构造原始／平移视图及空间对应的 schedules；各视图独立在全部初始局部特征处注入噪声，随后顺序执行 progressive traversal，最后聚合像素梯度。phase 指图像内容相对局部采样网格的空间偏移。
@@ -104,7 +108,7 @@ checkpoint 干预写为：
 
 `q_L=(1,1,1)/√3`，`q_RG=(1,−1,0)/√2`，`q_YB=(1,1,−2)/√6`。
 
-每个初始 token 的卷积核位置采样独立标准 Gaussian 系数，用 `√0.5, √1.25, √1.25` 缩放后组合为 RGB 噪声，再由卷积权重 W 投影。写为：
+每个初始 token 的卷积核位置采样独立标准正态系数，用 `√0.5, √1.25, √1.25` 缩放后组合为 RGB 噪声，再由卷积权重 W 投影。写为：
 
 `η = W ξ_RGB`，`η_hat = β · RMS(H_0) / RMS(η) · η`。
 
@@ -120,13 +124,11 @@ RMS 在单样本的全部初始 token 和通道上计算；实现中对特征 RM
 
 默认 G=10，每组两个视图，对应每步 20 个像素梯度的直接平均。平移视图的梯度通过 T_Δ 回传至当前像素 x_t。
 
-`g_t' = g_t + 0.75 · G_(σ=4) * g_t`；
-
-`m_(t+1) = m_t + g_t'`；
+`m_(t+1) = m_t + g_t`；
 
 `x_(t+1) = Clip_[0,1](x + Clip_[-ε,ε](x_t + (ε/10) sign(m_(t+1)) − x))`。
 
-动量直接累积处理后的梯度，更新过程按上述递推式描述。
+动量直接累积视图平均梯度，更新过程按上述递推式描述。
 
 ### 4.3 全部初始局部特征的噪声注入
 
@@ -147,7 +149,7 @@ RMS 在单样本的全部初始 token 和通道上计算；实现中对特征 RM
 
 ViT 各 checkpoint 的 drop ratio 均为 `0.051020408163`。四种架构按原生网格和阶段设置 checkpoint 与 drop 数量。
 
-共同配置：seed 20260907、10 steps、ε=16/255、步长 ε/10、动量系数 1、10 groups×2 views、平移集合 (4,4)/(8,8)/(12,12)、Gaussian σ=4/α=0.75。100 条 schedule/图像；ViT/CaiT/Visformer 200 次随机 checkpoint mask selection，PiT 300 次。phase masks 由共享 schedule 空间变换得到。
+共同配置：seed 20260907、10 steps、ε=16/255、步长 ε/10、动量系数 1、10 groups×2 views、平移集合 (4,4)/(8,8)/(12,12)。100 条 schedule/图像；ViT/CaiT/Visformer 200 次随机 checkpoint mask selection，PiT 300 次。phase masks 由共享 schedule 空间变换得到。
 
 计算量记录包含 schedule 构建遍历和视图前向/反向；效率分析使用实测运行时间或完整计算量。
 
@@ -208,7 +210,7 @@ ASR = `1 − correct/total`，分母是全部评估的 1000 张对抗图像，�
 | **3.1 Preliminaries** | 简短交代无目标迁移攻击：源模型的参数与梯度用于样本生成，黑盒目标模型用于迁移评估；生成过程不使用目标模型的参数、梯度或查询反馈。定义图像、标签、扰动约束和后文所需的局部表示、层与 checkpoint 符号 | 给出攻击目标与 L∞ 约束；符号随需要引入。保持简洁，让读者尽快进入 PRD |
 | **3.2 Progressive Random Token Drop** | 从同一 token 的分数变化与高分 patch 的位置更替出发，说明干预随表示演化沿深度展开。随后定义每个 step/group 的 fresh schedule、各 checkpoint 的独立均匀抽样、hard-zero 和继续传播 | patch-score 定义用于解释观察；配合 Fig. 1，接着给出随机集合与 checkpoint 更新公式。主体篇幅用于 progressive 设计 |
 | **3.3 RGB Opponent-Channel Noise** | 解释初始局部表示的结构化扰动。定义亮度、红绿、黄蓝方向，经真实 RGB 投影映射、feature RMS 匹配，在全部初始局部特征处注入一次，再随网络传播 | 给出对手通道基、投影噪声与 RMS 匹配公式，说明其在 Fig. 2 中的注入位置 |
-| **3.4 Optimization with Spatial Input Diversity** | 先说明轻微平移构建空间输入多样性，使两项核心干预覆盖不同内容—局部采样网格对齐下的前向过程；再定义原始／平移视图、空间对应的 schedules 和各视图独立初始噪声，最后聚合梯度并进行投影更新 | Fig. 2、Algorithm 1、配对损失与整体更新公式。明确 phase 的作用及配对关系，简洁交代 Gaussian residual、动量与投影 |
+| **3.4 Optimization with Spatial Input Diversity** | 先说明轻微平移构建空间输入多样性，使两项核心干预覆盖不同内容—局部采样网格对齐下的前向过程；再定义原始／平移视图、空间对应的 schedules 和各视图独立初始噪声，最后聚合梯度并进行投影更新 | Fig. 2、Algorithm 1、配对损失与整体更新公式。明确 phase 的作用及配对关系，简洁交代视图梯度平均、动量与投影 |
 
 Preliminaries 提供理解 PRD 所需的背景与符号。方法章的核心是“动态观察 → progressive 设计 → opponent noise → 空间输入多样性下的完整优化”。四源的具体 checkpoint、drop 数量和噪声强度放在正文 §4.1 配置表；各架构的 traversal 与投影几何在补充材料 B 展开。
 
@@ -253,7 +255,7 @@ Introduction 首先呈现问题与动态发现，再概括 PRD 及结果。§3.2
 | Table 2 主实验与比较 | 对哪些目标可迁移，与可比方法相比怎样？ | 放在 §4.2；PRD 4×14 已有，公平外部比较尚未在当前归档中提供 |
 | Table 3 核心消融 | 两机制分别贡献什么，组合取得什么 ASR？ | 放在 §4.3；当前 PRD 同协议完整因子结果尚未归档 |
 | Fig. 3 ASR 参数分析 | checkpoint、drop budget 和噪声强度怎样影响迁移效果？ | 放在 §4.4；按当前随机 PRD 配置准备对应 ASR 对照。空间配对与采样预算另用紧凑 ASR 表呈现：本对话已有数值，原始运行记录待关联，固定 groups/views 的平移对照待补 |
-| Supplement qualitative cases | 对抗样本外观、成功与失败如何？ | 当前主实验对抗图像在服务器；本地有原始 CSV、参数与环境记录 |
+| Supplement qualitative cases | 对抗样本外观、成功与失败如何？ | 当前主实验对抗图像在服务器；本地有迁移 CSV、保留参数与环境记录 |
 
 ## 8. 写作材料准备：围绕发现与 ASR 展开
 

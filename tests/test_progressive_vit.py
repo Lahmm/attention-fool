@@ -136,7 +136,6 @@ class ProgressiveViTTests(unittest.TestCase):
             "input_diversity_views_per_group": 2,
             "input_diversity_phase_shift_set": ((0, 0),),
             "use_momentum": False,
-            "gaussian_alpha": 0.0,
             "device": torch.device("cpu"),
         }
         arguments.update(overrides)
@@ -372,7 +371,6 @@ class ProgressiveViTTests(unittest.TestCase):
             input_diversity_groups=1,
             input_diversity_views_per_group=2,
             use_momentum=False,
-            gaussian_alpha=0.0,
             device=torch.device("cpu"),
         )
         pixels = torch.rand(1, 3, 224, 224, requires_grad=True)

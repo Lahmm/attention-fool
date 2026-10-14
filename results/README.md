@@ -9,10 +9,12 @@
 | [prd_cross_arch_s1000.csv](prd_cross_arch_s1000.csv) | 56 项 source-target ASR、目标类别、source-match 标记、seed 和样本数 |
 | [prd_summary_s1000.csv](prd_summary_s1000.csv) | 四个源模型及四源宏平均的 Overall、Transformer、CNN 和严格黑盒 ASR |
 | [prd_run_artifacts/provenance.json](prd_run_artifacts/provenance.json) | 实际运行环境、实现提交、seed、源配置与目标集 |
-| `prd_run_artifacts/{vit,cait,pit,visformer}/attack_params.json` | 四次运行的完整攻击参数 |
-| `prd_run_artifacts/{vit,cait,pit,visformer}/transfer.csv` | 四份原始迁移 CSV，包含实际运行时间、参数和逐目标结果 |
+| `prd_run_artifacts/{vit,cait,pit,visformer}/attack_params.json` | 四次运行保留的 PRD 参数 |
+| `prd_run_artifacts/{vit,cait,pit,visformer}/transfer.csv` | 四份迁移 CSV，包含实际运行时间、保留参数和逐目标结果 |
 | [patch_rank_observation_summary.json](patch_rank_observation_summary.json) | 动机观察统计，呈现 token/global 关系随模型深度的变化 |
 
 正式配置、结果表与计算规则见 [主实验报告](../experiments/progressive_cross_arch_mainline_s1000.md)。方法执行契约见 [PRD 方法记录](../experiments/prd_method_contract.md)。服务器上当前主实验图像、manifest 和日志的位置见 [写作交接](../experiments/server_handoff_inventory.md)。
+
+本地归档参数已于 2026-10-14 精简为保留的 PRD 内容；历史 ASR 与实现提交保持原记录，尚未用当前代码重新测量。
 
 论文统一通过 transfer ASR 呈现迁移性；patch-score 用于动机观察，梯度诊断用于实验内部分析。

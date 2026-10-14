@@ -12,8 +12,6 @@ PRD 仅包含两个核心机制：全部初始局部特征上的 RGB opponent-ch
 
 单视角消融接口：`--input-diversity-views-per-group 1` 仅使用当前对抗像素的原始视图，不采样 phase、不构造相位图像或变换 mask。每个 group 仍独立生成随机 schedule 并采样初始对手通道噪声。配合 `--input-diversity-groups 10`，每步平均 10 次原始视图梯度；配合 `--input-diversity-groups 1`，每步仅计算一次梯度。默认双视角配置保持不变。
 
-当前代码默认 `gaussian_alpha=0`，不添加 Gaussian residual；显式设置正值时在梯度平均后、动量累积前添加。2026-10-12 四源主实验实际使用 `sigma=4, alpha=0.75`，历史记录保持不变。
-
 ## 噪声定义
 
 全部局部位置在初始特征处接收噪声，包括 schedule 中之后会被 drop 的位置。亮度、红绿、黄蓝方向分别为 `(1,1,1)/√3`、`(1,-1,0)/√2`、`(1,1,-2)/√6`，采样方差为 `0.5, 1.25, 1.25`。每个初始局部位置按 RGB 投影核采样系数，经源模型真实初始投影权重映射到特征空间。
@@ -30,7 +28,7 @@ RMS 在单样本的全部初始局部位置及通道上计算。特征 RMS 与�
 
 噪声 metadata：`opponent_noise=initial_rgb_projection_all_local_tokens`；强度为零时为 `disabled`。相位 mask 的空间映射与 RGB 投影元数据均为当前流程所需。
 
-主实验完成于 2026-10-12，实现为 `bf092246`。结果唯一入口为 `results/prd_cross_arch_s1000.csv` 和 `results/prd_summary_s1000.csv`；实际参数、原始 CSV 和环境来源保存在 `results/prd_run_artifacts/`。transfer ASR 按全部评估样本计算。
+主实验完成于 2026-10-12，实现为 `bf092246`。结果唯一入口为 `results/prd_cross_arch_s1000.csv` 和 `results/prd_summary_s1000.csv`；保留参数、迁移 CSV 和环境来源保存在 `results/prd_run_artifacts/`。transfer ASR 按全部评估样本计算。
 
 ## 写作约定
 

@@ -15,7 +15,7 @@
 | PiT-B | stage2_block1, stage3_block2, stage3_block3 | 16×16, 8×8, 8×8 | 5, 2, 6 | 0.4 | 96 |
 | Visformer-S | stage2_block1, stage3_block1 | 14×14, 7×7 | 41, 10 | 0.4 | 48 |
 
-共同参数：seed `20260907`、`epsilon=16/255`、10 steps、step size `epsilon/10`、动量系数 1、10 groups × 2 views、相位集合 `(4,4)/(8,8)/(12,12)`、Gaussian `sigma=4, alpha=0.75`。当前生成配置入口为 `experiments/run_prd_1000s.sh`；具体主实验的实际参数和输出位置以归档原始 CSV 为准。
+共同参数：seed `20260907`、`epsilon=16/255`、10 steps、step size `epsilon/10`、动量系数 1、10 groups × 2 views、相位集合 `(4,4)/(8,8)/(12,12)`。当前生成配置入口为 `experiments/run_prd_1000s.sh`；具体主实验的保留参数和输出位置见归档迁移 CSV。
 
 ## 本地材料
 
@@ -34,15 +34,19 @@
 | `results/prd_cross_arch_s1000.csv` | 56 项 source-target ASR |
 | `results/prd_summary_s1000.csv` | 各源及四源汇总 |
 | `results/prd_run_artifacts/provenance.json` | 环境、实现提交、源配置和目标集 |
-| `results/prd_run_artifacts/{vit,cait,pit,visformer}/attack_params.json` | 实际攻击参数 |
-| `results/prd_run_artifacts/{vit,cait,pit,visformer}/transfer.csv` | 完整原始迁移 CSV、时间戳和实际参数 |
+| `results/prd_run_artifacts/{vit,cait,pit,visformer}/attack_params.json` | 保留的 PRD 参数 |
+| `results/prd_run_artifacts/{vit,cait,pit,visformer}/transfer.csv` | 迁移 CSV、时间戳和保留参数 |
 | `results/patch_rank_observation_summary.json` | 64 图像、统一 7×7 网格的动机观察统计 |
 
 动机统计中的四架构早晚层 Spearman 约为 −0.071、0.182、0.063、0.117。写作优先准备同一样本的多层 patch-score 图和固定位置 token 的分数曲线。
 
 ## 服务器当前运行材料
 
-本地保存主结果 CSV、参数与环境信息。当前运行的对抗图像、replay manifests、逐样本预测和日志保存在服务器；使用原始记录中的真实目录名称定位。
+本地保存主结果 CSV、参数与环境信息。
+
+本地归档参数已于 2026-10-14 精简为保留的 PRD 内容；历史 ASR 与实现提交保持原记录，尚未用当前代码重新测量。
+
+当前运行的对抗图像、replay manifests、逐样本预测和日志保存在服务器；使用原始记录中的真实目录名称定位。
 
 | 服务器路径 | 用途 |
 | --- | --- |

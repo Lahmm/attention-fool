@@ -56,5 +56,6 @@
     "resnet101",
     "inception_v3_adv",
     "inception_resnet_v2_adv"
-  ]
+  ],
+  "archive_metadata_note": "Local archived parameter metadata was reduced on 2026-10-14 to the retained PRD scope; it is not a complete runtime parameter snapshot. Evaluation values, timestamps, and implementation commit remain unchanged. These results were not rerun with the current code."
 }

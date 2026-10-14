@@ -30,8 +30,6 @@ def main():
              "--step-size", str(params["step_size"]),
              "--input-diversity-groups", str(params["input_diversity_groups"]),
              "--mi-decay", str(params["mi_decay"]),
-             "--gaussian-sigma", str(params["gaussian_sigma"]),
-             "--gaussian-alpha", str(params["gaussian_alpha"]),
              "--checkpoints", ",".join(params["checkpoints"]),
              "--drop-ratios", ",".join(map(str, params["drop_ratios"])),
              "--opponent-noise-strength", str(params["opponent_noise_strength"]),
