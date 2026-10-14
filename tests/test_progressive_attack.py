@@ -1,5 +1,6 @@
 import hashlib
 import unittest
+from unittest.mock import patch
 
 import torch
 
@@ -32,6 +33,31 @@ class ProgressiveAttackTests(unittest.TestCase):
         return hashlib.sha256(
             tensor.detach().contiguous().numpy().tobytes()
         ).hexdigest()
+
+    def test_original_only_ablation_uses_fresh_schedules_without_phase_views(self):
+        for groups in (1, 10):
+            with self.subTest(groups=groups):
+                attacker = self.make_attacker(
+                    input_diversity_groups=groups,
+                    input_diversity_views_per_group=1,
+                    input_diversity_phase_shift_set=(),
+                )
+                pixels = torch.rand(1, 3, 4, 4)
+                with patch.object(attacker, "_build_mask_schedule", wraps=attacker._build_mask_schedule) as schedules, \
+                     patch.object(attacker, "_pick_input_diversity_phases", side_effect=AssertionError("phase sampling")), \
+                     patch.object(attacker, "_apply_samplewise_phase_shifts", side_effect=AssertionError("phase image")), \
+                     patch.object(attacker, "_phase_mask_schedule", side_effect=AssertionError("phase masks")), \
+                     patch.object(attacker, "_strict_opponent_feature_noise", wraps=attacker._strict_opponent_feature_noise) as noise:
+                    probe = attacker.probe_attack_gradients(pixels, torch.tensor([1]))
+                self.assertEqual(probe["view_gradients"].shape, (groups, 1, 3, 4, 4))
+                self.assertEqual(schedules.call_count, groups)
+                self.assertEqual(noise.call_count, groups)
+                torch.testing.assert_close(probe["raw_mean"], probe["view_gradients"].mean(dim=0))
+                metadata = attacker.mainline_metadata()
+                self.assertEqual(metadata["mask_schedule_count_per_image"], groups)
+                self.assertEqual(metadata["checkpoint_mask_selection_count_per_image"], groups * 2)
+                self.assertEqual(metadata["mask_pair_sharing"], "not_applicable")
+                self.assertEqual(metadata["phase_mask_transform"], "disabled")
 
     def test_vit_schedule_regression(self):
         independent = self.make_attacker()

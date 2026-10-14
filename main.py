@@ -149,7 +149,10 @@ def parse_args() -> argparse.Namespace:
     parser.set_defaults(mi=True)
     parser.add_argument("--mi-decay", type=float, default=1.0)
     parser.add_argument("--input-diversity-groups", type=int, default=10)
-    parser.add_argument("--input-diversity-views-per-group", type=int, default=2)
+    parser.add_argument(
+        "--input-diversity-views-per-group", type=int, choices=(1, 2), default=2,
+        help="1: original view only; 2: original and phase views (default).",
+    )
     parser.add_argument("--input-diversity-phase-shift-set", type=parse_phase_shift_set, default=((4, 4), (8, 8), (12, 12)))
     parser.add_argument(
         "--checkpoints",
@@ -206,8 +209,6 @@ def main(args: argparse.Namespace) -> None:
         prefetch_factor=args.prefetch_factor,
     )
     model = build_whitebox_model(num_classes=num_classes, model_name=args.whitebox_model)
-    if args.input_diversity_views_per_group != 2:
-        raise ValueError("the progressive attack requires exactly two views per group.")
     attacker = ProgressiveRouteDisruptionAttacker(
         model=model,
         checkpoints=args.checkpoints,
@@ -219,7 +220,7 @@ def main(args: argparse.Namespace) -> None:
         use_momentum=args.mi,
         momentum_decay=args.mi_decay,
         input_diversity_groups=args.input_diversity_groups,
-        input_diversity_views_per_group=2,
+        input_diversity_views_per_group=args.input_diversity_views_per_group,
         input_diversity_phase_shift_set=args.input_diversity_phase_shift_set,
         gaussian_sigma=args.gaussian_sigma,
         gaussian_alpha=args.gaussian_alpha,
@@ -260,7 +261,10 @@ def main(args: argparse.Namespace) -> None:
         "input_diversity_total_views": (
             args.input_diversity_groups * args.input_diversity_views_per_group
         ),
-        "input_diversity_phase_shift_set": [list(shift) for shift in args.input_diversity_phase_shift_set],
+        "input_diversity_phase_shift_set": (
+            [list(shift) for shift in args.input_diversity_phase_shift_set]
+            if args.input_diversity_views_per_group == 2 else []
+        ),
         "checkpoints": list(attacker.progressive_checkpoints),
         "drop_ratios": list(attacker.progressive_drop_ratios),
         "opponent_noise_strength": attacker.opponent_noise_strength,

@@ -10,6 +10,8 @@ PRD 仅包含两个核心机制：全部初始局部特征上的 RGB opponent-ch
 4. 相位视图使用原始 schedule 的空间变换。图像空间反射平移后，按各 checkpoint 原生网格 occupancy top-k 保持 drop 数量；该视图独立采样初始噪声。
 5. 默认每个 step 有 10 groups × 2 views。对各视图求像素梯度并平均，添加 Gaussian residual，进行动量、sign 更新、相对干净输入的 L∞ 投影和 `[0,1]` 截断；重复 10 steps。
 
+单视角消融接口：`--input-diversity-views-per-group 1` 仅使用当前对抗像素的原始视图，不采样 phase、不构造相位图像或变换 mask。每个 group 仍独立生成随机 schedule 并采样初始对手通道噪声。配合 `--input-diversity-groups 10`，每步平均 10 次原始视图梯度；配合 `--input-diversity-groups 1`，每步仅计算一次梯度。默认双视角配置保持不变。
+
 ## 噪声定义
 
 全部局部位置在初始特征处接收噪声，包括 schedule 中之后会被 drop 的位置。亮度、红绿、黄蓝方向分别为 `(1,1,1)/√3`、`(1,-1,0)/√2`、`(1,1,-2)/√6`，采样方差为 `0.5, 1.25, 1.25`。每个初始局部位置按 RGB 投影核采样系数，经源模型真实初始投影权重映射到特征空间。

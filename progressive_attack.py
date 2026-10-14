@@ -104,11 +104,11 @@ class ProgressiveRouteDisruptionAttacker:
             raise ValueError("epsilon must be non-negative and steps must be positive.")
         if step_size is not None and step_size <= 0:
             raise ValueError("step_size must be positive.")
-        if input_diversity_groups <= 0 or input_diversity_views_per_group != 2:
-            raise ValueError("progressive requires positive groups and exactly two views per group.")
+        if input_diversity_groups <= 0 or input_diversity_views_per_group not in (1, 2):
+            raise ValueError("progressive requires positive groups and one or two views per group.")
         if input_diversity_groups * input_diversity_views_per_group > 20:
             raise ValueError("actual progressive views must be <= 20.")
-        if not input_diversity_phase_shift_set:
+        if input_diversity_views_per_group == 2 and not input_diversity_phase_shift_set:
             raise ValueError("phase shift set cannot be empty.")
         if gaussian_sigma < 0 or gaussian_alpha < 0:
             raise ValueError("Gaussian parameters must be non-negative.")
@@ -168,7 +168,7 @@ class ProgressiveRouteDisruptionAttacker:
         self.use_momentum = bool(use_momentum)
         self.decay = float(momentum_decay)
         self.input_diversity_groups = int(input_diversity_groups)
-        self.input_diversity_views_per_group = 2
+        self.input_diversity_views_per_group = int(input_diversity_views_per_group)
         self.input_diversity_phase_shift_set = tuple(
             tuple(int(value) for value in shift) for shift in input_diversity_phase_shift_set
         )
@@ -407,11 +407,17 @@ class ProgressiveRouteDisruptionAttacker:
             if self._gradient_replay is not None:
                 self._gradient_replay.set_context(group=group_index, view=-1)
             schedule = self._build_mask_schedule(pixels.detach())
-            phases = self._pick_input_diversity_phases(pixels.size(0), pixels.device)
+            phases = (
+                self._pick_input_diversity_phases(pixels.size(0), pixels.device)
+                if self.input_diversity_views_per_group == 2
+                else None
+            )
             if self._gradient_replay is not None:
                 self._gradient_replay.set_context(view=0)
             self._actual_forward_view_count += 1
             yield self._forward_with_schedule(pixels, labels, schedule)
+            if self.input_diversity_views_per_group == 1:
+                continue
             shifted_schedule = self._phase_mask_schedule(
                 schedule, phases, height=pixels.size(-2), width=pixels.size(-1)
             )
@@ -496,7 +502,7 @@ class ProgressiveRouteDisruptionAttacker:
         return views, raw_mean, processed
 
     def _check_view_count(self) -> None:
-        expected = self.input_diversity_groups * 2
+        expected = self.input_diversity_groups * self.input_diversity_views_per_group
         if self._actual_forward_view_count != expected:
             raise RuntimeError(
                 f"view count mismatch: {self._actual_forward_view_count} != {expected}."
@@ -590,8 +596,14 @@ class ProgressiveRouteDisruptionAttacker:
             "checkpoint_mask_selection_count_per_image": (
                 self.steps * self.input_diversity_groups * len(self.progressive_checkpoints)
             ),
-            "mask_pair_sharing": "same_schedule_with_phase_transformed_masks",
-            "phase_mask_transform": "image_reflect_shift_then_native_grid_occupancy_topk",
+            "mask_pair_sharing": (
+                "same_schedule_with_phase_transformed_masks"
+                if self.input_diversity_views_per_group == 2 else "not_applicable"
+            ),
+            "phase_mask_transform": (
+                "image_reflect_shift_then_native_grid_occupancy_topk"
+                if self.input_diversity_views_per_group == 2 else "disabled"
+            ),
             "opponent_noise": (
                 "initial_rgb_projection_all_local_tokens"
                 if self.opponent_noise_strength > 0

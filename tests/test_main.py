@@ -2,6 +2,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -45,6 +46,17 @@ class MainTests(unittest.TestCase):
         self.assertEqual(args.input_diversity_views_per_group, 2)
         self.assertIsNone(args.checkpoints)
         self.assertIsNone(args.drop_ratios)
+
+    def test_cli_accepts_original_only_ablation_settings(self):
+        for groups in (1, 10):
+            with self.subTest(groups=groups), patch.object(sys, "argv", [
+                "main.py", "--input-diversity-views-per-group", "1",
+                "--input-diversity-groups", str(groups),
+            ]):
+                args = parse_args()
+                self.assertEqual(args.input_diversity_views_per_group, 1)
+                self.assertEqual(args.input_diversity_groups, groups)
+                self.assertEqual(args.steps, 10)
 
     def test_attack_sample_limit_is_exact(self):
         dataloader = DataLoader(IndexedDataset(), batch_size=4, shuffle=False)

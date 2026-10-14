@@ -194,9 +194,10 @@ class ProgressiveViTTests(unittest.TestCase):
         encoded = json.dumps(attacker.mainline_metadata())
         self.assertIn('"model_mean": [0.0, 0.0, 0.0]', encoded)
 
-    def test_phase_pair_requires_two_views(self):
-        with self.assertRaisesRegex(ValueError, "two views"):
-            self.make_attacker(input_diversity_views_per_group=1)
+    def test_views_per_group_must_be_one_or_two(self):
+        for count in (0, 3):
+            with self.assertRaisesRegex(ValueError, "one or two views"):
+                self.make_attacker(input_diversity_views_per_group=count)
 
     def test_random_drop_uses_all_local_tokens_and_exact_budget(self):
         attacker = self.make_attacker()
