@@ -80,13 +80,13 @@ Route 指局部表示沿后续网络计算传播的轨迹。Progressive 强调�
 
 1. 从当前对抗像素开始，为本 step/group 构建 fresh schedule；构建过程遍历 checkpoint 并立即应用 mask，不计算 patch-score。
 2. 保存各 checkpoint 的原生网格与 mask；原始视图使用此 schedule。
-3. 用反射填充的像素平移构造 phase view，把同一 schedule 的 mask 同步变换；映回各 checkpoint 原生网格时按 occupancy top-k 保持 drop 数量。
+3. 为构建空间输入多样性，用反射填充的轻微像素平移构造 phase view，改变图像内容相对局部采样网格的对齐。把同一 schedule 的 mask 同步变换；映回各 checkpoint 原生网格时按 occupancy top-k 保持 drop 数量。
 4. 对每个视图，在全部初始 RGB 局部特征处注入该视图独立抽取的 opponent noise；然后顺序到达 checkpoint、hard-zero、继续前向并计算真实标签 CE loss。
 5. 对两个视图的损失分别求关于当前像素的梯度；10 groups 提供 20 个梯度，直接取平均。
 6. 添加 Gaussian 平滑梯度残差；进行原始梯度的动量累积、sign 更新、相对干净输入的 L∞ 投影与 [0,1] 截断。
 7. 重复 10 steps，保存最终像素对抗图像；目标模型评估使用各自 timm transform。
 
-流程图按实际执行顺序呈现：先采样 checkpoint mask，在可微前向的初始特征处注入噪声，随后顺序执行 progressive traversal。phase view 使用轻微像素平移。
+流程图按实际执行顺序呈现：先采样 checkpoint mask，再构造原始／平移视图及空间对应的 schedules；各视图独立在全部初始局部特征处注入噪声，随后顺序执行 progressive traversal，最后聚合像素梯度。phase 指图像内容相对局部采样网格的空间偏移。
 
 ### 4.2 推荐的最小公式集合
 
@@ -110,9 +110,15 @@ checkpoint 干预写为：
 
 RMS 在单样本的全部初始 token 和通道上计算；实现中对特征 RMS 与投影权重使用 detach。初始注入写为 `H_0^noise = H_0 + η_hat`，覆盖全部局部位置。
 
-像素梯度与更新写为：
+空间配对损失、像素梯度与更新写为：
 
-`g_t = (1/20) Σ_(g=1..10) Σ_(v=0..1) ∇_x CE(f_(schedule,noise,view)(x_t), y)`；
+记 `ℓ(x,y;S,η)` 为使用 checkpoint schedule S、初始局部特征噪声 η 的 PRD 前向交叉熵；T_Δ 为反射填充平移，A_Δ(S) 为保持各 checkpoint drop 数量的对应 schedule 空间变换。η_0、η_1 为两个视图独立采样并 RMS 匹配的噪声：
+
+`L_pair(x,y;S,Δ) = (1/2)[ℓ(x,y;S,η_0) + ℓ(T_Δ x,y;A_Δ(S),η_1)]`；
+
+`g_t = (1/G) Σ_(g=1..G) ∇_(x_t) L_pair(x_t,y;S_(t,g),Δ_(t,g))`；
+
+默认 G=10，每组两个视图，对应每步 20 个像素梯度的直接平均。平移视图的梯度通过 T_Δ 回传至当前像素 x_t。
 
 `g_t' = g_t + 0.75 · G_(σ=4) * g_t`；
 
@@ -189,7 +195,7 @@ ASR = `1 − correct/total`，分母是全部评估的 1000 张对抗图像，�
 | Abstract | 用最短篇幅交代问题、方法、验证和意义 | 深度证据演化→两机制→四源/1000 图/14 目标→83.49% 严格黑盒；比较增益须等同协议结果 |
 | 1. Introduction | 建立值得解决的问题，解释设计选择与贡献 | 迁移攻击场景；动态局部证据观察；干预演化轨迹的设计问题；两机制；贡献三点；开篇概念图 |
 | 2. Related Work | 把创新放入最接近的已有研究 | 迁移优化/输入变换；token/patch attack；self-ensemble/model augmentation；特征噪声。每类说明与 PRD 的具体关系 |
-| 3. Progressive Route Disruption | 从动态观察进入设计，完整提出 PRD | 3.1 Preliminaries；3.2 Progressive Random Token Drop（含观察与动机）；3.3 RGB Opponent-Channel Noise；3.4 Overall Attack Algorithm |
+| 3. Progressive Route Disruption | 从动态观察进入设计，完整提出 PRD | 3.1 Preliminaries；3.2 Progressive Random Token Drop（含观察与动机）；3.3 RGB Opponent-Channel Noise；3.4 Optimization with Spatial Input Diversity |
 | 4. Experiments | 呈现完整方法与各机制的迁移效果 | 4.1 Experimental Setup；4.2 Main Transfer Results；4.3 Component Ablations；4.4 Analysis |
 | 5. Conclusion | 以方法与验证结果收束全文 | 动态局部证据启发 PRD→两机制组成完整攻击→主要 ASR 结果 |
 | Limitations / responsible use 段落 | 简洁交代方法适用范围与安全研究用途 | 参数选择、计算预算与目标范围；按篇幅及正式投稿要求安排 |
@@ -202,9 +208,11 @@ ASR = `1 − correct/total`，分母是全部评估的 1000 张对抗图像，�
 | **3.1 Preliminaries** | 简短交代无目标迁移攻击：源模型的参数与梯度用于样本生成，黑盒目标模型用于迁移评估；生成过程不使用目标模型的参数、梯度或查询反馈。定义图像、标签、扰动约束和后文所需的局部表示、层与 checkpoint 符号 | 给出攻击目标与 L∞ 约束；符号随需要引入。保持简洁，让读者尽快进入 PRD |
 | **3.2 Progressive Random Token Drop** | 从同一 token 的分数变化与高分 patch 的位置更替出发，说明干预随表示演化沿深度展开。随后定义每个 step/group 的 fresh schedule、各 checkpoint 的独立均匀抽样、hard-zero 和继续传播 | patch-score 定义用于解释观察；配合 Fig. 1，接着给出随机集合与 checkpoint 更新公式。主体篇幅用于 progressive 设计 |
 | **3.3 RGB Opponent-Channel Noise** | 解释初始局部表示的结构化扰动。定义亮度、红绿、黄蓝方向，经真实 RGB 投影映射、feature RMS 匹配，在全部初始局部特征处注入一次，再随网络传播 | 给出对手通道基、投影噪声与 RMS 匹配公式，说明其在 Fig. 2 中的注入位置 |
-| **3.4 Overall Attack Algorithm** | 将两机制组织成完整攻击迭代：生成 schedule，原始/相位视图独立注入噪声，按各自 schedule 顺序 drop，求梯度并进行投影更新 | Fig. 2、Algorithm 1 与整体更新公式。相位配对、梯度平均、Gaussian residual 和动量作为执行流程简洁交代 |
+| **3.4 Optimization with Spatial Input Diversity** | 先说明轻微平移构建空间输入多样性，使两项核心干预覆盖不同内容—局部采样网格对齐下的前向过程；再定义原始／平移视图、空间对应的 schedules 和各视图独立初始噪声，最后聚合梯度并进行投影更新 | Fig. 2、Algorithm 1、配对损失与整体更新公式。明确 phase 的作用及配对关系，简洁交代 Gaussian residual、动量与投影 |
 
-Preliminaries 提供理解 PRD 所需的背景与符号。方法章的核心是“动态观察 → progressive 设计 → opponent noise → 完整算法”。四源的具体 checkpoint、drop 数量和噪声强度放在正文 §4.1 配置表；各架构的 traversal 与投影几何在补充材料 B 展开。
+Preliminaries 提供理解 PRD 所需的背景与符号。方法章的核心是“动态观察 → progressive 设计 → opponent noise → 空间输入多样性下的完整优化”。四源的具体 checkpoint、drop 数量和噪声强度放在正文 §4.1 配置表；各架构的 traversal 与投影几何在补充材料 B 展开。
+
+§3.1–§3.3 保持现有写作安排与已写内容；空间配对的动机、符号和算法衔接集中在 §3.4。该小节按三个自然段推进：①固定局部采样网格下的空间对齐，以及平移如何构建输入多样性，ViT 的 patch 划分作直观例子；②反射平移、对应 mask 的映射与固定 drop 数量、两个视图独立初始噪声；③配对损失、跨组梯度平均与像素更新。空间配对是两项核心机制共同执行的输入增强策略；贡献组织继续采用 §5.3 的两机制与 ASR 验证。
 
 ### 6.2 实验章：用 ASR 组织方法验证
 
@@ -212,8 +220,10 @@ Preliminaries 提供理解 PRD 所需的背景与符号。方法章的核心是�
 
 - **4.1 Experimental Setup：** 哪些图像、标签和权重，攻击预算、source/target、预处理、seed 和 ASR 定义是什么？给出四架构配置表。
 - **4.2 Main Transfer Results：** 在 ViT 与 CNN 目标上分别表现如何？报告 Overall 与严格黑盒 ASR，并在取得同协议结果后展开外部方法比较。
-- **4.3 Component Ablations：** progressive drop、opponent noise 及其组合分别取得什么 ASR？两项机制怎样共同贡献完整方法的效果？
-- **4.4 Analysis：** checkpoint、drop budget、颜色方向与噪声强度怎样影响 ASR？计算代价如何，定性样本呈现什么特点？
+- **4.3 Component Ablations：** 固定空间配对和采样预算，progressive drop、opponent noise 及其组合分别取得什么 ASR？两项机制怎样共同贡献完整方法的效果？
+- **4.4 Analysis：** checkpoint、drop budget、颜色方向与噪声强度怎样影响 ASR？固定每步视图预算时空间配对带来多少 ASR 变化，保留配对时减少 groups 的影响如何？计算代价如何，定性样本呈现什么特点？
+
+空间配对与预算分析使用本对话 2026-10-14 提供的 ViT 消融作为已有对照：20 views 下 20×1 与 10×2 的严格黑盒 ASR 为 71.62% 与 84.18%；保留配对、从 10×2 减到 5×2 时为 84.18% 与 81.64%。在所测 10–20 views 区间讨论空间覆盖与继续增加随机采样的作用，正式表格须关联原始运行参数和结果记录。20×1 与 10×2 同时改变了 schedule 数量与配对方式；补充固定 10 groups×2 views 的原始／原始与原始／平移对照，保持共享 schedule、独立噪声和全部其他设置一致，以分离空间平移的作用。
 
 Introduction 首先呈现问题与动态发现，再概括 PRD 及结果。§3.2 用观察直接引出机制定义；§4 用 ASR 完成验证。正文中的代表性发现、两个机制和主实验形成连续叙事，扩展观察与复现细节按 §7 安排。
 
@@ -237,12 +247,12 @@ Introduction 首先呈现问题与动态发现，再概括 PRD 及结果。§3.2
 | 图表 | 要回答的问题 | 当前材料状态 |
 | --- | --- | --- |
 | Fig. 1 动态发现与设计直觉 | 同一 token 分数如何变化，高分 patch 如何随深度更替，怎样引出沿深度的干预？ | 用于 Introduction 与 §3.2；统计已归档，代表性样本的多层图与分数曲线待从实际层输出准备 |
-| Fig. 2 PRD 完整流程 | 初始噪声、checkpoint drop 和像素更新分别在哪里发生？ | 用于 §3.3–§3.4；按当前实现绘制，明确全部初始局部特征加噪声后顺序 drop |
-| Algorithm 1 PRD | 怎样从 x 生成 x_adv？ | 放在 §3.4，可直接从当前实现写出 |
+| Fig. 2 PRD 完整流程 | 两个空间视图怎样构造，对应干预与像素更新在哪里发生？ | 用于 §3.3–§3.4；显示原始／平移分支、同一 schedule 的空间对应变换、各视图全部初始局部特征独立加噪声后顺序 drop，以及梯度汇合。输入处可用小示意展示内容与 patch 网格的对齐变化；可依据实现绘制 |
+| Algorithm 1 PRD | 怎样从 x 生成 x_adv？ | 放在 §3.4，显式列出 fresh schedule、偏移采样、对应 schedule 变换、两视图损失与梯度聚合，再进行投影更新 |
 | Table 1 实验配置 | 四架构如何实例化共同机制？ | 放在 §4.1；参数已完整归档，主文简表、补充全表 |
 | Table 2 主实验与比较 | 对哪些目标可迁移，与可比方法相比怎样？ | 放在 §4.2；PRD 4×14 已有，公平外部比较尚未在当前归档中提供 |
 | Table 3 核心消融 | 两机制分别贡献什么，组合取得什么 ASR？ | 放在 §4.3；当前 PRD 同协议完整因子结果尚未归档 |
-| Fig. 3 ASR 参数分析 | checkpoint、drop budget 和噪声强度怎样影响迁移效果？ | 放在 §4.4；按当前随机 PRD 配置准备对应 ASR 对照 |
+| Fig. 3 ASR 参数分析 | checkpoint、drop budget 和噪声强度怎样影响迁移效果？ | 放在 §4.4；按当前随机 PRD 配置准备对应 ASR 对照。空间配对与采样预算另用紧凑 ASR 表呈现：本对话已有数值，原始运行记录待关联，固定 groups/views 的平移对照待补 |
 | Supplement qualitative cases | 对抗样本外观、成功与失败如何？ | 当前主实验对抗图像在服务器；本地有原始 CSV、参数与环境记录 |
 
 ## 8. 写作材料准备：围绕发现与 ASR 展开
@@ -255,11 +265,11 @@ Introduction 首先呈现问题与动态发现，再概括 PRD 及结果。§3.2
 
 1. **动态发现的可视化。** 选取真实样本，排列不同深度的 patch-score 图，标出高分区域的更替；以固定位置 token 的分数曲线展示其沿深度的变化。
 2. **同协议 ASR 比较。** 使用相同 1000 样本、source/target 权重及预处理、ε=16/255 和 ASR 分母；共同报告计算预算。
-3. **两机制的 ASR 消融。** 配对 seed、固定支撑流程，比较共同优化底座、仅 progressive、仅 opponent 与完整 PRD。消融使用当前方法定义，固定 schedule 与噪声构造的对应设置。
+3. **两机制的 ASR 消融。** 配对 seed、固定空间配对和采样预算，比较共同优化底座、仅 progressive、仅 opponent 与完整 PRD。消融使用当前方法定义，固定 schedule 与噪声构造的对应设置。
 4. **Progressive 参数分析。** 在当前随机 PRD 配置下，用 ASR 对照呈现 checkpoint 位置、数量和 drop budget 的效果；按原生网格说明各项预算。
 5. **Opponent 参数分析。** 在全部初始局部特征的统一注入位置与 feature RMS 定义下，围绕颜色方向和噪声强度准备 ASR 分析。
 6. **实验设置和过程记录。** 简洁记录四架构 checkpoint、drop 数量、噪声强度、样本集、权重、环境和评估流程。
-7. **结果说明与计算代价。** 根据写作需要准备 clean accuracy、重复 seed、逐样本统计、生成时间和显存记录，配合已有 ASR 主表呈现实验结果。
+7. **结果说明与计算代价。** 根据写作需要准备 clean accuracy、重复 seed、逐样本统计、生成时间和显存记录，配合已有 ASR 主表呈现实验结果。关联空间配对／采样预算消融的原始记录，并补充固定 groups/views 的平移对照。
 
 已有主表固定为论文的主实验。写作先推进方法与结果初稿，后续材料围绕动态发现、两项机制和 ASR 评价补充。
 
@@ -286,6 +296,7 @@ Introduction 首先呈现问题与动态发现，再概括 PRD 及结果。§3.2
 - [GNS-HFA（ICLR 2024）](https://proceedings.iclr.cc/paper_files/paper/2024/file/e25198b6a75f74277ee3a2bd4165d9ef-Paper-Conference.pdf)：精读梯度调整与频域变换，明确与 PRD 的干预位置和噪声构造的关系。
 - [Learning Transferable Adversarial Examples via Ghost Networks](https://arxiv.org/abs/1812.03413)：需要核对随机 surrogate 变体和梯度聚合的已有设计。
 - [ViT-EnsembleAttack（ICCV 2025）](https://openaccess.thecvf.com/content/ICCV2025/html/Cao_ViT-EnsembleAttack_Augmenting_Ensemble_Models_for_Stronger_Adversarial_Transferability_in_Vision_ICCV_2025_paper.html)：核对 model augmentation 与单 source PRD 的关系，比较时对齐 source 与计算预算。
+- [DIM（CVPR 2019）](https://openaccess.thecvf.com/content_CVPR_2019/html/Xie_Improving_Transferability_of_Adversarial_Examples_With_Input_Diversity_CVPR_2019_paper.html) 与 [TI attacks（CVPR 2019）](https://openaccess.thecvf.com/content_CVPR_2019/html/Dong_Evading_Defenses_to_Transferable_Adversarial_Examples_by_Translation-Invariant_Attacks_CVPR_2019_paper.html)：用于 §3.4 的输入多样性与平移攻击背景，说明 PRD 在平移配对中同步变换 checkpoint schedules 并聚合像素梯度。
 
 Related Work 说明已有方法如何处理 patch/token 和模型计算，以及 PRD 在干预位置、顺序传播与初始局部表示扰动上的设计特点。
 
