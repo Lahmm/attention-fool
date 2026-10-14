@@ -137,6 +137,40 @@ class ProgressiveAttackTests(unittest.TestCase):
         metadata = disabled.mainline_metadata()
         self.assertEqual(metadata["opponent_noise"], "disabled")
 
+    def test_noise_gradient_switch_preserves_values_and_controls_rms_derivative(self):
+        noises = []
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled):
+                attacker = self.make_attacker(opponent_noise_grad=enabled)
+                state = attacker.model.prepare_progressive_input(torch.ones(1, 3, 4, 4))
+                local = torch.linspace(0.1, 2.0, 16).view(1, 4, 4).requires_grad_(True)
+                state.local_tokens = local
+                torch.manual_seed(123)
+                noise = attacker._strict_opponent_feature_noise(state)
+                noises.append(noise.detach())
+                self.assertEqual(noise.requires_grad, enabled)
+                gradient = torch.autograd.grad(0.5 * (local + noise).square().sum(), local)[0]
+                expected = local.detach() + noise.detach()
+                if enabled:
+                    extra = (expected * noise.detach()).sum() * local.detach() / local.detach().square().sum()
+                    self.assertGreater(float(extra.norm()), 0.0)
+                    expected = expected + extra
+                torch.testing.assert_close(gradient, expected)
+                self.assertEqual(attacker.mainline_metadata()["opponent_noise_grad"], enabled)
+        torch.testing.assert_close(noises[0], noises[1], rtol=0, atol=0)
+
+    def test_noise_gradient_switch_reaches_attack_pixel_gradients(self):
+        pixels = torch.linspace(0.01, 0.99, 48).view(1, 3, 4, 4)
+        probes = []
+        for enabled in (False, True):
+            attacker = self.make_attacker(opponent_noise_grad=enabled)
+            probe = attacker.probe_attack_gradients(
+                pixels, torch.tensor([1]), replay=GradientReplay(123), sample_ids=["noise.png"]
+            )
+            self.assertTrue(torch.isfinite(probe["raw_mean"]).all())
+            probes.append(probe["raw_mean"])
+        self.assertFalse(torch.allclose(probes[0], probes[1]))
+
     def test_cross_grid_phase_preserves_each_budget(self):
         attacker = self.make_attacker()
         from progressive_attack import ProgressiveMaskSchedule, ProgressiveMaskSelection

@@ -22,6 +22,8 @@ PRD 仅包含两个核心机制：全部初始局部特征上的 RGB opponent-ch
 
 RMS 在单样本的全部初始局部位置及通道上计算。特征 RMS 与投影权重使用 detach。ViT/CaiT 默认 `β=0.2`，PiT/Visformer 默认 `β=0.4`。噪声在特征空间注入，随后续计算传播。
 
+噪声梯度消融开关：`--opponent-noise-grad`（构造参数 `opponent_noise_grad=True`）允许特征 RMS 分支向输入反传；默认关闭，可显式使用 `--no-opponent-noise-grad`。该开关保持噪声前向构造和投影权重的 detach 不变，记录于 `attack_params.json` 的 `opponent_noise_grad` 字段；上述默认配置及主实验保持特征 RMS 停止梯度。
+
 ## 跨架构与运行约定
 
 四架构使用各自 adapter 的初始 RGB 投影和 checkpoint 遍历。ViT 当前配置为 `block3,block10`，每站独立 drop 10/196 个局部 token；其余配置见 [主实验报告](progressive_cross_arch_mainline_s1000.md)。token 数量和网格在清零操作中保持不变。

@@ -47,6 +47,15 @@ class MainTests(unittest.TestCase):
         self.assertEqual(args.gaussian_alpha, 0.0)
         self.assertIsNone(args.checkpoints)
         self.assertIsNone(args.drop_ratios)
+        self.assertFalse(args.opponent_noise_grad)
+
+    def test_cli_controls_opponent_noise_gradient(self):
+        for flag, expected in (
+            ("--opponent-noise-grad", True),
+            ("--no-opponent-noise-grad", False),
+        ):
+            with self.subTest(flag=flag), patch.object(sys, "argv", ["main.py", flag]):
+                self.assertEqual(parse_args().opponent_noise_grad, expected)
 
     def test_cli_accepts_original_only_ablation_settings(self):
         for groups in (1, 10):

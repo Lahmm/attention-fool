@@ -84,6 +84,7 @@ class ProgressiveRouteDisruptionAttacker:
         checkpoints: tuple[str | int, ...] | None = None,
         drop_ratios: tuple[float, ...] | None = None,
         opponent_noise_strength: float | None = None,
+        opponent_noise_grad: bool = False,
         epsilon: float = 16.0 / 255.0,
         step_size: float | None = None,
         steps: int = 10,
@@ -162,6 +163,7 @@ class ProgressiveRouteDisruptionAttacker:
         self.progressive_checkpoints = canonical
         self.progressive_drop_ratios = ratios
         self.opponent_noise_strength = float(opponent_noise_strength)
+        self.opponent_noise_grad = bool(opponent_noise_grad)
         self.epsilon = float(epsilon)
         self.steps = int(steps)
         self.step_size = float(step_size) if step_size is not None else self.epsilon / self.steps
@@ -372,7 +374,11 @@ class ProgressiveRouteDisruptionAttacker:
         if projection.size(1) != pixel_noise.size(2):
             raise ValueError("opponent noise and RGB projection dimensions do not match.")
         feature_noise = pixel_noise.matmul(projection.t())
-        token_rms = local.detach().square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
+        if self.opponent_noise_grad:
+            rms_source = local
+        else:
+            rms_source = local.detach()
+        token_rms = rms_source.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
         noise_rms = feature_noise.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
         return self.opponent_noise_strength * feature_noise * (token_rms / noise_rms)
 
@@ -610,6 +616,7 @@ class ProgressiveRouteDisruptionAttacker:
                 else "disabled"
             ),
             "opponent_noise_strength": self.opponent_noise_strength,
+            "opponent_noise_grad": self.opponent_noise_grad,
             "feature_noise_type": "opponent_channel_rgb_projection",
             "feature_noise_cls": False,
             "asr_definition": "1 - adversarial accuracy over all evaluated samples",

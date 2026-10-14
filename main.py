@@ -173,6 +173,12 @@ def parse_args() -> argparse.Namespace:
         help="Opponent-channel noise strength; omitted values use the source adapter default.",
     )
     parser.add_argument(
+        "--opponent-noise-grad",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Backpropagate through opponent noise feature-RMS matching (default: disabled).",
+    )
+    parser.add_argument(
         "--gaussian-sigma",
         type=float,
         default=4.0,
@@ -214,6 +220,7 @@ def main(args: argparse.Namespace) -> None:
         checkpoints=args.checkpoints,
         drop_ratios=args.drop_ratios,
         opponent_noise_strength=args.opponent_noise_strength,
+        opponent_noise_grad=args.opponent_noise_grad,
         epsilon=args.epsilon,
         step_size=args.step_size,
         steps=args.steps,
