@@ -10,9 +10,12 @@ LOCAL_HF_CACHE = Path(__file__).resolve().parent / "data" / "huggingface"
 os.environ["HF_HOME"] = str(LOCAL_HF_CACHE)
 os.environ["HF_HUB_CACHE"] = str(LOCAL_HF_CACHE / "hub")
 os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TORCH_HOME"] = str(Path(__file__).resolve().parent / "data" / "torch")
 
 import timm
 import torch
+import torchvision.models as torchvision_models
+from torchvision import transforms
 from PIL import Image
 from timm.data import resolve_data_config
 from timm.data.transforms_factory import create_transform
@@ -42,6 +45,17 @@ DEFAULT_CNN_BLACK_BOX_MODELS = [
 ]
 DEFAULT_BLACK_BOX_MODELS = DEFAULT_VIT_BLACK_BOX_MODELS + DEFAULT_CNN_BLACK_BOX_MODELS
 ASR_DEFINITION = "1 - adversarial accuracy"
+
+# Table 2 and transferattack/utils.py in the official RYC-98/FPR release.
+FPR_VIT_MODELS = [
+    "vit_base_patch16_224", "cait_s24_224", "pit_b_224", "visformer_small",
+    "swin_tiny_patch4_window7_224", "deit_tiny_patch16_224", "coat_tiny",
+]
+FPR_CNN_MODELS = [
+    "resnet18", "vgg16", "densenet121", "efficientnet_b0",
+    "mobilenet_v3_small", "resnext50_32x4d",
+]
+FPR_MODELS = FPR_VIT_MODELS + FPR_CNN_MODELS
 
 MODEL_ALIASES = {
     "ViT-B/16": "vit_base_patch16_224",
@@ -157,9 +171,11 @@ def _load_adversarial_checkpoint(model, model_name: str) -> None:
         )
 
 
-def build_black_box_model(model_name: str):
+def build_black_box_model(model_name: str, protocol: str = "project"):
     resolved_name = resolve_model_name(model_name)
-    if resolved_name in HF_ADVERSARIAL_MODELS:
+    if protocol == "fpr" and resolved_name in FPR_CNN_MODELS:
+        model = torchvision_models.get_model(resolved_name, weights="DEFAULT")
+    elif resolved_name in HF_ADVERSARIAL_MODELS:
         model = timm.create_model(HF_ADVERSARIAL_MODELS[resolved_name], pretrained=True)
     elif resolved_name in ADVERSARIAL_MODEL_BASES:
         model = timm.create_model(ADVERSARIAL_MODEL_BASES[resolved_name], pretrained=False)
@@ -168,8 +184,17 @@ def build_black_box_model(model_name: str):
         model = timm.create_model(resolved_name, pretrained=True)
     model.to(DEVICE)
     model.eval()
-    config = resolve_data_config({}, model=model)
-    transform = create_transform(**config)
+    if protocol == "fpr":
+        config = getattr(model, "default_cfg", {})
+        transform = transforms.Compose([
+            transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.ToTensor(),
+            transforms.Normalize(config.get("mean", (0.485, 0.456, 0.406)),
+                                 config.get("std", (0.229, 0.224, 0.225))),
+        ])
+    else:
+        config = resolve_data_config({}, model=model)
+        transform = create_transform(**config)
     return model, transform
 
 
@@ -316,8 +341,9 @@ def evaluate(
     prefetch_factor: int,
     use_amp: bool,
     pre_cache: bool = True,
+    protocol: str = "project",
 ) -> Tuple[int, int, int, List[str], List[int], List[int]]:
-    model, transform = build_black_box_model(model_name)
+    model, transform = build_black_box_model(model_name, protocol=protocol)
     samples, skipped = build_transfer_samples(
         image_paths=image_paths,
         annotations=annotations,
@@ -389,6 +415,7 @@ def main(
     pre_cache: bool = True,
     skip_unavailable: bool = True,
     predictions_output: str | None = None,
+    protocol: str = "project",
 ) -> None:
     configure_eval_runtime(use_tf32=use_tf32)
     image_dir_path = Path(image_dir)
@@ -426,6 +453,7 @@ def main(
                 prefetch_factor=prefetch_factor,
                 use_amp=use_amp,
                 pre_cache=pre_cache,
+                protocol=protocol,
             )
         except ModelUnavailableError as exc:
             if not skip_unavailable:
@@ -481,6 +509,7 @@ def main(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         prediction_artifact = {
             "asr_definition": ASR_DEFINITION,
+            "protocol": protocol,
             "image_dir": str(image_dir_path.resolve()),
             "prefix": prefix,
             "sample_ids": prediction_sample_ids or [],
@@ -544,6 +573,8 @@ if __name__ == "__main__":
     parser.add_argument("--no-record", action="store_true", help="Disable automatic Excel recording.")
     parser.add_argument("--no-pre-cache", action="store_true", help="Disable pre-caching images in RAM (slower, lower memory).")
     parser.add_argument("--strict-model-loading", action="store_true", help="Fail instead of skipping unavailable optional models such as adversarial CNN checkpoints.")
+    parser.add_argument("--protocol", choices=("project", "fpr"), default="project",
+                        help="fpr uses Table 2 models, torchvision CNN weights and direct 224px normalization.")
     parser.add_argument(
         "--predictions-output",
         default=None,
@@ -560,7 +591,7 @@ if __name__ == "__main__":
         image_dir=args.image_dir,
         annotations_path=args.annotations_path,
         prefix=args.prefix,
-        model_names=args.model_name,
+        model_names=FPR_MODELS if args.protocol == "fpr" else args.model_name,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         prefetch_factor=args.prefetch_factor,
@@ -571,4 +602,5 @@ if __name__ == "__main__":
         pre_cache=not args.no_pre_cache,
         skip_unavailable=not args.strict_model_loading,
         predictions_output=args.predictions_output,
+        protocol=args.protocol,
     )

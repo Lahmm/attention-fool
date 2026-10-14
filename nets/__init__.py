@@ -11,6 +11,7 @@ from .vit import DEFAULT_MODEL_NAME, build_vit_model
 
 WHITEBOX_MODEL_CHOICES = (
     "vit_base_patch16_224",
+    "deit_base_distilled_patch16_224",
     "cait_s24_224",
     "pit_b_224",
     "visformer_small",
@@ -22,7 +23,7 @@ def build_whitebox_model(
     pretrained: bool = DEFAULT_PRETRAINED,
     device=DEVICE,
 ) -> ProgressiveAdapter:
-    if model_name == "vit_base_patch16_224":
+    if model_name in ("vit_base_patch16_224", "deit_base_distilled_patch16_224"):
         return build_vit_model(num_classes=num_classes, model_name=model_name, pretrained=pretrained, device=device)
     if model_name == "cait_s24_224":
         return build_cait_s24_model(num_classes=num_classes, model_name=model_name, pretrained=pretrained, device=device)

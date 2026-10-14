@@ -7,6 +7,26 @@ import transfer_eval
 
 
 class HuggingFaceTransferModelTests(unittest.TestCase):
+    def test_fpr_suite_matches_official_table_two(self):
+        self.assertEqual(transfer_eval.FPR_MODELS, [
+            "vit_base_patch16_224", "cait_s24_224", "pit_b_224", "visformer_small",
+            "swin_tiny_patch4_window7_224", "deit_tiny_patch16_224", "coat_tiny",
+            "resnet18", "vgg16", "densenet121", "efficientnet_b0",
+            "mobilenet_v3_small", "resnext50_32x4d",
+        ])
+
+    def test_fpr_cnn_uses_torchvision_default_and_keeps_full_image(self):
+        from PIL import Image
+        import torch
+        model = MagicMock(spec=torch.nn.Module)
+        with patch("transfer_eval.torchvision_models.get_model", return_value=model) as create:
+            _, transform = transfer_eval.build_black_box_model("resnet18", protocol="fpr")
+        create.assert_called_once_with("resnet18", weights="DEFAULT")
+        image = Image.new("RGB", (224, 224), (255, 0, 0))
+        tensor = transform(image)
+        self.assertEqual(tuple(tensor.shape), (3, 224, 224))
+        self.assertAlmostEqual(tensor[0, 0, 0].item(), (1 - .485) / .229, places=5)
+
     def test_asr_is_one_minus_adversarial_accuracy(self):
         self.assertEqual(transfer_eval.ASR_DEFINITION, "1 - adversarial accuracy")
         self.assertAlmostEqual(
