@@ -47,7 +47,7 @@ python main.py --whitebox-model deit_base_distilled_patch16_224 --output-dir out
 
 `--input-diversity-views-per-group 1` 使用原始视图，`2` 使用原始／平移配对（默认）；`--input-diversity-groups` 控制每步组数，每步总视图不超过 20。初始 opponent noise 的特征 RMS 和投影权重固定停止梯度。像素梯度平均后直接进行系数为 1 的动量累积与投影更新。
 
-`main.py` 保存对抗 PNG 与 `attack_params.json`；`randomness.py` 只负责按样本与攻击上下文生成随机数，不输出梯度诊断或 replay manifest。现存实验运行脚本已移除，使用上述入口执行方法。
+`main.py` 在运行开始时统一设置 PyTorch seed 42，mask、噪声和 phase 直接使用 PyTorch 随机函数；固定 batch 和执行流程时可重复采样。入口保存对抗 PNG 与 `attack_params.json`。现存实验运行脚本已移除，使用上述入口执行方法。
 
 ## 1000-image transfer results
 

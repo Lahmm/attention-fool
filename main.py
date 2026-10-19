@@ -97,11 +97,7 @@ def attack_all_samples(
             for index in indices.tolist()
         ]
         all_sample_ids.extend(filenames)
-        adversarial = attacker.attack_batch(
-            images,
-            labels,
-            sample_ids=filenames,
-        )
+        adversarial = attacker.attack_batch(images, labels)
         save_adversarial_images(
             images=adversarial,
             output_dir=str(output_dir),

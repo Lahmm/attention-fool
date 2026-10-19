@@ -8,8 +8,6 @@ import torch.nn.functional as F
 
 from utils import DEVICE, SEED, IMAGENET_MEAN, IMAGENET_STD
 
-from randomness import AttackRandomness
-
 
 @dataclass(frozen=True)
 class ProgressiveMaskSelection:
@@ -124,7 +122,6 @@ class ProgressiveRouteDisruptionAttacker:
         model_std = getattr(model, "model_std", IMAGENET_STD)
         self.model_mean = torch.tensor(model_mean, device=self.device).view(1, 3, 1, 1)
         self.model_std = torch.tensor(model_std, device=self.device).view(1, 3, 1, 1)
-        self._random: AttackRandomness | None = None
         self._actual_forward_view_count = 0
         self._progressive_mask_counts: tuple[int, ...] = ()
         self._progressive_mask_grids: tuple[tuple[int, int], ...] = ()
@@ -138,32 +135,18 @@ class ProgressiveRouteDisruptionAttacker:
     def _normalize_output(self, images: torch.Tensor) -> torch.Tensor:
         return (images - self.pixel_mean) / self.pixel_std
 
-    def _randn_like(self, tensor: torch.Tensor, event: str) -> torch.Tensor:
-        if self._random is not None:
-            return self._random.randn_like(tensor, event)
-        return torch.randn_like(tensor)
-
     def _sample_random_mask(
         self,
         *,
         batch_size: int,
         token_count: int,
         ratio: float,
-        checkpoint: str,
         device: torch.device,
     ) -> torch.Tensor:
         drop_count = max(1, int(round(token_count * ratio)))
         mask = torch.zeros(batch_size, token_count, dtype=torch.bool, device=device)
         for batch_index in range(batch_size):
-            if self._random is None:
-                order = torch.randperm(token_count, device=device)
-            else:
-                order = self._random.randperm(
-                    token_count,
-                    f"progressive_random_drop_{checkpoint}",
-                    batch_index,
-                    device=device,
-                )
+            order = torch.randperm(token_count, device=device)
             mask[batch_index, order[:drop_count]] = True
         return mask.detach()
 
@@ -180,7 +163,6 @@ class ProgressiveRouteDisruptionAttacker:
                     batch_size=state.local_tokens.size(0),
                     token_count=state.local_tokens.size(1),
                     ratio=ratio,
-                    checkpoint=checkpoint,
                     device=state.local_tokens.device,
                 )
                 count = int(mask.sum(dim=1)[0].item())
@@ -233,18 +215,10 @@ class ProgressiveRouteDisruptionAttacker:
     def _pick_input_diversity_phases(
         self, batch_size: int, device: torch.device
     ) -> list[tuple[int, int]]:
-        if self._random is None:
-            index = int(torch.randint(len(self.input_diversity_phase_shift_set), (1,)).item())
-            return [self.input_diversity_phase_shift_set[index]] * batch_size
-        phases = [
-            self.input_diversity_phase_shift_set[
-                self._random.randint(
-                    len(self.input_diversity_phase_shift_set), "phase", index, device=device
-                )
-            ]
-            for index in range(batch_size)
-        ]
-        return phases
+        indices = torch.randint(
+            len(self.input_diversity_phase_shift_set), (batch_size,), device=device
+        ).tolist()
+        return [self.input_diversity_phase_shift_set[index] for index in indices]
 
     def _phase_mask_schedule(
         self,
@@ -275,11 +249,8 @@ class ProgressiveRouteDisruptionAttacker:
         weight = state.rgb_projection_weight
         kernel_h, kernel_w = weight.shape[-2:]
         batch, count, dimension = local.shape
-        coefficients = self._randn_like(
-            torch.empty(
-                batch, count, 3, kernel_h, kernel_w, device=local.device, dtype=local.dtype
-            ),
-            "mainline_opponent_token",
+        coefficients = torch.randn(
+            batch, count, 3, kernel_h, kernel_w, device=local.device, dtype=local.dtype
         )
         luma = 0.5**0.5 * coefficients[:, :, 0:1]
         red_green = 1.25**0.5 * coefficients[:, :, 1:2]
@@ -328,9 +299,7 @@ class ProgressiveRouteDisruptionAttacker:
     def _iter_attack_losses(
         self, pixels: torch.Tensor, labels: torch.Tensor
     ) -> Iterator[torch.Tensor]:
-        for group_index in range(self.input_diversity_groups):
-            if self._random is not None:
-                self._random.set_context(group=group_index, view=-1)
+        for _ in range(self.input_diversity_groups):
             schedule = (
                 self._build_mask_schedule(pixels.detach())
                 if self.progressive_drop else None
@@ -340,8 +309,6 @@ class ProgressiveRouteDisruptionAttacker:
                 if self.input_diversity_views_per_group == 2
                 else None
             )
-            if self._random is not None:
-                self._random.set_context(view=0)
             self._actual_forward_view_count += 1
             yield self._forward_with_schedule(pixels, labels, schedule)
             if self.input_diversity_views_per_group == 1:
@@ -353,8 +320,6 @@ class ProgressiveRouteDisruptionAttacker:
                 if schedule is not None else None
             )
             shifted_pixels = self._apply_samplewise_phase_shifts(pixels, phases)
-            if self._random is not None:
-                self._random.set_context(view=1)
             self._actual_forward_view_count += 1
             yield self._forward_with_schedule(shifted_pixels, labels, shifted_schedule)
 
@@ -383,29 +348,22 @@ class ProgressiveRouteDisruptionAttacker:
                 f"view count mismatch: {self._actual_forward_view_count} != {expected}."
             )
 
-    def attack_batch(self, images, labels, *, sample_ids):
-        if len(sample_ids) != images.size(0):
-            raise ValueError("sample_ids must match the image batch.")
-        self._random = AttackRandomness(sample_ids)
+    def attack_batch(self, images, labels):
         images = images.to(self.device)
         labels = labels.to(self.device)
         clean = self._denormalize(images).detach()
         adversarial = clean.clone()
         momentum = torch.zeros_like(adversarial)
-        try:
-            for step_index in range(self.steps):
-                self._random.set_context(step=step_index, group=-1, view=-1)
-                self._actual_forward_view_count = 0
-                pixels = adversarial.detach().requires_grad_(True)
-                gradient = self._attack_gradients(pixels, labels)
-                self._check_view_count()
-                momentum = momentum + gradient
-                adversarial = adversarial + self.step_size * momentum.sign()
-                delta = torch.clamp(adversarial - clean, -self.epsilon, self.epsilon)
-                adversarial = torch.clamp(clean + delta, 0, 1).detach()
-            return self._normalize_output(adversarial)
-        finally:
-            self._random = None
+        for _ in range(self.steps):
+            self._actual_forward_view_count = 0
+            pixels = adversarial.detach().requires_grad_(True)
+            gradient = self._attack_gradients(pixels, labels)
+            self._check_view_count()
+            momentum = momentum + gradient
+            adversarial = adversarial + self.step_size * momentum.sign()
+            delta = torch.clamp(adversarial - clean, -self.epsilon, self.epsilon)
+            adversarial = torch.clamp(clean + delta, 0, 1).detach()
+        return self._normalize_output(adversarial)
 
     def parameters(self):
         return {

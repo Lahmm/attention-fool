@@ -6,7 +6,6 @@ from torch import nn
 
 from nets.vit import ViTAdapter
 from progressive_attack import ProgressiveMaskSchedule, ProgressiveMaskSelection, ProgressiveRouteDisruptionAttacker
-from randomness import AttackRandomness
 from utils import SEED
 
 
@@ -65,12 +64,9 @@ class ProgressiveAttackTests(unittest.TestCase):
         self.pixels = torch.linspace(0.1, 0.9, 3 * 28 * 28).view(1, 3, 28, 28)
         self.labels = torch.tensor([1])
 
-    def test_schedule_uses_current_vit_budget_and_fresh_contexts(self):
+    def test_schedule_uses_current_vit_budget_and_fresh_masks(self):
         attacker = make_attacker()
-        attacker._random = AttackRandomness(['sample'])
-        attacker._random.set_context(step=0, group=0)
         first = attacker._build_mask_schedule(self.pixels)
-        attacker._random.set_context(group=1)
         second = attacker._build_mask_schedule(self.pixels)
         self.assertEqual(first.checkpoints, ('block3', 'block10'))
         self.assertEqual(first.counts, (10, 10))
@@ -149,15 +145,14 @@ class ProgressiveAttackTests(unittest.TestCase):
                                  input_diversity_phase_shift_set=())
         with patch.object(attacker, '_pick_input_diversity_phases', side_effect=AssertionError('phase called')), \
              patch.object(attacker, '_build_mask_schedule', wraps=attacker._build_mask_schedule) as schedules:
-            attacker.attack_batch(self.pixels * 2 - 1, self.labels, sample_ids=['sample'])
+            attacker.attack_batch(self.pixels * 2 - 1, self.labels)
         self.assertEqual(schedules.call_count, 4)
         self.assertEqual(attacker._actual_forward_view_count, 2)
 
     def test_mean_pixel_gradient_is_used_directly(self):
         attacker = make_attacker(input_diversity_groups=2)
         def initialize():
-            attacker._random = AttackRandomness(['sample'])
-            attacker._random.set_context(step=0)
+            torch.manual_seed(SEED)
             attacker._actual_forward_view_count = 0
         initialize()
         pixels = self.pixels.clone().requires_grad_(True)
@@ -177,23 +172,22 @@ class ProgressiveAttackTests(unittest.TestCase):
             return gradients.pop(0)
         images = self.pixels * 2 - 1
         with patch.object(attacker, '_attack_gradients', side_effect=gradient):
-            adversarial = attacker.attack_batch(images, self.labels, sample_ids=['sample'])
+            adversarial = attacker.attack_batch(images, self.labels)
         pixels = attacker._denormalize(adversarial)
         torch.testing.assert_close(pixels, self.pixels + attacker.epsilon)
         self.assertLessEqual(float((pixels - self.pixels).abs().max()), attacker.epsilon + 1e-6)
         self.assertGreaterEqual(float(pixels.min()), 0)
         self.assertLessEqual(float(pixels.max()), 1)
 
-    def test_seeded_attack_is_repeatable_and_batch_independent(self):
+    def test_seeded_attack_is_repeatable_for_fixed_batch_and_flow(self):
         images = (self.pixels * 2 - 1).repeat(2, 1, 1, 1)
         labels = self.labels.repeat(2)
         attacker = make_attacker()
-        together = attacker.attack_batch(images, labels, sample_ids=['a', 'b'])
-        separate = torch.cat([attacker.attack_batch(images[i:i+1], labels[i:i+1], sample_ids=[name])
-                              for i, name in enumerate(('a', 'b'))])
-        torch.testing.assert_close(together, separate, rtol=0, atol=0)
-        repeated = attacker.attack_batch(images, labels, sample_ids=['a', 'b'])
-        torch.testing.assert_close(together, repeated, rtol=0, atol=0)
+        torch.manual_seed(SEED)
+        first = attacker.attack_batch(images, labels)
+        torch.manual_seed(SEED)
+        repeated = attacker.attack_batch(images, labels)
+        torch.testing.assert_close(first, repeated, rtol=0, atol=0)
 
     def test_disabling_progressive_drop_skips_schedules_and_keeps_optimization(self):
         attacker = make_attacker(

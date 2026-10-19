@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | `AGENTS.md`、`README.md`、`experiments/prd_method_contract.md` | 确认单一方法、执行顺序、配置与术语 | 当前主线约束 |
 | `progressive_attack.py`、`main.py`、`nets/*.py` | 核对 schedule、噪声、遍历与更新 | 方法事实依据 |
-| `utils.py`、`transfer_eval.py`、`randomness.py` | 核对数据、预处理、ASR 与随机记录 | 实验协议依据 |
+| `main.py`、`utils.py`、`transfer_eval.py` | 核对固定 PyTorch seed、数据、预处理与 ASR | 实验协议依据 |
 | `tests/*.py` | 当前执行行为与 optional real-model 验证 | 行为契约 |
 | `experiments/prd_paper_story.md` | 论文故事与表达约定 | 叙事起点 |
 | `experiments/progressive_cross_arch_mainline_s1000.md` | 当前正式配置、汇总和 4×14 逐目标表 | 主实验说明 |

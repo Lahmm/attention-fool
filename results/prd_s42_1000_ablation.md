@@ -6,6 +6,8 @@ Recorded 2026-10-19 on the `prd` branch. Implementation includes `7ce5b7a` (the 
 
 Sources are ViT-B/16 (`vit_base_patch16_224`), CaiT-S24 (`cait_s24_224`), PiT-T (`pit_ti_224`), and distilled DeiT-B (`deit_base_distilled_patch16_224`). Targets are the default 14-model project protocol (8 Transformer, 6 CNN). Batch sizes are fixed per source across all cells: ViT-B 48, CaiT-S24 16, PiT-T 96, DeiT-B 48. These sizes were chosen for the 10 GB RTX 3080; randomness is keyed by sample ID, step, group, view, and event, so batching does not change schedules or noise.
 
+These recorded runs used the historical sample-keyed random streams. Subsequent executions use PyTorch's global RNG seeded to 42 at startup, with reproducibility scoped to a fixed batch layout and execution flow; this change does not alter the results recorded below.
+
 The ablation is a complete 2×2 factorial:
 
 | Cell | Progressive drop | Opponent noise | CLI |

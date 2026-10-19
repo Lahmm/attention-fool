@@ -24,7 +24,7 @@
 | `AGENTS.md` | 单一方法主线、表达与操作约定 |
 | `README.md` | 方法、配置和主结果入口 |
 | `progressive_attack.py`, `main.py`, `nets/` | PRD 实现和当前源遍历 |
-| `randomness.py`, `utils.py`, `transfer_eval.py` | 固定随机流、输入输出与 ASR 评估 |
+| `main.py`, `utils.py`, `transfer_eval.py` | 固定 PyTorch seed、输入输出与 ASR 评估 |
 | `tests/` | 当前执行契约验证 |
 | `data/clean_resized_images/` 与标签 JSON | 1000 张干净输入及标注 |
 | `experiments/prd_method_contract.md` | 噪声注入与 progressive drop 的准确顺序 |
