@@ -1,5 +1,3 @@
-"""Evaluate PRD images with the retained project or FPR target protocol."""
-
 import argparse
 from contextlib import nullcontext
 import csv

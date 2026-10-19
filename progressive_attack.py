@@ -1,5 +1,3 @@
-"""Architecture-neutral Progressive Route Disruption attack."""
-
 from __future__ import annotations
 
 from collections.abc import Iterator

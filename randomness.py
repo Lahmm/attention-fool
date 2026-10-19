@@ -1,5 +1,3 @@
-"""Sample-keyed PRD randomness, fixed to seed 42 across batch layouts."""
-
 from __future__ import annotations
 
 import hashlib
