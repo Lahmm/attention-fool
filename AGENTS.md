@@ -3,6 +3,7 @@
 - The assistant may use terminal commands in this repository except `rm` and commands that delete the Git repository.
 - After each completed modification to the current repository contents, the assistant should initiate a `git push`.
 - The assistant is allowed to use `git push` to push the change to the remote repository.
+- When modifying code, do not add comments at the top of `.py` files.
 - New executions use the fixed seed 42. Retain `--input-diversity-views-per-group` for ablations. Keep the FPR weight downloader, but remove experiment runner scripts.
 - Discussions are read-only. Modify code or files only when the user explicitly requests those changes; a discussion of implementing an idea is not authorization to implement it.
 
