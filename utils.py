@@ -12,6 +12,8 @@ from torchvision import transforms
 from torchvision.utils import save_image
 
 
+SEED = 42
+
 IMAGENET_MEAN = (0.5, 0.5, 0.5)
 IMAGENET_STD = (0.5, 0.5, 0.5)
 
@@ -91,7 +93,7 @@ def load_data(
     batch_size: int = 16,
     num_workers: int = 4,
     prefetch_factor: int = 4,
-) -> tuple[DataLoader, int]:
+) -> DataLoader:
     transform = transforms.Compose(
         [
             transforms.ToTensor(),
@@ -99,7 +101,6 @@ def load_data(
         ]
     )
     dataset = ImageDataset(image_dir_arg, annotations_path_arg, transform=transform)
-    num_classes = max(sample["class_id"] for sample in dataset.samples) + 1
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -108,15 +109,13 @@ def load_data(
         persistent_workers=num_workers > 0,
         prefetch_factor=prefetch_factor if num_workers > 0 else None,
     )
-    return dataloader, num_classes
+    return dataloader
 
 
 def save_adversarial_images(
     images: torch.Tensor,
     output_dir: str,
-    prefix: str,
-    start_index: int,
-    filenames: list[str] | None = None,
+    filenames: list[str],
 ) -> list[Path]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -126,15 +125,12 @@ def save_adversarial_images(
     mean = torch.tensor(IMAGENET_MEAN).view(1, 3, 1, 1)
     std = torch.tensor(IMAGENET_STD).view(1, 3, 1, 1)
     tensor = torch.clamp(tensor * std + mean, 0.0, 1.0)
-    if filenames is not None and len(filenames) != tensor.size(0):
+    if len(filenames) != tensor.size(0):
         raise ValueError("filenames must match the image batch size")
 
     saved: list[Path] = []
     for index, image in enumerate(tensor):
-        if filenames is None:
-            filename = f"{prefix}_{start_index + index:05d}.png"
-        else:
-            filename = f"{prefix}_{Path(filenames[index]).stem}.png"
+        filename = f"adv_{Path(filenames[index]).stem}.png"
         path = output_path / filename
         save_image(image, str(path))
         saved.append(path)

@@ -1,6 +1,6 @@
 # PRD：1000 图像跨架构主实验
 
-主实验完成日期：2026-10-12。实际运行实现：`bf09224675093cd6a4fcccee2db10acae0eb5f4e`；seed：`20260907`。本文全部结果来自四源、1000 图像、14 目标的当前 PRD 运行。
+主实验完成日期：2026-10-12。实际运行实现：`bf09224675093cd6a4fcccee2db10acae0eb5f4e`。本文结果保留原四源、1000 图像、14 目标的历史测量。当前源支持已调整，所有新执行固定 seed 42；不将历史结果视为新配置重测。
 
 ## 方法与配置
 
@@ -54,7 +54,7 @@ ASR = `1 - adversarial accuracy`，分母是全部 1000 张评估的对抗图像
 
 - [逐目标规范化表](../results/prd_cross_arch_s1000.csv)：56 条结果。
 - [四源汇总](../results/prd_summary_s1000.csv)：各源及四源宏平均。
-- [运行环境与来源](../results/prd_run_artifacts/provenance.json)：实际实现、环境、seed、源配置和目标集。
+- [运行环境与来源](../results/prd_run_artifacts/provenance.json)：实际实现、环境、源配置和目标集。
 - `results/prd_run_artifacts/{vit,cait,pit,visformer}/attack_params.json`：保留的 PRD 参数。
 - `results/prd_run_artifacts/{vit,cait,pit,visformer}/transfer.csv`：迁移 CSV，含时间戳、保留参数与逐目标 ASR。
 

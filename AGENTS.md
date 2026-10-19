@@ -3,6 +3,7 @@
 - The assistant may use terminal commands in this repository except `rm` and commands that delete the Git repository.
 - After each completed modification to the current repository contents, the assistant should initiate a `git push`.
 - The assistant is allowed to use `git push` to push the change to the remote repository.
+- New executions use the fixed seed 42. Retain `--input-diversity-views-per-group` for ablations. Keep the FPR weight downloader, but remove experiment runner scripts.
 - Discussions are read-only. Modify code or files only when the user explicitly requests those changes; a discussion of implementing an idea is not authorization to implement it.
 
 ## Current research mainline
@@ -16,7 +17,7 @@
 - The sole main experiment is the four-source, 1000-image, 14-target run completed on 2026-10-12 at `bf092246`. Its transfer ASRs are in `results/prd_cross_arch_s1000.csv`, summaries in `results/prd_summary_s1000.csv`, and retained parameter metadata and transfer CSVs in `results/prd_run_artifacts/`. Four-source Overall ASR is 84.55%; strict black-box ASR is 83.49%.
 - Keep records and paper drafts focused on this single method and main experiment. Describe RGB opponent-channel noise on all initial local features followed by progressive checkpoint drops; do not introduce noise-policy version comparisons or a selection narrative.
 - Evaluate transferability and component effects through transfer ASR defined as `1 - adversarial accuracy` over all evaluated adversarial samples; do not filter to a target-clean-correct subset. Gradient diagnostics, including effective rank, are internal experimental analysis tools and are not paper evidence for transferability.
-- Preserve support for ViT-B/16, CaiT-S24, PiT-B, and Visformer-S through architecture adapters. Do not encode ViT block assumptions as a nominally cross-architecture implementation.
+- Current paper sources are ViT-B/16, CaiT-S24, PiT-T, and distilled DeiT-B. Preserve PiT-B as an additional source; remove Visformer source support while retaining it as an evaluation target. Do not encode ViT block assumptions as a nominally cross-architecture implementation.
 
 ## Paper-writing objective and voice
 
@@ -44,7 +45,7 @@
 
 ## Retained executable scope
 
-- Retain only PRD's progressive random-drop behavior in `progressive_attack.py`, the minimal `main.py` execution path needed to run it, and the progressive portions of the four architecture adapters in `nets/`.
+- Retain only PRD's progressive random-drop behavior in `progressive_attack.py`, the minimal `main.py` execution path needed to run it, and the progressive adapters for the five retained source models in `nets/`.
 - Retain only utility, test, configuration, and documentation code that is directly required to execute or verify that progressive attack.
 - Pixel gradients are averaged across views and used directly for momentum accumulation and the projected update.
 - The protected behavior is: fresh uniformly random checkpoint schedules, the ViT `block3,block10` schedule, local-token hard zeroing during sequential checkpoint traversal, transformed phase-pair schedules, RGB opponent-channel projected noise on all initial local features before traversal, and the projected iterative update used by PRD.

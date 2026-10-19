@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | `AGENTS.md`、`README.md`、`experiments/prd_method_contract.md` | 确认单一方法、执行顺序、配置与术语 | 当前主线约束 |
 | `progressive_attack.py`、`main.py`、`nets/*.py` | 核对 schedule、噪声、遍历与更新 | 方法事实依据 |
-| `utils.py`、`transfer_eval.py`、`record_experiment.py`、`gradient_replay.py` | 核对数据、预处理、ASR 与随机记录 | 实验协议依据 |
+| `utils.py`、`transfer_eval.py`、`randomness.py` | 核对数据、预处理、ASR 与随机记录 | 实验协议依据 |
 | `tests/*.py` | 当前执行行为与 optional real-model 验证 | 行为契约 |
 | `experiments/prd_paper_story.md` | 论文故事与表达约定 | 叙事起点 |
 | `experiments/progressive_cross_arch_mainline_s1000.md` | 当前正式配置、汇总和 4×14 逐目标表 | 主实验说明 |
@@ -30,7 +30,7 @@
 | `results/patch_rank_observation_summary.json` | 64 图像深度关系变化观察 | 动机证据 |
 | `experiments/server_handoff_inventory.md` | 本地材料与服务器当前运行目录 | 文件可用性依据 |
 
-规范化表与四份原始 transfer CSV 的逐目标数值及实际参数一致；汇总从 56 条记录按目标类型和 source-match 标记计算。四次主实验使用相同的 1000 图像输入集、seed 20260907、全部样本 ASR 分母，记录的 skipped 为零。
+规范化表与四份原始 transfer CSV 的逐目标数值及实际参数一致；汇总从 56 条记录按目标类型和 source-match 标记计算。四次主实验使用相同的 1000 图像输入集、全部样本 ASR 分母，记录的 skipped 为零。
 
 当前主实验的对抗图像、replay manifests、逐样本预测和日志保存在服务器。本地保存完整结果 CSV、参数与环境记录；样本可视化和进一步逐样本分析从当前运行目录取得原件。
 
@@ -132,30 +132,31 @@ RMS 在单样本的全部初始 token 和通道上计算；实现中对特征 RM
 
 ### 4.3 全部初始局部特征的噪声注入
 
-噪声范围覆盖当前架构的全部初始局部特征，独立于后续 checkpoint mask。ViT/CaiT 在初始 patch 特征处注入；PiT/Visformer 在各自 adapter 定义的初始 RGB 特征处注入。随后按各 checkpoint 原生网格执行 hard-zero。
+噪声范围覆盖当前架构的全部初始局部特征，独立于后续 checkpoint mask。ViT/CaiT 在初始 patch 特征处注入；PiT 在其 adapter 定义的初始 RGB 特征处注入，DeiT 在初始局部 patch 特征处注入。随后按各 checkpoint 原生网格执行 hard-zero。
 
 每个可微视图在初始位置注入一次噪声，随后随特征传播。到达 checkpoint 时，按随机 mask 清零局部 token；相位 mask 按图像空间平移与原生网格 occupancy 保持 drop 数量。
 
 完整执行顺序见 [PRD 方法记录](prd_method_contract.md)。
 
-### 4.4 当前主实验配置
+### 4.4 当前源配置与历史主表
 
-| Source | Checkpoints | 原生网格 | Drop 数量 | Opponent β | 生成 batch size |
-| --- | --- | --- | --- | ---: | ---: |
-| ViT-B/16 | block3, block10 | 14×14, 14×14 | 10, 10 | 0.2 | 96 |
-| CaiT-S24 | block17, block23 | 14×14, 14×14 | 2, 28 | 0.2 | 48 |
-| PiT-B | stage2_block1, stage3_block2, stage3_block3 | 16×16, 8×8, 8×8 | 5, 2, 6 | 0.4 | 96 |
-| Visformer-S | stage2_block1, stage3_block1 | 14×14, 7×7 | 41, 10 | 0.4 | 48 |
+论文当前四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled；PiT-B 额外保留。新执行固定 seed 42，历史主表保留原源模型与数值。
 
-ViT 各 checkpoint 的 drop ratio 均为 `0.051020408163`。四种架构按原生网格和阶段设置 checkpoint 与 drop 数量。
+| Source | Checkpoints | 原生网格 | Drop 数量 | Opponent β |
+| --- | --- | --- | --- | ---: |
+| ViT-B/16 | block3, block10 | 14×14, 14×14 | 10, 10 | 0.2 |
+| CaiT-S24 | block17, block23 | 14×14, 14×14 | 2, 28 | 0.2 |
+| PiT-T | stage2_block1, stage3_block2, stage3_block3 | 14×14, 7×7, 7×7 | 4, 2, 5 | 0.4 |
+| DeiT-B distilled | block3, block10 | 14×14, 14×14 | 10, 10 | 0.2 |
+| PiT-B（额外保留） | stage2_block1, stage3_block2, stage3_block3 | 16×16, 8×8, 8×8 | 5, 2, 6 | 0.4 |
 
-共同配置：seed 20260907、10 steps、ε=16/255、步长 ε/10、动量系数 1、10 groups×2 views、平移集合 (4,4)/(8,8)/(12,12)。100 条 schedule/图像；ViT/CaiT/Visformer 200 次随机 checkpoint mask selection，PiT 300 次。phase masks 由共享 schedule 空间变换得到。
+ViT/DeiT drop ratios 为 `0.051020408163,0.051020408163`；PiT-T/B 为 `0.02081165,0.03125,0.09375`，按实际原生网格计算数量。DeiT 的两个 prefix 都保留。四源默认 10 steps、epsilon=16/255、步长 epsilon/steps、动量系数 1、10 groups×2 views、平移集合 (4,4)/(8,8)/(12,12)。保留每组视图数 1/2 的消融入口。每图 100 条 schedule；ViT/CaiT/DeiT 200 次 mask selection，PiT 300 次。
 
 计算量记录包含 schedule 构建遍历和视图前向/反向；效率分析使用实测运行时间或完整计算量。
 
 ## 5. 现有结果与贡献组织
 
-### 5.1 主实验结果
+### 5.1 保留的历史主实验结果
 
 | Source | 14 目标 Overall | Transformer（8） | CNN（6） | 严格黑盒（13） |
 | --- | ---: | ---: | ---: | ---: |
@@ -171,7 +172,7 @@ Transformer 的 88.39% 同样含各源的同架构目标；若叙述“跨模型
 
 ASR = `1 − correct/total`，分母是全部评估的 1000 张对抗图像，不筛选 target-clean-correct 子集。因此 ASR 包含目标模型原本的分类错误；补报相同样本的 clean accuracy 有助于解释攻击增加了多少错误，但保持现有主指标定义。
 
-四个 source 分别独立攻击相同的 1000 张输入，共生成 4000 张对抗图像；56 项评估对应 56000 次样本预测。strict black-box 指排除 source-matched target 后对其余 13 个目标取平均。
+历史主实验的四个 source 分别独立攻击相同的 1000 张输入，共生成 4000 张对抗图像；56 项评估对应 56000 次样本预测。strict black-box 指排除 source-matched target 后对其余 13 个目标取平均。
 
 主表覆盖标准模型与两个对抗训练 CNN，按目标类型呈现迁移表现与差异。
 
@@ -239,7 +240,7 @@ Introduction 首先呈现问题与动态发现，再概括 PRD 及结果。§3.2
 | B. Architecture adapters | 四源原生阶段、初始投影几何、CLS/GAP/卷积前端、相位 mask 的跨尺度变换 |
 | C. Reproducibility and evaluation protocol | 样本 ID、权重版本、环境、seed、运行参数、原始表、指标定义与参数选择过程 |
 | D. Extended motivating observation | 扩展正文 §3.2 的动机：score 定义、层对、空间对齐、更多真实样本的分数图与变化曲线，及辅助统计 |
-| E. Extended results and sensitivity | 逐目标结果、补充 seed/参数扫描/基线与消融，标注其与当前配置的对应关系 |
+| E. Extended results and sensitivity | 逐目标结果、参数扫描/基线与消融，标注其与当前配置的对应关系 |
 | F. Qualitative cases and computational cost | 成功/失败案例、可视化与实测计算代价 |
 
 正文保留主要 ASR 比较和机制消融，补充材料展开复现细节与扩展结果。
@@ -267,11 +268,11 @@ Introduction 首先呈现问题与动态发现，再概括 PRD 及结果。§3.2
 
 1. **动态发现的可视化。** 选取真实样本，排列不同深度的 patch-score 图，标出高分区域的更替；以固定位置 token 的分数曲线展示其沿深度的变化。
 2. **同协议 ASR 比较。** 使用相同 1000 样本、source/target 权重及预处理、ε=16/255 和 ASR 分母；共同报告计算预算。
-3. **两机制的 ASR 消融。** 配对 seed、固定空间配对和采样预算，比较共同优化底座、仅 progressive、仅 opponent 与完整 PRD。消融使用当前方法定义，固定 schedule 与噪声构造的对应设置。
+3. **两机制的 ASR 消融。** 固定 seed 42、固定空间配对和采样预算，比较共同优化底座、仅 progressive、仅 opponent 与完整 PRD。消融使用当前方法定义，固定 schedule 与噪声构造的对应设置。
 4. **Progressive 参数分析。** 在当前随机 PRD 配置下，用 ASR 对照呈现 checkpoint 位置、数量和 drop budget 的效果；按原生网格说明各项预算。
 5. **Opponent 参数分析。** 在全部初始局部特征的统一注入位置与 feature RMS 定义下，围绕颜色方向和噪声强度准备 ASR 分析。
 6. **实验设置和过程记录。** 简洁记录四架构 checkpoint、drop 数量、噪声强度、样本集、权重、环境和评估流程。
-7. **结果说明与计算代价。** 根据写作需要准备 clean accuracy、重复 seed、逐样本统计、生成时间和显存记录，配合已有 ASR 主表呈现实验结果。关联空间配对／采样预算消融的原始记录，并补充固定 groups/views 的平移对照。
+7. **结果说明与计算代价。** 根据写作需要准备 clean accuracy、逐样本统计、生成时间和显存记录，配合已有 ASR 主表呈现实验结果。关联空间配对／采样预算消融的原始记录，并补充固定 groups/views 的平移对照。
 
 已有主表固定为论文的主实验。写作先推进方法与结果初稿，后续材料围绕动态发现、两项机制和 ASR 评价补充。
 

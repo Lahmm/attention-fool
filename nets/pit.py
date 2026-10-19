@@ -2,90 +2,29 @@ from __future__ import annotations
 
 import torch
 
-from .base import (
-    DEFAULT_PRETRAINED,
-    ProgressiveAdapter,
-    ProgressiveAttackState,
-    ProgressiveInputState,
-    conv2d_progressive_metadata,
-)
+from .base import ProgressiveAdapter, ProgressiveState
 
 
-DEFAULT_MODEL_NAME = "pit_b_224"
+class PiTAdapter(ProgressiveAdapter):
+    """Native hierarchical traversal shared by PiT-T and PiT-B."""
 
+    default_model_name = "pit_ti_224"
+    checkpoints = ("stage2_block1", "stage3_block2", "stage3_block3")
+    drop_ratios = (0.02081165, 0.03125, 0.09375)
+    opponent_noise_strength = 0.4
 
-class PiTB224Adapter(ProgressiveAdapter):
-    default_model_name = DEFAULT_MODEL_NAME
-
-    _PROGRESSIVE_LAYERS = (
-        "stage1_block3",
-        "stage2_block1",
-        "stage2_block2",
-        "stage2_block3",
-        "stage2_block4",
-        "stage2_block5",
-        "stage2_block6",
-        "stage3_block1",
-        "stage3_block2",
-        "stage3_block3",
-    )
-    _DEFAULT_PROGRESSIVE_LAYERS = (
-        "stage2_block1",
-        "stage3_block2",
-        "stage3_block3",
-    )
-    _DEFAULT_PROGRESSIVE_DROP_RATIOS = (
-        0.02081165,
-        0.03125,
-        0.09375,
-    )
-
-    def prepare_progressive_input(self, x: torch.Tensor) -> ProgressiveInputState:
+    def begin_progressive_forward(self, x):
         base = self.model
-        spatial = base.patch_embed(x)
-        spatial = base.pos_drop(spatial + base.pos_embed)
-        grid_size = (int(spatial.size(-2)), int(spatial.size(-1)))
-        cls_token = base.cls_token.expand(spatial.size(0), -1, -1)
-        state = ProgressiveInputState(
-            local_tokens=spatial.flatten(2).transpose(1, 2),
-            grid_size=grid_size,
-            context={"cls_token": cls_token},
-            **conv2d_progressive_metadata(base.patch_embed.conv),
+        spatial = base.pos_drop(base.patch_embed(x) + base.pos_embed)
+        state = ProgressiveState(
+            spatial.flatten(2).transpose(1, 2),
+            (int(spatial.size(-2)), int(spatial.size(-1))),
+            {"cls_token": base.cls_token.expand(spatial.size(0), -1, -1),
+             "stage_index": 0, "block_index": 0, "stage_prepared": False},
+            base.patch_embed.conv.weight,
         )
         state.validate()
         return state
-
-    def progressive_checkpoint_candidates(self) -> tuple[str, ...]:
-        return self._PROGRESSIVE_LAYERS
-
-    def default_progressive_checkpoints(self) -> tuple[str, ...]:
-        return self._DEFAULT_PROGRESSIVE_LAYERS
-
-    def default_progressive_drop_ratios(self) -> tuple[float, ...]:
-        return self._DEFAULT_PROGRESSIVE_DROP_RATIOS
-
-    def default_progressive_opponent_noise_strength(self) -> float:
-        return 0.4
-
-    def begin_progressive_forward(self, x: torch.Tensor) -> ProgressiveAttackState:
-        initial = self.prepare_progressive_input(x)
-        return ProgressiveAttackState(
-            initial.local_tokens,
-            initial.grid_size,
-            {
-                "cls_token": initial.context["cls_token"],
-                "stage_index": 0,
-                "block_index": 0,
-                "stage_prepared": False,
-            },
-        )
-
-    def replace_progressive_local_tokens(
-        self, state: ProgressiveAttackState, local_tokens: torch.Tensor
-    ) -> ProgressiveAttackState:
-        if local_tokens.shape != state.local_tokens.shape:
-            raise ValueError("replacement PiT progressive tokens do not match the state.")
-        return ProgressiveAttackState(local_tokens, state.grid_size, dict(state.context))
 
     @staticmethod
     def _parse_progressive_checkpoint(checkpoint_id: str) -> tuple[int, int]:
@@ -93,7 +32,7 @@ class PiTB224Adapter(ProgressiveAdapter):
         return int(stage_text.removeprefix("stage")) - 1, int(block_text.removeprefix("block"))
 
     @staticmethod
-    def _pit_spatial(state: ProgressiveAttackState) -> torch.Tensor:
+    def _pit_spatial(state: ProgressiveState) -> torch.Tensor:
         batch, _, channels = state.local_tokens.shape
         height, width = state.grid_size
         return state.local_tokens.transpose(1, 2).reshape(batch, channels, height, width)
@@ -120,9 +59,9 @@ class PiTB224Adapter(ProgressiveAdapter):
         return stage.norm(tokens), grid
 
     def advance_progressive_state(
-        self, state: ProgressiveAttackState, checkpoint_id: str
-    ) -> ProgressiveAttackState:
-        if checkpoint_id not in self._PROGRESSIVE_LAYERS:
+        self, state: ProgressiveState, checkpoint_id: str
+    ) -> ProgressiveState:
+        if checkpoint_id not in self.checkpoints:
             raise ValueError(f"unsupported PiT progressive checkpoint: {checkpoint_id!r}.")
         target_stage, target_block = self._parse_progressive_checkpoint(checkpoint_id)
         stage_index = int(state.context["stage_index"])
@@ -147,7 +86,7 @@ class PiTB224Adapter(ProgressiveAdapter):
             spatial, cls = self._split_pit_tokens(tokens, prefix_count, grid)
             block_index = end
             if stage_index == target_stage:
-                return ProgressiveAttackState(
+                return ProgressiveState(
                     spatial.flatten(2).transpose(1, 2),
                     grid,
                     {
@@ -162,15 +101,7 @@ class PiTB224Adapter(ProgressiveAdapter):
             prepared = False
         raise RuntimeError("PiT progressive checkpoint was not reached.")
 
-    def apply_progressive_mask(
-        self, state: ProgressiveAttackState, mask: torch.Tensor
-    ) -> ProgressiveAttackState:
-        if mask.shape != state.local_tokens.shape[:2] or mask.dtype != torch.bool:
-            raise ValueError("PiT progressive mask does not match local tokens.")
-        local = torch.where(mask.unsqueeze(-1), torch.zeros_like(state.local_tokens), state.local_tokens)
-        return ProgressiveAttackState(local, state.grid_size, dict(state.context))
-
-    def finish_progressive_forward(self, state: ProgressiveAttackState) -> torch.Tensor:
+    def finish_progressive_forward(self, state: ProgressiveState) -> torch.Tensor:
         spatial = self._pit_spatial(state)
         cls = state.context["cls_token"]
         stage_index = int(state.context["stage_index"])
@@ -191,12 +122,3 @@ class PiTB224Adapter(ProgressiveAdapter):
             block_index = 0
             prepared = False
         return self.model.forward_head(self.model.norm(cls))
-
-
-def build_pit_b_224_model(
-    num_classes: int,
-    model_name: str = DEFAULT_MODEL_NAME,
-    pretrained: bool = DEFAULT_PRETRAINED,
-    device=None,
-) -> PiTB224Adapter:
-    return PiTB224Adapter(model_name=model_name, num_classes=num_classes, pretrained=pretrained, device=device)

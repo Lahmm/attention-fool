@@ -1,34 +1,20 @@
-from __future__ import annotations
-
 from utils import DEVICE
 
-from .base import DEFAULT_PRETRAINED, ProgressiveAdapter
-from .cait import build_cait_s24_model
-from .pit import build_pit_b_224_model
-from .visformer import build_visformer_small_model
-from .vit import DEFAULT_MODEL_NAME, build_vit_model
+from .cait import CaiTAdapter
+from .pit import PiTAdapter
+from .vit import DEFAULT_MODEL_NAME, ViTAdapter
+
+SOURCE_ADAPTERS = {
+    "vit_base_patch16_224": ViTAdapter,
+    "cait_s24_224": CaiTAdapter,
+    "pit_ti_224": PiTAdapter,
+    "deit_base_distilled_patch16_224": ViTAdapter,
+    "pit_b_224": PiTAdapter,
+}
+WHITEBOX_MODEL_CHOICES = tuple(SOURCE_ADAPTERS)
 
 
-WHITEBOX_MODEL_CHOICES = (
-    "vit_base_patch16_224",
-    "deit_base_distilled_patch16_224",
-    "cait_s24_224",
-    "pit_b_224",
-    "visformer_small",
-)
-
-def build_whitebox_model(
-    num_classes: int,
-    model_name: str = DEFAULT_MODEL_NAME,
-    pretrained: bool = DEFAULT_PRETRAINED,
-    device=DEVICE,
-) -> ProgressiveAdapter:
-    if model_name in ("vit_base_patch16_224", "deit_base_distilled_patch16_224"):
-        return build_vit_model(num_classes=num_classes, model_name=model_name, pretrained=pretrained, device=device)
-    if model_name == "cait_s24_224":
-        return build_cait_s24_model(num_classes=num_classes, model_name=model_name, pretrained=pretrained, device=device)
-    if model_name == "pit_b_224":
-        return build_pit_b_224_model(num_classes=num_classes, model_name=model_name, pretrained=pretrained, device=device)
-    if model_name == "visformer_small":
-        return build_visformer_small_model(num_classes=num_classes, model_name=model_name, pretrained=pretrained, device=device)
-    raise ValueError(f"Unsupported whitebox model: {model_name!r}.")
+def build_whitebox_model(model_name=DEFAULT_MODEL_NAME, *, pretrained=True, device=DEVICE):
+    if model_name not in SOURCE_ADAPTERS:
+        raise ValueError(f"unsupported source model: {model_name!r}.")
+    return SOURCE_ADAPTERS[model_name](model_name, pretrained=pretrained, device=device)

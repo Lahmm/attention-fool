@@ -15,15 +15,13 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 
 from tqdm import tqdm
 
-from gradient_replay import GradientReplay
 from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, build_whitebox_model
 from progressive_attack import ProgressiveRouteDisruptionAttacker
-from utils import DEVICE, load_data, save_adversarial_images
+from utils import DEVICE, SEED, load_data, save_adversarial_images
 
 
 IMAGE_DIR = "data/clean_resized_images"
 ANNOTATIONS_PATH = "data/image_name_to_class_id_and_name.json"
-ATTACK_METHODS = ("progressive",)
 
 
 def parse_phase_shift(value: str) -> tuple[int, int]:
@@ -38,18 +36,6 @@ def parse_phase_shift_set(value: str) -> tuple[tuple[int, int], ...]:
     if not shifts:
         raise argparse.ArgumentTypeError("phase shift set cannot be empty")
     return shifts
-
-
-def parse_checkpoint_list(value: str) -> tuple[str | int, ...]:
-    checkpoints: list[str | int] = []
-    for item in value.split(","):
-        item = item.strip()
-        if not item:
-            continue
-        checkpoints.append(int(item) if item.isdigit() else item)
-    if not checkpoints:
-        raise argparse.ArgumentTypeError("checkpoint list cannot be empty")
-    return tuple(checkpoints)
 
 
 def parse_float_list(value: str) -> tuple[float, ...]:
@@ -92,13 +78,11 @@ def attack_all_samples(
     attacker,
     output_dir: Path,
     max_attacked_samples: int | None,
-    replay: GradientReplay | None = None,
 ) -> list[str]:
     total = len(dataloader.dataset)
     limit = total if max_attacked_samples is None else min(total, max_attacked_samples)
     progress = tqdm(total=limit, desc="Attacking samples")
     attacked = 0
-    saved_count = 0
     all_sample_ids: list[str] = []
 
     for images, labels, indices in dataloader:
@@ -116,50 +100,34 @@ def attack_all_samples(
         adversarial = attacker.attack_batch(
             images,
             labels,
-            replay=replay,
-            sample_ids=filenames if replay is not None else None,
+            sample_ids=filenames,
         )
-        saved = save_adversarial_images(
+        save_adversarial_images(
             images=adversarial,
             output_dir=str(output_dir),
-            prefix="adv",
-            start_index=saved_count,
             filenames=filenames,
         )
         attacked += images.size(0)
-        saved_count += len(saved)
         progress.update(images.size(0))
 
     progress.close()
-    print(f"Attacked {attacked} samples and saved {saved_count} images to {output_dir}")
+    print(f"Attacked {attacked} samples and saved {attacked} images to {output_dir}")
     return all_sample_ids
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Progressive Route Disruption attack")
-    parser.add_argument("--attack-method", choices=ATTACK_METHODS, default="progressive")
     parser.add_argument("--whitebox-model", choices=WHITEBOX_MODEL_CHOICES, default=DEFAULT_MODEL_NAME)
     parser.add_argument("--max-attacked-samples", type=int, default=1000)
     parser.add_argument("--epsilon", type=float, default=16.0 / 255.0)
     parser.add_argument("--step-size", type=float, default=None)
     parser.add_argument("--steps", type=int, default=10)
-    parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--mi", dest="mi", action="store_true")
-    parser.add_argument("--no-mi", dest="mi", action="store_false")
-    parser.set_defaults(mi=True)
-    parser.add_argument("--mi-decay", type=float, default=1.0)
     parser.add_argument("--input-diversity-groups", type=int, default=10)
     parser.add_argument(
         "--input-diversity-views-per-group", type=int, choices=(1, 2), default=2,
         help="1: original view only; 2: original and phase views (default).",
     )
     parser.add_argument("--input-diversity-phase-shift-set", type=parse_phase_shift_set, default=((4, 4), (8, 8), (12, 12)))
-    parser.add_argument(
-        "--checkpoints",
-        type=parse_checkpoint_list,
-        default=None,
-        help="Ordered adapter checkpoint IDs; defaults are architecture-specific.",
-    )
     parser.add_argument(
         "--drop-ratios",
         type=parse_float_list,
@@ -172,12 +140,6 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Opponent-channel noise strength; omitted values use the source adapter default.",
     )
-    parser.add_argument(
-        "--opponent-noise-grad",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Backpropagate through opponent noise feature-RMS matching (default: disabled).",
-    )
     parser.add_argument("--image-dir", default=IMAGE_DIR)
     parser.add_argument("--annotations-path", default=ANNOTATIONS_PATH)
     parser.add_argument("--batch-size", type=int, default=96)
@@ -188,32 +150,27 @@ def parse_args() -> argparse.Namespace:
 
 
 def main(args: argparse.Namespace) -> None:
-    if args.seed is not None:
-        import torch
+    import torch
 
-        torch.manual_seed(args.seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(args.seed)
+    torch.manual_seed(SEED)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(SEED)
     output_dir = validate_output_dir(args.output_dir)
-    dataloader, num_classes = load_data(
+    dataloader = load_data(
         image_dir_arg=args.image_dir,
         annotations_path_arg=args.annotations_path,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         prefetch_factor=args.prefetch_factor,
     )
-    model = build_whitebox_model(num_classes=num_classes, model_name=args.whitebox_model)
+    model = build_whitebox_model(model_name=args.whitebox_model)
     attacker = ProgressiveRouteDisruptionAttacker(
         model=model,
-        checkpoints=args.checkpoints,
         drop_ratios=args.drop_ratios,
         opponent_noise_strength=args.opponent_noise_strength,
-        opponent_noise_grad=args.opponent_noise_grad,
         epsilon=args.epsilon,
         step_size=args.step_size,
         steps=args.steps,
-        use_momentum=args.mi,
-        momentum_decay=args.mi_decay,
         input_diversity_groups=args.input_diversity_groups,
         input_diversity_views_per_group=args.input_diversity_views_per_group,
         input_diversity_phase_shift_set=args.input_diversity_phase_shift_set,
@@ -221,50 +178,14 @@ def main(args: argparse.Namespace) -> None:
     )
 
     clear_directory_contents(output_dir)
-    replay = GradientReplay(args.seed) if args.seed is not None else None
     sample_ids = attack_all_samples(
         dataloader,
         attacker,
         output_dir,
         args.max_attacked_samples,
-        replay=replay,
     )
-    if replay is not None:
-        (output_dir / "replay_manifest.json").write_text(
-            json.dumps(replay.manifest(sample_ids), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-    (output_dir / "gradient_diagnostics.json").write_text(
-        json.dumps(attacker.gradient_diagnostics_summary(), indent=2),
-        encoding="utf-8",
-    )
-
-    params = {
-        "attack_method": args.attack_method,
-        "whitebox_model": args.whitebox_model,
-        "max_attacked_samples": args.max_attacked_samples,
-        "epsilon": args.epsilon,
-        "step_size": args.step_size if args.step_size is not None else args.epsilon / args.steps,
-        "steps": args.steps,
-        "seed": args.seed,
-        "mi": args.mi,
-        "mi_decay": args.mi_decay,
-        "input_diversity_groups": args.input_diversity_groups,
-        "input_diversity_views_per_group": args.input_diversity_views_per_group,
-        "input_diversity_total_views": (
-            args.input_diversity_groups * args.input_diversity_views_per_group
-        ),
-        "input_diversity_phase_shift_set": (
-            [list(shift) for shift in args.input_diversity_phase_shift_set]
-            if args.input_diversity_views_per_group == 2 else []
-        ),
-        "checkpoints": list(attacker.progressive_checkpoints),
-        "drop_ratios": list(attacker.progressive_drop_ratios),
-        "opponent_noise_strength": attacker.opponent_noise_strength,
-        "feature_noise_type": "opponent_channel_rgb_projection",
-        "feature_noise_position": "initial_rgb_projection",
-    }
-    params.update(attacker.mainline_metadata())
+    params = attacker.parameters()
+    params["num_images"] = len(sample_ids)
     (output_dir / "attack_params.json").write_text(
         json.dumps(params, indent=2, ensure_ascii=False),
         encoding="utf-8",

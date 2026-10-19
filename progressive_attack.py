@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, replace
 
 import torch
 import torch.nn.functional as F
 
-from utils import DEVICE, IMAGENET_MEAN, IMAGENET_STD
+from utils import DEVICE, SEED, IMAGENET_MEAN, IMAGENET_STD
 
-if TYPE_CHECKING:
-    from gradient_replay import GradientReplay
+from randomness import AttackRandomness
 
 
 @dataclass(frozen=True)
@@ -42,13 +40,11 @@ class ProgressiveMaskSelection:
 class ProgressiveMaskSchedule:
     selections: tuple[ProgressiveMaskSelection, ...]
 
-    def validate(self, *, batch_size: int, token_count: int | None = None) -> None:
+    def validate(self, *, batch_size: int) -> None:
         if not self.selections:
             raise ValueError("a progressive schedule must contain selections.")
         for selection in self.selections:
             selection.validate(batch_size=batch_size)
-            if token_count is not None and selection.mask.size(1) != token_count:
-                raise ValueError("schedule token count does not match the requested count.")
 
     @property
     def checkpoints(self) -> tuple[str, ...]:
@@ -66,13 +62,6 @@ class ProgressiveMaskSchedule:
     def grid_sizes(self) -> tuple[tuple[int, int], ...]:
         return tuple(item.grid_size for item in self.selections)
 
-    @property
-    def grid_size(self) -> tuple[int, int]:
-        grids = self.grid_sizes
-        if any(grid != grids[0] for grid in grids[1:]):
-            raise ValueError("cross-scale schedules do not have one grid_size.")
-        return grids[0]
-
 
 class ProgressiveRouteDisruptionAttacker:
     """Randomly disrupt evolving token routes at sequential checkpoints."""
@@ -81,15 +70,11 @@ class ProgressiveRouteDisruptionAttacker:
         self,
         model,
         *,
-        checkpoints: tuple[str | int, ...] | None = None,
         drop_ratios: tuple[float, ...] | None = None,
         opponent_noise_strength: float | None = None,
-        opponent_noise_grad: bool = False,
         epsilon: float = 16.0 / 255.0,
         step_size: float | None = None,
         steps: int = 10,
-        use_momentum: bool = True,
-        momentum_decay: float = 1.0,
         input_diversity_groups: int = 10,
         input_diversity_views_per_group: int = 2,
         input_diversity_phase_shift_set: tuple[tuple[int, int], ...] = (
@@ -110,59 +95,24 @@ class ProgressiveRouteDisruptionAttacker:
         if input_diversity_views_per_group == 2 and not input_diversity_phase_shift_set:
             raise ValueError("phase shift set cannot be empty.")
         if opponent_noise_strength is None:
-            opponent_provider = getattr(
-                model, "default_progressive_opponent_noise_strength", None
-            )
-            opponent_noise_strength = (
-                opponent_provider() if callable(opponent_provider) else 0.2
-            )
+            opponent_noise_strength = model.opponent_noise_strength
         if opponent_noise_strength < 0:
             raise ValueError("opponent noise strength must be non-negative.")
-
-        candidates = tuple(model.progressive_checkpoint_candidates())
-        requested = (
-            tuple(model.default_progressive_checkpoints())
-            if checkpoints is None
-            else tuple(checkpoints)
-        )
-        canonical = tuple(self._canonical_checkpoint(model, value) for value in requested)
-        if drop_ratios is None:
-            ratio_provider = getattr(model, "default_progressive_drop_ratios", None)
-            if not callable(ratio_provider):
-                raise ValueError(
-                    "the model adapter must define default_progressive_drop_ratios()."
-                )
-            drop_ratios = ratio_provider()
-        ratios = tuple(float(value) for value in drop_ratios)
-        if not canonical:
-            raise ValueError("at least one progressive checkpoint is required.")
-        if len(canonical) != len(ratios):
-            raise ValueError(
-                "progressive checkpoint/drop-ratio count mismatch: "
-                f"{len(canonical)} checkpoints vs {len(ratios)} ratios."
-            )
-        if any(item not in candidates for item in canonical):
-            raise ValueError(
-                f"checkpoints {canonical} must belong to adapter candidates {candidates}."
-            )
-        positions = tuple(candidates.index(item) for item in canonical)
-        if positions != tuple(sorted(positions)) or len(set(positions)) != len(positions):
-            raise ValueError("progressive checkpoints must be strictly increasing.")
-        if any(ratio <= 0.0 or ratio > 0.5 for ratio in ratios):
-            raise ValueError("each progressive drop ratio must satisfy 0 < ratio <= 0.5.")
+        ratios = tuple(model.drop_ratios if drop_ratios is None else drop_ratios)
+        if len(ratios) != len(model.checkpoints):
+            raise ValueError("checkpoint/drop-ratio count mismatch.")
+        if any(ratio <= 0 or ratio > 0.5 for ratio in ratios):
+            raise ValueError("each drop ratio must satisfy 0 < ratio <= 0.5.")
 
         self.model = model
         self.model.eval()
         self.device = device if device is not None else DEVICE
-        self.progressive_checkpoints = canonical
-        self.progressive_drop_ratios = ratios
+        self.progressive_checkpoints = model.checkpoints
+        self.progressive_drop_ratios = tuple(float(value) for value in ratios)
         self.opponent_noise_strength = float(opponent_noise_strength)
-        self.opponent_noise_grad = bool(opponent_noise_grad)
         self.epsilon = float(epsilon)
         self.steps = int(steps)
         self.step_size = float(step_size) if step_size is not None else self.epsilon / self.steps
-        self.use_momentum = bool(use_momentum)
-        self.decay = float(momentum_decay)
         self.input_diversity_groups = int(input_diversity_groups)
         self.input_diversity_views_per_group = int(input_diversity_views_per_group)
         self.input_diversity_phase_shift_set = tuple(
@@ -174,26 +124,10 @@ class ProgressiveRouteDisruptionAttacker:
         model_std = getattr(model, "model_std", IMAGENET_STD)
         self.model_mean = torch.tensor(model_mean, device=self.device).view(1, 3, 1, 1)
         self.model_std = torch.tensor(model_std, device=self.device).view(1, 3, 1, 1)
-        self._gradient_replay: GradientReplay | None = None
+        self._random: AttackRandomness | None = None
         self._actual_forward_view_count = 0
         self._progressive_mask_counts: tuple[int, ...] = ()
         self._progressive_mask_grids: tuple[tuple[int, int], ...] = ()
-        self._progressive_schedule_count = 0
-        self._progressive_checkpoint_selection_count = 0
-        self._gradient_diagnostics: dict[str, list[float]] = {
-            "view_cosine_to_final": [],
-            "sign_agreement": [],
-            "effective_rank": [],
-            "mi_cumulative_cosine": [],
-        }
-
-    @staticmethod
-    def _canonical_checkpoint(model, value: str | int) -> str:
-        if isinstance(value, int):
-            if getattr(model, "model_name", "") != "vit_base_patch16_224":
-                raise ValueError("integer checkpoint shorthand is supported only for ViT.")
-            return f"block{value}"
-        return str(value)
 
     def _denormalize(self, images: torch.Tensor) -> torch.Tensor:
         return images * self.pixel_std + self.pixel_mean
@@ -205,8 +139,8 @@ class ProgressiveRouteDisruptionAttacker:
         return (images - self.pixel_mean) / self.pixel_std
 
     def _randn_like(self, tensor: torch.Tensor, event: str) -> torch.Tensor:
-        if self._gradient_replay is not None:
-            return self._gradient_replay.randn_like(tensor, event)
+        if self._random is not None:
+            return self._random.randn_like(tensor, event)
         return torch.randn_like(tensor)
 
     def _sample_random_mask(
@@ -221,10 +155,10 @@ class ProgressiveRouteDisruptionAttacker:
         drop_count = max(1, int(round(token_count * ratio)))
         mask = torch.zeros(batch_size, token_count, dtype=torch.bool, device=device)
         for batch_index in range(batch_size):
-            if self._gradient_replay is None:
+            if self._random is None:
                 order = torch.randperm(token_count, device=device)
             else:
-                order = self._gradient_replay.randperm(
+                order = self._random.randperm(
                     token_count,
                     f"progressive_random_drop_{checkpoint}",
                     batch_index,
@@ -258,8 +192,6 @@ class ProgressiveRouteDisruptionAttacker:
         schedule.validate(batch_size=pixels.size(0))
         self._progressive_mask_counts = schedule.counts
         self._progressive_mask_grids = schedule.grid_sizes
-        self._progressive_schedule_count += 1
-        self._progressive_checkpoint_selection_count += len(selections)
         return schedule
 
     @staticmethod
@@ -301,19 +233,17 @@ class ProgressiveRouteDisruptionAttacker:
     def _pick_input_diversity_phases(
         self, batch_size: int, device: torch.device
     ) -> list[tuple[int, int]]:
-        if self._gradient_replay is None:
+        if self._random is None:
             index = int(torch.randint(len(self.input_diversity_phase_shift_set), (1,)).item())
             return [self.input_diversity_phase_shift_set[index]] * batch_size
         phases = [
             self.input_diversity_phase_shift_set[
-                self._gradient_replay.randint(
+                self._random.randint(
                     len(self.input_diversity_phase_shift_set), "phase", index, device=device
                 )
             ]
             for index in range(batch_size)
         ]
-        for index, phase in enumerate(phases):
-            self._gradient_replay.record_phase(index, phase)
         return phases
 
     def _phase_mask_schedule(
@@ -343,7 +273,7 @@ class ProgressiveRouteDisruptionAttacker:
         state.validate()
         local = state.local_tokens
         weight = state.rgb_projection_weight
-        kernel_h, kernel_w = state.projection_kernel
+        kernel_h, kernel_w = weight.shape[-2:]
         batch, count, dimension = local.shape
         coefficients = self._randn_like(
             torch.empty(
@@ -366,11 +296,7 @@ class ProgressiveRouteDisruptionAttacker:
         if projection.size(1) != pixel_noise.size(2):
             raise ValueError("opponent noise and RGB projection dimensions do not match.")
         feature_noise = pixel_noise.matmul(projection.t())
-        if self.opponent_noise_grad:
-            rms_source = local
-        else:
-            rms_source = local.detach()
-        token_rms = rms_source.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
+        token_rms = local.detach().square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
         noise_rms = feature_noise.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
         return self.opponent_noise_strength * feature_noise * (token_rms / noise_rms)
 
@@ -378,16 +304,13 @@ class ProgressiveRouteDisruptionAttacker:
         self, pixels: torch.Tensor, labels: torch.Tensor, schedule: ProgressiveMaskSchedule
     ) -> torch.Tensor:
         normalized = self._normalize(pixels)
-        initial = self.model.prepare_progressive_input(normalized)
-        initial.validate()
         state = self.model.begin_progressive_forward(normalized)
-        if state.local_tokens.shape != initial.local_tokens.shape:
-            raise ValueError("progressive and RGB-projection initial states disagree.")
+        state.validate()
         local = state.local_tokens
         if self.opponent_noise_strength > 0:
             # Noise reaches every initial local position before checkpoint drops.
-            local = local + self._strict_opponent_feature_noise(initial)
-        state = self.model.replace_progressive_local_tokens(state, local)
+            local = local + self._strict_opponent_feature_noise(state)
+        state = replace(state, local_tokens=local)
         for item in schedule.selections:
             state = self.model.advance_progressive_state(state, item.checkpoint)
             if state.grid_size != item.grid_size:
@@ -402,16 +325,16 @@ class ProgressiveRouteDisruptionAttacker:
         self, pixels: torch.Tensor, labels: torch.Tensor
     ) -> Iterator[torch.Tensor]:
         for group_index in range(self.input_diversity_groups):
-            if self._gradient_replay is not None:
-                self._gradient_replay.set_context(group=group_index, view=-1)
+            if self._random is not None:
+                self._random.set_context(group=group_index, view=-1)
             schedule = self._build_mask_schedule(pixels.detach())
             phases = (
                 self._pick_input_diversity_phases(pixels.size(0), pixels.device)
                 if self.input_diversity_views_per_group == 2
                 else None
             )
-            if self._gradient_replay is not None:
-                self._gradient_replay.set_context(view=0)
+            if self._random is not None:
+                self._random.set_context(view=0)
             self._actual_forward_view_count += 1
             yield self._forward_with_schedule(pixels, labels, schedule)
             if self.input_diversity_views_per_group == 1:
@@ -420,8 +343,8 @@ class ProgressiveRouteDisruptionAttacker:
                 schedule, phases, height=pixels.size(-2), width=pixels.size(-1)
             )
             shifted_pixels = self._apply_samplewise_phase_shifts(pixels, phases)
-            if self._gradient_replay is not None:
-                self._gradient_replay.set_context(view=1)
+            if self._random is not None:
+                self._random.set_context(view=1)
             self._actual_forward_view_count += 1
             yield self._forward_with_schedule(shifted_pixels, labels, shifted_schedule)
 
@@ -431,45 +354,9 @@ class ProgressiveRouteDisruptionAttacker:
             raise ValueError("view gradients must have shape [V,B,C,H,W] with V > 0.")
         return view_gradients.mean(dim=0)
 
-    def _record_gradient_diagnostics(
-        self, view_gradients: torch.Tensor, final_gradient: torch.Tensor
-    ) -> None:
-        with torch.no_grad():
-            views = view_gradients.detach().flatten(2).transpose(0, 1)
-            final = final_gradient.detach().flatten(1)
-            cosines = F.cosine_similarity(views, final.unsqueeze(1), dim=-1)
-            final_sign = final.sign()
-            valid = final_sign.ne(0).unsqueeze(1)
-            agreement = (views.sign().eq(final_sign.unsqueeze(1)) & valid).float()
-            denominator = valid.expand_as(agreement).sum().clamp_min(1.0)
-            normalized = views / views.norm(dim=-1, keepdim=True).clamp_min(1e-12)
-            eigenvalues = torch.linalg.eigvalsh(
-                torch.bmm(normalized, normalized.transpose(1, 2))
-            ).clamp_min(0.0)
-            probabilities = eigenvalues / eigenvalues.sum(dim=-1, keepdim=True).clamp_min(1e-12)
-            effective_rank = torch.exp(
-                -(probabilities * probabilities.clamp_min(1e-12).log()).sum(dim=-1)
-            )
-            self._gradient_diagnostics["view_cosine_to_final"].append(float(cosines.mean().cpu()))
-            self._gradient_diagnostics["sign_agreement"].append(
-                float(agreement.sum().cpu() / denominator.cpu())
-            )
-            self._gradient_diagnostics["effective_rank"].append(
-                float(effective_rank.mean().cpu())
-            )
-
-    def gradient_diagnostics_summary(self) -> dict[str, float | int]:
-        summary: dict[str, float | int] = {
-            "num_gradient_batches": len(self._gradient_diagnostics["effective_rank"])
-        }
-        for name, values in self._gradient_diagnostics.items():
-            if values:
-                summary[name] = sum(values) / len(values)
-        return summary
-
     def _attack_gradients(
         self, pixels: torch.Tensor, labels: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         gradients = [
             torch.autograd.grad(loss, pixels, retain_graph=False)[0]
             for loss in self._iter_attack_losses(pixels, labels)
@@ -477,9 +364,7 @@ class ProgressiveRouteDisruptionAttacker:
         if not gradients:
             raise RuntimeError("no progressive losses were generated.")
         views = torch.stack(gradients, dim=0)
-        raw_mean = self._aggregate_gradients(views)
-        self._record_gradient_diagnostics(views, raw_mean)
-        return views, raw_mean
+        return self._aggregate_gradients(views)
 
     def _check_view_count(self) -> None:
         expected = self.input_diversity_groups * self.input_diversity_views_per_group
@@ -488,46 +373,10 @@ class ProgressiveRouteDisruptionAttacker:
                 f"view count mismatch: {self._actual_forward_view_count} != {expected}."
             )
 
-    def probe_attack_gradients(
-        self,
-        pixels: torch.Tensor,
-        labels: torch.Tensor,
-        *,
-        replay: GradientReplay | None = None,
-        sample_ids: list[str] | None = None,
-        step_index: int = 0,
-    ) -> dict[str, torch.Tensor]:
-        if replay is not None:
-            if sample_ids is None or len(sample_ids) != pixels.size(0):
-                raise ValueError("sample_ids must match pixels when replay is enabled.")
-            replay.begin_batch(sample_ids)
-            replay.set_context(step=step_index, group=-1, view=-1)
-        self._gradient_replay = replay
-        self._actual_forward_view_count = 0
-        probe = pixels.to(self.device).detach().requires_grad_(True)
-        labels = labels.to(self.device)
-        try:
-            views, raw_mean = self._attack_gradients(probe, labels)
-            self._check_view_count()
-            return {
-                "view_gradients": views.detach(),
-                "raw_mean": raw_mean.detach(),
-            }
-        finally:
-            self._gradient_replay = None
-
-    def attack_batch(
-        self,
-        images: torch.Tensor,
-        labels: torch.Tensor,
-        replay: GradientReplay | None = None,
-        sample_ids: list[str] | None = None,
-    ) -> torch.Tensor:
-        if replay is not None:
-            if sample_ids is None or len(sample_ids) != images.size(0):
-                raise ValueError("sample_ids must match the batch when replay is enabled.")
-            replay.begin_batch(sample_ids)
-        self._gradient_replay = replay
+    def attack_batch(self, images, labels, *, sample_ids):
+        if len(sample_ids) != images.size(0):
+            raise ValueError("sample_ids must match the image batch.")
+        self._random = AttackRandomness(sample_ids)
         images = images.to(self.device)
         labels = labels.to(self.device)
         clean = self._denormalize(images).detach()
@@ -535,64 +384,42 @@ class ProgressiveRouteDisruptionAttacker:
         momentum = torch.zeros_like(adversarial)
         try:
             for step_index in range(self.steps):
-                if replay is not None:
-                    replay.set_context(step=step_index, group=-1, view=-1)
+                self._random.set_context(step=step_index, group=-1, view=-1)
                 self._actual_forward_view_count = 0
-                gradient_pixels = adversarial.detach().requires_grad_(True)
-                _, gradient = self._attack_gradients(gradient_pixels, labels)
+                pixels = adversarial.detach().requires_grad_(True)
+                gradient = self._attack_gradients(pixels, labels)
                 self._check_view_count()
-                if self.use_momentum:
-                    momentum = self.decay * momentum + gradient
-                    update = momentum
-                else:
-                    update = gradient
-                with torch.no_grad():
-                    self._gradient_diagnostics["mi_cumulative_cosine"].append(
-                        float(F.cosine_similarity(momentum, gradient, dim=1).mean().cpu())
-                        if self.use_momentum
-                        else 1.0
-                    )
-                adversarial = adversarial + self.step_size * update.sign()
+                momentum = momentum + gradient
+                adversarial = adversarial + self.step_size * momentum.sign()
                 delta = torch.clamp(adversarial - clean, -self.epsilon, self.epsilon)
-                adversarial = torch.clamp(clean + delta, 0.0, 1.0).detach()
+                adversarial = torch.clamp(clean + delta, 0, 1).detach()
             return self._normalize_output(adversarial)
         finally:
-            self._gradient_replay = None
+            self._random = None
 
-    def mainline_metadata(self) -> dict[str, object]:
+    def parameters(self):
         return {
             "attack_method": "progressive_route_disruption",
-            "whitebox_model": getattr(self.model, "model_name", "unknown"),
-            "drop_map_policy": "uniform_random_all_local_tokens",
-            "progressive_checkpoints": list(self.progressive_checkpoints),
-            "progressive_drop_ratios": list(self.progressive_drop_ratios),
-            "progressive_drop_counts": list(self._progressive_mask_counts),
-            "progressive_grids": [list(grid) for grid in self._progressive_mask_grids],
-            "progressive_repeated_positions": True,
-            "token_intervention": "local_patch_tokens_hard_zero_after_checkpoint",
-            "mask_schedule_policy": "current_attack_iterate_per_step_group",
-            "mask_schedule_count_per_image": self.steps * self.input_diversity_groups,
-            "checkpoint_mask_selection_count_per_image": (
-                self.steps * self.input_diversity_groups * len(self.progressive_checkpoints)
-            ),
-            "mask_pair_sharing": (
-                "same_schedule_with_phase_transformed_masks"
-                if self.input_diversity_views_per_group == 2 else "not_applicable"
-            ),
-            "phase_mask_transform": (
-                "image_reflect_shift_then_native_grid_occupancy_topk"
-                if self.input_diversity_views_per_group == 2 else "disabled"
-            ),
-            "opponent_noise": (
-                "initial_rgb_projection_all_local_tokens"
-                if self.opponent_noise_strength > 0
-                else "disabled"
-            ),
+            "seed": SEED,
+            "whitebox_model": self.model.model_name,
+            "epsilon": self.epsilon,
+            "step_size": self.step_size,
+            "steps": self.steps,
+            "momentum_decay": 1.0,
+            "checkpoints": list(self.progressive_checkpoints),
+            "drop_ratios": list(self.progressive_drop_ratios),
+            "drop_counts": list(self._progressive_mask_counts),
+            "grids": [list(grid) for grid in self._progressive_mask_grids],
             "opponent_noise_strength": self.opponent_noise_strength,
-            "opponent_noise_grad": self.opponent_noise_grad,
-            "feature_noise_type": "opponent_channel_rgb_projection",
-            "feature_noise_cls": False,
-            "asr_definition": "1 - adversarial accuracy over all evaluated samples",
+            "input_diversity_groups": self.input_diversity_groups,
+            "input_diversity_views_per_group": self.input_diversity_views_per_group,
+            "input_diversity_phase_shift_set": (
+                [list(shift) for shift in self.input_diversity_phase_shift_set]
+                if self.input_diversity_views_per_group == 2 else []
+            ),
+            "input_diversity_total_views": self.input_diversity_groups * self.input_diversity_views_per_group,
+            "mask_schedule_count_per_image": self.steps * self.input_diversity_groups,
+            "checkpoint_mask_selection_count_per_image": self.steps * self.input_diversity_groups * len(self.progressive_checkpoints),
             "model_mean": self.model_mean.flatten().tolist(),
             "model_std": self.model_std.flatten().tolist(),
         }

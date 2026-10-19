@@ -25,28 +25,33 @@ current adversarial pixels
 
 ## 当前配置
 
+论文当前四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled；PiT-B 额外保留源支持。Visformer 仅作为评估目标和历史结果中的模型保留。
+
 | Source | Checkpoints | Native grids | Drop counts | Opponent strength |
 | --- | --- | --- | --- | ---: |
 | ViT-B/16 | `block3,block10` | 14×14, 14×14 | 10, 10 | 0.2 |
 | CaiT-S24 | `block17,block23` | 14×14, 14×14 | 2, 28 | 0.2 |
-| PiT-B | `stage2_block1,stage3_block2,stage3_block3` | 16×16, 8×8, 8×8 | 5, 2, 6 | 0.4 |
-| Visformer-S | `stage2_block1,stage3_block1` | 14×14, 7×7 | 41, 10 | 0.4 |
+| PiT-T | `stage2_block1,stage3_block2,stage3_block3` | 14×14, 7×7, 7×7 | 4, 2, 5 | 0.4 |
+| DeiT-B distilled | `block3,block10` | 14×14, 14×14 | 10, 10 | 0.2 |
+| PiT-B（额外保留） | `stage2_block1,stage3_block2,stage3_block3` | 16×16, 8×8, 8×8 | 5, 2, 6 | 0.4 |
 
-ViT-B/16 的唯一当前执行示例：
+PiT-T 与 PiT-B 共享 drop ratios，但网格不同，上表数量按实际 timm 网格计算。DeiT-B distilled 的 CLS 和 distillation token 均不加噪声、不清零，输出使用模型原生双 head。
+
+所有新执行统一使用 seed **42**，不可通过命令行改成其他值。checkpoint 由源适配器固定；保留 drop ratios、噪声强度、步数、步长和增强组数作为方法参数。
 
 ```bash
-python main.py \
-  --attack-method progressive \
-  --whitebox-model vit_base_patch16_224 \
-  --checkpoints block3,block10 \
-  --drop-ratios 0.051020408163,0.051020408163
+python main.py --whitebox-model vit_base_patch16_224 --output-dir outputs/attack/prd_vit
+python main.py --whitebox-model pit_ti_224 --output-dir outputs/attack/prd_pit_t
+python main.py --whitebox-model deit_base_distilled_patch16_224 --output-dir outputs/attack/prd_deit_b
 ```
 
-`main.py` 只调度 `progressive_attack.py` 中的 `ProgressiveRouteDisruptionAttacker`。四个 architecture adapter 只负责初始 RGB projection 元数据、checkpoint traversal、local-token mask application 和原生 forward completion。
+`--input-diversity-views-per-group 1` 使用原始视图，`2` 使用原始／平移配对（默认）；`--input-diversity-groups` 控制每步组数，每步总视图不超过 20。初始 opponent noise 的特征 RMS 和投影权重固定停止梯度。像素梯度平均后直接进行系数为 1 的动量累积与投影更新。
+
+`main.py` 保存对抗 PNG 与 `attack_params.json`；`randomness.py` 只负责按样本与攻击上下文生成随机数，不输出梯度诊断或 replay manifest。现存实验运行脚本已移除，使用上述入口执行方法。
 
 ## 1000-image transfer results
 
-主实验于 2026-10-12 完成，实际实现为 `bf092246`。
+以下历史主实验于 2026-10-12 完成，实际实现为 `bf092246`，源模型为 ViT-B/16、CaiT-S24、PiT-B、Visformer-S。结果不代表新四源或 seed 42 的重测。
 
 本地归档参数已于 2026-10-14 精简为保留的 PRD 内容；历史 ASR 与实现提交保持原记录，尚未用当前代码重新测量。
 
@@ -68,21 +73,22 @@ Strict black-box 指标排除与 source 架构相同的 target。56 个 source-t
 
 异地写作所需的当前主实验参数、原始记录和服务器材料位置见 [写作交接与文件清单](experiments/server_handoff_inventory.md)。
 
-论文以 ASR 呈现迁移效果。梯度诊断保留为实验过程中的内部分析工具。写作结构、图表计划和表达约定见 [CVPR 2027 写作蓝图](experiments/cvpr2027_writing_blueprint.md)。
+论文以 ASR 呈现迁移效果。写作结构、图表计划和表达约定见 [CVPR 2027 写作蓝图](experiments/cvpr2027_writing_blueprint.md)。
 
-## 运行与验证
+## 评估与验证
 
-默认图像位于 `data/clean_resized_images`，标签为 `data/image_name_to_class_id_and_name.json`，模型从 `data/huggingface` 离线缓存读取。
+图像位于 `data/clean_resized_images`，标签为 `data/image_name_to_class_id_and_name.json`，源与 Transformer 目标从 `data/huggingface` 离线缓存读取。
 
 ```bash
-/root/miniconda3/envs/att-atk/bin/python transfer_eval.py \
-  --image-dir outputs/attack/progressive_route_disruption \
-  --prefix adv_
-
-/root/miniconda3/envs/att-atk/bin/python -m unittest discover -s tests
+python transfer_eval.py --image-dir outputs/attack/prd_vit
+python transfer_eval.py --image-dir outputs/attack/prd_vit --protocol fpr --no-tf32
+python -m unittest discover -s tests
+RUN_REAL_PRD_ADAPTERS=1 python -m unittest tests.test_progressive_adapters
 ```
 
-安装依赖：
+评估保留 project 的 14 目标和 FPR 的 13 目标协议，使用各自模型加载和预处理；目标集的选择独立于源支持。结果默认写入图像目录的 `transfer.csv` 与 `transfer.json`，可用 `--predictions-output` 保存逐样本预测。ASR 使用全部输入样本；严格黑盒排除与源模型完全相同的目标。
+
+权重准备工具 `experiments/download_fpr_models.py` 保留，负责缓存 FPR 目标和额外的 PiT-T／DeiT-B distilled 源权重，不执行攻击或评估。
 
 ```bash
 pip install -r requirements.txt

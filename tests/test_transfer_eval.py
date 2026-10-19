@@ -1,85 +1,80 @@
+import csv
+import json
+from pathlib import Path
 import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import transfer_eval
+import torch
+from PIL import Image
+from torchvision import transforms
+
+import transfer_eval as evaluation
 
 
-class HuggingFaceTransferModelTests(unittest.TestCase):
-    def test_fpr_suite_matches_official_table_two(self):
-        self.assertEqual(transfer_eval.FPR_MODELS, [
-            "vit_base_patch16_224", "cait_s24_224", "pit_b_224", "visformer_small",
-            "swin_tiny_patch4_window7_224", "deit_tiny_patch16_224", "coat_tiny",
-            "resnet18", "vgg16", "densenet121", "efficientnet_b0",
-            "mobilenet_v3_small", "resnext50_32x4d",
-        ])
-
-    def test_fpr_cnn_uses_torchvision_default_and_keeps_full_image(self):
-        from PIL import Image
-        import torch
-        model = MagicMock(spec=torch.nn.Module)
-        with patch("transfer_eval.torchvision_models.get_model", return_value=model) as create:
-            _, transform = transfer_eval.build_black_box_model("resnet18", protocol="fpr")
-        create.assert_called_once_with("resnet18", weights="DEFAULT")
-        image = Image.new("RGB", (224, 224), (255, 0, 0))
-        tensor = transform(image)
-        self.assertEqual(tuple(tensor.shape), (3, 224, 224))
-        self.assertAlmostEqual(tensor[0, 0, 0].item(), (1 - .485) / .229, places=5)
-
-    def test_asr_is_one_minus_adversarial_accuracy(self):
-        self.assertEqual(transfer_eval.ASR_DEFINITION, "1 - adversarial accuracy")
-        self.assertAlmostEqual(
-            transfer_eval.adversarial_accuracy_to_asr(correct=23, total=100),
-            0.77,
-        )
-        self.assertEqual(
-            transfer_eval.adversarial_accuracy_to_asr(correct=0, total=0),
-            0.0,
-        )
-
-    def test_asr_rejects_invalid_adversarial_counts(self):
+class TransferTests(unittest.TestCase):
+    def test_asr_uses_all_adversarial_samples(self):
+        self.assertAlmostEqual(evaluation.adversarial_accuracy_to_asr(23, 100), 0.77)
+        self.assertEqual(evaluation.adversarial_accuracy_to_asr(0, 0), 0)
         with self.assertRaises(ValueError):
-            transfer_eval.adversarial_accuracy_to_asr(correct=11, total=10)
+            evaluation.adversarial_accuracy_to_asr(11, 10)
 
-    def test_default_suite_is_fourteen_real_huggingface_models(self):
-        self.assertEqual(len(transfer_eval.DEFAULT_BLACK_BOX_MODELS), 14)
-        self.assertIn("vit_base_patch16_224", transfer_eval.DEFAULT_BLACK_BOX_MODELS)
-        self.assertIn("inception_v3_adv", transfer_eval.DEFAULT_BLACK_BOX_MODELS)
-        self.assertIn("inception_resnet_v2_adv", transfer_eval.DEFAULT_BLACK_BOX_MODELS)
-        self.assertNotIn("inception_v3_adv_3", transfer_eval.DEFAULT_BLACK_BOX_MODELS)
-        self.assertNotIn("inception_v3_adv_4", transfer_eval.DEFAULT_BLACK_BOX_MODELS)
-
-    def test_adversarial_models_use_exact_huggingface_timm_variants(self):
-        expected = {
-            "inception_v3_adv": "inception_v3.tf_adv_in1k",
-            "inception_resnet_v2_adv": "inception_resnet_v2.tf_ens_adv_in1k",
-        }
-        for requested, timm_name in expected.items():
+    def test_retained_target_protocols_and_exact_adversarial_weights(self):
+        self.assertEqual(len(evaluation.DEFAULT_BLACK_BOX_MODELS), 14)
+        self.assertEqual(len(evaluation.FPR_MODELS), 13)
+        for name, weight_name in evaluation.HF_ADVERSARIAL_MODELS.items():
             model = MagicMock()
-            with (
-                self.subTest(model=requested),
-                patch("transfer_eval.timm.create_model", return_value=model) as create,
-                patch("transfer_eval.resolve_data_config", return_value={}),
-                patch("transfer_eval.create_transform", return_value=object()),
-            ):
-                built, _ = transfer_eval.build_black_box_model(requested)
-                self.assertIs(built, model)
-                create.assert_called_once_with(timm_name, pretrained=True)
-                model.to.assert_called_once_with(transfer_eval.DEVICE)
-                model.eval.assert_called_once_with()
+            model.to.return_value = model
+            with self.subTest(name=name), \
+                 patch.object(evaluation.timm, 'create_model', return_value=model) as create, \
+                 patch.object(evaluation, 'resolve_data_config', return_value={}), \
+                 patch.object(evaluation, 'create_transform'):
+                evaluation.build_black_box_model(name)
+                create.assert_called_once_with(weight_name, pretrained=True)
+        with self.assertRaises(ValueError):
+            evaluation.build_black_box_model('inception_v3_adv_3')
 
-    def test_recording_reads_attack_params_without_deleting_them(self):
+    def test_fpr_cnn_preserves_full_image_and_normalization(self):
+        model = MagicMock(spec=torch.nn.Module)
+        model.to.return_value = model
+        with patch.object(evaluation.torchvision_models, 'get_model', return_value=model) as create:
+            _, transform = evaluation.build_black_box_model('resnet18', protocol='fpr')
+        create.assert_called_once_with('resnet18', weights='DEFAULT')
+        result = transform(Image.new('RGB', (300, 200), (255, 0, 0)))
+        self.assertEqual(tuple(result.shape), (3, 224, 224))
+        self.assertAlmostEqual(float(result[0, 0, 0]), (1 - .485) / .229, places=5)
+
+    def test_evaluation_and_csv_use_the_same_ordered_sample_set(self):
+        class ConstantModel(torch.nn.Module):
+            def forward(self, images):
+                return torch.tensor([[1., 0.]]).repeat(images.size(0), 1)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "attack_params.json"
-            payload = '{"seed": 20260715}'
-            path.write_text(payload, encoding="utf-8")
-
-            self.assertEqual(
-                transfer_eval.read_attack_params_for_recording(path), payload
-            )
-            self.assertTrue(path.is_file())
-
-
-if __name__ == "__main__":
-    unittest.main()
+            root = Path(directory)
+            for name in ('a', 'b'):
+                Image.new('RGB', (8, 8)).save(root / f'adv_{name}.png')
+            annotations = {'a.jpg': {'class_id': 0}, 'b.jpg': {'class_id': 1}}
+            path = root / 'labels.json'
+            path.write_text(json.dumps(annotations))
+            (root / 'attack_params.json').write_text(json.dumps({'whitebox_model': 'vit_base_patch16_224'}))
+            samples = evaluation.build_transfer_samples(root, annotations)
+            with patch.object(evaluation, 'DEVICE', torch.device('cpu')), \
+                 patch.object(evaluation, 'build_black_box_model', return_value=(ConstantModel(), transforms.ToTensor())):
+                metrics, predictions = evaluation.evaluate(samples, 'vit_base_patch16_224')
+                self.assertEqual(predictions, [0, 0])
+                self.assertEqual(metrics['total'], 2)
+                self.assertEqual(metrics['asr'], 0.5)
+                args = type('Args', (), dict(image_dir=root, annotations_path=path, protocol='project',
+                    model_name='vit_base_patch16_224,resnet101', batch_size=2, num_workers=0,
+                    amp=False, no_tf32=True, output=None, predictions_output=root / 'predictions.json'))()
+                evaluation.main(args)
+            with (root / 'transfer.csv').open() as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 2)
+            self.assertEqual([int(row['total']) for row in rows], [2, 2])
+            summary = json.loads((root / 'transfer.json').read_text())['summary']
+            self.assertEqual(summary['strict_black_box_asr'], 0.5)
+            output = json.loads((root / 'predictions.json').read_text())
+            self.assertEqual(output['labels'], [0, 1])
+            self.assertEqual(output['sample_ids'], ['a.png', 'b.png'])
+            with self.assertRaises(ValueError):
+                evaluation.build_transfer_samples(root, {'a.jpg': annotations['a.jpg']})

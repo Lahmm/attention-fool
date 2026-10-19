@@ -4,6 +4,8 @@
 
 本地归档参数已于 2026-10-14 精简为保留的 PRD 内容；历史 ASR 与实现提交保持原记录，尚未用当前代码重新测量。
 
+当前论文源改为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled，额外保留 PiT-B；新执行固定 seed 42。下列主实验数值仍属于原四源历史记录。
+
 当前执行顺序见 [PRD 方法记录](prd_method_contract.md)。
 
 本文的中心贡献是 **Progressive Route Disruption（PRD）**：一种面向跨模型迁移的攻击方法。主线聚焦完整方法的设计与迁移效果，核心机制只有两个：沿模型深度的 checkpoint-wise progressive random token drop，以及施加在全部初始局部特征上的 RGB opponent-channel noise。
@@ -23,12 +25,7 @@
 
 PRD 默认使用 10 个迭代 step、每步 10 个 augmentation group、每组 2 个视图。一个 step/group 构造一条新 schedule，因此每张图像有 100 条随机 schedule；ViT 的两个 checkpoint 对应 200 次 mask selection。不同 checkpoint 独立采样，允许重复选中同一空间位置。相位视图共享原始 schedule 的空间变换结果，而非另抽一套 mask。
 
-| 源模型 | 默认 checkpoint | 原生 token 网格 | 每个 checkpoint 的 drop 数 | Opponent strength |
-| --- | --- | --- | --- | ---: |
-| ViT-B/16 | `block3,block10` | 14×14、14×14 | 10、10 | 0.2 |
-| CaiT-S24 | `block17,block23` | 14×14、14×14 | 2、28 | 0.2 |
-| PiT-B | `stage2_block1,stage3_block2,stage3_block3` | 16×16、8×8、8×8 | 5、2、6 | 0.4 |
-| Visformer-S | `stage2_block1,stage3_block1` | 14×14、7×7 | 41、10 | 0.4 |
+当前各源的 checkpoint、实际网格和 drop 数见 [方法契约](prd_method_contract.md)。PiT-T 与 PiT-B 共用比例、按原生网格得到不同数量；DeiT-B distilled 保留两个 prefix。每组视图数仍支持 1/2 消融。
 
 相位配对、20-view 梯度平均、动量和投影更新属于攻击的实现流程；论文贡献陈述保持在上述两项核心机制上。
 

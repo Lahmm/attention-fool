@@ -1,3 +1,6 @@
+from contextlib import redirect_stderr
+from io import StringIO
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -7,80 +10,54 @@ from unittest.mock import patch
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from main import ATTACK_METHODS, attack_all_samples, parse_args
+import main
+from tests.test_progressive_attack import make_model
+from utils import SEED
 
 
 class IndexedDataset(Dataset):
-    def __init__(self):
-        self.samples = [{"image_name": f"image_{index}.png"} for index in range(6)]
+    samples = [{'image_name': f'image_{i}.png'} for i in range(4)]
 
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, index):
-        return torch.zeros(3, 2, 2), 0, index
-
-
-class RecordingAttacker:
-    def __init__(self):
-        self.ids = []
-
-    def attack_batch(self, images, _labels, replay=None, sample_ids=None):
-        self.ids.extend(sample_ids or [])
-        return images
+        return torch.zeros(3, 28, 28), 1, index
 
 
 class MainTests(unittest.TestCase):
-    def test_progressive_is_the_only_attack_method(self):
-        self.assertEqual(ATTACK_METHODS, ("progressive",))
+    def test_cli_preserves_view_count_ablation(self):
+        for views in (1, 2):
+            with patch.object(sys, 'argv', ['main.py', '--input-diversity-views-per-group', str(views)]):
+                self.assertEqual(main.parse_args().input_diversity_views_per_group, views)
+        self.assertEqual(SEED, 42)
 
-    def test_cli_defaults_match_progressive_configuration(self):
-        old_argv = sys.argv
-        sys.argv = ["main.py"]
-        try:
-            args = parse_args()
-        finally:
-            sys.argv = old_argv
+    def test_removed_parameters_are_rejected(self):
+        for option in ('--seed', '--attack-method', '--mi', '--no-mi', '--mi-decay',
+                       '--opponent-noise-grad', '--checkpoints', '--gaussian-alpha'):
+            with self.subTest(option=option), redirect_stderr(StringIO()), \
+                 patch.object(sys, 'argv', ['main.py', option]), self.assertRaises(SystemExit):
+                main.parse_args()
 
-        self.assertEqual(args.attack_method, "progressive")
-        self.assertEqual(args.input_diversity_views_per_group, 2)
-        self.assertIsNone(args.checkpoints)
-        self.assertIsNone(args.drop_ratios)
-        self.assertFalse(args.opponent_noise_grad)
+    def test_main_records_fixed_seed_and_saves_exact_sample_limit(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(sys, 'argv', ['main.py', '--steps', '1', '--input-diversity-groups', '1',
+                                      '--input-diversity-views-per-group', '1', '--max-attacked-samples', '2']):
+            output = Path(directory)
+            loader = DataLoader(IndexedDataset(), batch_size=4)
+            with patch.object(main, 'validate_output_dir', return_value=output), \
+                 patch.object(main, 'load_data', return_value=loader), \
+                 patch.object(main, 'build_whitebox_model', return_value=make_model()):
+                main.main(main.parse_args())
+            params = json.loads((output / 'attack_params.json').read_text())
+            self.assertEqual(params['seed'], 42)
+            self.assertEqual(params['input_diversity_total_views'], 1)
+            self.assertEqual(params['checkpoints'], ['block3', 'block10'])
+            self.assertNotIn('opponent_noise_grad', params)
+            self.assertEqual({p.name for p in output.iterdir()},
+                             {'adv_image_0.png', 'adv_image_1.png', 'attack_params.json'})
 
-    def test_cli_controls_opponent_noise_gradient(self):
-        for flag, expected in (
-            ("--opponent-noise-grad", True),
-            ("--no-opponent-noise-grad", False),
-        ):
-            with self.subTest(flag=flag), patch.object(sys, "argv", ["main.py", flag]):
-                self.assertEqual(parse_args().opponent_noise_grad, expected)
-
-    def test_cli_accepts_original_only_ablation_settings(self):
-        for groups in (1, 10):
-            with self.subTest(groups=groups), patch.object(sys, "argv", [
-                "main.py", "--input-diversity-views-per-group", "1",
-                "--input-diversity-groups", str(groups),
-            ]):
-                args = parse_args()
-                self.assertEqual(args.input_diversity_views_per_group, 1)
-                self.assertEqual(args.input_diversity_groups, groups)
-                self.assertEqual(args.steps, 10)
-
-    def test_attack_sample_limit_is_exact(self):
-        dataloader = DataLoader(IndexedDataset(), batch_size=4, shuffle=False)
-        attacker = RecordingAttacker()
-        with tempfile.TemporaryDirectory() as directory:
-            ids = attack_all_samples(
-                dataloader,
-                attacker,
-                Path(directory),
-                max_attacked_samples=2,
-                replay=object(),
-            )
-        self.assertEqual(ids, ["image_0.png", "image_1.png"])
-        self.assertEqual(attacker.ids, ids)
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_output_guard_rejects_repository_and_attack_root(self):
+        for directory in ('.', 'outputs/attack', '/private/tmp'):
+            with self.subTest(directory=directory), self.assertRaises(ValueError):
+                main.validate_output_dir(directory)

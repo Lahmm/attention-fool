@@ -1,177 +1,76 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import os
 from pathlib import Path
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 from utils import DEVICE
 
 LOCAL_HF_CACHE = Path(__file__).resolve().parents[1] / "data" / "huggingface"
-# Model construction always resolves weights from the repository-local cache.
 os.environ["HF_HOME"] = str(LOCAL_HF_CACHE)
 os.environ["HF_HUB_CACHE"] = str(LOCAL_HF_CACHE / "hub")
 os.environ["HF_HUB_OFFLINE"] = "1"
 
 
-DEFAULT_PRETRAINED = True
-
-
 @dataclass
-class ProgressiveInputState:
-    """Initial progressive representation and its RGB projection geometry."""
+class ProgressiveState:
+    """Local features and architecture context at a forward boundary."""
 
     local_tokens: torch.Tensor
     grid_size: tuple[int, int]
-    context: object
-    rgb_projection_weight: torch.Tensor
-    projection_kernel: tuple[int, int]
-    projection_stride: tuple[int, int]
-    projection_padding: tuple[int, int]
-    projection_dilation: tuple[int, int] = (1, 1)
+    context: dict
+    rgb_projection_weight: torch.Tensor | None = None
 
     def validate(self) -> None:
         if self.local_tokens.ndim != 3:
-            raise ValueError(
-                f"local_tokens must have shape [B,N,D], got {tuple(self.local_tokens.shape)}."
-            )
+            raise ValueError("local_tokens must have shape [B,N,D].")
         if self.local_tokens.size(1) != self.grid_size[0] * self.grid_size[1]:
-            raise ValueError("progressive input token count does not match grid_size.")
-        weight = self.rgb_projection_weight
-        if weight.ndim != 4 or weight.size(1) != 3:
-            raise ValueError("the progressive attack requires an RGB Conv2d projection.")
-        if weight.size(0) != self.local_tokens.size(2):
-            raise ValueError("RGB projection output channels do not match local feature channels.")
-
-
-@dataclass
-class ProgressiveAttackState:
-    """Opaque architecture state used during progressive checkpoint traversal."""
-
-    local_tokens: torch.Tensor
-    grid_size: tuple[int, int]
-    context: object
-
-    def validate(self) -> None:
-        if self.local_tokens.ndim != 3:
-            raise ValueError(
-                "progressive local_tokens must have shape [B,N,D], got "
-                f"{tuple(self.local_tokens.shape)}."
-            )
-        if self.local_tokens.size(1) != self.grid_size[0] * self.grid_size[1]:
-            raise ValueError("progressive local token count does not match grid_size.")
-
-
-def conv2d_progressive_metadata(module: nn.Module) -> dict[str, object]:
-    """Return RGB projection metadata required by progressive opponent noise."""
-    if not isinstance(module, nn.Conv2d) or module.in_channels != 3:
-        raise ValueError("the progressive attack requires an RGB Conv2d projection module.")
-    return {
-        "rgb_projection_weight": module.weight,
-        "projection_kernel": tuple(int(value) for value in module.kernel_size),
-        "projection_stride": tuple(int(value) for value in module.stride),
-        "projection_padding": tuple(int(value) for value in module.padding),
-        "projection_dilation": tuple(int(value) for value in module.dilation),
-    }
-
-
-def create_timm_model(model_name: str, *, num_classes: int | None, pretrained: bool) -> nn.Module:
-    import timm
-
-    create_kwargs = {}
-    if num_classes is not None:
-        create_kwargs["num_classes"] = num_classes
-    return timm.create_model(model_name, pretrained=pretrained, **create_kwargs)
+            raise ValueError("local token count does not match grid_size.")
+        if self.rgb_projection_weight is not None:
+            weight = self.rgb_projection_weight
+            if weight.ndim != 4 or weight.size(1) != 3:
+                raise ValueError("opponent noise requires an RGB Conv2d projection.")
+            if weight.size(0) != self.local_tokens.size(2):
+                raise ValueError("RGB projection and local feature dimensions differ.")
 
 
 class ProgressiveAdapter(nn.Module):
-    """Base contract implemented by every progressive source-model adapter."""
+    default_model_name = ""
+    checkpoints: tuple[str, ...] = ()
+    drop_ratios: tuple[float, ...] = ()
+    opponent_noise_strength = 0.2
 
-    default_model_name: str = ""
-
-    def __init__(
-        self,
-        model_name: str | None = None,
-        num_classes: int | None = None,
-        pretrained: bool = DEFAULT_PRETRAINED,
-        device: torch.device | None = None,
-    ) -> None:
+    def __init__(self, model_name=None, *, pretrained=True, device=None):
         super().__init__()
+        import timm
+
         self.device = device if device is not None else DEVICE
         self.model_name = model_name or self.default_model_name
-        self.model = create_timm_model(
-            self.model_name, num_classes=num_classes, pretrained=pretrained
-        )
-        config = getattr(self.model, "pretrained_cfg", {})
-        self.model_mean = tuple(
-            float(value) for value in config.get("mean", (0.5, 0.5, 0.5))
-        )
-        self.model_std = tuple(
-            float(value) for value in config.get("std", (0.5, 0.5, 0.5))
-        )
+        self.model = timm.create_model(self.model_name, pretrained=pretrained)
+        config = self.model.pretrained_cfg
+        self.model_mean = tuple(config.get("mean", (0.5, 0.5, 0.5)))
+        self.model_std = tuple(config.get("std", (0.5, 0.5, 0.5)))
         self.to(self.device)
+        self.eval()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x):
         return self.model(x.to(self.device))
 
-    def progressive_checkpoint_candidates(self) -> tuple[str, ...]:
-        raise NotImplementedError(
-            f"progressive checkpoints are not implemented for {self.model_name}."
-        )
+    def begin_progressive_forward(self, x) -> ProgressiveState:
+        raise NotImplementedError
 
-    def default_progressive_checkpoints(self) -> tuple[str, ...]:
-        raise NotImplementedError(
-            f"progressive checkpoint defaults are not implemented for {self.model_name}."
-        )
+    def advance_progressive_state(self, state, checkpoint_id) -> ProgressiveState:
+        raise NotImplementedError
 
-    def default_progressive_drop_ratios(self) -> tuple[float, ...]:
-        raise NotImplementedError(
-            f"progressive drop-ratio defaults are not implemented for {self.model_name}."
-        )
+    def finish_progressive_forward(self, state):
+        raise NotImplementedError
 
-    def default_progressive_opponent_noise_strength(self) -> float:
-        return 0.2
-
-    def prepare_progressive_input(self, x: torch.Tensor) -> ProgressiveInputState:
-        raise NotImplementedError(
-            f"progressive input preparation is not implemented for {self.model_name}."
-        )
-
-    def begin_progressive_forward(self, x: torch.Tensor) -> ProgressiveAttackState:
-        raise NotImplementedError(
-            f"progressive forward preparation is not implemented for {self.model_name}."
-        )
-
-    def replace_progressive_local_tokens(
-        self,
-        state: ProgressiveAttackState,
-        local_tokens: torch.Tensor,
-    ) -> ProgressiveAttackState:
-        raise NotImplementedError(
-            f"progressive token replacement is not implemented for {self.model_name}."
-        )
-
-    def advance_progressive_state(
-        self,
-        state: ProgressiveAttackState,
-        checkpoint_id: str,
-    ) -> ProgressiveAttackState:
-        raise NotImplementedError(
-            f"progressive traversal is not implemented for {self.model_name}."
-        )
-
-    def apply_progressive_mask(
-        self,
-        state: ProgressiveAttackState,
-        mask: torch.Tensor,
-    ) -> ProgressiveAttackState:
-        raise NotImplementedError(
-            f"progressive masking is not implemented for {self.model_name}."
-        )
-
-    def finish_progressive_forward(self, state: ProgressiveAttackState) -> torch.Tensor:
-        raise NotImplementedError(
-            f"progressive forward completion is not implemented for {self.model_name}."
-        )
+    @staticmethod
+    def apply_progressive_mask(state, mask) -> ProgressiveState:
+        if mask.shape != state.local_tokens.shape[:2] or mask.dtype != torch.bool:
+            raise ValueError("progressive mask must be boolean and match local tokens.")
+        local = state.local_tokens.masked_fill(mask.unsqueeze(-1), 0)
+        return replace(state, local_tokens=local)

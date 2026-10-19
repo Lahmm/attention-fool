@@ -1,4 +1,4 @@
-"""Cache the seven timm and six torchvision models in FPR Table 2."""
+"""Cache FPR target weights and the additional retained PRD source weights."""
 import os
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
@@ -16,7 +16,8 @@ from huggingface_hub import snapshot_download
 from timm.models import get_pretrained_cfg
 
 VITS = ["vit_base_patch16_224", "cait_s24_224", "pit_b_224", "visformer_small",
-        "swin_tiny_patch4_window7_224", "deit_tiny_patch16_224", "coat_tiny"]
+        "swin_tiny_patch4_window7_224", "deit_tiny_patch16_224", "coat_tiny",
+        "pit_ti_224", "deit_base_distilled_patch16_224"]
 CNNS = ["resnet18", "vgg16", "densenet121", "efficientnet_b0",
         "mobilenet_v3_small", "resnext50_32x4d"]
 

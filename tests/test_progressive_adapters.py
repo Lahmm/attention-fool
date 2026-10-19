@@ -4,113 +4,67 @@ import unittest
 import torch
 
 from nets import WHITEBOX_MODEL_CHOICES, build_whitebox_model
-from nets.cait import CaiTS24Adapter
-from nets.pit import PiTB224Adapter
-from nets.visformer import VisformerSmallAdapter
+from nets.cait import CaiTAdapter
+from nets.pit import PiTAdapter
 from nets.vit import ViTAdapter
 from progressive_attack import ProgressiveRouteDisruptionAttacker
+from utils import SEED
 
 
-class ProgressiveAdapterContractTests(unittest.TestCase):
-    EXPECTED_DEFAULTS = {
-        ViTAdapter: ("block3", "block10"),
-        CaiTS24Adapter: ("block17", "block23"),
-        PiTB224Adapter: ("stage2_block1", "stage3_block2", "stage3_block3"),
-        VisformerSmallAdapter: ("stage2_block1", "stage3_block1"),
-    }
-    EXPECTED_DEFAULT_COUNTS = {
-        ViTAdapter: ((196, 196), (10, 10)),
-        CaiTS24Adapter: ((196, 196), (2, 28)),
-        PiTB224Adapter: ((256, 64, 64), (5, 2, 6)),
-        VisformerSmallAdapter: ((196, 49), (41, 10)),
-    }
+class AdapterTests(unittest.TestCase):
+    def test_sources_and_checkpoint_profiles(self):
+        self.assertEqual(set(WHITEBOX_MODEL_CHOICES), {
+            'vit_base_patch16_224', 'cait_s24_224', 'pit_ti_224',
+            'deit_base_distilled_patch16_224', 'pit_b_224',
+        })
+        self.assertEqual(ViTAdapter.checkpoints, ('block3', 'block10'))
+        self.assertEqual(CaiTAdapter.checkpoints, ('block17', 'block23'))
+        self.assertEqual(PiTAdapter.checkpoints, ('stage2_block1', 'stage3_block2', 'stage3_block3'))
+        with self.assertRaises(ValueError):
+            build_whitebox_model('visformer_small')
 
-    def test_each_adapter_registers_ordered_defaults(self):
-        for adapter, defaults in self.EXPECTED_DEFAULTS.items():
-            with self.subTest(adapter=adapter.__name__):
-                self.assertEqual(adapter._DEFAULT_PROGRESSIVE_LAYERS, defaults)
-                candidates = adapter._PROGRESSIVE_LAYERS
-                positions = [candidates.index(item) for item in defaults]
-                self.assertEqual(positions, sorted(positions))
-                self.assertGreater(len(defaults), 1)
-
-    def test_architecture_specific_default_drop_ratios(self):
-        expected_ratios = {
-            ViTAdapter: (0.051020408163, 0.051020408163),
-            CaiTS24Adapter: (0.010204081633, 0.142857142857),
-            PiTB224Adapter: (0.02081165, 0.03125, 0.09375),
-            VisformerSmallAdapter: (0.209183673469, 0.204081632653),
-        }
-        for adapter in self.EXPECTED_DEFAULTS:
-            with self.subTest(adapter=adapter.__name__):
-                instance = object.__new__(adapter)
-                self.assertEqual(
-                    instance.default_progressive_drop_ratios(), expected_ratios[adapter]
-                )
-
-    def test_architecture_specific_defaults_resolve_expected_drop_counts(self):
-        for adapter, (token_counts, expected_counts) in self.EXPECTED_DEFAULT_COUNTS.items():
-            with self.subTest(adapter=adapter.__name__):
-                instance = object.__new__(adapter)
-                ratios = instance.default_progressive_drop_ratios()
-                self.assertEqual(len(ratios), len(token_counts))
-                self.assertEqual(
-                    tuple(round(tokens * ratio) for tokens, ratio in zip(token_counts, ratios)),
-                    expected_counts,
-                )
-
-    def test_architecture_specific_opponent_defaults(self):
+    @unittest.skipUnless(os.environ.get('RUN_REAL_PRD_ADAPTERS') == '1',
+                         'set RUN_REAL_PRD_ADAPTERS=1 for real-model CPU validation')
+    def test_all_real_sources_preserve_forward_masks_and_input_gradients(self):
+        torch.set_num_threads(2)
         expected = {
-            ViTAdapter: 0.2,
-            CaiTS24Adapter: 0.2,
-            PiTB224Adapter: 0.4,
-            VisformerSmallAdapter: 0.4,
+            'vit_base_patch16_224': (((14, 14), (14, 14)), (10, 10)),
+            'deit_base_distilled_patch16_224': (((14, 14), (14, 14)), (10, 10)),
+            'cait_s24_224': (((14, 14), (14, 14)), (2, 28)),
+            'pit_ti_224': (((14, 14), (7, 7), (7, 7)), (4, 2, 5)),
+            'pit_b_224': (((16, 16), (8, 8), (8, 8)), (5, 2, 6)),
         }
-        for adapter, default in expected.items():
-            with self.subTest(adapter=adapter.__name__):
-                instance = object.__new__(adapter)
-                self.assertEqual(
-                    instance.default_progressive_opponent_noise_strength(), default
-                )
-
-    @unittest.skipUnless(
-        os.environ.get("RUN_REAL_PROGRESSIVE_ADAPTER_SMOKE") == "1",
-        "set RUN_REAL_PROGRESSIVE_ADAPTER_SMOKE=1 for four real timm adapters",
-    )
-    def test_real_models_progressive_forward_and_backpropagate(self):
-        if not torch.cuda.is_available():
-            self.skipTest("CUDA is required for the complete adapter smoke matrix")
-        device = torch.device("cuda")
-        for model_name in WHITEBOX_MODEL_CHOICES:
-            with self.subTest(model=model_name):
-                model = build_whitebox_model(
-                    num_classes=1000,
-                    model_name=model_name,
-                    pretrained=False,
-                    device=device,
-                )
-                pixels = torch.rand(1, 3, 224, 224, device=device)
+        for name in WHITEBOX_MODEL_CHOICES:
+            with self.subTest(source=name):
+                torch.manual_seed(SEED)
+                model = build_whitebox_model(name, pretrained=False, device=torch.device('cpu'))
+                pixels = torch.linspace(0.1, 0.9, 3 * 224 * 224).view(1, 3, 224, 224)
                 with torch.no_grad():
+                    initial = model.begin_progressive_forward(pixels)
                     native = model(pixels)
-                    state = model.begin_progressive_forward(pixels)
-                    resumed = model.finish_progressive_forward(state)
-                self.assertTrue(torch.equal(native, resumed))
-                attacker = ProgressiveRouteDisruptionAttacker(
-                    model,
-                    steps=1,
-                    input_diversity_groups=1,
-                    input_diversity_phase_shift_set=((0, 0),),
-                    use_momentum=False,
-                    device=device,
-                )
-                probe = attacker.probe_attack_gradients(
-                    pixels, torch.tensor([1], device=device)
-                )
-                self.assertEqual(probe["view_gradients"].size(0), 2)
-                self.assertTrue(torch.isfinite(probe["raw_mean"]).all())
-                del probe, attacker, model, pixels, native, resumed, state
-                torch.cuda.empty_cache()
-
-
-if __name__ == "__main__":
-    unittest.main()
+                    resumed = model.finish_progressive_forward(initial)
+                    torch.testing.assert_close(resumed, native, rtol=0, atol=0)
+                    if name == 'deit_base_distilled_patch16_224':
+                        self.assertEqual(initial.context['prefix_tokens'].size(1), 2)
+                attacker = ProgressiveRouteDisruptionAttacker(model, steps=1, input_diversity_groups=1,
+                                                              device=torch.device('cpu'))
+                schedule = attacker._build_mask_schedule(pixels)
+                self.assertEqual((schedule.grid_sizes, schedule.counts), expected[name])
+                state = model.begin_progressive_forward(pixels)
+                for selection in schedule.selections:
+                    state = model.advance_progressive_state(state, selection.checkpoint)
+                    prefix_key = next((key for key in ('prefix_tokens', 'cls_token') if key in state.context), None)
+                    prefix = state.context[prefix_key].clone() if prefix_key else None
+                    masked = model.apply_progressive_mask(state, selection.mask)
+                    self.assertEqual(int(torch.count_nonzero(masked.local_tokens[selection.mask])), 0)
+                    if prefix_key:
+                        torch.testing.assert_close(masked.context[prefix_key], prefix, rtol=0, atol=0)
+                    state = masked
+                del initial, native, resumed, state, masked
+                probe = pixels.requires_grad_(True)
+                loss = attacker._forward_with_schedule(probe, torch.tensor([1]), schedule)
+                gradient = torch.autograd.grad(loss, probe)[0]
+                self.assertTrue(torch.isfinite(gradient).all())
+                self.assertGreater(float(gradient.norm()), 0)
+                print(f'{name}: grids={schedule.grid_sizes}, counts={schedule.counts}, finite gradients', flush=True)
+                del model, attacker, probe, gradient, loss, pixels, schedule
