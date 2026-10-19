@@ -19,6 +19,8 @@
 
 2026-10-19 已用当前代码和固定 seed 42 重新完成当前四源（ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled）的 1000 图像 14 目标测量，并完成完整的 2×2 机制消融。四源 Overall ASR 为 **84.91%**，严格黑盒 ASR 为 **84.46%**。记录、逐目标结果和因子效应见 [PRD seed-42 主运行与消融](prd_s42_1000_ablation.md)、[汇总 CSV](prd_s42_1000_summary.csv)、[效应 CSV](prd_s42_1000_effects.csv) 和 [逐目标 CSV](prd_s42_1000_per_target.csv)。
 
+FPR 13-target 口径使用同一批对抗图单独补测，结果不与上述 project 14-target 结果合并：[FPR 主运行与消融记录](prd_s42_1000_fpr_ablation.md)、[FPR 汇总 CSV](prd_s42_1000_fpr_summary.csv)、[FPR 效应 CSV](prd_s42_1000_fpr_effects.csv)、[FPR 逐目标 CSV](prd_s42_1000_fpr_per_target.csv)。FPR 四源完整 PRD 的 Overall ASR 为 **89.16%**，严格黑盒 ASR 为 **88.73%**。
+
 论文统一通过 transfer ASR 呈现迁移性；patch-score 用于动机观察，梯度诊断用于实验内部分析。
 
 当前论文四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled，另保留 PiT-B 源；新执行固定 seed 42。历史原始 CSV 与参数文件不改写为新设置的测量。
