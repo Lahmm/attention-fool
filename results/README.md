@@ -15,7 +15,9 @@
 
 正式配置、结果表与计算规则见 [主实验报告](../experiments/progressive_cross_arch_mainline_s1000.md)。方法执行契约见 [PRD 方法记录](../experiments/prd_method_contract.md)。服务器上当前主实验图像、manifest 和日志的位置见 [写作交接](../experiments/server_handoff_inventory.md)。
 
-本地归档参数已于 2026-10-14 精简为保留的 PRD 内容；历史 ASR 与实现提交保持原记录，尚未用当前代码重新测量。
+本地归档参数已于 2026-10-14 精简为保留的 PRD 内容；历史 ASR 与实现提交保持原记录。
+
+2026-10-19 已用当前代码和固定 seed 42 重新完成当前四源（ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled）的 1000 图像 14 目标测量，并完成完整的 2×2 机制消融。四源 Overall ASR 为 **84.91%**，严格黑盒 ASR 为 **84.46%**。记录、逐目标结果和因子效应见 [PRD seed-42 主运行与消融](prd_s42_1000_ablation.md)、[汇总 CSV](prd_s42_1000_summary.csv)、[效应 CSV](prd_s42_1000_effects.csv) 和 [逐目标 CSV](prd_s42_1000_per_target.csv)。
 
 论文统一通过 transfer ASR 呈现迁移性；patch-score 用于动机观察，梯度诊断用于实验内部分析。
 
