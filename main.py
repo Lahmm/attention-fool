@@ -129,6 +129,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--input-diversity-phase-shift-set", type=parse_phase_shift_set, default=((4, 4), (8, 8), (12, 12)))
     parser.add_argument(
+        "--no-progressive-drop",
+        action="store_true",
+        help="Disable checkpoint token drops for mechanism ablations.",
+    )
+    parser.add_argument(
         "--drop-ratios",
         type=parse_float_list,
         default=None,
@@ -166,6 +171,7 @@ def main(args: argparse.Namespace) -> None:
     model = build_whitebox_model(model_name=args.whitebox_model)
     attacker = ProgressiveRouteDisruptionAttacker(
         model=model,
+        progressive_drop=not args.no_progressive_drop,
         drop_ratios=args.drop_ratios,
         opponent_noise_strength=args.opponent_noise_strength,
         epsilon=args.epsilon,

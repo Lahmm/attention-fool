@@ -195,6 +195,23 @@ class ProgressiveAttackTests(unittest.TestCase):
         repeated = attacker.attack_batch(images, labels, sample_ids=['a', 'b'])
         torch.testing.assert_close(together, repeated, rtol=0, atol=0)
 
+    def test_disabling_progressive_drop_skips_schedules_and_keeps_optimization(self):
+        attacker = make_attacker(
+            progressive_drop=False, opponent_noise_strength=0.0,
+            input_diversity_groups=1, input_diversity_views_per_group=1,
+        )
+        pixels = self.pixels.clone().requires_grad_(True)
+        with patch.object(attacker, '_build_mask_schedule',
+                          side_effect=AssertionError('schedule must not be built')):
+            gradient = attacker._attack_gradients(pixels, self.labels)
+        self.assertEqual(attacker._actual_forward_view_count, 1)
+        self.assertTrue(torch.isfinite(gradient).all())
+        self.assertGreater(float(gradient.norm()), 0)
+        params = attacker.parameters()
+        self.assertFalse(params['progressive_drop_enabled'])
+        self.assertFalse(params['opponent_noise_enabled'])
+        self.assertEqual(params['drop_counts'], [])
+
     def test_invalid_budgets_are_rejected(self):
         for settings in (dict(drop_ratios=(0.1,)), dict(input_diversity_views_per_group=3),
                          dict(input_diversity_groups=11), dict(input_diversity_phase_shift_set=())):

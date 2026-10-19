@@ -68,6 +68,7 @@ class ProgressiveRouteDisruptionAttacker:
         self,
         model,
         *,
+        progressive_drop: bool = True,
         drop_ratios: tuple[float, ...] | None = None,
         opponent_noise_strength: float | None = None,
         epsilon: float = 16.0 / 255.0,
@@ -99,11 +100,12 @@ class ProgressiveRouteDisruptionAttacker:
         ratios = tuple(model.drop_ratios if drop_ratios is None else drop_ratios)
         if len(ratios) != len(model.checkpoints):
             raise ValueError("checkpoint/drop-ratio count mismatch.")
-        if any(ratio <= 0 or ratio > 0.5 for ratio in ratios):
+        if progressive_drop and any(ratio <= 0 or ratio > 0.5 for ratio in ratios):
             raise ValueError("each drop ratio must satisfy 0 < ratio <= 0.5.")
 
         self.model = model
         self.model.eval()
+        self.progressive_drop = bool(progressive_drop)
         self.device = device if device is not None else DEVICE
         self.progressive_checkpoints = model.checkpoints
         self.progressive_drop_ratios = tuple(float(value) for value in ratios)
@@ -299,7 +301,10 @@ class ProgressiveRouteDisruptionAttacker:
         return self.opponent_noise_strength * feature_noise * (token_rms / noise_rms)
 
     def _forward_with_schedule(
-        self, pixels: torch.Tensor, labels: torch.Tensor, schedule: ProgressiveMaskSchedule
+        self,
+        pixels: torch.Tensor,
+        labels: torch.Tensor,
+        schedule: ProgressiveMaskSchedule | None,
     ) -> torch.Tensor:
         normalized = self._normalize(pixels)
         state = self.model.begin_progressive_forward(normalized)
@@ -309,13 +314,14 @@ class ProgressiveRouteDisruptionAttacker:
             # Noise reaches every initial local position before checkpoint drops.
             local = local + self._strict_opponent_feature_noise(state)
         state = replace(state, local_tokens=local)
-        for item in schedule.selections:
-            state = self.model.advance_progressive_state(state, item.checkpoint)
-            if state.grid_size != item.grid_size:
-                raise ValueError(
-                    f"replay grid mismatch at {item.checkpoint}: {state.grid_size} != {item.grid_size}."
-                )
-            state = self.model.apply_progressive_mask(state, item.mask)
+        if schedule is not None:
+            for item in schedule.selections:
+                state = self.model.advance_progressive_state(state, item.checkpoint)
+                if state.grid_size != item.grid_size:
+                    raise ValueError(
+                        f"replay grid mismatch at {item.checkpoint}: {state.grid_size} != {item.grid_size}."
+                    )
+                state = self.model.apply_progressive_mask(state, item.mask)
         logits = self.model.finish_progressive_forward(state)
         return F.cross_entropy(logits, labels)
 
@@ -325,7 +331,10 @@ class ProgressiveRouteDisruptionAttacker:
         for group_index in range(self.input_diversity_groups):
             if self._random is not None:
                 self._random.set_context(group=group_index, view=-1)
-            schedule = self._build_mask_schedule(pixels.detach())
+            schedule = (
+                self._build_mask_schedule(pixels.detach())
+                if self.progressive_drop else None
+            )
             phases = (
                 self._pick_input_diversity_phases(pixels.size(0), pixels.device)
                 if self.input_diversity_views_per_group == 2
@@ -337,8 +346,11 @@ class ProgressiveRouteDisruptionAttacker:
             yield self._forward_with_schedule(pixels, labels, schedule)
             if self.input_diversity_views_per_group == 1:
                 continue
-            shifted_schedule = self._phase_mask_schedule(
-                schedule, phases, height=pixels.size(-2), width=pixels.size(-1)
+            shifted_schedule = (
+                self._phase_mask_schedule(
+                    schedule, phases, height=pixels.size(-2), width=pixels.size(-1)
+                )
+                if schedule is not None else None
             )
             shifted_pixels = self._apply_samplewise_phase_shifts(pixels, phases)
             if self._random is not None:
@@ -404,6 +416,8 @@ class ProgressiveRouteDisruptionAttacker:
             "step_size": self.step_size,
             "steps": self.steps,
             "momentum_decay": 1.0,
+            "progressive_drop_enabled": self.progressive_drop,
+            "opponent_noise_enabled": self.opponent_noise_strength > 0,
             "checkpoints": list(self.progressive_checkpoints),
             "drop_ratios": list(self.progressive_drop_ratios),
             "drop_counts": list(self._progressive_mask_counts),

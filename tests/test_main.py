@@ -32,6 +32,13 @@ class MainTests(unittest.TestCase):
                 self.assertEqual(main.parse_args().input_diversity_views_per_group, views)
         self.assertEqual(SEED, 42)
 
+    def test_mechanism_ablation_switches_are_available(self):
+        with patch.object(sys, 'argv', ['main.py', '--no-progressive-drop',
+                                       '--opponent-noise-strength', '0']):
+            args = main.parse_args()
+        self.assertTrue(args.no_progressive_drop)
+        self.assertEqual(args.opponent_noise_strength, 0.0)
+
     def test_removed_parameters_are_rejected(self):
         for option in ('--seed', '--attack-method', '--mi', '--no-mi', '--mi-decay',
                        '--opponent-noise-grad', '--checkpoints', '--gaussian-alpha'):
