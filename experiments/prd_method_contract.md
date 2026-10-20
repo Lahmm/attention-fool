@@ -11,7 +11,7 @@ PRD 的两项核心机制是全部初始局部特征上的 RGB opponent-channel 
 | ViT-B/16 | `block3,block10` | 14×14, 14×14 | 10, 10 | 0.2 |
 | CaiT-S24 | `block17,block23` | 14×14, 14×14 | 2, 28 | 0.2 |
 | PiT-T | `stage2_block1,stage3_block2,stage3_block3` | 14×14, 7×7, 7×7 | 4, 2, 5 | 0.4 |
-| DeiT-B distilled | `block3,block10` | 14×14, 14×14 | 10, 10 | 0.2 |
+| DeiT-B distilled | `block2,block9` | 14×14, 14×14 | 10, 10 | 0.2 |
 | PiT-B（额外保留） | `stage2_block1,stage3_block2,stage3_block3` | 16×16, 8×8, 8×8 | 5, 2, 6 | 0.4 |
 
 PiT-T 的初始网格为 27×27，PiT-B 为 31×31；上表列出各 checkpoint 的实际网格。两者 drop ratios 均为 `0.02081165,0.03125,0.09375`，按各站 token 数四舍五入得到不同 drop 数。DeiT-B distilled 保留两个 prefix 并使用原生分类输出。

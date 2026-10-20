@@ -1,6 +1,6 @@
 # DeiT-B distilled 源配置
 
-当前 DeiT-B 源模型为 `deit_base_distilled_patch16_224`。与 ViT-B/16 共享 PRD 遍历，checkpoint 为 block3、block10，各清零 10/196 个局部 token；opponent strength 为 0.2。
+当前 DeiT-B 源模型为 `deit_base_distilled_patch16_224`。与 ViT-B/16 共享 PRD 遍历，默认 checkpoint 为 block2、block9，各清零 10/196 个局部 token；opponent strength 为 0.2。ViT-B/16 的默认 checkpoint 仍为 block3、block10。
 
 初始状态将局部 token 与两个 prefix（CLS、distillation）分开。初始噪声和 checkpoint masks 仅作用于局部 token，最终调用模型原生 forward_head，在 eval 模式下平均两个分类 head。
 

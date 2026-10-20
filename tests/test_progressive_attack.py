@@ -30,6 +30,7 @@ class TinyViT(nn.Module):
     def __init__(self, prefixes):
         super().__init__()
         self.num_prefix_tokens = prefixes
+        self.pretrained_cfg = {'mean': (0.5, 0.5, 0.5), 'std': (0.5, 0.5, 0.5)}
         self.patch_embed = TinyPatchEmbed()
         self.patch_drop = self.norm_pre = self.norm = nn.Identity()
         self.blocks = nn.ModuleList(TinyBlock() for _ in range(12))
@@ -44,13 +45,9 @@ class TinyViT(nn.Module):
 
 def make_model(prefixes=1):
     torch.manual_seed(SEED)
-    adapter = ViTAdapter.__new__(ViTAdapter)
-    nn.Module.__init__(adapter)
-    adapter.device = torch.device('cpu')
-    adapter.model_name = 'vit_base_patch16_224' if prefixes == 1 else 'deit_base_distilled_patch16_224'
-    adapter.model_mean = adapter.model_std = (0.5, 0.5, 0.5)
-    adapter.model = TinyViT(prefixes)
-    return adapter
+    model_name = 'vit_base_patch16_224' if prefixes == 1 else 'deit_base_distilled_patch16_224'
+    with patch('timm.create_model', return_value=TinyViT(prefixes)):
+        return ViTAdapter(model_name, pretrained=False, device=torch.device('cpu'))
 
 
 def make_attacker(**overrides):
@@ -127,6 +124,7 @@ class ProgressiveAttackTests(unittest.TestCase):
         model = make_model(prefixes=2)
         attacker = ProgressiveRouteDisruptionAttacker(model, steps=1, input_diversity_groups=1, device=torch.device('cpu'))
         schedule = attacker._build_mask_schedule(self.pixels)
+        self.assertEqual(schedule.checkpoints, ('block2', 'block9'))
         initial = model.begin_progressive_forward(attacker._normalize(self.pixels))
         with patch.object(attacker, '_strict_opponent_feature_noise', return_value=torch.ones_like(initial.local_tokens)) as noise, \
              patch.object(model, 'begin_progressive_forward', wraps=model.begin_progressive_forward) as begin:
@@ -136,7 +134,7 @@ class ProgressiveAttackTests(unittest.TestCase):
         first = model.model.blocks[0].last_input
         torch.testing.assert_close(first[:, :2], initial.context['prefix_tokens'])
         torch.testing.assert_close(first[:, 2:], initial.local_tokens + 1)
-        for mask, index in zip(schedule.masks, (3, 10)):
+        for mask, index in zip(schedule.masks, (2, 9)):
             after_drop = model.model.blocks[index].last_input[:, 2:]
             self.assertEqual(int(torch.count_nonzero(after_drop[mask])), 0)
 

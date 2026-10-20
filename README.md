@@ -32,7 +32,7 @@ current adversarial pixels
 | ViT-B/16 | `block3,block10` | 14×14, 14×14 | 10, 10 | 0.2 |
 | CaiT-S24 | `block17,block23` | 14×14, 14×14 | 2, 28 | 0.2 |
 | PiT-T | `stage2_block1,stage3_block2,stage3_block3` | 14×14, 7×7, 7×7 | 4, 2, 5 | 0.4 |
-| DeiT-B distilled | `block3,block10` | 14×14, 14×14 | 10, 10 | 0.2 |
+| DeiT-B distilled | `block2,block9` | 14×14, 14×14 | 10, 10 | 0.2 |
 | PiT-B（额外保留） | `stage2_block1,stage3_block2,stage3_block3` | 16×16, 8×8, 8×8 | 5, 2, 6 | 0.4 |
 
 PiT-T 与 PiT-B 共享 drop ratios，但网格不同，上表数量按实际 timm 网格计算。DeiT-B distilled 的 CLS 和 distillation token 均不加噪声、不清零，输出使用模型原生双 head。

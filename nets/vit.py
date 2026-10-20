@@ -14,6 +14,11 @@ class ViTAdapter(ProgressiveAdapter):
     checkpoints = ("block3", "block10")
     drop_ratios = (0.051020408163, 0.051020408163)
 
+    def __init__(self, model_name=None, *, pretrained=True, device=None):
+        super().__init__(model_name, pretrained=pretrained, device=device)
+        if self.model_name == "deit_base_distilled_patch16_224":
+            self.checkpoints = ("block2", "block9")
+
     def begin_progressive_forward(self, x):
         base = self.model
         tokens = base.norm_pre(base.patch_drop(base._pos_embed(base.patch_embed(x))))

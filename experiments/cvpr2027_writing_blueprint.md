@@ -147,7 +147,7 @@ RMS 在单样本的全部初始 token 和通道上计算；实现中对特征 RM
 | ViT-B/16 | block3, block10 | 14×14, 14×14 | 10, 10 | 0.2 |
 | CaiT-S24 | block17, block23 | 14×14, 14×14 | 2, 28 | 0.2 |
 | PiT-T | stage2_block1, stage3_block2, stage3_block3 | 14×14, 7×7, 7×7 | 4, 2, 5 | 0.4 |
-| DeiT-B distilled | block3, block10 | 14×14, 14×14 | 10, 10 | 0.2 |
+| DeiT-B distilled | block2, block9 | 14×14, 14×14 | 10, 10 | 0.2 |
 | PiT-B（额外保留） | stage2_block1, stage3_block2, stage3_block3 | 16×16, 8×8, 8×8 | 5, 2, 6 | 0.4 |
 
 ViT/DeiT drop ratios 为 `0.051020408163,0.051020408163`；PiT-T/B 为 `0.02081165,0.03125,0.09375`，按实际原生网格计算数量。DeiT 的两个 prefix 都保留。四源默认 10 steps、epsilon=16/255、步长 epsilon/steps、动量系数 1、10 groups×2 views、平移集合 (4,4)/(8,8)/(12,12)。保留每组视图数 1/2 的消融入口。每图 100 条 schedule；ViT/CaiT/DeiT 200 次 mask selection，PiT 300 次。

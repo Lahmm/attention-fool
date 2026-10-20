@@ -46,6 +46,9 @@ class AdapterTests(unittest.TestCase):
                     torch.testing.assert_close(resumed, native, rtol=0, atol=0)
                     if name == 'deit_base_distilled_patch16_224':
                         self.assertEqual(initial.context['prefix_tokens'].size(1), 2)
+                        self.assertEqual(model.checkpoints, ('block2', 'block9'))
+                    elif name == 'vit_base_patch16_224':
+                        self.assertEqual(model.checkpoints, ('block3', 'block10'))
                 attacker = ProgressiveRouteDisruptionAttacker(model, steps=1, input_diversity_groups=1,
                                                               device=torch.device('cpu'))
                 schedule = attacker._build_mask_schedule(pixels)
