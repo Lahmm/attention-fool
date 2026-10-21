@@ -10,8 +10,13 @@ class PiTAdapter(ProgressiveAdapter):
 
     default_model_name = "pit_ti_224"
     checkpoints = ("stage2_block1", "stage3_block2", "stage3_block3")
-    drop_ratios = (0.02081165, 0.03125, 0.09375)
+    drop_ratios = (0.07142857142857142, 0.04081632653061224, 0.04081632653061224)
     opponent_noise_strength = 0.4
+
+    def __init__(self, model_name=None, *, pretrained=True, device=None):
+        super().__init__(model_name, pretrained=pretrained, device=device)
+        if self.model_name == "pit_b_224":
+            self.drop_ratios = (0.02081165, 0.03125, 0.09375)
 
     def begin_progressive_forward(self, x):
         base = self.model

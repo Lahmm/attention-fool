@@ -86,7 +86,7 @@ python -m unittest discover -s tests
 RUN_REAL_PRD_ADAPTERS=1 python -m unittest tests.test_progressive_adapters
 ```
 
-评估保留 project 的 14 目标和 FPR 的 13 目标协议，使用各自模型加载和预处理；目标集的选择独立于源支持。结果默认写入图像目录的 `transfer.csv` 与 `transfer.json`，可用 `--predictions-output` 保存逐样本预测。ASR 使用全部输入样本；严格黑盒排除与源模型完全相同的目标。
+当前迁移测试以 FPR 的 13 目标协议为主，使用 FPR 对齐的模型加载和预处理；project 的 14 目标协议保留作历史对照。目标集的选择独立于源支持。结果默认写入图像目录的 `transfer.csv` 与 `transfer.json`，可用 `--predictions-output` 保存逐样本预测。ASR 使用全部输入样本；严格黑盒排除与源模型完全相同的目标。协议定义见 [FPR 目标评估协议](experiments/fpr_target_protocol.md)。
 
 权重准备工具 `experiments/download_fpr_models.py` 保留，负责缓存 FPR 目标和额外的 PiT-T／DeiT-B distilled 源权重，不执行攻击或评估。
 
