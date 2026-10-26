@@ -13,3 +13,6 @@ outputs/*
 # Claude Code config (personal per-workspace, not tracked by git)
 CLAUDE.md
 .claude/settings.local.json
+
+# Local LaTeX project
+/CVPR_2026_Submission_Template/
