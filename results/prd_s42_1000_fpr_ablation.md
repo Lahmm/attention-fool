@@ -2,8 +2,6 @@
 
 Updated 2026-10-26 with the four reruns completed on 2026-10-23 (12:02:55–13:02:13 UTC), using code commit `2d2625b5588587b75da7f87694c0d52234b6faa7`. The current result combines these four updated cells—PiT-T `drop/full` and distilled DeiT-B `drop/full`—with the twelve unchanged cells measured on 2026-10-19. All sixteen cells use the same 1000 image IDs and labels. FPR13 is the primary transfer protocol; only FPR13 numerical records are retained in the current `results/` tree; earlier protocol tables can be retrieved from Git history.
 
-Per the user's experimental convention, historical `randomness.py` seed-42 runs and current PyTorch global-seed-42 runs are treated as one seed-42 reporting standard. Only checkpoint/drop-parameter changes required rerunning cells. This convention does not claim identical random streams or batch-independent sampling in the current code.
-
 ## Setup and retained records
 
 All attacks use epsilon=16/255, 10 steps, step size epsilon/10, momentum 1, 10 augmentation groups × 2 views, phase shifts (4,4)/(8,8)/(12,12), raw pixel-gradient averaging and projected sign updates. When enabled, each view injects opponent-channel noise on all initial local features before progressive checkpoint drops. When enabled, the two mechanisms use the following source configurations:
