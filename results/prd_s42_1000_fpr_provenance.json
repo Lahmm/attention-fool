@@ -1,0 +1,1393 @@
+{
+  "updated_on": "2026-10-26",
+  "primary_protocol": "fpr",
+  "targets": [
+    "vit_base_patch16_224",
+    "cait_s24_224",
+    "pit_b_224",
+    "visformer_small",
+    "swin_tiny_patch4_window7_224",
+    "deit_tiny_patch16_224",
+    "coat_tiny",
+    "resnet18",
+    "vgg16",
+    "densenet121",
+    "efficientnet_b0",
+    "mobilenet_v3_small",
+    "resnext50_32x4d"
+  ],
+  "num_images": 1000,
+  "seed": 42,
+  "seed_policy": "Historical randomness.py seed-42 results and PyTorch seed-42 results are treated as the same experimental standard per user instruction.",
+  "rerun_code_commit": "2d2625b5588587b75da7f87694c0d52234b6faa7",
+  "rerun_started_utc": "2026-10-23T12:02:55.270229+00:00",
+  "rerun_finished_utc": "2026-10-23T13:02:13.873335+00:00",
+  "sample_order_sha256": "b182c97d353f8b2b7aaa05e57e55467485cbda4943005256e7bc6f50f54c1e94",
+  "label_order_sha256": "7f220ccf352c1597c0736bf8d8105dbc14a295279036de88e90bec53e51b181e",
+  "bootstrap": {
+    "resamples": 10000,
+    "seed": 42,
+    "generator": "numpy.random.default_rng (PCG64)",
+    "unit": "image",
+    "target_set": "fixed 13 targets; all 13 outcomes of each sampled image retained",
+    "cross_source_pairing": "same image resample shared by all four sources and all cells",
+    "interval": "percentile 95%",
+    "effect_order": [
+      "drop_minus_base",
+      "noise_minus_base",
+      "full_minus_base",
+      "full_minus_drop",
+      "full_minus_noise",
+      "drop_main_effect",
+      "noise_main_effect",
+      "interaction"
+    ]
+  },
+  "mcnemar": {
+    "method": "two-sided exact binomial test on discordant image pairs",
+    "multiplicity_adjustment": "none; exploratory per-target analysis"
+  },
+  "artifact_layout": "results/prd_s42_fpr_run_artifacts/{cell}_{source}/{attack_params.json,transfer.csv,transfer.json}",
+  "runs": [
+    {
+      "source": "vit",
+      "cell": "base",
+      "measurement_date": "2026-10-19",
+      "rerun": false,
+      "recorded_code_commit": null,
+      "earlier_run_record_commit": "e299b0e",
+      "transfer_csv_path": "outputs/fpr_eval/prd_s42_base_vit/transfer.csv",
+      "transfer_csv_sha256": "4dcf6b0de02f18432bbeec3a417c1cfb6ad2b60d3a2eeddf3f301bd54830c2a0",
+      "transfer_json_path": "outputs/fpr_eval/prd_s42_base_vit/transfer.json",
+      "transfer_json_sha256": "ddb8369e860b827634c8ce6dc7b0a13a51030783cd1b3efc09f9fd11e16e933d",
+      "predictions_path": "outputs/predictions_fpr/prd_s42_base_vit.json",
+      "predictions_sha256": "acd2436ea797c80aa1290056b3d6a91ada94bf13aaf6235b31bd3c15e83b7d0e",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": false,
+        "opponent_noise_enabled": false,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [],
+        "grids": [],
+        "opponent_noise_strength": 0.0,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 64.5,
+        "strict_black_box_asr": 61.541666666666664,
+        "transformer_asr": 70.3142857142857,
+        "cnn_asr": 57.71666666666667
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/base_vit",
+      "generation_batch_size": 48,
+      "evaluation_batch_size": 32
+    },
+    {
+      "source": "vit",
+      "cell": "drop",
+      "measurement_date": "2026-10-19",
+      "rerun": false,
+      "recorded_code_commit": null,
+      "earlier_run_record_commit": "e299b0e",
+      "transfer_csv_path": "outputs/fpr_eval/prd_s42_drop_vit/transfer.csv",
+      "transfer_csv_sha256": "cae15d508fd1b38f61f94a039d848f83c1dfeda35d58ab70ee721e399d696d8e",
+      "transfer_json_path": "outputs/fpr_eval/prd_s42_drop_vit/transfer.json",
+      "transfer_json_sha256": "1ab3f7aeca433967b6dd22e03c2c951d7bf1e33f064548c396f6ccf8a4bbc2e7",
+      "predictions_path": "outputs/predictions_fpr/prd_s42_drop_vit.json",
+      "predictions_sha256": "f3d37489a8d085f5b72a201ecb8b5d6c7c688dc51b7745f88ed2e226b8d67551",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": false,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [
+          10,
+          10
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.0,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 72.91538461538461,
+        "strict_black_box_asr": 70.65833333333332,
+        "transformer_asr": 78.51428571428572,
+        "cnn_asr": 66.38333333333334
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/drop_vit",
+      "generation_batch_size": 48,
+      "evaluation_batch_size": 32
+    },
+    {
+      "source": "vit",
+      "cell": "noise",
+      "measurement_date": "2026-10-19",
+      "rerun": false,
+      "recorded_code_commit": null,
+      "earlier_run_record_commit": "e299b0e",
+      "transfer_csv_path": "outputs/fpr_eval/prd_s42_noise_vit/transfer.csv",
+      "transfer_csv_sha256": "2cb4a62e1a63c95b565231e8138d31665ad1ac88a4cca87cb741ff2b08cd7558",
+      "transfer_json_path": "outputs/fpr_eval/prd_s42_noise_vit/transfer.json",
+      "transfer_json_sha256": "c5a08ccdc0a51f198dc2c713684404a001b9c5acd1ffcacc59e70c784b100172",
+      "predictions_path": "outputs/predictions_fpr/prd_s42_noise_vit.json",
+      "predictions_sha256": "74bbf2a819cf6bf100d898f1ce17b10465d63784c6de84bfbaf595eee97497fb",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": false,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [],
+        "grids": [],
+        "opponent_noise_strength": 0.2,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 79.32307692307691,
+        "strict_black_box_asr": 77.78333333333332,
+        "transformer_asr": 83.30000000000001,
+        "cnn_asr": 74.68333333333334
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/noise_vit",
+      "generation_batch_size": 48,
+      "evaluation_batch_size": 32
+    },
+    {
+      "source": "vit",
+      "cell": "full",
+      "measurement_date": "2026-10-19",
+      "rerun": false,
+      "recorded_code_commit": null,
+      "earlier_run_record_commit": "e299b0e",
+      "transfer_csv_path": "outputs/fpr_eval/prd_s42_full_vit/transfer.csv",
+      "transfer_csv_sha256": "d6305d463ba41deba636c2d38034b612c05fca7ad058884edfcc988aa064b1fe",
+      "transfer_json_path": "outputs/fpr_eval/prd_s42_full_vit/transfer.json",
+      "transfer_json_sha256": "23d347d79fca866c6092c368bbe78382abe1faa5ab645913bc64e4558cf5fb91",
+      "predictions_path": "outputs/predictions_fpr/prd_s42_full_vit.json",
+      "predictions_sha256": "e9427f15909f35d834bfddc73e9f751b1d4ebc3092d9a8b635002c453f7603a5",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [
+          10,
+          10
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 88.02307692307691,
+        "strict_black_box_asr": 87.05833333333332,
+        "transformer_asr": 91.17142857142856,
+        "cnn_asr": 84.35000000000001
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/full_vit",
+      "generation_batch_size": 48,
+      "evaluation_batch_size": 32
+    },
+    {
+      "source": "cait",
+      "cell": "base",
+      "measurement_date": "2026-10-19",
+      "rerun": false,
+      "recorded_code_commit": null,
+      "earlier_run_record_commit": "e299b0e",
+      "transfer_csv_path": "outputs/fpr_eval/prd_s42_base_cait/transfer.csv",
+      "transfer_csv_sha256": "f38db4a833c9fd81b389561575a65f4bf3289ab3e37366ff84da6691c221daf3",
+      "transfer_json_path": "outputs/fpr_eval/prd_s42_base_cait/transfer.json",
+      "transfer_json_sha256": "f5aceb2bbff0a9b9dc7b94fa6d8d6ff0bd5ca14273a646fa0b72a6f9e9ded4ea",
+      "predictions_path": "outputs/predictions_fpr/prd_s42_base_cait.json",
+      "predictions_sha256": "192e3755448cb2d876fa38df42b43de490a1cda61e0674312b778cc06a29fff5",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "cait_s24_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": false,
+        "opponent_noise_enabled": false,
+        "checkpoints": [
+          "block17",
+          "block23"
+        ],
+        "drop_ratios": [
+          0.010204081633,
+          0.142857142857
+        ],
+        "drop_counts": [],
+        "grids": [],
+        "opponent_noise_strength": 0.0,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.48500001430511475,
+          0.4560000002384186,
+          0.4059999883174896
+        ],
+        "model_std": [
+          0.2290000021457672,
+          0.2240000069141388,
+          0.22499999403953552
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 78.23846153846152,
+        "strict_black_box_asr": 76.4583333333333,
+        "transformer_asr": 83.62857142857143,
+        "cnn_asr": 71.95
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/base_cait",
+      "generation_batch_size": 16,
+      "evaluation_batch_size": 32
+    },
+    {
+      "source": "cait",
+      "cell": "drop",
+      "measurement_date": "2026-10-19",
+      "rerun": false,
+      "recorded_code_commit": null,
+      "earlier_run_record_commit": "e299b0e",
+      "transfer_csv_path": "outputs/fpr_eval/prd_s42_drop_cait/transfer.csv",
+      "transfer_csv_sha256": "ab0a148a9071cf6bdb519e351b6b83793946a016b0b9ede6558cfce3e8982404",
+      "transfer_json_path": "outputs/fpr_eval/prd_s42_drop_cait/transfer.json",
+      "transfer_json_sha256": "27abaa7dc0f3e1aed7f70d5f2049a8aa10d80d036616929b3adb400d0e7f692f",
+      "predictions_path": "outputs/predictions_fpr/prd_s42_drop_cait.json",
+      "predictions_sha256": "487ef363407e9a0dd5607f89292e994f5afb9424eb4223a57b415074428d6736",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "cait_s24_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": false,
+        "checkpoints": [
+          "block17",
+          "block23"
+        ],
+        "drop_ratios": [
+          0.010204081633,
+          0.142857142857
+        ],
+        "drop_counts": [
+          2,
+          28
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.0,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.48500001430511475,
+          0.4560000002384186,
+          0.4059999883174896
+        ],
+        "model_std": [
+          0.2290000021457672,
+          0.2240000069141388,
+          0.22499999403953552
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 81.75384615384615,
+        "strict_black_box_asr": 80.24166666666665,
+        "transformer_asr": 85.91428571428573,
+        "cnn_asr": 76.9
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/drop_cait",
+      "generation_batch_size": 16,
+      "evaluation_batch_size": 32
+    },
+    {
+      "source": "cait",
+      "cell": "noise",
+      "measurement_date": "2026-10-19",
+      "rerun": false,
+      "recorded_code_commit": null,
+      "earlier_run_record_commit": "e299b0e",
+      "transfer_csv_path": "outputs/fpr_eval/prd_s42_noise_cait/transfer.csv",
+      "transfer_csv_sha256": "bcaea9b3dfa02d6d689de424d72f12ef291d68284fdf32a9d2967f88bebe6d88",
+      "transfer_json_path": "outputs/fpr_eval/prd_s42_noise_cait/transfer.json",
+      "transfer_json_sha256": "5eca1882fb92f417ea6264f46a1ea16f2efed8fe209be1a694018e055bea2b42",
+      "predictions_path": "outputs/predictions_fpr/prd_s42_noise_cait.json",
+      "predictions_sha256": "07a87c105f45407ad85fb76073925ec742f8ac694f86d9d74a3b5ae133cb47bb",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "cait_s24_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": false,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block17",
+          "block23"
+        ],
+        "drop_ratios": [
+          0.010204081633,
+          0.142857142857
+        ],
+        "drop_counts": [],
+        "grids": [],
+        "opponent_noise_strength": 0.2,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.48500001430511475,
+          0.4560000002384186,
+          0.4059999883174896
+        ],
+        "model_std": [
+          0.2290000021457672,
+          0.2240000069141388,
+          0.22499999403953552
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 85.13846153846156,
+        "strict_black_box_asr": 83.99166666666667,
+        "transformer_asr": 88.27142857142857,
+        "cnn_asr": 81.48333333333333
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/noise_cait",
+      "generation_batch_size": 16,
+      "evaluation_batch_size": 32
+    },
+    {
+      "source": "cait",
+      "cell": "full",
+      "measurement_date": "2026-10-19",
+      "rerun": false,
+      "recorded_code_commit": null,
+      "earlier_run_record_commit": "e299b0e",
+      "transfer_csv_path": "outputs/fpr_eval/prd_s42_full_cait/transfer.csv",
+      "transfer_csv_sha256": "ce647b56f9b4be31320a18bc842a07bd5b54d77342506808a9319f3a56af4ba3",
+      "transfer_json_path": "outputs/fpr_eval/prd_s42_full_cait/transfer.json",
+      "transfer_json_sha256": "a927239b08336c043d614d206eab6ee43f8c212e8f546e2170a364a22062414b",
+      "predictions_path": "outputs/predictions_fpr/prd_s42_full_cait.json",
+      "predictions_sha256": "66a31396f24b5a07f5ae835f052e7b896b1b4f41862788bf233dbe4c284479e1",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "cait_s24_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block17",
+          "block23"
+        ],
+        "drop_ratios": [
+          0.010204081633,
+          0.142857142857
+        ],
+        "drop_counts": [
+          2,
+          28
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.48500001430511475,
+          0.4560000002384186,
+          0.4059999883174896
+        ],
+        "model_std": [
+          0.2290000021457672,
+          0.2240000069141388,
+          0.22499999403953552
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 90.23846153846155,
+        "strict_black_box_asr": 89.50000000000001,
+        "transformer_asr": 92.62857142857143,
+        "cnn_asr": 87.44999999999999
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/full_cait",
+      "generation_batch_size": 16,
+      "evaluation_batch_size": 32
+    },
+    {
+      "source": "pit_t",
+      "cell": "base",
+      "measurement_date": "2026-10-19",
+      "rerun": false,
+      "recorded_code_commit": null,
+      "earlier_run_record_commit": "e299b0e",
+      "transfer_csv_path": "outputs/fpr_eval/prd_s42_base_pit_t/transfer.csv",
+      "transfer_csv_sha256": "5f8689a5b00d904a7730c42b9006f67a98cddaaa18476ae2c6d54fb0f326c76b",
+      "transfer_json_path": "outputs/fpr_eval/prd_s42_base_pit_t/transfer.json",
+      "transfer_json_sha256": "5ccdd1c1daef78ca03112fe8e2c471b5c8dfde62d79bc03d686ebcb829b7d2f8",
+      "predictions_path": "outputs/predictions_fpr/prd_s42_base_pit_t.json",
+      "predictions_sha256": "d7a1ed2c56cbc041104e95d266d5ebfe17fe48bdacd26221409dea83eda650ed",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "pit_ti_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": false,
+        "opponent_noise_enabled": false,
+        "checkpoints": [
+          "stage2_block1",
+          "stage3_block2",
+          "stage3_block3"
+        ],
+        "drop_ratios": [
+          0.02081165,
+          0.03125,
+          0.09375
+        ],
+        "drop_counts": [],
+        "grids": [],
+        "opponent_noise_strength": 0.0,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 300,
+        "model_mean": [
+          0.48500001430511475,
+          0.4560000002384186,
+          0.4059999883174896
+        ],
+        "model_std": [
+          0.2290000021457672,
+          0.2240000069141388,
+          0.22499999403953552
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 70.0,
+        "strict_black_box_asr": 70.0,
+        "transformer_asr": 64.7,
+        "cnn_asr": 76.18333333333335
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/base_pit_t",
+      "generation_batch_size": 96,
+      "evaluation_batch_size": 32
+    },
+    {
+      "source": "pit_t",
+      "cell": "drop",
+      "measurement_date": "2026-10-23",
+      "rerun": true,
+      "recorded_code_commit": "2d2625b5588587b75da7f87694c0d52234b6faa7",
+      "earlier_run_record_commit": null,
+      "transfer_csv_path": "outputs/reruns/prd_s42_adjusted_20261023T120255Z/drop_pit_t/transfer.csv",
+      "transfer_csv_sha256": "38304c181bc0c1f8d32561229d0361e09d77be7ebfb9f9f0d034f5dd01a17831",
+      "transfer_json_path": "outputs/reruns/prd_s42_adjusted_20261023T120255Z/drop_pit_t/transfer.json",
+      "transfer_json_sha256": "c9d1e742035167cdf108114a47728a6be7cb533867835b995b51ac696aa7bf6d",
+      "predictions_path": "outputs/reruns/prd_s42_adjusted_20261023T120255Z/drop_pit_t/predictions.json",
+      "predictions_sha256": "96f13aa7259999cce5d2feb90faaaa3da6b8b4dd39acffd8447f57bdf717af0a",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "pit_ti_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": false,
+        "checkpoints": [
+          "stage2_block1",
+          "stage3_block2",
+          "stage3_block3"
+        ],
+        "drop_ratios": [
+          0.07142857142857142,
+          0.04081632653061224,
+          0.04081632653061224
+        ],
+        "drop_counts": [
+          14,
+          2,
+          2
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            7,
+            7
+          ],
+          [
+            7,
+            7
+          ]
+        ],
+        "opponent_noise_strength": 0.0,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 300,
+        "model_mean": [
+          0.48500001430511475,
+          0.4560000002384186,
+          0.4059999883174896
+        ],
+        "model_std": [
+          0.2290000021457672,
+          0.2240000069141388,
+          0.22499999403953552
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 72.32307692307691,
+        "strict_black_box_asr": 72.32307692307691,
+        "transformer_asr": 66.39999999999999,
+        "cnn_asr": 79.23333333333332
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/drop_pit_t",
+      "generation_batch_size": 32,
+      "evaluation_batch_size": 32
+    },
+    {
+      "source": "pit_t",
+      "cell": "noise",
+      "measurement_date": "2026-10-19",
+      "rerun": false,
+      "recorded_code_commit": null,
+      "earlier_run_record_commit": "e299b0e",
+      "transfer_csv_path": "outputs/fpr_eval/prd_s42_noise_pit_t/transfer.csv",
+      "transfer_csv_sha256": "f386123dbdd2b08f5efbf3d4b3ceb8b8a3219191b9a359236dd70fb2ce3a7cdf",
+      "transfer_json_path": "outputs/fpr_eval/prd_s42_noise_pit_t/transfer.json",
+      "transfer_json_sha256": "a4f94b955a6b2363ac3dd9e766e090b1de0cb607c367f33e08c1ef7ff9426ba8",
+      "predictions_path": "outputs/predictions_fpr/prd_s42_noise_pit_t.json",
+      "predictions_sha256": "c0acbe08f356f0db68b1ce6402dc201f8e472f828bd46d66a754934ca86217ad",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "pit_ti_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": false,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "stage2_block1",
+          "stage3_block2",
+          "stage3_block3"
+        ],
+        "drop_ratios": [
+          0.02081165,
+          0.03125,
+          0.09375
+        ],
+        "drop_counts": [],
+        "grids": [],
+        "opponent_noise_strength": 0.4,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 300,
+        "model_mean": [
+          0.48500001430511475,
+          0.4560000002384186,
+          0.4059999883174896
+        ],
+        "model_std": [
+          0.2290000021457672,
+          0.2240000069141388,
+          0.22499999403953552
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 83.9923076923077,
+        "strict_black_box_asr": 83.9923076923077,
+        "transformer_asr": 80.47142857142858,
+        "cnn_asr": 88.1
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/noise_pit_t",
+      "generation_batch_size": 96,
+      "evaluation_batch_size": 32
+    },
+    {
+      "source": "pit_t",
+      "cell": "full",
+      "measurement_date": "2026-10-23",
+      "rerun": true,
+      "recorded_code_commit": "2d2625b5588587b75da7f87694c0d52234b6faa7",
+      "earlier_run_record_commit": null,
+      "transfer_csv_path": "outputs/reruns/prd_s42_adjusted_20261023T120255Z/full_pit_t/transfer.csv",
+      "transfer_csv_sha256": "5b8462e94de2c6ecc651fa82c35d7d725c995e5c0e95c399c82f6dfc63047800",
+      "transfer_json_path": "outputs/reruns/prd_s42_adjusted_20261023T120255Z/full_pit_t/transfer.json",
+      "transfer_json_sha256": "42890b1ee0f9ef242727d32e7bdffd2d4a8d12315003f171c47e1ebd5c1e14a5",
+      "predictions_path": "outputs/reruns/prd_s42_adjusted_20261023T120255Z/full_pit_t/predictions.json",
+      "predictions_sha256": "fb8390ef6345b85d88ce3f1abd0e09e011e6311cc7fd2c893bfa3f4250eff5c3",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "pit_ti_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "stage2_block1",
+          "stage3_block2",
+          "stage3_block3"
+        ],
+        "drop_ratios": [
+          0.07142857142857142,
+          0.04081632653061224,
+          0.04081632653061224
+        ],
+        "drop_counts": [
+          14,
+          2,
+          2
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            7,
+            7
+          ],
+          [
+            7,
+            7
+          ]
+        ],
+        "opponent_noise_strength": 0.4,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 300,
+        "model_mean": [
+          0.48500001430511475,
+          0.4560000002384186,
+          0.4059999883174896
+        ],
+        "model_std": [
+          0.2290000021457672,
+          0.2240000069141388,
+          0.22499999403953552
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 85.8076923076923,
+        "strict_black_box_asr": 85.8076923076923,
+        "transformer_asr": 81.89999999999999,
+        "cnn_asr": 90.36666666666666
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/full_pit_t",
+      "generation_batch_size": 32,
+      "evaluation_batch_size": 32
+    },
+    {
+      "source": "deit_b",
+      "cell": "base",
+      "measurement_date": "2026-10-19",
+      "rerun": false,
+      "recorded_code_commit": null,
+      "earlier_run_record_commit": "e299b0e",
+      "transfer_csv_path": "outputs/fpr_eval/prd_s42_base_deit_b/transfer.csv",
+      "transfer_csv_sha256": "80a17c56bd2cadf4016ca9c36f20cd258e3314895657c6a058e6cd61f551b4a0",
+      "transfer_json_path": "outputs/fpr_eval/prd_s42_base_deit_b/transfer.json",
+      "transfer_json_sha256": "3b6d658e1bd5400dc7a7ceebb6cbf5e665394bf692496f5b113a7774a86ef9e6",
+      "predictions_path": "outputs/predictions_fpr/prd_s42_base_deit_b.json",
+      "predictions_sha256": "d5067ce8cca917ae9e0dec22ac9e3daccf65073f350fcb5bd5bee92673d875c4",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "deit_base_distilled_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": false,
+        "opponent_noise_enabled": false,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [],
+        "grids": [],
+        "opponent_noise_strength": 0.0,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.48500001430511475,
+          0.4560000002384186,
+          0.4059999883174896
+        ],
+        "model_std": [
+          0.2290000021457672,
+          0.2240000069141388,
+          0.22499999403953552
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 88.18461538461538,
+        "strict_black_box_asr": 88.18461538461538,
+        "transformer_asr": 93.37142857142857,
+        "cnn_asr": 82.13333333333331
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/base_deit_b",
+      "generation_batch_size": 48,
+      "evaluation_batch_size": 32
+    },
+    {
+      "source": "deit_b",
+      "cell": "drop",
+      "measurement_date": "2026-10-23",
+      "rerun": true,
+      "recorded_code_commit": "2d2625b5588587b75da7f87694c0d52234b6faa7",
+      "earlier_run_record_commit": null,
+      "transfer_csv_path": "outputs/reruns/prd_s42_adjusted_20261023T120255Z/drop_deit_b/transfer.csv",
+      "transfer_csv_sha256": "0a42ebd3c19fc8d787a8c0a8a3ce364e6ec420b2492015c8e03cf4701dfde922",
+      "transfer_json_path": "outputs/reruns/prd_s42_adjusted_20261023T120255Z/drop_deit_b/transfer.json",
+      "transfer_json_sha256": "d9315c988fc0b951671f027dc72d8c69f6c10a6787643ddcbdb65104c3f156df",
+      "predictions_path": "outputs/reruns/prd_s42_adjusted_20261023T120255Z/drop_deit_b/predictions.json",
+      "predictions_sha256": "2bd02191d699290946527ba5066981833026783cc5d746670c14e7f6a852f179",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "deit_base_distilled_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": false,
+        "checkpoints": [
+          "block2",
+          "block9"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [
+          10,
+          10
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.0,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.48500001430511475,
+          0.4560000002384186,
+          0.4059999883174896
+        ],
+        "model_std": [
+          0.2290000021457672,
+          0.2240000069141388,
+          0.22499999403953552
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 90.0076923076923,
+        "strict_black_box_asr": 90.0076923076923,
+        "transformer_asr": 94.1,
+        "cnn_asr": 85.23333333333333
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/drop_deit_b",
+      "generation_batch_size": 48,
+      "evaluation_batch_size": 32
+    },
+    {
+      "source": "deit_b",
+      "cell": "noise",
+      "measurement_date": "2026-10-19",
+      "rerun": false,
+      "recorded_code_commit": null,
+      "earlier_run_record_commit": "e299b0e",
+      "transfer_csv_path": "outputs/fpr_eval/prd_s42_noise_deit_b/transfer.csv",
+      "transfer_csv_sha256": "24b2f2ee34ec07534255d7887dde35356b310842bfe1442789755aca04a81c89",
+      "transfer_json_path": "outputs/fpr_eval/prd_s42_noise_deit_b/transfer.json",
+      "transfer_json_sha256": "9e8d65f9bd8ade815d6524be57747ab8a7fb7cbbe5e1dc37650c0bdfdbe808c1",
+      "predictions_path": "outputs/predictions_fpr/prd_s42_noise_deit_b.json",
+      "predictions_sha256": "a58bf4202c78f0db6a6f658598d944ceb07d254f21e44ad354fcf00c63a84043",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "deit_base_distilled_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": false,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [],
+        "grids": [],
+        "opponent_noise_strength": 0.2,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.48500001430511475,
+          0.4560000002384186,
+          0.4059999883174896
+        ],
+        "model_std": [
+          0.2290000021457672,
+          0.2240000069141388,
+          0.22499999403953552
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 94.46153846153845,
+        "strict_black_box_asr": 94.46153846153845,
+        "transformer_asr": 96.82857142857144,
+        "cnn_asr": 91.69999999999999
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/noise_deit_b",
+      "generation_batch_size": 48,
+      "evaluation_batch_size": 32
+    },
+    {
+      "source": "deit_b",
+      "cell": "full",
+      "measurement_date": "2026-10-23",
+      "rerun": true,
+      "recorded_code_commit": "2d2625b5588587b75da7f87694c0d52234b6faa7",
+      "earlier_run_record_commit": null,
+      "transfer_csv_path": "outputs/reruns/prd_s42_adjusted_20261023T120255Z/full_deit_b/transfer.csv",
+      "transfer_csv_sha256": "a5f42bcb6f12670d928e9bbabae5b8058d71b627b93debc0a5af9aa9d9560d1b",
+      "transfer_json_path": "outputs/reruns/prd_s42_adjusted_20261023T120255Z/full_deit_b/transfer.json",
+      "transfer_json_sha256": "ce3f3eee58be0dcabd2e85434ef738233489b04052283b9feab52e0d2bc47c06",
+      "predictions_path": "outputs/reruns/prd_s42_adjusted_20261023T120255Z/full_deit_b/predictions.json",
+      "predictions_sha256": "ee630d6168423d2888771b4d0db01c4a21173d415115978ec8f5eb41fdf474db",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "deit_base_distilled_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block2",
+          "block9"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [
+          10,
+          10
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.48500001430511475,
+          0.4560000002384186,
+          0.4059999883174896
+        ],
+        "model_std": [
+          0.2290000021457672,
+          0.2240000069141388,
+          0.22499999403953552
+        ],
+        "num_images": 1000
+      },
+      "summary_percent": {
+        "overall_asr": 94.8,
+        "strict_black_box_asr": 94.8,
+        "transformer_asr": 96.9,
+        "cnn_asr": 92.35000000000001
+      },
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/full_deit_b",
+      "generation_batch_size": 48,
+      "evaluation_batch_size": 32
+    }
+  ],
+  "paired_outcomes": {
+    "path": "results/prd_s42_fpr_run_artifacts/paired_outcomes.npz",
+    "sha256": "9252a59d3bc1ff205cb7d9a0116e442a05405ead058ca1f391bb5cf7031381a8",
+    "keys": [
+      "success",
+      "sample_ids",
+      "labels",
+      "sources",
+      "cells",
+      "targets"
+    ],
+    "success_shape": [
+      4,
+      4,
+      1000,
+      13
+    ],
+    "success_axes": [
+      "source",
+      "cell",
+      "image",
+      "target"
+    ],
+    "success_definition": "true iff predicted class differs from the ground-truth class; enough to reproduce ASRs, paired bootstrap effects, and McNemar discordant counts",
+    "numpy_load_allow_pickle": false
+  }
+}

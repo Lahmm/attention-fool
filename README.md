@@ -51,6 +51,20 @@ python main.py --whitebox-model deit_base_distilled_patch16_224 --output-dir out
 
 ## 1000-image transfer results
 
+当前主协议为 **FPR13**。seed 42、1000 张图像的当前四源结果已完成；2026-10-23 更新 PiT-T 和 distilled DeiT-B 的 drop/full 消融单元。
+
+| Source | Overall ASR | Strict black-box |
+| --- | ---: | ---: |
+| ViT-B/16 | 88.02% | 87.06% |
+| CaiT-S24 | 90.24% | 89.50% |
+| PiT-T（14/2/2） | 85.81% | 85.81% |
+| DeiT-B distilled（block2/block9） | 94.80% | 94.80% |
+| **Four-source mean** | **89.72%** | **89.29%** |
+
+完整逐目标矩阵、2×2 消融和配对统计见 [FPR13 实验记录](results/prd_s42_1000_fpr_ablation.md)。[results 索引](results/README.md) 和 [轻量原始参数／迁移记录](results/prd_s42_fpr_run_artifacts/) 随 Git 提交，可在其他机器查看。历史 randomness.py seed 42 与当前 PyTorch seed 42 按用户约定作为统一报告标准。
+
+### Historical project 14-target results
+
 以下历史主实验于 2026-10-12 完成，实际实现为 `bf092246`，源模型为 ViT-B/16、CaiT-S24、PiT-B、Visformer-S。结果不代表新四源或 seed 42 的重测。
 
 本地归档参数已于 2026-10-14 精简为保留的 PRD 内容；历史 ASR 与实现提交保持原记录，尚未用当前代码重新测量。

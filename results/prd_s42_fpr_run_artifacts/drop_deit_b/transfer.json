@@ -1,0 +1,74 @@
+{
+  "protocol": "fpr",
+  "asr_definition": "1 - adversarial accuracy",
+  "attack_params": {
+    "attack_method": "progressive_route_disruption",
+    "seed": 42,
+    "whitebox_model": "deit_base_distilled_patch16_224",
+    "epsilon": 0.06274509803921569,
+    "step_size": 0.006274509803921568,
+    "steps": 10,
+    "momentum_decay": 1.0,
+    "progressive_drop_enabled": true,
+    "opponent_noise_enabled": false,
+    "checkpoints": [
+      "block2",
+      "block9"
+    ],
+    "drop_ratios": [
+      0.051020408163,
+      0.051020408163
+    ],
+    "drop_counts": [
+      10,
+      10
+    ],
+    "grids": [
+      [
+        14,
+        14
+      ],
+      [
+        14,
+        14
+      ]
+    ],
+    "opponent_noise_strength": 0.0,
+    "input_diversity_groups": 10,
+    "input_diversity_views_per_group": 2,
+    "input_diversity_phase_shift_set": [
+      [
+        4,
+        4
+      ],
+      [
+        8,
+        8
+      ],
+      [
+        12,
+        12
+      ]
+    ],
+    "input_diversity_total_views": 20,
+    "mask_schedule_count_per_image": 100,
+    "checkpoint_mask_selection_count_per_image": 200,
+    "model_mean": [
+      0.48500001430511475,
+      0.4560000002384186,
+      0.4059999883174896
+    ],
+    "model_std": [
+      0.2290000021457672,
+      0.2240000069141388,
+      0.22499999403953552
+    ],
+    "num_images": 1000
+  },
+  "summary": {
+    "overall_asr": 0.900076923076923,
+    "strict_black_box_asr": 0.900076923076923,
+    "transformer_asr": 0.941,
+    "cnn_asr": 0.8523333333333333
+  }
+}

@@ -4,17 +4,17 @@ PRD 的两项核心机制是全部初始局部特征上的 RGB opponent-channel 
 
 ## 源与随机设置
 
-当前论文四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled，另保留 PiT-B；Visformer 源实现已移除。所有新执行固定 seed 42。随机流按样本标识、step、group、view 与事件组织，不依赖 batch 位置。
+当前论文四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled，另保留 PiT-B；Visformer 源实现已移除。所有新执行在入口设置 PyTorch 全局 seed 42；固定 batch 布局和执行流程时可复现采样。按照用户的实验报告约定，历史 `randomness.py` seed 42 与当前 PyTorch seed 42 视为统一 seed-42 标准，不因随机实现差异重跑参数未变的单元。
 
 | Source | Checkpoints | Native grids | Drop counts | Opponent strength |
 | --- | --- | --- | --- | ---: |
 | ViT-B/16 | `block3,block10` | 14×14, 14×14 | 10, 10 | 0.2 |
 | CaiT-S24 | `block17,block23` | 14×14, 14×14 | 2, 28 | 0.2 |
-| PiT-T | `stage2_block1,stage3_block2,stage3_block3` | 14×14, 7×7, 7×7 | 4, 2, 5 | 0.4 |
+| PiT-T | `stage2_block1,stage3_block2,stage3_block3` | 14×14, 7×7, 7×7 | 14, 2, 2 | 0.4 |
 | DeiT-B distilled | `block2,block9` | 14×14, 14×14 | 10, 10 | 0.2 |
 | PiT-B（额外保留） | `stage2_block1,stage3_block2,stage3_block3` | 16×16, 8×8, 8×8 | 5, 2, 6 | 0.4 |
 
-PiT-T 的初始网格为 27×27，PiT-B 为 31×31；上表列出各 checkpoint 的实际网格。两者 drop ratios 均为 `0.02081165,0.03125,0.09375`，按各站 token 数四舍五入得到不同 drop 数。DeiT-B distilled 保留两个 prefix 并使用原生分类输出。
+PiT-T 的初始网格为 27×27，PiT-B 为 31×31；上表列出各 checkpoint 的实际网格。PiT-T 当前 drop ratios 为 `0.07142857142857142,0.04081632653061224,0.04081632653061224`，对应 14/2/2；额外保留的 PiT-B 仍为 `0.02081165,0.03125,0.09375`，对应 5/2/6。DeiT-B distilled 保留两个 prefix 并使用原生分类输出。
 
 ## 执行顺序
 
@@ -39,3 +39,5 @@ RMS 在单样本全部初始局部位置和通道上计算。特征 RMS 与投�
 `attack_params.json` 保存实际配置，包括 seed 42、源模型、checkpoint、drop 数量／网格、噪声强度和视图设置。攻击路径不计算或输出梯度诊断。当前迁移测试以 FPR 13-target 协议为主；project 14-target 结果作为历史对照单独报告。ASR 为全部对抗样本上的 `1 - adversarial accuracy`。
 
 2026-10-12 的历史主实验实现为 bf092246；结果保留在 `results/prd_cross_arch_s1000.csv`、`results/prd_summary_s1000.csv` 和 `results/prd_run_artifacts/`。这些记录不因源支持调整或随机设置更新而改写数值，不作为当前代码的新测量。
+
+当前 seed-42 四源 FPR13 完整 PRD 的 Overall ASR 为 89.72%，严格黑盒 ASR 为 89.29%；当前配置的主结果、消融和参数归档见 [FPR 实验记录](../results/prd_s42_1000_fpr_ablation.md)。2026-10-23 已完成 PiT-T 和 distilled DeiT-B 的 drop/full 配置更新重跑。

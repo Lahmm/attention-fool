@@ -1,5 +1,7 @@
 # PRD seed-42 1000-image main run and 2×2 mechanism ablation
 
+This document retains the historical project 14-target measurements and their original configurations. The current primary FPR13 result, including the 2026-10-23 PiT-T and distilled DeiT-B drop/full reruns, is recorded in [the FPR13 report](prd_s42_1000_fpr_ablation.md). These FPR reruns do not replace any 14-target measurements in this document.
+
 Recorded 2026-10-19 on the `prd` branch. Implementation includes `7ce5b7a` (the `--no-progressive-drop` ablation switch; the default PRD path is unchanged). All runs use seed 42, 1000 images, `epsilon=16/255`, 10 steps, step size `epsilon/10`, 10 groups × 2 views, phase shifts `(4,4)/(8,8)/(12,12)`, 20-view raw gradient averaging, momentum 1, sign update, and L∞ projection. ASR is `1 - adversarial accuracy` over all 1000 images with no filtering.
 
 ## Setup

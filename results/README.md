@@ -4,18 +4,28 @@
 
 ## 当前主协议结果
 
-seed 42、1000 张图像、完整 PRD 的 FPR 13-target 汇总见 [FPR 汇总 CSV](prd_s42_1000_fpr_summary.csv) 和 [逐目标结果](prd_s42_1000_fpr_per_target.csv)。该批完整 PRD 的四源均值为 **89.16% Overall ASR**、**88.73% 严格黑盒 ASR**。PiT-T 随后在相同 seed、图像数及 FPR 协议下使用新选的 14/2/2 丢弃配置复核，Overall 与严格黑盒 ASR 均为 **85.81%**；逐候选记录见 [PiT-T 比例探索复核表](../outputs/pit_ratio_distribution_s42_20261021/confirmation_summary.csv)。2026-10-19 FPR 消融表中的 PiT-T full 值 85.34% 对应旧 4/2/5 配置，作为历史测量保留。
+当前四源设置已完成 seed 42、1000 张图像的 FPR13 完整 PRD 与 2×2 机制消融。2026-10-23 对 PiT-T 和 distilled DeiT-B 的 `drop/full` 四个单元完成重跑；其余 12 个单元沿用参数未变的 2026-10-19 测量。按照用户约定，历史 `randomness.py` seed 42 与当前 PyTorch seed 42 统一作为 seed-42 标准，随机实现差异不要求补跑。
 
-当前可用的 seed-42 FPR13 full-PRD 结果如下。ViT、CaiT 与 distilled DeiT 数值来自 2026-10-19 的主运行；PiT-T 使用 2026-10-21 复核的 14/2/2 配置。
+完整 PRD 四源平均 **Overall ASR 为 89.72%**，**严格黑盒 ASR 为 89.29%**。Transformer 平均为 **90.65%**，CNN 平均为 **88.63%**。
 
-| 源模型 | FPR13 测量时的 checkpoint | Overall ASR | Strict black-box ASR | Transformer ASR | CNN ASR |
+| 源模型 | 当前 checkpoint / drop 数量 | Overall ASR | Strict black-box ASR | Transformer ASR | CNN ASR |
 | --- | --- | ---: | ---: | ---: | ---: |
-| ViT-B/16 | block3、block10 | 88.02% | 87.06% | 91.17% | 84.35% |
-| CaiT-S24 | block17、block23 | 90.24% | 89.50% | 92.63% | 87.45% |
-| PiT-T | S2-B1、S3-B2、S3-B3（14/2/2） | 85.81% | 85.81% | 81.90% | 90.37% |
-| DeiT-B distilled | block3、block10 | 93.04% | 93.04% | 95.23% | 90.45% |
+| ViT-B/16 | block3、block10 / 10、10 | 88.02% | 87.06% | 91.17% | 84.35% |
+| CaiT-S24 | block17、block23 / 2、28 | 90.24% | 89.50% | 92.63% | 87.45% |
+| PiT-T | S2-B1、S3-B2、S3-B3 / 14、2、2 | 85.81% | 85.81% | 81.90% | 90.37% |
+| DeiT-B distilled | block2、block9 / 10、10 | 94.80% | 94.80% | 96.90% | 92.35% |
 
-PiT-T 更新值来自本轮选层／比例实验；其余三行沿用各自 FPR13 完整 PRD 测量。注意，DeiT 当前默认选层为 block2、block9，而这份 seed-42 FPR13 记录使用 block3、block10，因此它还不是当前默认配置的测量；四个源模型完全对齐当前默认配置的 FPR13 汇总需要补测 DeiT。逐次运行的实际配置保存在各自 `attack_params.json` 中，读数跨运行汇总时不覆盖原始记录。
+| 源模型 | base（均关闭） | drop（仅丢弃） | noise（仅噪声） | full（完整 PRD） |
+| --- | ---: | ---: | ---: | ---: |
+| ViT-B/16 | 64.50% | 72.92% | 79.32% | 88.02% |
+| CaiT-S24 | 78.24% | 81.75% | 85.14% | 90.24% |
+| PiT-T | 70.00% | 72.32% | 83.99% | 85.81% |
+| DeiT-B distilled | 88.18% | 90.01% | 94.46% | 94.80% |
+| 四源平均 | 75.23% | 79.25% | 85.73% | 89.72% |
+
+上述数值和逐目标结果、效应及置信区间均已同步到 [FPR 完整实验记录](prd_s42_1000_fpr_ablation.md)、[汇总 CSV](prd_s42_1000_fpr_summary.csv)、[逐目标 CSV](prd_s42_1000_fpr_per_target.csv) 与 [效应 CSV](prd_s42_1000_fpr_effects.csv)。完整方法在 DeiT 上比仅噪声高 0.34 个百分点，配对 95% CI 为 [-0.10, +0.80]，区间跨零。
+
+这批记录受 Git 管理。[轻量原始记录目录](prd_s42_fpr_run_artifacts/) 包含全部 16 个单元的真实参数 JSON、迁移 CSV/JSON；[provenance](prd_s42_1000_fpr_provenance.json) 保存代码 commit、测量日期、原始路径和文件哈希。[压缩逐图像成功标记](prd_s42_fpr_run_artifacts/paired_outcomes.npz) 同时保存所有单元的逐样本成功与否、样本标识及标签，足以在其他机器复算 ASR、配对区间与 McNemar 统计。另一台机器拉取仓库即可查看和复核这些结果；攻击图像、原始预测类别和日志继续保存在被忽略的服务器 `outputs/` 目录。
 
 ## 历史 project 14-target 结果
 
