@@ -24,13 +24,13 @@
 | `tests/*.py` | 当前执行行为与 optional real-model 验证 | 行为契约 |
 | `experiments/prd_paper_story.md` | 论文故事与表达约定 | 叙事起点 |
 | `experiments/progressive_cross_arch_mainline_s1000.md` | 当前正式配置、汇总和 4×13 逐目标表 | 主实验说明 |
-| `results/prd_s42_fpr_run_artifacts/` | 16 个单元的参数、原始迁移表与逐图像成功标记 | 主实验原始记录 |
+| `results/prd_s42_fpr_run_artifacts/` | 16 个单元的参数和原始迁移表 | 主实验原始记录 |
 | `results/prd_s42_1000_fpr_per_target.csv`、`results/prd_s42_1000_fpr_summary.csv` | 52 项 full 主结果及完整 208 项消融评估 | 制作主表与消融表的数值依据 |
 | `results/prd_s42_1000_fpr_provenance.json` | 各单元参数、日期、代码提交、样本及文件哈希 | 可复核性依据 |
 | 实际样本的多层 patch-score 图与变化曲线（待准备） | 展示局部证据随深度变化 | 动机证据 |
 | `experiments/server_handoff_inventory.md` | 本地材料与服务器当前运行目录 | 文件可用性依据 |
 
-主实验 full 包含 52 项 source-target 结果；16 个消融单元共 208 项评估。所有单元使用相同 1000 图像输入集与全部样本 ASR 分母，汇总与逐图像成功标记均已归档。
+主实验 full 包含 52 项 source-target 结果；16 个消融单元共 208 项评估。所有单元使用相同 1000 图像输入集与全部样本 ASR 分母，汇总与原始迁移记录均已归档。
 
 当前主实验的对抗图像、replay manifests、逐样本预测和日志保存在服务器。本地保存完整结果 CSV、参数与环境记录；样本可视化和进一步逐样本分析从当前运行目录取得原件。
 
@@ -168,7 +168,7 @@ ViT/DeiT drop ratios 为 `0.051020408163,0.051020408163`；PiT-T 为 `0.07142857
 
 摘要与引言可报告 89.29% 的四源平均严格黑盒 ASR，并在主表提供 89.72% Overall ASR。严格黑盒只排除完全同名的源目标，ViT/CaiT 对 12 个目标取平均，PiT-T/distilled DeiT-B 对全部 13 个目标取平均。
 
-ASR = `1 − correct/total`，分母是全部 1000 张评估对抗图像，不筛选 target-clean-correct 子集。full 主结果为 52 项 source-target 评估；完整 2×2 消融共 208 项评估。主表和消融 CSV、参数与逐图像成功标记见 results 的 FPR13 记录。
+ASR = `1 − correct/total`，分母是全部 1000 张评估对抗图像，不筛选 target-clean-correct 子集。full 主结果为 52 项 source-target 评估；完整 2×2 消融共 208 项评估。主表和消融 CSV、参数与原始迁移记录见 results 的 FPR13 记录。
 
 ### 5.2 论文评价与内部分析的分工
 
@@ -248,7 +248,7 @@ Introduction 首先呈现问题与动态发现，再概括 PRD 及结果。§3.2
 | Algorithm 1 PRD | 怎样从 x 生成 x_adv？ | 放在 §3.4，显式列出 fresh schedule、偏移采样、对应 schedule 变换、两视图损失与梯度聚合，再进行投影更新 |
 | Table 1 实验配置 | 四架构如何实例化共同机制？ | 放在 §4.1；参数已完整归档，主文简表、补充全表 |
 | Table 2 主实验与比较 | 对哪些目标可迁移，与可比方法相比怎样？ | 放在 §4.2；PRD 4×13 已有，公平外部比较尚未在当前归档中提供 |
-| Table 3 核心消融 | 两机制分别贡献什么，组合取得什么 ASR？ | 放在 §4.3；当前 FPR13 完整 2×2 因子结果和配对统计已归档 |
+| Table 3 核心消融 | 两机制分别贡献什么，组合取得什么 ASR？ | 放在 §4.3；当前 FPR13 完整 2×2 因子结果和 ASR 差值已归档 |
 | Fig. 3 ASR 参数分析 | checkpoint、drop budget 和噪声强度怎样影响迁移效果？ | 放在 §4.4；按当前随机 PRD 配置准备对应 ASR 对照。空间配对与采样预算使用 FPR13 下的紧凑 ASR 表呈现，固定 groups/views 的平移对照待补 |
 | Supplement qualitative cases | 对抗样本外观、成功与失败如何？ | 当前主实验对抗图像在服务器；本地有迁移 CSV、保留参数与环境记录 |
 

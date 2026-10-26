@@ -6,7 +6,8 @@
 - When modifying code, do not add comments at the top of `.py` files.
 - New executions use the fixed seed 42. Retain `--input-diversity-views-per-group` for ablations. Keep the FPR weight downloader, but remove experiment runner scripts.
 - For experimental reporting, the user treats historical `randomness.py` seed-42 measurements and current PyTorch-global-seed-42 measurements as one seed-42 standard. RNG implementation differences alone do not require rerunning existing results; checkpoint/drop-parameter changes do.
-- Keep `results/` exclusively for FPR13 transfer results and their parameters, ablations, paired outcomes, statistics, and provenance. Do not restore non-FPR13 numerical snapshots there.
+- Keep `results/` exclusively for FPR13 ASR results and their parameters, ablations, direct ASR differences, and provenance. Do not restore non-FPR13 numerical snapshots there.
+- Confidence intervals (置信区间), bootstrap/resampling error bars, statistical significance tests, McNemar tests, and p-values are not required for this project. Do not calculate, generate, store, or report them, and do not add or restore their analysis code, tools, tests, result files, metadata, or documentation. Evaluate and report PRD using ASR and direct ASR differences only.
 - Discussions are read-only. Modify code or files only when the user explicitly requests those changes; a discussion of implementing an idea is not authorization to implement it.
 
 ## Current research mainline

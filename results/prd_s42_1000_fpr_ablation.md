@@ -19,7 +19,7 @@ All attacks use epsilon=16/255, 10 steps, step size epsilon/10, momentum 1, 10 a
 
 Evaluation uses `transfer_eval.py --protocol fpr --no-tf32`, batch size 32, and all 1000 images per target. The fixed suite is 7 Transformer and 6 CNN targets. ASR is `1 - adversarial accuracy`, without clean-correct filtering. Overall averages all 13 targets. Strict black-box excludes the exactly matching source target: 12 targets for ViT-B/16 and CaiT-S24, all 13 for PiT-T and distilled DeiT-B. The four-source macro mean weights sources equally.
 
-The versioned directory [prd_s42_fpr_run_artifacts](prd_s42_fpr_run_artifacts/) retains `attack_params.json`, `transfer.csv`, and `transfer.json` for all 16 source/cell combinations. These lightweight records are available after a Git clone. The compressed [paired outcomes](prd_s42_fpr_run_artifacts/paired_outcomes.npz) additionally retain the per-image attack-success indicators for every source, cell and target, along with sample IDs and labels, so all reported metrics and paired statistics can be recomputed from the checkout. Attack PNGs, original predicted class IDs, and logs remain server-local under ignored `outputs/`. [Provenance JSON](prd_s42_1000_fpr_provenance.json) records the original paths, hashes, code commit and per-run parameters.
+The versioned directory [prd_s42_fpr_run_artifacts](prd_s42_fpr_run_artifacts/) retains `attack_params.json`, `transfer.csv`, and `transfer.json` for all 16 source/cell combinations. These lightweight records are available after a Git clone and directly record every per-target ASR and source/cell summary. Attack PNGs, per-image predicted class IDs, and logs remain server-local under ignored `outputs/`. [Provenance JSON](prd_s42_1000_fpr_provenance.json) records the original paths, hashes, code commit and per-run parameters.
 
 ## Full PRD ASR (%)
 
@@ -60,42 +60,40 @@ The versioned directory [prd_s42_fpr_run_artifacts](prd_s42_fpr_run_artifacts/) 
 
 ## Factorial effects (percentage points)
 
-All effects and intervals below were recomputed from per-image predictions after replacing the four changed cells. Each image retains all 13 target outcomes; 10,000 paired bootstrap samples resample the 1000 image IDs with replacement, using NumPy `default_rng(42)` (PCG64). The same bootstrap image indices are shared by every cell and all four sources. Targets are held fixed. Intervals are percentile 95% CIs. Drop main effect = ((drop − base) + (full − noise))/2; noise main effect = ((noise − base) + (full − drop))/2; interaction = full − drop − noise + base.
+The following values are point estimates obtained from the ASR tables. Drop main effect = ((drop − base) + (full − noise))/2; noise main effect = ((noise − base) + (full − drop))/2; interaction = full − drop − noise + base. All differences are in percentage points.
 
 | Scope | Drop main effect | Noise main effect | Interaction | Full − base |
 | --- | ---: | ---: | ---: | ---: |
-| Macro mean | +4.00 [+3.55, +4.46] | +10.48 [+9.82, +11.16] | -0.03 [-0.60, +0.54] | +14.49 [+13.55, +15.45] |
-| ViT-B/16 | +8.56 [+7.58, +9.55] | +14.97 [+13.82, +16.10] | +0.28 [-1.03, +1.62] | +23.52 [+21.86, +25.22] |
-| CaiT-S24 | +4.31 [+3.30, +5.37] | +7.69 [+6.82, +8.58] | +1.58 [+0.27, +2.92] | +12.00 [+10.62, +13.42] |
-| PiT-T | +2.07 [+1.54, +2.60] | +13.74 [+12.72, +14.78] | -0.51 [-1.42, +0.42] | +15.81 [+14.59, +17.04] |
-| DeiT-B distilled | +1.08 [+0.67, +1.52] | +5.53 [+4.95, +6.15] | -1.48 [-2.22, -0.74] | +6.62 [+5.83, +7.42] |
+| Macro mean | +4.00 | +10.48 | -0.03 | +14.49 |
+| ViT-B/16 | +8.56 | +14.97 | +0.28 | +23.52 |
+| CaiT-S24 | +4.31 | +7.69 | +1.58 | +12.00 |
+| PiT-T | +2.07 | +13.74 | -0.51 | +15.81 |
+| DeiT-B distilled | +1.08 | +5.53 | -1.48 | +6.62 |
 
 Selected pairwise differences:
 
 | Scope | Drop − base | Noise − base | Full − drop | Full − noise |
 | --- | ---: | ---: | ---: | ---: |
-| Macro mean | +4.02 [+3.50, +4.55] | +10.50 [+9.80, +11.21] | +10.47 [+9.73, +11.22] | +3.99 [+3.45, +4.55] |
-| ViT-B/16 | +8.42 [+7.34, +9.52] | +14.82 [+13.43, +16.20] | +15.11 [+13.89, +16.35] | +8.70 [+7.47, +9.98] |
-| CaiT-S24 | +3.52 [+2.35, +4.72] | +6.90 [+5.82, +8.02] | +8.48 [+7.38, +9.61] | +5.10 [+3.85, +6.40] |
-| PiT-T | +2.32 [+1.58, +3.06] | +13.99 [+12.83, +15.17] | +13.48 [+12.39, +14.61] | +1.82 [+1.16, +2.48] |
-| DeiT-B distilled | +1.82 [+1.18, +2.48] | +6.28 [+5.56, +7.01] | +4.79 [+4.12, +5.48] | +0.34 [-0.10, +0.80] |
+| Macro mean | +4.02 | +10.50 | +10.47 | +3.99 |
+| ViT-B/16 | +8.42 | +14.82 | +15.11 | +8.70 |
+| CaiT-S24 | +3.52 | +6.90 | +8.48 | +5.10 |
+| PiT-T | +2.32 | +13.99 | +13.48 | +1.82 |
+| DeiT-B distilled | +1.82 | +6.28 | +4.79 | +0.34 |
 
 ## Observations
 
-- Full PRD has the highest Overall ASR point estimate for every source. Its four-source mean is 89.72%, versus 85.73% for noise-only; the paired difference is +3.99 [+3.45, +4.55] pp.
-- Opponent noise has a macro main effect of +10.48 [+9.82, +11.16] pp, and progressive drop has a macro main effect of +4.00 [+3.55, +4.46] pp.
-- PiT-T uses 14/2/2 drops and reaches 85.81%. Its full-minus-noise difference is +1.82 [+1.16, +2.48] pp.
-- Distilled DeiT-B uses block2/block9 and reaches 94.80%; drop-only reaches 90.01%, above the 88.18% base. Its full-minus-noise difference is +0.34 [-0.10, +0.80] pp. This interval includes zero; the full result is higher in point estimate, while this comparison does not establish a positive difference at the 95% level.
-- Exact two-sided McNemar statistics against `base` were also recomputed per source, enabled cell and target. [The CSV](prd_s42_1000_fpr_mcnemar.csv) retains discordant counts and unadjusted p-values as exploratory per-target statistics; no multiple-comparison correction is applied.
+- Full PRD has the highest Overall ASR for every source. Its four-source mean is 89.72%, versus 85.73% for noise-only, a difference of +3.99 pp.
+- Opponent noise has a macro main effect of +10.48 pp, and progressive drop has a macro main effect of +4.00 pp.
+- PiT-T uses 14/2/2 drops and reaches 85.81%, +1.82 pp above noise-only.
+- Distilled DeiT-B uses block2/block9 and reaches 94.80%, +0.34 pp above noise-only. Drop-only reaches 90.01%, +1.82 pp above the 88.18% base.
 
 ## Files and history
 
 - [Summary CSV](prd_s42_1000_fpr_summary.csv): all 16 source/cell metrics and four macro rows; ASR values are percentages.
 - [Per-target CSV](prd_s42_1000_fpr_per_target.csv): all 208 source/cell/target measurements; ASR values are fractions in [0,1].
-- [Effects CSV](prd_s42_1000_fpr_effects.csv): 40 effect estimates and paired bootstrap intervals, in percentage points.
-- [McNemar CSV](prd_s42_1000_fpr_mcnemar.csv): 156 exploratory per-target tests against base.
+- [Effects CSV](prd_s42_1000_fpr_effects.csv): 40 direct ASR effect estimates, in percentage points.
 - [Provenance JSON](prd_s42_1000_fpr_provenance.json): measurement dates, seed convention, source paths and hashes, and parameters of every retained run.
-- [Versioned run artifacts](prd_s42_fpr_run_artifacts/): actual parameter and transfer records for all 16 cells; `paired_outcomes.npz` stores a boolean `success` array with axes (source, cell, image, target), shape (4, 4, 1000, 13), and separate source/cell/target names, image IDs and labels. It can be loaded with `numpy.load(..., allow_pickle=False)`.
+- [Versioned run artifacts](prd_s42_fpr_run_artifacts/): actual attack parameters and original transfer CSV/JSON records for all 16 cells.
 - Rerun outputs and logs: `outputs/reruns/prd_s42_adjusted_20261023T120255Z/`; corresponding images: `outputs/attack/prd_s42_adjusted_20261023T120255Z_{drop,full}_{pit_t,deit_b}/`.
 
 The previous 2026-10-19 full-PRD FPR table had PiT-T 85.34% (4/2/5 drops), distilled DeiT-B 93.04% (block3/block10), and macro 89.16%. Those values describe the earlier configurations and remain in Git history and original outputs. Earlier project 14-target and seed-20260907 records can be retrieved from Git history; they are not part of this current result table.

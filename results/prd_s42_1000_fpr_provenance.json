@@ -24,29 +24,6 @@
   "rerun_finished_utc": "2026-10-23T13:02:13.873335+00:00",
   "sample_order_sha256": "b182c97d353f8b2b7aaa05e57e55467485cbda4943005256e7bc6f50f54c1e94",
   "label_order_sha256": "7f220ccf352c1597c0736bf8d8105dbc14a295279036de88e90bec53e51b181e",
-  "bootstrap": {
-    "resamples": 10000,
-    "seed": 42,
-    "generator": "numpy.random.default_rng (PCG64)",
-    "unit": "image",
-    "target_set": "fixed 13 targets; all 13 outcomes of each sampled image retained",
-    "cross_source_pairing": "same image resample shared by all four sources and all cells",
-    "interval": "percentile 95%",
-    "effect_order": [
-      "drop_minus_base",
-      "noise_minus_base",
-      "full_minus_base",
-      "full_minus_drop",
-      "full_minus_noise",
-      "drop_main_effect",
-      "noise_main_effect",
-      "interaction"
-    ]
-  },
-  "mcnemar": {
-    "method": "two-sided exact binomial test on discordant image pairs",
-    "multiplicity_adjustment": "none; exploratory per-target analysis"
-  },
   "artifact_layout": "results/prd_s42_fpr_run_artifacts/{cell}_{source}/{attack_params.json,transfer.csv,transfer.json}",
   "runs": [
     {
@@ -1364,30 +1341,8 @@
       "evaluation_batch_size": 32
     }
   ],
-  "paired_outcomes": {
-    "path": "results/prd_s42_fpr_run_artifacts/paired_outcomes.npz",
-    "sha256": "9252a59d3bc1ff205cb7d9a0116e442a05405ead058ca1f391bb5cf7031381a8",
-    "keys": [
-      "success",
-      "sample_ids",
-      "labels",
-      "sources",
-      "cells",
-      "targets"
-    ],
-    "success_shape": [
-      4,
-      4,
-      1000,
-      13
-    ],
-    "success_axes": [
-      "source",
-      "cell",
-      "image",
-      "target"
-    ],
-    "success_definition": "true iff predicted class differs from the ground-truth class; enough to reproduce ASRs, paired bootstrap effects, and McNemar discordant counts",
-    "numpy_load_allow_pickle": false
-  }
+  "reporting_metrics": [
+    "ASR over all evaluated adversarial samples",
+    "Direct ASR differences in percentage points"
+  ]
 }
