@@ -1,6 +1,6 @@
 # PRD seed-42 FPR 13-target transfer and ablation results
 
-Updated 2026-10-26 with the four reruns completed on 2026-10-23 (12:02:55–13:02:13 UTC), using code commit `2d2625b5588587b75da7f87694c0d52234b6faa7`. The current result combines these four updated cells—PiT-T `drop/full` and distilled DeiT-B `drop/full`—with the twelve unchanged cells measured on 2026-10-19. All sixteen cells use the same 1000 image IDs and labels. FPR13 is the primary transfer protocol; the project 14-target tables remain historical measurements of their recorded configurations.
+Updated 2026-10-26 with the four reruns completed on 2026-10-23 (12:02:55–13:02:13 UTC), using code commit `2d2625b5588587b75da7f87694c0d52234b6faa7`. The current result combines these four updated cells—PiT-T `drop/full` and distilled DeiT-B `drop/full`—with the twelve unchanged cells measured on 2026-10-19. All sixteen cells use the same 1000 image IDs and labels. FPR13 is the primary transfer protocol; only FPR13 numerical records are retained in the current `results/` tree; earlier protocol tables can be retrieved from Git history.
 
 Per the user's experimental convention, historical `randomness.py` seed-42 runs and current PyTorch global-seed-42 runs are treated as one seed-42 reporting standard. Only checkpoint/drop-parameter changes required rerunning cells. This convention does not claim identical random streams or batch-independent sampling in the current code.
 
@@ -98,4 +98,4 @@ Selected pairwise differences:
 - [Versioned run artifacts](prd_s42_fpr_run_artifacts/): actual parameter and transfer records for all 16 cells; `paired_outcomes.npz` stores a boolean `success` array with axes (source, cell, image, target), shape (4, 4, 1000, 13), and separate source/cell/target names, image IDs and labels. It can be loaded with `numpy.load(..., allow_pickle=False)`.
 - Rerun outputs and logs: `outputs/reruns/prd_s42_adjusted_20261023T120255Z/`; corresponding images: `outputs/attack/prd_s42_adjusted_20261023T120255Z_{drop,full}_{pit_t,deit_b}/`.
 
-The previous 2026-10-19 full-PRD FPR table had PiT-T 85.34% (4/2/5 drops), distilled DeiT-B 93.04% (block3/block10), and macro 89.16%. Those values describe the earlier configurations and remain in Git history and original outputs. The project 14-target records and historical seed-20260907 results retain their own original values.
+The previous 2026-10-19 full-PRD FPR table had PiT-T 85.34% (4/2/5 drops), distilled DeiT-B 93.04% (block3/block10), and macro 89.16%. Those values describe the earlier configurations and remain in Git history and original outputs. Earlier project 14-target and seed-20260907 records can be retrieved from Git history; they are not part of this current result table.

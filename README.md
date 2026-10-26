@@ -63,26 +63,6 @@ python main.py --whitebox-model deit_base_distilled_patch16_224 --output-dir out
 
 完整逐目标矩阵、2×2 消融和配对统计见 [FPR13 实验记录](results/prd_s42_1000_fpr_ablation.md)。[results 索引](results/README.md) 和 [轻量原始参数／迁移记录](results/prd_s42_fpr_run_artifacts/) 随 Git 提交，可在其他机器查看。历史 randomness.py seed 42 与当前 PyTorch seed 42 按用户约定作为统一报告标准。
 
-### Historical project 14-target results
-
-以下历史主实验于 2026-10-12 完成，实际实现为 `bf092246`，源模型为 ViT-B/16、CaiT-S24、PiT-B、Visformer-S。结果不代表新四源或 seed 42 的重测。
-
-本地归档参数已于 2026-10-14 精简为保留的 PRD 内容；历史 ASR 与实现提交保持原记录，尚未用当前代码重新测量。
-
-下表使用该次四源运行的记录结果。
-
-ASR 定义为 `1 - adversarial accuracy`，分母是送入目标模型评估的全部对抗样本，不筛选 target-clean-correct 子集。四个 PRD source 均在相同的 14 个目标模型（8 Transformer、6 CNN）上完成评估：
-
-| Source | Overall ASR | Transformer avg | CNN avg | Strict black-box overall |
-| --- | ---: | ---: | ---: | ---: |
-| ViT-B/16 | 85.06% | 89.96% | 78.52% | 84.18% |
-| CaiT-S24 | 87.64% | 90.89% | 83.32% | 86.79% |
-| PiT-B | 84.34% | 89.55% | 77.38% | 83.24% |
-| Visformer-S | 81.18% | 83.16% | 78.53% | 79.75% |
-| **Four-source mean** | 84.55% | 88.39% | 79.44% | 83.49% |
-
-Strict black-box 指标排除与 source 架构相同的 target。56 个 source-target evaluation 均使用完整 1000 张对抗样本且没有 skipped images。逐目标结果和规范化 CSV 记录见 `experiments/progressive_cross_arch_mainline_s1000.md`。
-
 方法执行顺序见 [PRD 方法记录](experiments/prd_method_contract.md)。论文叙事、主实验记录与建议写作结构见 [PRD 论文叙事文档](experiments/prd_paper_story.md)。
 
 异地写作所需的当前主实验参数、原始记录和服务器材料位置见 [写作交接与文件清单](experiments/server_handoff_inventory.md)。
@@ -94,13 +74,12 @@ Strict black-box 指标排除与 source 架构相同的 target。56 个 source-t
 图像位于 `data/clean_resized_images`，标签为 `data/image_name_to_class_id_and_name.json`，源与 Transformer 目标从 `data/huggingface` 离线缓存读取。
 
 ```bash
-python transfer_eval.py --image-dir outputs/attack/prd_vit
 python transfer_eval.py --image-dir outputs/attack/prd_vit --protocol fpr --no-tf32
 python -m unittest discover -s tests
 RUN_REAL_PRD_ADAPTERS=1 python -m unittest tests.test_progressive_adapters
 ```
 
-当前迁移测试以 FPR 的 13 目标协议为主，使用 FPR 对齐的模型加载和预处理；project 的 14 目标协议保留作历史对照。目标集的选择独立于源支持。结果默认写入图像目录的 `transfer.csv` 与 `transfer.json`，可用 `--predictions-output` 保存逐样本预测。ASR 使用全部输入样本；严格黑盒排除与源模型完全相同的目标。协议定义见 [FPR 目标评估协议](experiments/fpr_target_protocol.md)。
+当前迁移测试以 FPR 的 13 目标协议为主，使用 FPR 对齐的模型加载和预处理；`results/` 仅保留 FPR13 的结果与实验记录。目标集的选择独立于源支持。结果默认写入图像目录的 `transfer.csv` 与 `transfer.json`，可用 `--predictions-output` 保存逐样本预测。ASR 使用全部输入样本；严格黑盒排除与源模型完全相同的目标。协议定义见 [FPR 目标评估协议](experiments/fpr_target_protocol.md)。
 
 权重准备工具 `experiments/download_fpr_models.py` 保留，负责缓存 FPR 目标和额外的 PiT-T／DeiT-B distilled 源权重，不执行攻击或评估。
 

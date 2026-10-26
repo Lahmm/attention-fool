@@ -1,6 +1,6 @@
 # PRD 迁移结果
 
-当前迁移测试以 FPR 13-target 协议为主，按 FPR 对齐的模型与预处理评估。project 14-target 协议保留为历史对照，结果单独呈现，不与 FPR 数值合并。ASR 定义为 `1 - adversarial accuracy`，分母为全部评估样本。
+本目录仅保留 FPR 13-target 迁移结果及其参数、消融、统计与来源记录，使用 FPR 对齐的模型和预处理。非 FPR13 结果文件已清理，历史内容可从 Git 历史查询。ASR 定义为 `1 - adversarial accuracy`，分母为全部评估样本。
 
 ## 当前主协议结果
 
@@ -27,29 +27,16 @@
 
 这批记录受 Git 管理。[轻量原始记录目录](prd_s42_fpr_run_artifacts/) 包含全部 16 个单元的真实参数 JSON、迁移 CSV/JSON；[provenance](prd_s42_1000_fpr_provenance.json) 保存代码 commit、测量日期、原始路径和文件哈希。[压缩逐图像成功标记](prd_s42_fpr_run_artifacts/paired_outcomes.npz) 同时保存所有单元的逐样本成功与否、样本标识及标签，足以在其他机器复算 ASR、配对区间与 McNemar 统计。另一台机器拉取仓库即可查看和复核这些结果；攻击图像、原始预测类别和日志继续保存在被忽略的服务器 `outputs/` 目录。
 
-## 历史 project 14-target 结果
+## 文件索引
 
-以下结果保留 2026-10-12 完成的 PRD 主实验记录：全部初始局部特征注入 RGB 对手通道投影噪声，随后按随机 schedule 在多个 checkpoint 逐次清零局部 token。该历史测量对四种源架构各攻击 1000 张图像，并在相同的 14 个目标模型上评估。
-
-四源平均 Overall ASR 为 **84.55%**，严格黑盒 ASR 为 **83.49%**；Transformer 平均为 **88.39%**，CNN 平均为 **79.44%**。
-
-| 文件 | 内容 |
+| 文件或目录 | 内容 |
 | --- | --- |
-| [prd_cross_arch_s1000.csv](prd_cross_arch_s1000.csv) | 56 项 source-target ASR、目标类别、source-match 标记和样本数 |
-| [prd_summary_s1000.csv](prd_summary_s1000.csv) | 四个源模型及四源宏平均的 Overall、Transformer、CNN 和严格黑盒 ASR |
-| [prd_run_artifacts/provenance.json](prd_run_artifacts/provenance.json) | 实际运行环境、实现提交、源配置与目标集 |
-| `prd_run_artifacts/{vit,cait,pit,visformer}/attack_params.json` | 四次运行保留的 PRD 参数 |
-| `prd_run_artifacts/{vit,cait,pit,visformer}/transfer.csv` | 四份迁移 CSV，包含实际运行时间、保留参数和逐目标结果 |
-| [patch_rank_observation_summary.json](patch_rank_observation_summary.json) | 动机观察统计，呈现 token/global 关系随模型深度的变化 |
+| [FPR 完整实验记录](prd_s42_1000_fpr_ablation.md) | 当前配置、四源主结果、逐目标矩阵与完整机制消融 |
+| [汇总 CSV](prd_s42_1000_fpr_summary.csv) | 16 个源/消融单元与四源宏平均 |
+| [逐目标 CSV](prd_s42_1000_fpr_per_target.csv) | 208 个源/消融单元/目标组合的 ASR |
+| [效应 CSV](prd_s42_1000_fpr_effects.csv) | 40 个配对效应及 95% bootstrap 区间 |
+| [McNemar CSV](prd_s42_1000_fpr_mcnemar.csv) | 156 项探索性逐目标配对统计 |
+| [Provenance JSON](prd_s42_1000_fpr_provenance.json) | seed 约定、运行参数、日期、代码提交和校验哈希 |
+| [原始记录目录](prd_s42_fpr_run_artifacts/) | 全部 16 个单元的参数与原始迁移 CSV/JSON，以及可复算的压缩逐图像成功标记 |
 
-正式配置、结果表与计算规则见 [主实验报告](../experiments/progressive_cross_arch_mainline_s1000.md)。方法执行契约见 [PRD 方法记录](../experiments/prd_method_contract.md)。服务器上当前主实验图像、manifest 和日志的位置见 [写作交接](../experiments/server_handoff_inventory.md)。
-
-本地归档参数已于 2026-10-14 精简为保留的 PRD 内容；历史 ASR 与实现提交保持原记录。
-
-2026-10-19 另完成 project 14-target 的 seed-42 机制消融。该协议结果作为历史对照，记录、逐目标结果和因子效应见 [PRD seed-42 主运行与消融](prd_s42_1000_ablation.md)、[汇总 CSV](prd_s42_1000_summary.csv)、[效应 CSV](prd_s42_1000_effects.csv) 和 [逐目标 CSV](prd_s42_1000_per_target.csv)。
-
-FPR 主运行与消融记录见 [FPR 主运行与消融记录](prd_s42_1000_fpr_ablation.md)、[FPR 汇总 CSV](prd_s42_1000_fpr_summary.csv)、[FPR 效应 CSV](prd_s42_1000_fpr_effects.csv) 和 [FPR 逐目标 CSV](prd_s42_1000_fpr_per_target.csv)。
-
-论文统一通过 transfer ASR 呈现迁移性；patch-score 用于动机观察，梯度诊断用于实验内部分析。
-
-当前论文四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled，另保留 PiT-B 源；新执行固定 seed 42。历史原始 CSV 与参数文件不改写为新设置的测量。
+方法执行契约见 [PRD 方法记录](../experiments/prd_method_contract.md)，服务器产物位置见 [写作交接](../experiments/server_handoff_inventory.md)。论文以 ASR 呈现迁移性；patch-score 用于动机可视化，观察材料从实际样本与层输出准备。

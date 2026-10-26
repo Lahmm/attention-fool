@@ -36,8 +36,8 @@ RMS 在单样本全部初始局部位置和通道上计算。特征 RMS 与投�
 
 ## 记录与评估
 
-`attack_params.json` 保存实际配置，包括 seed 42、源模型、checkpoint、drop 数量／网格、噪声强度和视图设置。攻击路径不计算或输出梯度诊断。当前迁移测试以 FPR 13-target 协议为主；project 14-target 结果作为历史对照单独报告。ASR 为全部对抗样本上的 `1 - adversarial accuracy`。
+`attack_params.json` 保存实际配置，包括 seed 42、源模型、checkpoint、drop 数量／网格、噪声强度和视图设置。攻击路径不计算或输出梯度诊断。当前迁移测试以 FPR 13-target 协议为主；`results/` 仅保存 FPR13 协议的数值与实验记录。ASR 为全部对抗样本上的 `1 - adversarial accuracy`。
 
-2026-10-12 的历史主实验实现为 bf092246；结果保留在 `results/prd_cross_arch_s1000.csv`、`results/prd_summary_s1000.csv` 和 `results/prd_run_artifacts/`。这些记录不因源支持调整或随机设置更新而改写数值，不作为当前代码的新测量。
+非 FPR13 结果文件已从当前 `results/` 目录清理，旧协议数据可在 Git 历史中查询。
 
 当前 seed-42 四源 FPR13 完整 PRD 的 Overall ASR 为 89.72%，严格黑盒 ASR 为 89.29%；当前配置的主结果、消融和参数归档见 [FPR 实验记录](../results/prd_s42_1000_fpr_ablation.md)。2026-10-23 已完成 PiT-T 和 distilled DeiT-B 的 drop/full 配置更新重跑。

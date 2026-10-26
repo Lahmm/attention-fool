@@ -1,10 +1,10 @@
 # PRD 的 FPR 目标评估协议
 
-这是当前 PRD 迁移测试的主协议。新结果默认按以下 13 个 FPR 目标报告；project 的 14 目标协议保留作历史对照，不与 FPR 结果混合汇总。
+这是当前 PRD 迁移测试的主协议。新结果默认按以下 13 个 FPR 目标报告；`results/` 仅保留 FPR13 的数值与实验记录；旧协议数据保存在 Git 历史中。
 
 使用 `transfer_eval.py --protocol fpr` 评估 13 个目标：ViT-B/16、CaiT-S24、PiT-B、Visformer-S、Swin-T、DeiT-T、CoaT-T，以及 ResNet-18、VGG-16、DenseNet-121、EfficientNet-B0、MobileNet-V3-Small、ResNeXt-50-32x4d。
 
-七个 Transformer 使用 timm 预训练权重，六个 CNN 使用 torchvision DEFAULT 权重；图像直接 bicubic resize 到 224×224，转换到 [0,1] 后按各模型配置归一化。该预处理与 project 14 目标协议分别保留。
+七个 Transformer 使用 timm 预训练权重，六个 CNN 使用 torchvision DEFAULT 权重；图像直接 bicubic resize 到 224×224，转换到 [0,1] 后按各模型配置归一化。本目录中的 FPR13 ASR 均采用这一预处理。
 
 权重准备工具 `experiments/download_fpr_models.py` 保留，并准备额外的 PiT-T／DeiT-B distilled 源权重，下载到 `data/huggingface` 与 `data/torch`。攻击和评估直接通过 `main.py`、`transfer_eval.py` 调用，不再提供实验编排脚本。
 
