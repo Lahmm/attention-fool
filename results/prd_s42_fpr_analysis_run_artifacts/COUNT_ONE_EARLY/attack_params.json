@@ -1,0 +1,63 @@
+{
+  "attack_method": "progressive_route_disruption",
+  "seed": 42,
+  "whitebox_model": "vit_base_patch16_224",
+  "epsilon": 0.06274509803921569,
+  "step_size": 0.006274509803921568,
+  "steps": 10,
+  "momentum_decay": 1.0,
+  "progressive_drop_enabled": true,
+  "opponent_noise_enabled": true,
+  "checkpoints": [
+    "block3"
+  ],
+  "drop_ratios": [
+    0.102040816327
+  ],
+  "drop_counts": [
+    20
+  ],
+  "grids": [
+    [
+      14,
+      14
+    ]
+  ],
+  "opponent_noise_strength": 0.2,
+  "noise_structure": "opponent",
+  "noise_direction_variances": [
+    0.5,
+    1.25,
+    1.25
+  ],
+  "input_diversity_groups": 10,
+  "input_diversity_views_per_group": 2,
+  "input_diversity_phase_shift_set": [
+    [
+      4,
+      4
+    ],
+    [
+      8,
+      8
+    ],
+    [
+      12,
+      12
+    ]
+  ],
+  "input_diversity_total_views": 20,
+  "mask_schedule_count_per_image": 100,
+  "checkpoint_mask_selection_count_per_image": 100,
+  "model_mean": [
+    0.5,
+    0.5,
+    0.5
+  ],
+  "model_std": [
+    0.5,
+    0.5,
+    0.5
+  ],
+  "num_images": 1000
+}

@@ -1,0 +1,2984 @@
+{
+  "analysis": "PRD paper section 4.4 ViT-B/16 design analysis",
+  "generated_utc": "2026-10-27T08:52:33.472675+00:00",
+  "primary_protocol": "fpr",
+  "targets": [
+    "vit_base_patch16_224",
+    "cait_s24_224",
+    "pit_b_224",
+    "visformer_small",
+    "swin_tiny_patch4_window7_224",
+    "deit_tiny_patch16_224",
+    "coat_tiny",
+    "resnet18",
+    "vgg16",
+    "densenet121",
+    "efficientnet_b0",
+    "mobilenet_v3_small",
+    "resnext50_32x4d"
+  ],
+  "num_images": 1000,
+  "seed": 42,
+  "seed_policy": "All new runs use the global PyTorch seed 42 set by main.py. Historical seed-42 reference units are reused without rerunning; RNG implementation differences alone do not trigger reruns.",
+  "asr_definition": "1 - adversarial accuracy over all 1000 images; no clean-correct filtering.",
+  "summary_metrics": {
+    "primary": "strict black-box mean ASR over the 12 targets excluding vit_base_patch16_224",
+    "transformer_black_box": "mean ASR over the six black-box Transformer targets",
+    "cnn": "mean ASR over the six CNN targets",
+    "transfer_json_note": "Archived transfer.json files retain transfer_eval's source-inclusive transformer_asr. The analysis summary recomputes the six-target black-box Transformer mean and the twelve-target strict black-box mean from the same per-target counts.",
+    "differences": "percentage points",
+    "statistics": "No confidence intervals, bootstrap/resampling error bars, significance tests, McNemar tests, or p-values are computed or reported."
+  },
+  "code_commit_at_run": "3940e6fe8360c5f7f57d353d2a107746e88fc3e6",
+  "code_changes": [
+    "main.py: --vit-analysis-checkpoints with ViT-B-only boundary/order/count validation",
+    "main.py: --noise-structure opponent|isotropic_rgb",
+    "progressive_attack.py: recorded noise_structure and noise_direction_variances",
+    "tests: checkpoint traversal/budget, zero-shift identity and view count, noise RMS/structure"
+  ],
+  "environment": {
+    "conda_env": "att-atk",
+    "python": "3.10.19",
+    "torch": "2.10.0+cu128",
+    "torch_cuda": "12.8",
+    "timm": "1.0.24",
+    "torchvision": "0.25.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 3080",
+    "gpu_total_memory_bytes": 10354753536,
+    "driver": "580.76.05",
+    "platform": "Linux-5.4.0-126-generic-x86_64-with-glibc2.35",
+    "generation_batch_size": 48,
+    "evaluation_batch_size": 32,
+    "tf32": "disabled for evaluation with --no-tf32",
+    "amp": "disabled"
+  },
+  "data": {
+    "image_dir": "data/clean_resized_images",
+    "annotations_path": "data/image_name_to_class_id_and_name.json",
+    "annotations_sha256": "56d8845af2c4d8af0590d5f4e771c5d1a09317c4882502c64b249ffcd8ca75be",
+    "num_images": 1000,
+    "sample_order_sha256": "b182c97d353f8b2b7aaa05e57e55467485cbda4943005256e7bc6f50f54c1e94",
+    "label_order_sha256": "7f220ccf352c1597c0736bf8d8105dbc14a295279036de88e90bec53e51b181e",
+    "ordering": "sorted adversarial PNG filenames; identical to the reference sample order hash",
+    "first_sample": "ILSVRC2012_val_00000031.png",
+    "last_sample": "ILSVRC2012_val_00049870.png",
+    "sample_order": [
+      "ILSVRC2012_val_00000031.png",
+      "ILSVRC2012_val_00000081.png",
+      "ILSVRC2012_val_00000102.png",
+      "ILSVRC2012_val_00000117.png",
+      "ILSVRC2012_val_00000120.png",
+      "ILSVRC2012_val_00000138.png",
+      "ILSVRC2012_val_00000166.png",
+      "ILSVRC2012_val_00000262.png",
+      "ILSVRC2012_val_00000299.png",
+      "ILSVRC2012_val_00000410.png",
+      "ILSVRC2012_val_00000499.png",
+      "ILSVRC2012_val_00000526.png",
+      "ILSVRC2012_val_00000537.png",
+      "ILSVRC2012_val_00000548.png",
+      "ILSVRC2012_val_00000575.png",
+      "ILSVRC2012_val_00000602.png",
+      "ILSVRC2012_val_00000695.png",
+      "ILSVRC2012_val_00000724.png",
+      "ILSVRC2012_val_00000781.png",
+      "ILSVRC2012_val_00000809.png",
+      "ILSVRC2012_val_00000871.png",
+      "ILSVRC2012_val_00000890.png",
+      "ILSVRC2012_val_00000989.png",
+      "ILSVRC2012_val_00001094.png",
+      "ILSVRC2012_val_00001115.png",
+      "ILSVRC2012_val_00001343.png",
+      "ILSVRC2012_val_00001379.png",
+      "ILSVRC2012_val_00001425.png",
+      "ILSVRC2012_val_00001434.png",
+      "ILSVRC2012_val_00001435.png",
+      "ILSVRC2012_val_00001512.png",
+      "ILSVRC2012_val_00001537.png",
+      "ILSVRC2012_val_00001570.png",
+      "ILSVRC2012_val_00001638.png",
+      "ILSVRC2012_val_00001642.png",
+      "ILSVRC2012_val_00001645.png",
+      "ILSVRC2012_val_00001648.png",
+      "ILSVRC2012_val_00001655.png",
+      "ILSVRC2012_val_00001659.png",
+      "ILSVRC2012_val_00001689.png",
+      "ILSVRC2012_val_00001753.png",
+      "ILSVRC2012_val_00001925.png",
+      "ILSVRC2012_val_00002002.png",
+      "ILSVRC2012_val_00002073.png",
+      "ILSVRC2012_val_00002159.png",
+      "ILSVRC2012_val_00002176.png",
+      "ILSVRC2012_val_00002183.png",
+      "ILSVRC2012_val_00002184.png",
+      "ILSVRC2012_val_00002311.png",
+      "ILSVRC2012_val_00002347.png",
+      "ILSVRC2012_val_00002464.png",
+      "ILSVRC2012_val_00002533.png",
+      "ILSVRC2012_val_00002583.png",
+      "ILSVRC2012_val_00002614.png",
+      "ILSVRC2012_val_00002716.png",
+      "ILSVRC2012_val_00002733.png",
+      "ILSVRC2012_val_00002734.png",
+      "ILSVRC2012_val_00002815.png",
+      "ILSVRC2012_val_00002932.png",
+      "ILSVRC2012_val_00003096.png",
+      "ILSVRC2012_val_00003145.png",
+      "ILSVRC2012_val_00003190.png",
+      "ILSVRC2012_val_00003194.png",
+      "ILSVRC2012_val_00003317.png",
+      "ILSVRC2012_val_00003332.png",
+      "ILSVRC2012_val_00003337.png",
+      "ILSVRC2012_val_00003340.png",
+      "ILSVRC2012_val_00003381.png",
+      "ILSVRC2012_val_00003515.png",
+      "ILSVRC2012_val_00003577.png",
+      "ILSVRC2012_val_00003584.png",
+      "ILSVRC2012_val_00003607.png",
+      "ILSVRC2012_val_00003670.png",
+      "ILSVRC2012_val_00003674.png",
+      "ILSVRC2012_val_00003706.png",
+      "ILSVRC2012_val_00003724.png",
+      "ILSVRC2012_val_00003745.png",
+      "ILSVRC2012_val_00003900.png",
+      "ILSVRC2012_val_00003901.png",
+      "ILSVRC2012_val_00003913.png",
+      "ILSVRC2012_val_00003918.png",
+      "ILSVRC2012_val_00004015.png",
+      "ILSVRC2012_val_00004171.png",
+      "ILSVRC2012_val_00004180.png",
+      "ILSVRC2012_val_00004234.png",
+      "ILSVRC2012_val_00004238.png",
+      "ILSVRC2012_val_00004267.png",
+      "ILSVRC2012_val_00004281.png",
+      "ILSVRC2012_val_00004289.png",
+      "ILSVRC2012_val_00004309.png",
+      "ILSVRC2012_val_00004319.png",
+      "ILSVRC2012_val_00004340.png",
+      "ILSVRC2012_val_00004346.png",
+      "ILSVRC2012_val_00004355.png",
+      "ILSVRC2012_val_00004359.png",
+      "ILSVRC2012_val_00004400.png",
+      "ILSVRC2012_val_00004401.png",
+      "ILSVRC2012_val_00004413.png",
+      "ILSVRC2012_val_00004418.png",
+      "ILSVRC2012_val_00004447.png",
+      "ILSVRC2012_val_00004508.png",
+      "ILSVRC2012_val_00004575.png",
+      "ILSVRC2012_val_00004576.png",
+      "ILSVRC2012_val_00004590.png",
+      "ILSVRC2012_val_00004593.png",
+      "ILSVRC2012_val_00004606.png",
+      "ILSVRC2012_val_00004630.png",
+      "ILSVRC2012_val_00004638.png",
+      "ILSVRC2012_val_00004658.png",
+      "ILSVRC2012_val_00004678.png",
+      "ILSVRC2012_val_00004751.png",
+      "ILSVRC2012_val_00004841.png",
+      "ILSVRC2012_val_00004871.png",
+      "ILSVRC2012_val_00004919.png",
+      "ILSVRC2012_val_00004923.png",
+      "ILSVRC2012_val_00004924.png",
+      "ILSVRC2012_val_00004925.png",
+      "ILSVRC2012_val_00005036.png",
+      "ILSVRC2012_val_00005109.png",
+      "ILSVRC2012_val_00005139.png",
+      "ILSVRC2012_val_00005192.png",
+      "ILSVRC2012_val_00005241.png",
+      "ILSVRC2012_val_00005309.png",
+      "ILSVRC2012_val_00005365.png",
+      "ILSVRC2012_val_00005565.png",
+      "ILSVRC2012_val_00005582.png",
+      "ILSVRC2012_val_00005591.png",
+      "ILSVRC2012_val_00005634.png",
+      "ILSVRC2012_val_00005664.png",
+      "ILSVRC2012_val_00005689.png",
+      "ILSVRC2012_val_00005718.png",
+      "ILSVRC2012_val_00005804.png",
+      "ILSVRC2012_val_00005869.png",
+      "ILSVRC2012_val_00005891.png",
+      "ILSVRC2012_val_00005950.png",
+      "ILSVRC2012_val_00005989.png",
+      "ILSVRC2012_val_00005996.png",
+      "ILSVRC2012_val_00006106.png",
+      "ILSVRC2012_val_00006147.png",
+      "ILSVRC2012_val_00006177.png",
+      "ILSVRC2012_val_00006180.png",
+      "ILSVRC2012_val_00006213.png",
+      "ILSVRC2012_val_00006231.png",
+      "ILSVRC2012_val_00006242.png",
+      "ILSVRC2012_val_00006246.png",
+      "ILSVRC2012_val_00006326.png",
+      "ILSVRC2012_val_00006393.png",
+      "ILSVRC2012_val_00006416.png",
+      "ILSVRC2012_val_00006470.png",
+      "ILSVRC2012_val_00006501.png",
+      "ILSVRC2012_val_00006510.png",
+      "ILSVRC2012_val_00006575.png",
+      "ILSVRC2012_val_00006585.png",
+      "ILSVRC2012_val_00006647.png",
+      "ILSVRC2012_val_00006747.png",
+      "ILSVRC2012_val_00006752.png",
+      "ILSVRC2012_val_00006758.png",
+      "ILSVRC2012_val_00006822.png",
+      "ILSVRC2012_val_00006871.png",
+      "ILSVRC2012_val_00006935.png",
+      "ILSVRC2012_val_00006941.png",
+      "ILSVRC2012_val_00007119.png",
+      "ILSVRC2012_val_00007127.png",
+      "ILSVRC2012_val_00007134.png",
+      "ILSVRC2012_val_00007241.png",
+      "ILSVRC2012_val_00007306.png",
+      "ILSVRC2012_val_00007356.png",
+      "ILSVRC2012_val_00007406.png",
+      "ILSVRC2012_val_00007437.png",
+      "ILSVRC2012_val_00007445.png",
+      "ILSVRC2012_val_00007548.png",
+      "ILSVRC2012_val_00007575.png",
+      "ILSVRC2012_val_00007604.png",
+      "ILSVRC2012_val_00007633.png",
+      "ILSVRC2012_val_00007638.png",
+      "ILSVRC2012_val_00007650.png",
+      "ILSVRC2012_val_00007766.png",
+      "ILSVRC2012_val_00007767.png",
+      "ILSVRC2012_val_00007804.png",
+      "ILSVRC2012_val_00007841.png",
+      "ILSVRC2012_val_00007868.png",
+      "ILSVRC2012_val_00007968.png",
+      "ILSVRC2012_val_00008024.png",
+      "ILSVRC2012_val_00008062.png",
+      "ILSVRC2012_val_00008082.png",
+      "ILSVRC2012_val_00008092.png",
+      "ILSVRC2012_val_00008166.png",
+      "ILSVRC2012_val_00008197.png",
+      "ILSVRC2012_val_00008346.png",
+      "ILSVRC2012_val_00008399.png",
+      "ILSVRC2012_val_00008401.png",
+      "ILSVRC2012_val_00008417.png",
+      "ILSVRC2012_val_00008447.png",
+      "ILSVRC2012_val_00008538.png",
+      "ILSVRC2012_val_00008618.png",
+      "ILSVRC2012_val_00008627.png",
+      "ILSVRC2012_val_00008653.png",
+      "ILSVRC2012_val_00008675.png",
+      "ILSVRC2012_val_00008676.png",
+      "ILSVRC2012_val_00008686.png",
+      "ILSVRC2012_val_00008693.png",
+      "ILSVRC2012_val_00008697.png",
+      "ILSVRC2012_val_00008764.png",
+      "ILSVRC2012_val_00008772.png",
+      "ILSVRC2012_val_00008783.png",
+      "ILSVRC2012_val_00008803.png",
+      "ILSVRC2012_val_00008829.png",
+      "ILSVRC2012_val_00008854.png",
+      "ILSVRC2012_val_00008935.png",
+      "ILSVRC2012_val_00008952.png",
+      "ILSVRC2012_val_00008985.png",
+      "ILSVRC2012_val_00009038.png",
+      "ILSVRC2012_val_00009140.png",
+      "ILSVRC2012_val_00009170.png",
+      "ILSVRC2012_val_00009207.png",
+      "ILSVRC2012_val_00009406.png",
+      "ILSVRC2012_val_00009494.png",
+      "ILSVRC2012_val_00009498.png",
+      "ILSVRC2012_val_00009651.png",
+      "ILSVRC2012_val_00009762.png",
+      "ILSVRC2012_val_00009834.png",
+      "ILSVRC2012_val_00009970.png",
+      "ILSVRC2012_val_00009989.png",
+      "ILSVRC2012_val_00010022.png",
+      "ILSVRC2012_val_00010063.png",
+      "ILSVRC2012_val_00010070.png",
+      "ILSVRC2012_val_00010079.png",
+      "ILSVRC2012_val_00010112.png",
+      "ILSVRC2012_val_00010121.png",
+      "ILSVRC2012_val_00010125.png",
+      "ILSVRC2012_val_00010127.png",
+      "ILSVRC2012_val_00010131.png",
+      "ILSVRC2012_val_00010149.png",
+      "ILSVRC2012_val_00010158.png",
+      "ILSVRC2012_val_00010259.png",
+      "ILSVRC2012_val_00010344.png",
+      "ILSVRC2012_val_00010362.png",
+      "ILSVRC2012_val_00010401.png",
+      "ILSVRC2012_val_00010537.png",
+      "ILSVRC2012_val_00010595.png",
+      "ILSVRC2012_val_00010599.png",
+      "ILSVRC2012_val_00010608.png",
+      "ILSVRC2012_val_00010631.png",
+      "ILSVRC2012_val_00010711.png",
+      "ILSVRC2012_val_00010721.png",
+      "ILSVRC2012_val_00010858.png",
+      "ILSVRC2012_val_00010923.png",
+      "ILSVRC2012_val_00010928.png",
+      "ILSVRC2012_val_00011092.png",
+      "ILSVRC2012_val_00011104.png",
+      "ILSVRC2012_val_00011118.png",
+      "ILSVRC2012_val_00011184.png",
+      "ILSVRC2012_val_00011226.png",
+      "ILSVRC2012_val_00011236.png",
+      "ILSVRC2012_val_00011321.png",
+      "ILSVRC2012_val_00011398.png",
+      "ILSVRC2012_val_00011527.png",
+      "ILSVRC2012_val_00011651.png",
+      "ILSVRC2012_val_00011711.png",
+      "ILSVRC2012_val_00011744.png",
+      "ILSVRC2012_val_00011788.png",
+      "ILSVRC2012_val_00011799.png",
+      "ILSVRC2012_val_00011827.png",
+      "ILSVRC2012_val_00011902.png",
+      "ILSVRC2012_val_00011963.png",
+      "ILSVRC2012_val_00011987.png",
+      "ILSVRC2012_val_00011998.png",
+      "ILSVRC2012_val_00012067.png",
+      "ILSVRC2012_val_00012175.png",
+      "ILSVRC2012_val_00012208.png",
+      "ILSVRC2012_val_00012233.png",
+      "ILSVRC2012_val_00012333.png",
+      "ILSVRC2012_val_00012349.png",
+      "ILSVRC2012_val_00012473.png",
+      "ILSVRC2012_val_00012488.png",
+      "ILSVRC2012_val_00012491.png",
+      "ILSVRC2012_val_00012563.png",
+      "ILSVRC2012_val_00012613.png",
+      "ILSVRC2012_val_00012793.png",
+      "ILSVRC2012_val_00012809.png",
+      "ILSVRC2012_val_00012900.png",
+      "ILSVRC2012_val_00012964.png",
+      "ILSVRC2012_val_00012976.png",
+      "ILSVRC2012_val_00013057.png",
+      "ILSVRC2012_val_00013058.png",
+      "ILSVRC2012_val_00013098.png",
+      "ILSVRC2012_val_00013124.png",
+      "ILSVRC2012_val_00013200.png",
+      "ILSVRC2012_val_00013202.png",
+      "ILSVRC2012_val_00013203.png",
+      "ILSVRC2012_val_00013207.png",
+      "ILSVRC2012_val_00013286.png",
+      "ILSVRC2012_val_00013348.png",
+      "ILSVRC2012_val_00013410.png",
+      "ILSVRC2012_val_00013525.png",
+      "ILSVRC2012_val_00013547.png",
+      "ILSVRC2012_val_00013552.png",
+      "ILSVRC2012_val_00013583.png",
+      "ILSVRC2012_val_00013616.png",
+      "ILSVRC2012_val_00013641.png",
+      "ILSVRC2012_val_00013733.png",
+      "ILSVRC2012_val_00013858.png",
+      "ILSVRC2012_val_00013921.png",
+      "ILSVRC2012_val_00013975.png",
+      "ILSVRC2012_val_00014029.png",
+      "ILSVRC2012_val_00014035.png",
+      "ILSVRC2012_val_00014043.png",
+      "ILSVRC2012_val_00014059.png",
+      "ILSVRC2012_val_00014090.png",
+      "ILSVRC2012_val_00014117.png",
+      "ILSVRC2012_val_00014128.png",
+      "ILSVRC2012_val_00014212.png",
+      "ILSVRC2012_val_00014268.png",
+      "ILSVRC2012_val_00014341.png",
+      "ILSVRC2012_val_00014377.png",
+      "ILSVRC2012_val_00014391.png",
+      "ILSVRC2012_val_00014483.png",
+      "ILSVRC2012_val_00014487.png",
+      "ILSVRC2012_val_00014567.png",
+      "ILSVRC2012_val_00014747.png",
+      "ILSVRC2012_val_00014776.png",
+      "ILSVRC2012_val_00014819.png",
+      "ILSVRC2012_val_00014874.png",
+      "ILSVRC2012_val_00014999.png",
+      "ILSVRC2012_val_00015043.png",
+      "ILSVRC2012_val_00015190.png",
+      "ILSVRC2012_val_00015220.png",
+      "ILSVRC2012_val_00015261.png",
+      "ILSVRC2012_val_00015271.png",
+      "ILSVRC2012_val_00015297.png",
+      "ILSVRC2012_val_00015328.png",
+      "ILSVRC2012_val_00015360.png",
+      "ILSVRC2012_val_00015401.png",
+      "ILSVRC2012_val_00015435.png",
+      "ILSVRC2012_val_00015444.png",
+      "ILSVRC2012_val_00015501.png",
+      "ILSVRC2012_val_00015523.png",
+      "ILSVRC2012_val_00015554.png",
+      "ILSVRC2012_val_00015731.png",
+      "ILSVRC2012_val_00015736.png",
+      "ILSVRC2012_val_00015767.png",
+      "ILSVRC2012_val_00015777.png",
+      "ILSVRC2012_val_00015833.png",
+      "ILSVRC2012_val_00015892.png",
+      "ILSVRC2012_val_00015938.png",
+      "ILSVRC2012_val_00016047.png",
+      "ILSVRC2012_val_00016183.png",
+      "ILSVRC2012_val_00016278.png",
+      "ILSVRC2012_val_00016364.png",
+      "ILSVRC2012_val_00016401.png",
+      "ILSVRC2012_val_00016410.png",
+      "ILSVRC2012_val_00016464.png",
+      "ILSVRC2012_val_00016513.png",
+      "ILSVRC2012_val_00016597.png",
+      "ILSVRC2012_val_00016620.png",
+      "ILSVRC2012_val_00016771.png",
+      "ILSVRC2012_val_00016804.png",
+      "ILSVRC2012_val_00016846.png",
+      "ILSVRC2012_val_00016883.png",
+      "ILSVRC2012_val_00016958.png",
+      "ILSVRC2012_val_00016986.png",
+      "ILSVRC2012_val_00016999.png",
+      "ILSVRC2012_val_00017020.png",
+      "ILSVRC2012_val_00017128.png",
+      "ILSVRC2012_val_00017179.png",
+      "ILSVRC2012_val_00017205.png",
+      "ILSVRC2012_val_00017216.png",
+      "ILSVRC2012_val_00017352.png",
+      "ILSVRC2012_val_00017354.png",
+      "ILSVRC2012_val_00017391.png",
+      "ILSVRC2012_val_00017398.png",
+      "ILSVRC2012_val_00017524.png",
+      "ILSVRC2012_val_00017608.png",
+      "ILSVRC2012_val_00017789.png",
+      "ILSVRC2012_val_00017812.png",
+      "ILSVRC2012_val_00017876.png",
+      "ILSVRC2012_val_00018090.png",
+      "ILSVRC2012_val_00018127.png",
+      "ILSVRC2012_val_00018134.png",
+      "ILSVRC2012_val_00018283.png",
+      "ILSVRC2012_val_00018324.png",
+      "ILSVRC2012_val_00018365.png",
+      "ILSVRC2012_val_00018431.png",
+      "ILSVRC2012_val_00018441.png",
+      "ILSVRC2012_val_00018529.png",
+      "ILSVRC2012_val_00018670.png",
+      "ILSVRC2012_val_00018743.png",
+      "ILSVRC2012_val_00018889.png",
+      "ILSVRC2012_val_00018915.png",
+      "ILSVRC2012_val_00018995.png",
+      "ILSVRC2012_val_00019001.png",
+      "ILSVRC2012_val_00019005.png",
+      "ILSVRC2012_val_00019020.png",
+      "ILSVRC2012_val_00019080.png",
+      "ILSVRC2012_val_00019207.png",
+      "ILSVRC2012_val_00019208.png",
+      "ILSVRC2012_val_00019233.png",
+      "ILSVRC2012_val_00019295.png",
+      "ILSVRC2012_val_00019390.png",
+      "ILSVRC2012_val_00019521.png",
+      "ILSVRC2012_val_00019689.png",
+      "ILSVRC2012_val_00019708.png",
+      "ILSVRC2012_val_00019799.png",
+      "ILSVRC2012_val_00019943.png",
+      "ILSVRC2012_val_00019948.png",
+      "ILSVRC2012_val_00020031.png",
+      "ILSVRC2012_val_00020098.png",
+      "ILSVRC2012_val_00020199.png",
+      "ILSVRC2012_val_00020244.png",
+      "ILSVRC2012_val_00020255.png",
+      "ILSVRC2012_val_00020274.png",
+      "ILSVRC2012_val_00020406.png",
+      "ILSVRC2012_val_00020434.png",
+      "ILSVRC2012_val_00020488.png",
+      "ILSVRC2012_val_00020493.png",
+      "ILSVRC2012_val_00020524.png",
+      "ILSVRC2012_val_00020659.png",
+      "ILSVRC2012_val_00020678.png",
+      "ILSVRC2012_val_00020694.png",
+      "ILSVRC2012_val_00020702.png",
+      "ILSVRC2012_val_00020730.png",
+      "ILSVRC2012_val_00020748.png",
+      "ILSVRC2012_val_00020753.png",
+      "ILSVRC2012_val_00020758.png",
+      "ILSVRC2012_val_00020760.png",
+      "ILSVRC2012_val_00020812.png",
+      "ILSVRC2012_val_00020852.png",
+      "ILSVRC2012_val_00020857.png",
+      "ILSVRC2012_val_00020889.png",
+      "ILSVRC2012_val_00020894.png",
+      "ILSVRC2012_val_00020904.png",
+      "ILSVRC2012_val_00021045.png",
+      "ILSVRC2012_val_00021095.png",
+      "ILSVRC2012_val_00021123.png",
+      "ILSVRC2012_val_00021206.png",
+      "ILSVRC2012_val_00021226.png",
+      "ILSVRC2012_val_00021374.png",
+      "ILSVRC2012_val_00021379.png",
+      "ILSVRC2012_val_00021380.png",
+      "ILSVRC2012_val_00021398.png",
+      "ILSVRC2012_val_00021559.png",
+      "ILSVRC2012_val_00021570.png",
+      "ILSVRC2012_val_00021629.png",
+      "ILSVRC2012_val_00021639.png",
+      "ILSVRC2012_val_00021671.png",
+      "ILSVRC2012_val_00021697.png",
+      "ILSVRC2012_val_00021784.png",
+      "ILSVRC2012_val_00021917.png",
+      "ILSVRC2012_val_00022047.png",
+      "ILSVRC2012_val_00022082.png",
+      "ILSVRC2012_val_00022140.png",
+      "ILSVRC2012_val_00022222.png",
+      "ILSVRC2012_val_00022243.png",
+      "ILSVRC2012_val_00022250.png",
+      "ILSVRC2012_val_00022345.png",
+      "ILSVRC2012_val_00022346.png",
+      "ILSVRC2012_val_00022391.png",
+      "ILSVRC2012_val_00022400.png",
+      "ILSVRC2012_val_00022499.png",
+      "ILSVRC2012_val_00022664.png",
+      "ILSVRC2012_val_00022665.png",
+      "ILSVRC2012_val_00022748.png",
+      "ILSVRC2012_val_00022830.png",
+      "ILSVRC2012_val_00022861.png",
+      "ILSVRC2012_val_00023008.png",
+      "ILSVRC2012_val_00023031.png",
+      "ILSVRC2012_val_00023039.png",
+      "ILSVRC2012_val_00023042.png",
+      "ILSVRC2012_val_00023047.png",
+      "ILSVRC2012_val_00023076.png",
+      "ILSVRC2012_val_00023130.png",
+      "ILSVRC2012_val_00023147.png",
+      "ILSVRC2012_val_00023275.png",
+      "ILSVRC2012_val_00023353.png",
+      "ILSVRC2012_val_00023362.png",
+      "ILSVRC2012_val_00023411.png",
+      "ILSVRC2012_val_00023447.png",
+      "ILSVRC2012_val_00023484.png",
+      "ILSVRC2012_val_00023546.png",
+      "ILSVRC2012_val_00023599.png",
+      "ILSVRC2012_val_00023678.png",
+      "ILSVRC2012_val_00023692.png",
+      "ILSVRC2012_val_00023699.png",
+      "ILSVRC2012_val_00023843.png",
+      "ILSVRC2012_val_00023898.png",
+      "ILSVRC2012_val_00023949.png",
+      "ILSVRC2012_val_00023956.png",
+      "ILSVRC2012_val_00023958.png",
+      "ILSVRC2012_val_00023968.png",
+      "ILSVRC2012_val_00023994.png",
+      "ILSVRC2012_val_00024001.png",
+      "ILSVRC2012_val_00024006.png",
+      "ILSVRC2012_val_00024017.png",
+      "ILSVRC2012_val_00024048.png",
+      "ILSVRC2012_val_00024239.png",
+      "ILSVRC2012_val_00024244.png",
+      "ILSVRC2012_val_00024310.png",
+      "ILSVRC2012_val_00024354.png",
+      "ILSVRC2012_val_00024453.png",
+      "ILSVRC2012_val_00024461.png",
+      "ILSVRC2012_val_00024479.png",
+      "ILSVRC2012_val_00024540.png",
+      "ILSVRC2012_val_00024550.png",
+      "ILSVRC2012_val_00024609.png",
+      "ILSVRC2012_val_00024637.png",
+      "ILSVRC2012_val_00024710.png",
+      "ILSVRC2012_val_00024753.png",
+      "ILSVRC2012_val_00024781.png",
+      "ILSVRC2012_val_00024926.png",
+      "ILSVRC2012_val_00025075.png",
+      "ILSVRC2012_val_00025315.png",
+      "ILSVRC2012_val_00025390.png",
+      "ILSVRC2012_val_00025402.png",
+      "ILSVRC2012_val_00025408.png",
+      "ILSVRC2012_val_00025416.png",
+      "ILSVRC2012_val_00025440.png",
+      "ILSVRC2012_val_00025446.png",
+      "ILSVRC2012_val_00025563.png",
+      "ILSVRC2012_val_00025800.png",
+      "ILSVRC2012_val_00025844.png",
+      "ILSVRC2012_val_00025851.png",
+      "ILSVRC2012_val_00025907.png",
+      "ILSVRC2012_val_00025989.png",
+      "ILSVRC2012_val_00026068.png",
+      "ILSVRC2012_val_00026088.png",
+      "ILSVRC2012_val_00026113.png",
+      "ILSVRC2012_val_00026139.png",
+      "ILSVRC2012_val_00026145.png",
+      "ILSVRC2012_val_00026189.png",
+      "ILSVRC2012_val_00026202.png",
+      "ILSVRC2012_val_00026226.png",
+      "ILSVRC2012_val_00026280.png",
+      "ILSVRC2012_val_00026315.png",
+      "ILSVRC2012_val_00026328.png",
+      "ILSVRC2012_val_00026332.png",
+      "ILSVRC2012_val_00026390.png",
+      "ILSVRC2012_val_00026397.png",
+      "ILSVRC2012_val_00026436.png",
+      "ILSVRC2012_val_00026490.png",
+      "ILSVRC2012_val_00026510.png",
+      "ILSVRC2012_val_00026559.png",
+      "ILSVRC2012_val_00026627.png",
+      "ILSVRC2012_val_00026692.png",
+      "ILSVRC2012_val_00026737.png",
+      "ILSVRC2012_val_00026743.png",
+      "ILSVRC2012_val_00026754.png",
+      "ILSVRC2012_val_00026803.png",
+      "ILSVRC2012_val_00026901.png",
+      "ILSVRC2012_val_00026916.png",
+      "ILSVRC2012_val_00026925.png",
+      "ILSVRC2012_val_00026972.png",
+      "ILSVRC2012_val_00027124.png",
+      "ILSVRC2012_val_00027141.png",
+      "ILSVRC2012_val_00027148.png",
+      "ILSVRC2012_val_00027201.png",
+      "ILSVRC2012_val_00027287.png",
+      "ILSVRC2012_val_00027348.png",
+      "ILSVRC2012_val_00027385.png",
+      "ILSVRC2012_val_00027498.png",
+      "ILSVRC2012_val_00027530.png",
+      "ILSVRC2012_val_00027633.png",
+      "ILSVRC2012_val_00027636.png",
+      "ILSVRC2012_val_00027657.png",
+      "ILSVRC2012_val_00027790.png",
+      "ILSVRC2012_val_00027793.png",
+      "ILSVRC2012_val_00027955.png",
+      "ILSVRC2012_val_00028029.png",
+      "ILSVRC2012_val_00028103.png",
+      "ILSVRC2012_val_00028201.png",
+      "ILSVRC2012_val_00028333.png",
+      "ILSVRC2012_val_00028359.png",
+      "ILSVRC2012_val_00028377.png",
+      "ILSVRC2012_val_00028502.png",
+      "ILSVRC2012_val_00028524.png",
+      "ILSVRC2012_val_00028528.png",
+      "ILSVRC2012_val_00028576.png",
+      "ILSVRC2012_val_00028592.png",
+      "ILSVRC2012_val_00028608.png",
+      "ILSVRC2012_val_00028696.png",
+      "ILSVRC2012_val_00028779.png",
+      "ILSVRC2012_val_00028825.png",
+      "ILSVRC2012_val_00028835.png",
+      "ILSVRC2012_val_00028870.png",
+      "ILSVRC2012_val_00028887.png",
+      "ILSVRC2012_val_00028920.png",
+      "ILSVRC2012_val_00029045.png",
+      "ILSVRC2012_val_00029093.png",
+      "ILSVRC2012_val_00029125.png",
+      "ILSVRC2012_val_00029127.png",
+      "ILSVRC2012_val_00029156.png",
+      "ILSVRC2012_val_00029183.png",
+      "ILSVRC2012_val_00029207.png",
+      "ILSVRC2012_val_00029208.png",
+      "ILSVRC2012_val_00029572.png",
+      "ILSVRC2012_val_00029594.png",
+      "ILSVRC2012_val_00029709.png",
+      "ILSVRC2012_val_00029714.png",
+      "ILSVRC2012_val_00029737.png",
+      "ILSVRC2012_val_00029766.png",
+      "ILSVRC2012_val_00029780.png",
+      "ILSVRC2012_val_00029781.png",
+      "ILSVRC2012_val_00029802.png",
+      "ILSVRC2012_val_00029828.png",
+      "ILSVRC2012_val_00029884.png",
+      "ILSVRC2012_val_00029885.png",
+      "ILSVRC2012_val_00029919.png",
+      "ILSVRC2012_val_00029967.png",
+      "ILSVRC2012_val_00029975.png",
+      "ILSVRC2012_val_00030022.png",
+      "ILSVRC2012_val_00030088.png",
+      "ILSVRC2012_val_00030198.png",
+      "ILSVRC2012_val_00030262.png",
+      "ILSVRC2012_val_00030295.png",
+      "ILSVRC2012_val_00030305.png",
+      "ILSVRC2012_val_00030443.png",
+      "ILSVRC2012_val_00030453.png",
+      "ILSVRC2012_val_00030500.png",
+      "ILSVRC2012_val_00030718.png",
+      "ILSVRC2012_val_00030719.png",
+      "ILSVRC2012_val_00030809.png",
+      "ILSVRC2012_val_00030891.png",
+      "ILSVRC2012_val_00030915.png",
+      "ILSVRC2012_val_00030940.png",
+      "ILSVRC2012_val_00030991.png",
+      "ILSVRC2012_val_00031127.png",
+      "ILSVRC2012_val_00031152.png",
+      "ILSVRC2012_val_00031252.png",
+      "ILSVRC2012_val_00031328.png",
+      "ILSVRC2012_val_00031361.png",
+      "ILSVRC2012_val_00031410.png",
+      "ILSVRC2012_val_00031472.png",
+      "ILSVRC2012_val_00031495.png",
+      "ILSVRC2012_val_00031548.png",
+      "ILSVRC2012_val_00031586.png",
+      "ILSVRC2012_val_00031588.png",
+      "ILSVRC2012_val_00031593.png",
+      "ILSVRC2012_val_00031629.png",
+      "ILSVRC2012_val_00031647.png",
+      "ILSVRC2012_val_00031670.png",
+      "ILSVRC2012_val_00031686.png",
+      "ILSVRC2012_val_00031762.png",
+      "ILSVRC2012_val_00031783.png",
+      "ILSVRC2012_val_00031785.png",
+      "ILSVRC2012_val_00031789.png",
+      "ILSVRC2012_val_00031922.png",
+      "ILSVRC2012_val_00031927.png",
+      "ILSVRC2012_val_00032032.png",
+      "ILSVRC2012_val_00032039.png",
+      "ILSVRC2012_val_00032046.png",
+      "ILSVRC2012_val_00032097.png",
+      "ILSVRC2012_val_00032098.png",
+      "ILSVRC2012_val_00032102.png",
+      "ILSVRC2012_val_00032120.png",
+      "ILSVRC2012_val_00032188.png",
+      "ILSVRC2012_val_00032370.png",
+      "ILSVRC2012_val_00032435.png",
+      "ILSVRC2012_val_00032552.png",
+      "ILSVRC2012_val_00032623.png",
+      "ILSVRC2012_val_00032646.png",
+      "ILSVRC2012_val_00032695.png",
+      "ILSVRC2012_val_00032723.png",
+      "ILSVRC2012_val_00032911.png",
+      "ILSVRC2012_val_00032926.png",
+      "ILSVRC2012_val_00032950.png",
+      "ILSVRC2012_val_00033014.png",
+      "ILSVRC2012_val_00033018.png",
+      "ILSVRC2012_val_00033076.png",
+      "ILSVRC2012_val_00033149.png",
+      "ILSVRC2012_val_00033150.png",
+      "ILSVRC2012_val_00033171.png",
+      "ILSVRC2012_val_00033207.png",
+      "ILSVRC2012_val_00033255.png",
+      "ILSVRC2012_val_00033340.png",
+      "ILSVRC2012_val_00033725.png",
+      "ILSVRC2012_val_00033897.png",
+      "ILSVRC2012_val_00033960.png",
+      "ILSVRC2012_val_00033997.png",
+      "ILSVRC2012_val_00034008.png",
+      "ILSVRC2012_val_00034055.png",
+      "ILSVRC2012_val_00034168.png",
+      "ILSVRC2012_val_00034182.png",
+      "ILSVRC2012_val_00034217.png",
+      "ILSVRC2012_val_00034225.png",
+      "ILSVRC2012_val_00034230.png",
+      "ILSVRC2012_val_00034302.png",
+      "ILSVRC2012_val_00034356.png",
+      "ILSVRC2012_val_00034359.png",
+      "ILSVRC2012_val_00034391.png",
+      "ILSVRC2012_val_00034406.png",
+      "ILSVRC2012_val_00034438.png",
+      "ILSVRC2012_val_00034459.png",
+      "ILSVRC2012_val_00034548.png",
+      "ILSVRC2012_val_00034551.png",
+      "ILSVRC2012_val_00034603.png",
+      "ILSVRC2012_val_00034714.png",
+      "ILSVRC2012_val_00034765.png",
+      "ILSVRC2012_val_00034862.png",
+      "ILSVRC2012_val_00034870.png",
+      "ILSVRC2012_val_00034948.png",
+      "ILSVRC2012_val_00034998.png",
+      "ILSVRC2012_val_00035014.png",
+      "ILSVRC2012_val_00035047.png",
+      "ILSVRC2012_val_00035093.png",
+      "ILSVRC2012_val_00035125.png",
+      "ILSVRC2012_val_00035279.png",
+      "ILSVRC2012_val_00035379.png",
+      "ILSVRC2012_val_00035545.png",
+      "ILSVRC2012_val_00035570.png",
+      "ILSVRC2012_val_00035751.png",
+      "ILSVRC2012_val_00035777.png",
+      "ILSVRC2012_val_00035908.png",
+      "ILSVRC2012_val_00036018.png",
+      "ILSVRC2012_val_00036072.png",
+      "ILSVRC2012_val_00036132.png",
+      "ILSVRC2012_val_00036208.png",
+      "ILSVRC2012_val_00036288.png",
+      "ILSVRC2012_val_00036292.png",
+      "ILSVRC2012_val_00036344.png",
+      "ILSVRC2012_val_00036353.png",
+      "ILSVRC2012_val_00036402.png",
+      "ILSVRC2012_val_00036424.png",
+      "ILSVRC2012_val_00036493.png",
+      "ILSVRC2012_val_00036517.png",
+      "ILSVRC2012_val_00036533.png",
+      "ILSVRC2012_val_00036613.png",
+      "ILSVRC2012_val_00036655.png",
+      "ILSVRC2012_val_00036681.png",
+      "ILSVRC2012_val_00036749.png",
+      "ILSVRC2012_val_00036780.png",
+      "ILSVRC2012_val_00036828.png",
+      "ILSVRC2012_val_00036850.png",
+      "ILSVRC2012_val_00036913.png",
+      "ILSVRC2012_val_00036954.png",
+      "ILSVRC2012_val_00036956.png",
+      "ILSVRC2012_val_00036999.png",
+      "ILSVRC2012_val_00037018.png",
+      "ILSVRC2012_val_00037057.png",
+      "ILSVRC2012_val_00037102.png",
+      "ILSVRC2012_val_00037103.png",
+      "ILSVRC2012_val_00037133.png",
+      "ILSVRC2012_val_00037164.png",
+      "ILSVRC2012_val_00037196.png",
+      "ILSVRC2012_val_00037204.png",
+      "ILSVRC2012_val_00037247.png",
+      "ILSVRC2012_val_00037367.png",
+      "ILSVRC2012_val_00037385.png",
+      "ILSVRC2012_val_00037452.png",
+      "ILSVRC2012_val_00037522.png",
+      "ILSVRC2012_val_00037524.png",
+      "ILSVRC2012_val_00037541.png",
+      "ILSVRC2012_val_00037639.png",
+      "ILSVRC2012_val_00037644.png",
+      "ILSVRC2012_val_00037652.png",
+      "ILSVRC2012_val_00037694.png",
+      "ILSVRC2012_val_00037714.png",
+      "ILSVRC2012_val_00037736.png",
+      "ILSVRC2012_val_00037758.png",
+      "ILSVRC2012_val_00037916.png",
+      "ILSVRC2012_val_00037926.png",
+      "ILSVRC2012_val_00037929.png",
+      "ILSVRC2012_val_00038033.png",
+      "ILSVRC2012_val_00038096.png",
+      "ILSVRC2012_val_00038110.png",
+      "ILSVRC2012_val_00038142.png",
+      "ILSVRC2012_val_00038157.png",
+      "ILSVRC2012_val_00038221.png",
+      "ILSVRC2012_val_00038236.png",
+      "ILSVRC2012_val_00038251.png",
+      "ILSVRC2012_val_00038413.png",
+      "ILSVRC2012_val_00038427.png",
+      "ILSVRC2012_val_00038546.png",
+      "ILSVRC2012_val_00038597.png",
+      "ILSVRC2012_val_00038607.png",
+      "ILSVRC2012_val_00038678.png",
+      "ILSVRC2012_val_00038705.png",
+      "ILSVRC2012_val_00038708.png",
+      "ILSVRC2012_val_00038743.png",
+      "ILSVRC2012_val_00038986.png",
+      "ILSVRC2012_val_00039085.png",
+      "ILSVRC2012_val_00039106.png",
+      "ILSVRC2012_val_00039130.png",
+      "ILSVRC2012_val_00039253.png",
+      "ILSVRC2012_val_00039290.png",
+      "ILSVRC2012_val_00039421.png",
+      "ILSVRC2012_val_00039426.png",
+      "ILSVRC2012_val_00039464.png",
+      "ILSVRC2012_val_00039490.png",
+      "ILSVRC2012_val_00039737.png",
+      "ILSVRC2012_val_00039746.png",
+      "ILSVRC2012_val_00039748.png",
+      "ILSVRC2012_val_00039815.png",
+      "ILSVRC2012_val_00039842.png",
+      "ILSVRC2012_val_00039892.png",
+      "ILSVRC2012_val_00039939.png",
+      "ILSVRC2012_val_00040016.png",
+      "ILSVRC2012_val_00040140.png",
+      "ILSVRC2012_val_00040221.png",
+      "ILSVRC2012_val_00040291.png",
+      "ILSVRC2012_val_00040345.png",
+      "ILSVRC2012_val_00040407.png",
+      "ILSVRC2012_val_00040452.png",
+      "ILSVRC2012_val_00040457.png",
+      "ILSVRC2012_val_00040494.png",
+      "ILSVRC2012_val_00040541.png",
+      "ILSVRC2012_val_00040601.png",
+      "ILSVRC2012_val_00040634.png",
+      "ILSVRC2012_val_00040798.png",
+      "ILSVRC2012_val_00040930.png",
+      "ILSVRC2012_val_00040952.png",
+      "ILSVRC2012_val_00040966.png",
+      "ILSVRC2012_val_00041010.png",
+      "ILSVRC2012_val_00041063.png",
+      "ILSVRC2012_val_00041080.png",
+      "ILSVRC2012_val_00041241.png",
+      "ILSVRC2012_val_00041354.png",
+      "ILSVRC2012_val_00041406.png",
+      "ILSVRC2012_val_00041468.png",
+      "ILSVRC2012_val_00041474.png",
+      "ILSVRC2012_val_00041483.png",
+      "ILSVRC2012_val_00041486.png",
+      "ILSVRC2012_val_00041488.png",
+      "ILSVRC2012_val_00041511.png",
+      "ILSVRC2012_val_00041545.png",
+      "ILSVRC2012_val_00041601.png",
+      "ILSVRC2012_val_00041653.png",
+      "ILSVRC2012_val_00041670.png",
+      "ILSVRC2012_val_00041756.png",
+      "ILSVRC2012_val_00041787.png",
+      "ILSVRC2012_val_00041863.png",
+      "ILSVRC2012_val_00041883.png",
+      "ILSVRC2012_val_00041900.png",
+      "ILSVRC2012_val_00041938.png",
+      "ILSVRC2012_val_00042004.png",
+      "ILSVRC2012_val_00042029.png",
+      "ILSVRC2012_val_00042034.png",
+      "ILSVRC2012_val_00042063.png",
+      "ILSVRC2012_val_00042080.png",
+      "ILSVRC2012_val_00042125.png",
+      "ILSVRC2012_val_00042134.png",
+      "ILSVRC2012_val_00042212.png",
+      "ILSVRC2012_val_00042223.png",
+      "ILSVRC2012_val_00042348.png",
+      "ILSVRC2012_val_00042429.png",
+      "ILSVRC2012_val_00042554.png",
+      "ILSVRC2012_val_00042625.png",
+      "ILSVRC2012_val_00042657.png",
+      "ILSVRC2012_val_00042659.png",
+      "ILSVRC2012_val_00042795.png",
+      "ILSVRC2012_val_00042833.png",
+      "ILSVRC2012_val_00042944.png",
+      "ILSVRC2012_val_00042981.png",
+      "ILSVRC2012_val_00043045.png",
+      "ILSVRC2012_val_00043070.png",
+      "ILSVRC2012_val_00043108.png",
+      "ILSVRC2012_val_00043123.png",
+      "ILSVRC2012_val_00043157.png",
+      "ILSVRC2012_val_00043161.png",
+      "ILSVRC2012_val_00043231.png",
+      "ILSVRC2012_val_00043254.png",
+      "ILSVRC2012_val_00043286.png",
+      "ILSVRC2012_val_00043335.png",
+      "ILSVRC2012_val_00043394.png",
+      "ILSVRC2012_val_00043442.png",
+      "ILSVRC2012_val_00043469.png",
+      "ILSVRC2012_val_00043504.png",
+      "ILSVRC2012_val_00043578.png",
+      "ILSVRC2012_val_00043583.png",
+      "ILSVRC2012_val_00043637.png",
+      "ILSVRC2012_val_00043739.png",
+      "ILSVRC2012_val_00043753.png",
+      "ILSVRC2012_val_00043862.png",
+      "ILSVRC2012_val_00043893.png",
+      "ILSVRC2012_val_00044018.png",
+      "ILSVRC2012_val_00044044.png",
+      "ILSVRC2012_val_00044214.png",
+      "ILSVRC2012_val_00044221.png",
+      "ILSVRC2012_val_00044226.png",
+      "ILSVRC2012_val_00044289.png",
+      "ILSVRC2012_val_00044351.png",
+      "ILSVRC2012_val_00044407.png",
+      "ILSVRC2012_val_00044416.png",
+      "ILSVRC2012_val_00044434.png",
+      "ILSVRC2012_val_00044529.png",
+      "ILSVRC2012_val_00044616.png",
+      "ILSVRC2012_val_00044803.png",
+      "ILSVRC2012_val_00044813.png",
+      "ILSVRC2012_val_00044826.png",
+      "ILSVRC2012_val_00044884.png",
+      "ILSVRC2012_val_00044936.png",
+      "ILSVRC2012_val_00045004.png",
+      "ILSVRC2012_val_00045005.png",
+      "ILSVRC2012_val_00045076.png",
+      "ILSVRC2012_val_00045117.png",
+      "ILSVRC2012_val_00045127.png",
+      "ILSVRC2012_val_00045167.png",
+      "ILSVRC2012_val_00045196.png",
+      "ILSVRC2012_val_00045214.png",
+      "ILSVRC2012_val_00045255.png",
+      "ILSVRC2012_val_00045276.png",
+      "ILSVRC2012_val_00045304.png",
+      "ILSVRC2012_val_00045335.png",
+      "ILSVRC2012_val_00045469.png",
+      "ILSVRC2012_val_00045503.png",
+      "ILSVRC2012_val_00045512.png",
+      "ILSVRC2012_val_00045572.png",
+      "ILSVRC2012_val_00045686.png",
+      "ILSVRC2012_val_00045693.png",
+      "ILSVRC2012_val_00045840.png",
+      "ILSVRC2012_val_00045926.png",
+      "ILSVRC2012_val_00045934.png",
+      "ILSVRC2012_val_00045956.png",
+      "ILSVRC2012_val_00046028.png",
+      "ILSVRC2012_val_00046083.png",
+      "ILSVRC2012_val_00046149.png",
+      "ILSVRC2012_val_00046160.png",
+      "ILSVRC2012_val_00046176.png",
+      "ILSVRC2012_val_00046225.png",
+      "ILSVRC2012_val_00046328.png",
+      "ILSVRC2012_val_00046387.png",
+      "ILSVRC2012_val_00046492.png",
+      "ILSVRC2012_val_00046683.png",
+      "ILSVRC2012_val_00046721.png",
+      "ILSVRC2012_val_00046829.png",
+      "ILSVRC2012_val_00046903.png",
+      "ILSVRC2012_val_00046983.png",
+      "ILSVRC2012_val_00047004.png",
+      "ILSVRC2012_val_00047055.png",
+      "ILSVRC2012_val_00047194.png",
+      "ILSVRC2012_val_00047267.png",
+      "ILSVRC2012_val_00047286.png",
+      "ILSVRC2012_val_00047453.png",
+      "ILSVRC2012_val_00047567.png",
+      "ILSVRC2012_val_00047587.png",
+      "ILSVRC2012_val_00047596.png",
+      "ILSVRC2012_val_00047639.png",
+      "ILSVRC2012_val_00047655.png",
+      "ILSVRC2012_val_00047734.png",
+      "ILSVRC2012_val_00047790.png",
+      "ILSVRC2012_val_00047802.png",
+      "ILSVRC2012_val_00047824.png",
+      "ILSVRC2012_val_00047861.png",
+      "ILSVRC2012_val_00047960.png",
+      "ILSVRC2012_val_00047991.png",
+      "ILSVRC2012_val_00048004.png",
+      "ILSVRC2012_val_00048102.png",
+      "ILSVRC2012_val_00048123.png",
+      "ILSVRC2012_val_00048130.png",
+      "ILSVRC2012_val_00048242.png",
+      "ILSVRC2012_val_00048249.png",
+      "ILSVRC2012_val_00048322.png",
+      "ILSVRC2012_val_00048332.png",
+      "ILSVRC2012_val_00048336.png",
+      "ILSVRC2012_val_00048350.png",
+      "ILSVRC2012_val_00048404.png",
+      "ILSVRC2012_val_00048409.png",
+      "ILSVRC2012_val_00048433.png",
+      "ILSVRC2012_val_00048467.png",
+      "ILSVRC2012_val_00048503.png",
+      "ILSVRC2012_val_00048620.png",
+      "ILSVRC2012_val_00048624.png",
+      "ILSVRC2012_val_00048681.png",
+      "ILSVRC2012_val_00048698.png",
+      "ILSVRC2012_val_00048727.png",
+      "ILSVRC2012_val_00048802.png",
+      "ILSVRC2012_val_00048880.png",
+      "ILSVRC2012_val_00048941.png",
+      "ILSVRC2012_val_00048948.png",
+      "ILSVRC2012_val_00048961.png",
+      "ILSVRC2012_val_00049013.png",
+      "ILSVRC2012_val_00049041.png",
+      "ILSVRC2012_val_00049044.png",
+      "ILSVRC2012_val_00049047.png",
+      "ILSVRC2012_val_00049050.png",
+      "ILSVRC2012_val_00049060.png",
+      "ILSVRC2012_val_00049082.png",
+      "ILSVRC2012_val_00049108.png",
+      "ILSVRC2012_val_00049114.png",
+      "ILSVRC2012_val_00049158.png",
+      "ILSVRC2012_val_00049171.png",
+      "ILSVRC2012_val_00049188.png",
+      "ILSVRC2012_val_00049248.png",
+      "ILSVRC2012_val_00049259.png",
+      "ILSVRC2012_val_00049307.png",
+      "ILSVRC2012_val_00049397.png",
+      "ILSVRC2012_val_00049418.png",
+      "ILSVRC2012_val_00049421.png",
+      "ILSVRC2012_val_00049426.png",
+      "ILSVRC2012_val_00049438.png",
+      "ILSVRC2012_val_00049459.png",
+      "ILSVRC2012_val_00049461.png",
+      "ILSVRC2012_val_00049477.png",
+      "ILSVRC2012_val_00049494.png",
+      "ILSVRC2012_val_00049539.png",
+      "ILSVRC2012_val_00049553.png",
+      "ILSVRC2012_val_00049642.png",
+      "ILSVRC2012_val_00049675.png",
+      "ILSVRC2012_val_00049782.png",
+      "ILSVRC2012_val_00049800.png",
+      "ILSVRC2012_val_00049830.png",
+      "ILSVRC2012_val_00049870.png"
+    ]
+  },
+  "source_weights": {
+    "model": "vit_base_patch16_224",
+    "timm_pretrained_cfg": "timm/vit_base_patch16_224.augreg2_in21k_ft_in1k",
+    "snapshot": "063c6c38a5d8510b2e57df480445e94b231dad2c",
+    "files": {
+      "config.json": {
+        "path": "data/huggingface/hub/models--timm--vit_base_patch16_224.augreg2_in21k_ft_in1k/snapshots/063c6c38a5d8510b2e57df480445e94b231dad2c/config.json",
+        "sha256": "b2d2d7d483d964889a9bdf7fcad9da6f3dd7fd3ffdf05def4807a29980ce6a16"
+      },
+      "model.safetensors": {
+        "path": "data/huggingface/hub/models--timm--vit_base_patch16_224.augreg2_in21k_ft_in1k/snapshots/063c6c38a5d8510b2e57df480445e94b231dad2c/model.safetensors",
+        "sha256": "32aa17d6e17b43500f531d5f6dc9bc93e56ed8841b8a75682e1bb295d722405b"
+      },
+      "pytorch_model.bin": {
+        "path": "data/huggingface/hub/models--timm--vit_base_patch16_224.augreg2_in21k_ft_in1k/snapshots/063c6c38a5d8510b2e57df480445e94b231dad2c/pytorch_model.bin",
+        "sha256": "06e516abac6943dbba7b5dddfc39af6d63de8ebe6fa730240acfd32b94e74d19"
+      }
+    }
+  },
+  "evaluation": {
+    "protocol": "fpr",
+    "targets": [
+      "vit_base_patch16_224",
+      "cait_s24_224",
+      "pit_b_224",
+      "visformer_small",
+      "swin_tiny_patch4_window7_224",
+      "deit_tiny_patch16_224",
+      "coat_tiny",
+      "resnet18",
+      "vgg16",
+      "densenet121",
+      "efficientnet_b0",
+      "mobilenet_v3_small",
+      "resnext50_32x4d"
+    ],
+    "num_targets": 13,
+    "batch_size": 32,
+    "tf32": false,
+    "amp": false,
+    "strict_black_box_excludes": [
+      "vit_base_patch16_224"
+    ],
+    "command_template": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir <run_directory>",
+    "asr_uses_all_samples": true
+  },
+  "fixed_attack_settings": {
+    "whitebox_model": "vit_base_patch16_224",
+    "epsilon": 0.06274509803921569,
+    "step_size": 0.006274509803921569,
+    "steps": 10,
+    "momentum_decay": 1.0,
+    "default_checkpoints": [
+      "block3",
+      "block10"
+    ],
+    "default_drop_counts": [
+      10,
+      10
+    ],
+    "default_noise_structure": "opponent",
+    "default_noise_beta": 0.2,
+    "default_groups": 10,
+    "views_per_group": 2,
+    "default_phase_shift_set": [
+      [
+        4,
+        4
+      ],
+      [
+        8,
+        8
+      ],
+      [
+        12,
+        12
+      ]
+    ],
+    "generation_batch_size": 48,
+    "noise_basis": [
+      "(1,1,1)/sqrt(3)",
+      "(1,-1,0)/sqrt(2)",
+      "(1,1,-2)/sqrt(6)"
+    ],
+    "noise_rms_matching": "Per-sample RMS over all initial local features and channels; feature RMS and RGB projection weights are detached; prefix/CLS unchanged.",
+    "gradient_aggregation": "direct mean of view pixel gradients",
+    "update": "momentum accumulation (coefficient 1), sign update, L-infinity projection"
+  },
+  "reference_compatibility": {
+    "data_match": "sample_order_sha256 and label_order_sha256 match the existing FPR13 provenance",
+    "parameter_match": "All three reference archives match the fixed setting matrix; each reference uses batch size 48 for generation and 32 for evaluation.",
+    "evaluation_protocol_match": "FPR13, all 1000 images, batch size 32, TF32 disabled, no AMP; strict black-box excludes vit_base_patch16_224.",
+    "rerun": false,
+    "rerun_reason": "Reference units are reused unchanged per instruction; RNG differences do not require reruns."
+  },
+  "reference_units": {
+    "REF_FULL": {
+      "role": "reference",
+      "reused": true,
+      "rerun": false,
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/full_vit",
+      "attack_params_path": "results/prd_s42_fpr_run_artifacts/full_vit/attack_params.json",
+      "attack_params_sha256": "4de803e7c49d188ab5445652fb83ab088cf4b71320dd0608d93b4294d0c6e3b8",
+      "transfer_csv_path": "results/prd_s42_fpr_run_artifacts/full_vit/transfer.csv",
+      "transfer_csv_sha256": "d6305d463ba41deba636c2d38034b612c05fca7ad058884edfcc988aa064b1fe",
+      "transfer_json_path": "results/prd_s42_fpr_run_artifacts/full_vit/transfer.json",
+      "transfer_json_sha256": "23d347d79fca866c6092c368bbe78382abe1faa5ab645913bc64e4558cf5fb91",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [
+          10,
+          10
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 88.02307692307691,
+        "strict_black_box": 87.05833333333332,
+        "transformer_black_box": 89.76666666666667,
+        "cnn": 84.35000000000001
+      },
+      "measurement_date": "2026-10-19",
+      "source_transfer_csv_path": "outputs/fpr_eval/prd_s42_full_vit/transfer.csv",
+      "source_transfer_csv_sha256": "d6305d463ba41deba636c2d38034b612c05fca7ad058884edfcc988aa064b1fe",
+      "source_transfer_json_path": "outputs/fpr_eval/prd_s42_full_vit/transfer.json",
+      "source_transfer_json_sha256": "23d347d79fca866c6092c368bbe78382abe1faa5ab645913bc64e4558cf5fb91",
+      "generation_batch_size": 48,
+      "evaluation_batch_size": 32
+    },
+    "REF_DROP": {
+      "role": "reference",
+      "reused": true,
+      "rerun": false,
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/drop_vit",
+      "attack_params_path": "results/prd_s42_fpr_run_artifacts/drop_vit/attack_params.json",
+      "attack_params_sha256": "de854218bd1db33d6ca0169f0df59cc7fc199eeb51a1cea3b26eae0f73bec715",
+      "transfer_csv_path": "results/prd_s42_fpr_run_artifacts/drop_vit/transfer.csv",
+      "transfer_csv_sha256": "cae15d508fd1b38f61f94a039d848f83c1dfeda35d58ab70ee721e399d696d8e",
+      "transfer_json_path": "results/prd_s42_fpr_run_artifacts/drop_vit/transfer.json",
+      "transfer_json_sha256": "1ab3f7aeca433967b6dd22e03c2c951d7bf1e33f064548c396f6ccf8a4bbc2e7",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": false,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [
+          10,
+          10
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.0,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 72.91538461538461,
+        "strict_black_box": 70.65833333333332,
+        "transformer_black_box": 74.93333333333334,
+        "cnn": 66.38333333333334
+      },
+      "measurement_date": "2026-10-19",
+      "source_transfer_csv_path": "outputs/fpr_eval/prd_s42_drop_vit/transfer.csv",
+      "source_transfer_csv_sha256": "cae15d508fd1b38f61f94a039d848f83c1dfeda35d58ab70ee721e399d696d8e",
+      "source_transfer_json_path": "outputs/fpr_eval/prd_s42_drop_vit/transfer.json",
+      "source_transfer_json_sha256": "1ab3f7aeca433967b6dd22e03c2c951d7bf1e33f064548c396f6ccf8a4bbc2e7",
+      "generation_batch_size": 48,
+      "evaluation_batch_size": 32
+    },
+    "REF_NOISE": {
+      "role": "reference",
+      "reused": true,
+      "rerun": false,
+      "archive_directory": "results/prd_s42_fpr_run_artifacts/noise_vit",
+      "attack_params_path": "results/prd_s42_fpr_run_artifacts/noise_vit/attack_params.json",
+      "attack_params_sha256": "b88c86a15a50f7c5a0640fd2c53f27067c4670ad0ea0c386a3dd1921b310604b",
+      "transfer_csv_path": "results/prd_s42_fpr_run_artifacts/noise_vit/transfer.csv",
+      "transfer_csv_sha256": "2cb4a62e1a63c95b565231e8138d31665ad1ac88a4cca87cb741ff2b08cd7558",
+      "transfer_json_path": "results/prd_s42_fpr_run_artifacts/noise_vit/transfer.json",
+      "transfer_json_sha256": "c5a08ccdc0a51f198dc2c713684404a001b9c5acd1ffcacc59e70c784b100172",
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": false,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [],
+        "grids": [],
+        "opponent_noise_strength": 0.2,
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 79.32307692307691,
+        "strict_black_box": 77.78333333333333,
+        "transformer_black_box": 80.88333333333333,
+        "cnn": 74.68333333333334
+      },
+      "measurement_date": "2026-10-19",
+      "source_transfer_csv_path": "outputs/fpr_eval/prd_s42_noise_vit/transfer.csv",
+      "source_transfer_csv_sha256": "2cb4a62e1a63c95b565231e8138d31665ad1ac88a4cca87cb741ff2b08cd7558",
+      "source_transfer_json_path": "outputs/fpr_eval/prd_s42_noise_vit/transfer.json",
+      "source_transfer_json_sha256": "c5a08ccdc0a51f198dc2c713684404a001b9c5acd1ffcacc59e70c784b100172",
+      "generation_batch_size": 48,
+      "evaluation_batch_size": 32
+    }
+  },
+  "new_runs": {
+    "POS_EARLY": {
+      "role": "new",
+      "reused": false,
+      "rerun": true,
+      "status": "completed",
+      "exit_code": 0,
+      "attack_started_utc": "2026-10-27T04:14:30.299233+00:00",
+      "attack_finished_utc": "2026-10-27T04:36:15.299233+00:00",
+      "attack_log": "outputs/logs/prd_s42_analysis_20261027/pos_early.log",
+      "attack_elapsed_seconds": 1305,
+      "output_dir": "outputs/attack/prd_s42_analysis_20261027_pos_early",
+      "image_count": 1000,
+      "command": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --vit-analysis-checkpoints block1,block4 --output-dir outputs/attack/prd_s42_analysis_20261027_pos_early",
+      "attack_params_path": "outputs/attack/prd_s42_analysis_20261027_pos_early/attack_params.json",
+      "attack_params_sha256": "2e637b8454222173b92b569e2e260a28be25174d8a26e8ff4564333d4e987ea3",
+      "transfer_csv_path": "outputs/attack/prd_s42_analysis_20261027_pos_early/transfer.csv",
+      "transfer_csv_sha256": "e61ed4f5b42635600f9e17f514e37e2fe939aed10a003e6ac88f84a56de55b26",
+      "transfer_json_path": "outputs/attack/prd_s42_analysis_20261027_pos_early/transfer.json",
+      "transfer_json_sha256": "4434a97bafe2f132cdb575754197ac3b31f6efc38cff62c8581125378bf3cd42",
+      "archive_directory": "results/prd_s42_fpr_analysis_run_artifacts/POS_EARLY",
+      "archive_attack_params_sha256": "2e637b8454222173b92b569e2e260a28be25174d8a26e8ff4564333d4e987ea3",
+      "archive_transfer_csv_sha256": "e61ed4f5b42635600f9e17f514e37e2fe939aed10a003e6ac88f84a56de55b26",
+      "archive_transfer_json_sha256": "4434a97bafe2f132cdb575754197ac3b31f6efc38cff62c8581125378bf3cd42",
+      "evaluation": {
+        "status": "completed",
+        "exit_code": 0,
+        "started_utc": "2026-10-27T08:31:23Z",
+        "finished_utc": "2026-10-27T08:32:38Z",
+        "elapsed_seconds": 75,
+        "rows": 13,
+        "log": "outputs/logs/prd_s42_analysis_20261027/eval_pos_early.log",
+        "command": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_pos_early"
+      },
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block1",
+          "block4"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [
+          10,
+          10
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "noise_structure": "opponent",
+        "noise_direction_variances": [
+          0.5,
+          1.25,
+          1.25
+        ],
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 78.73076923076923,
+        "strict_black_box": 77.35,
+        "transformer_black_box": 80.06666666666668,
+        "cnn": 74.63333333333333
+      }
+    },
+    "POS_MIDDLE": {
+      "role": "new",
+      "reused": false,
+      "rerun": true,
+      "status": "completed",
+      "exit_code": 0,
+      "attack_started_utc": "2026-10-27T04:36:15.229862+00:00",
+      "attack_finished_utc": "2026-10-27T04:59:35.229862+00:00",
+      "attack_log": "outputs/logs/prd_s42_analysis_20261027/pos_middle.log",
+      "attack_elapsed_seconds": 1400,
+      "output_dir": "outputs/attack/prd_s42_analysis_20261027_pos_middle",
+      "image_count": 1000,
+      "command": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --vit-analysis-checkpoints block5,block8 --output-dir outputs/attack/prd_s42_analysis_20261027_pos_middle",
+      "attack_params_path": "outputs/attack/prd_s42_analysis_20261027_pos_middle/attack_params.json",
+      "attack_params_sha256": "d9bb1ce071b276ed0ac408063be648d3c3432fc36c0cd62d274982a7683b7172",
+      "transfer_csv_path": "outputs/attack/prd_s42_analysis_20261027_pos_middle/transfer.csv",
+      "transfer_csv_sha256": "e4c64080721d19894fe27e950b7ccffbc252d2acbc39b180feec69121f9cf6ad",
+      "transfer_json_path": "outputs/attack/prd_s42_analysis_20261027_pos_middle/transfer.json",
+      "transfer_json_sha256": "2c3fec44ee46ff8299525b58179cd1d37384aa8da4ae57633638deb575575b0b",
+      "archive_directory": "results/prd_s42_fpr_analysis_run_artifacts/POS_MIDDLE",
+      "archive_attack_params_sha256": "d9bb1ce071b276ed0ac408063be648d3c3432fc36c0cd62d274982a7683b7172",
+      "archive_transfer_csv_sha256": "e4c64080721d19894fe27e950b7ccffbc252d2acbc39b180feec69121f9cf6ad",
+      "archive_transfer_json_sha256": "2c3fec44ee46ff8299525b58179cd1d37384aa8da4ae57633638deb575575b0b",
+      "evaluation": {
+        "status": "completed",
+        "exit_code": 0,
+        "started_utc": "2026-10-27T08:32:38Z",
+        "finished_utc": "2026-10-27T08:33:53Z",
+        "elapsed_seconds": 75,
+        "rows": 13,
+        "log": "outputs/logs/prd_s42_analysis_20261027/eval_pos_middle.log",
+        "command": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_pos_middle"
+      },
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block5",
+          "block8"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [
+          10,
+          10
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "noise_structure": "opponent",
+        "noise_direction_variances": [
+          0.5,
+          1.25,
+          1.25
+        ],
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 77.44615384615385,
+        "strict_black_box": 75.93333333333334,
+        "transformer_black_box": 78.69999999999999,
+        "cnn": 73.16666666666666
+      }
+    },
+    "POS_LATE": {
+      "role": "new",
+      "reused": false,
+      "rerun": true,
+      "status": "completed",
+      "exit_code": 0,
+      "attack_started_utc": "2026-10-27T04:59:34.553150+00:00",
+      "attack_finished_utc": "2026-10-27T05:24:05.553150+00:00",
+      "attack_log": "outputs/logs/prd_s42_analysis_20261027/pos_late.log",
+      "attack_elapsed_seconds": 1471,
+      "output_dir": "outputs/attack/prd_s42_analysis_20261027_pos_late",
+      "image_count": 1000,
+      "command": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --vit-analysis-checkpoints block8,block11 --output-dir outputs/attack/prd_s42_analysis_20261027_pos_late",
+      "attack_params_path": "outputs/attack/prd_s42_analysis_20261027_pos_late/attack_params.json",
+      "attack_params_sha256": "f6479fce2f00786284edd1fb7a2b0708a816dcb0f75add80c1adb0103112b611",
+      "transfer_csv_path": "outputs/attack/prd_s42_analysis_20261027_pos_late/transfer.csv",
+      "transfer_csv_sha256": "0392ecffab50ccb1e9592095198b9eff469b19b0f9f4ddc20ec5a3e9200998a9",
+      "transfer_json_path": "outputs/attack/prd_s42_analysis_20261027_pos_late/transfer.json",
+      "transfer_json_sha256": "b94b957fbaee352d3c90e8a8c247082da34bca686cedb71a09ba6bf19aefd7fa",
+      "archive_directory": "results/prd_s42_fpr_analysis_run_artifacts/POS_LATE",
+      "archive_attack_params_sha256": "f6479fce2f00786284edd1fb7a2b0708a816dcb0f75add80c1adb0103112b611",
+      "archive_transfer_csv_sha256": "0392ecffab50ccb1e9592095198b9eff469b19b0f9f4ddc20ec5a3e9200998a9",
+      "archive_transfer_json_sha256": "b94b957fbaee352d3c90e8a8c247082da34bca686cedb71a09ba6bf19aefd7fa",
+      "evaluation": {
+        "status": "completed",
+        "exit_code": 0,
+        "started_utc": "2026-10-27T08:33:53Z",
+        "finished_utc": "2026-10-27T08:35:09Z",
+        "elapsed_seconds": 76,
+        "rows": 13,
+        "log": "outputs/logs/prd_s42_analysis_20261027/eval_pos_late.log",
+        "command": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_pos_late"
+      },
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block8",
+          "block11"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [
+          10,
+          10
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "noise_structure": "opponent",
+        "noise_direction_variances": [
+          0.5,
+          1.25,
+          1.25
+        ],
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 82.34615384615384,
+        "strict_black_box": 80.94166666666668,
+        "transformer_black_box": 84.18333333333334,
+        "cnn": 77.7
+      }
+    },
+    "COUNT_ONE_EARLY": {
+      "role": "new",
+      "reused": false,
+      "rerun": true,
+      "status": "completed",
+      "exit_code": 0,
+      "attack_started_utc": "2026-10-27T07:00:57.416462+00:00",
+      "attack_finished_utc": "2026-10-27T07:22:29.416462+00:00",
+      "attack_log": "outputs/logs/prd_s42_analysis_20261027/count_one_early.log",
+      "attack_elapsed_seconds": 1292,
+      "output_dir": "outputs/attack/prd_s42_analysis_20261027_count_one_early",
+      "image_count": 1000,
+      "command": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --vit-analysis-checkpoints block3 --drop-ratios 0.102040816327 --output-dir outputs/attack/prd_s42_analysis_20261027_count_one_early",
+      "attack_params_path": "outputs/attack/prd_s42_analysis_20261027_count_one_early/attack_params.json",
+      "attack_params_sha256": "f99577b4bec6357917d3679f11464f9cf5a5cc6178a5b6f6a16b99ae3b489567",
+      "transfer_csv_path": "outputs/attack/prd_s42_analysis_20261027_count_one_early/transfer.csv",
+      "transfer_csv_sha256": "4f4146eb13831032daa9b07a367a6e3792a4d9c777d412e8ddd82808c615d04a",
+      "transfer_json_path": "outputs/attack/prd_s42_analysis_20261027_count_one_early/transfer.json",
+      "transfer_json_sha256": "1b160163ab5af51bdc22fc279d9341bcdc8d7381ef5f8bc2be242f15c8a22cb8",
+      "archive_directory": "results/prd_s42_fpr_analysis_run_artifacts/COUNT_ONE_EARLY",
+      "archive_attack_params_sha256": "f99577b4bec6357917d3679f11464f9cf5a5cc6178a5b6f6a16b99ae3b489567",
+      "archive_transfer_csv_sha256": "4f4146eb13831032daa9b07a367a6e3792a4d9c777d412e8ddd82808c615d04a",
+      "archive_transfer_json_sha256": "1b160163ab5af51bdc22fc279d9341bcdc8d7381ef5f8bc2be242f15c8a22cb8",
+      "evaluation": {
+        "status": "completed",
+        "exit_code": 0,
+        "started_utc": "2026-10-27T08:40:10Z",
+        "finished_utc": "2026-10-27T08:41:25Z",
+        "elapsed_seconds": 75,
+        "rows": 13,
+        "log": "outputs/logs/prd_s42_analysis_20261027/eval_count_one_early.log",
+        "command": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_count_one_early"
+      },
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block3"
+        ],
+        "drop_ratios": [
+          0.102040816327
+        ],
+        "drop_counts": [
+          20
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "noise_structure": "opponent",
+        "noise_direction_variances": [
+          0.5,
+          1.25,
+          1.25
+        ],
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 100,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 78.26153846153846,
+        "strict_black_box": 76.88333333333334,
+        "transformer_black_box": 79.46666666666667,
+        "cnn": 74.3
+      }
+    },
+    "COUNT_ONE_LATE": {
+      "role": "new",
+      "reused": false,
+      "rerun": true,
+      "status": "completed",
+      "exit_code": 0,
+      "attack_started_utc": "2026-10-27T07:22:28.675606+00:00",
+      "attack_finished_utc": "2026-10-27T07:46:33.675606+00:00",
+      "attack_log": "outputs/logs/prd_s42_analysis_20261027/count_one_late.log",
+      "attack_elapsed_seconds": 1445,
+      "output_dir": "outputs/attack/prd_s42_analysis_20261027_count_one_late",
+      "image_count": 1000,
+      "command": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --vit-analysis-checkpoints block10 --drop-ratios 0.102040816327 --output-dir outputs/attack/prd_s42_analysis_20261027_count_one_late",
+      "attack_params_path": "outputs/attack/prd_s42_analysis_20261027_count_one_late/attack_params.json",
+      "attack_params_sha256": "6a4d10526ee048e5f92739c132ef4c5bfef5956965eba6b4091cbc5c1f1fcb9e",
+      "transfer_csv_path": "outputs/attack/prd_s42_analysis_20261027_count_one_late/transfer.csv",
+      "transfer_csv_sha256": "ae720eaaad8c0c724b8082fc9dfca19674f4aa5b8a6ea4d008da507b8c8a26fe",
+      "transfer_json_path": "outputs/attack/prd_s42_analysis_20261027_count_one_late/transfer.json",
+      "transfer_json_sha256": "266ea86ce10180764a98bcf6bb19cb09d84b83975cc0e48730a5c364faa193df",
+      "archive_directory": "results/prd_s42_fpr_analysis_run_artifacts/COUNT_ONE_LATE",
+      "archive_attack_params_sha256": "6a4d10526ee048e5f92739c132ef4c5bfef5956965eba6b4091cbc5c1f1fcb9e",
+      "archive_transfer_csv_sha256": "ae720eaaad8c0c724b8082fc9dfca19674f4aa5b8a6ea4d008da507b8c8a26fe",
+      "archive_transfer_json_sha256": "266ea86ce10180764a98bcf6bb19cb09d84b83975cc0e48730a5c364faa193df",
+      "evaluation": {
+        "status": "completed",
+        "exit_code": 0,
+        "started_utc": "2026-10-27T08:41:25Z",
+        "finished_utc": "2026-10-27T08:42:40Z",
+        "elapsed_seconds": 75,
+        "rows": 13,
+        "log": "outputs/logs/prd_s42_analysis_20261027/eval_count_one_late.log",
+        "command": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_count_one_late"
+      },
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block10"
+        ],
+        "drop_ratios": [
+          0.102040816327
+        ],
+        "drop_counts": [
+          20
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "noise_structure": "opponent",
+        "noise_direction_variances": [
+          0.5,
+          1.25,
+          1.25
+        ],
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 100,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 88.48461538461538,
+        "strict_black_box": 87.53333333333333,
+        "transformer_black_box": 90.4,
+        "cnn": 84.66666666666667
+      }
+    },
+    "COUNT_THREE": {
+      "role": "new",
+      "reused": false,
+      "rerun": true,
+      "status": "completed",
+      "exit_code": 0,
+      "attack_started_utc": "2026-10-27T07:46:34.810993+00:00",
+      "attack_finished_utc": "2026-10-27T08:10:59.810993+00:00",
+      "attack_log": "outputs/logs/prd_s42_analysis_20261027/count_three.log",
+      "attack_elapsed_seconds": 1465,
+      "output_dir": "outputs/attack/prd_s42_analysis_20261027_count_three",
+      "image_count": 1000,
+      "command": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --vit-analysis-checkpoints block3,block6,block10 --drop-ratios 0.035714285714,0.030612244898,0.035714285714 --output-dir outputs/attack/prd_s42_analysis_20261027_count_three",
+      "attack_params_path": "outputs/attack/prd_s42_analysis_20261027_count_three/attack_params.json",
+      "attack_params_sha256": "263f948713b476d343328008b70f7c368eae2820ee14403772304cb507f2e64b",
+      "transfer_csv_path": "outputs/attack/prd_s42_analysis_20261027_count_three/transfer.csv",
+      "transfer_csv_sha256": "536e4dfc3c11aa1d6d30bde48a0505eccdb5235a5407620c9ead6cab4d39bcf1",
+      "transfer_json_path": "outputs/attack/prd_s42_analysis_20261027_count_three/transfer.json",
+      "transfer_json_sha256": "2d2db8b565fbcf76715ae9ce15d91e866969fb279927fe6aa4a9ebd6eab4960c",
+      "archive_directory": "results/prd_s42_fpr_analysis_run_artifacts/COUNT_THREE",
+      "archive_attack_params_sha256": "263f948713b476d343328008b70f7c368eae2820ee14403772304cb507f2e64b",
+      "archive_transfer_csv_sha256": "536e4dfc3c11aa1d6d30bde48a0505eccdb5235a5407620c9ead6cab4d39bcf1",
+      "archive_transfer_json_sha256": "2d2db8b565fbcf76715ae9ce15d91e866969fb279927fe6aa4a9ebd6eab4960c",
+      "evaluation": {
+        "status": "completed",
+        "exit_code": 0,
+        "started_utc": "2026-10-27T08:42:40Z",
+        "finished_utc": "2026-10-27T08:43:55Z",
+        "elapsed_seconds": 75,
+        "rows": 13,
+        "log": "outputs/logs/prd_s42_analysis_20261027/eval_count_three.log",
+        "command": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_count_three"
+      },
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block3",
+          "block6",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.035714285714,
+          0.030612244898,
+          0.035714285714
+        ],
+        "drop_counts": [
+          7,
+          6,
+          7
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "noise_structure": "opponent",
+        "noise_direction_variances": [
+          0.5,
+          1.25,
+          1.25
+        ],
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 300,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 87.53846153846153,
+        "strict_black_box": 86.54166666666666,
+        "transformer_black_box": 89.5,
+        "cnn": 83.58333333333333
+      }
+    },
+    "BUDGET_10": {
+      "role": "new",
+      "reused": false,
+      "rerun": true,
+      "status": "completed",
+      "exit_code": 0,
+      "attack_started_utc": "2026-10-27T05:24:05.864541+00:00",
+      "attack_finished_utc": "2026-10-27T05:48:22.864541+00:00",
+      "attack_log": "outputs/logs/prd_s42_analysis_20261027/budget_10.log",
+      "attack_elapsed_seconds": 1457,
+      "output_dir": "outputs/attack/prd_s42_analysis_20261027_budget_10",
+      "image_count": 1000,
+      "command": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --drop-ratios 0.025510204082,0.025510204082 --output-dir outputs/attack/prd_s42_analysis_20261027_budget_10",
+      "attack_params_path": "outputs/attack/prd_s42_analysis_20261027_budget_10/attack_params.json",
+      "attack_params_sha256": "1113293652f0ec43c60107f10d60d28440f11ade687c57a9ea17694f79a8572e",
+      "transfer_csv_path": "outputs/attack/prd_s42_analysis_20261027_budget_10/transfer.csv",
+      "transfer_csv_sha256": "433cb2aeecf81dbbadd4f9d0b5192fdd18ea43c0564a3468e6f3d07939c5a2c9",
+      "transfer_json_path": "outputs/attack/prd_s42_analysis_20261027_budget_10/transfer.json",
+      "transfer_json_sha256": "c6e26373f458e378021c4612baa8942e508ad2deb9ebd1ef1268d964887bd19d",
+      "archive_directory": "results/prd_s42_fpr_analysis_run_artifacts/BUDGET_10",
+      "archive_attack_params_sha256": "1113293652f0ec43c60107f10d60d28440f11ade687c57a9ea17694f79a8572e",
+      "archive_transfer_csv_sha256": "433cb2aeecf81dbbadd4f9d0b5192fdd18ea43c0564a3468e6f3d07939c5a2c9",
+      "archive_transfer_json_sha256": "c6e26373f458e378021c4612baa8942e508ad2deb9ebd1ef1268d964887bd19d",
+      "evaluation": {
+        "status": "completed",
+        "exit_code": 0,
+        "started_utc": "2026-10-27T08:35:09Z",
+        "finished_utc": "2026-10-27T08:36:24Z",
+        "elapsed_seconds": 75,
+        "rows": 13,
+        "log": "outputs/logs/prd_s42_analysis_20261027/eval_budget_10.log",
+        "command": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_budget_10"
+      },
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.025510204082,
+          0.025510204082
+        ],
+        "drop_counts": [
+          5,
+          5
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "noise_structure": "opponent",
+        "noise_direction_variances": [
+          0.5,
+          1.25,
+          1.25
+        ],
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 87.12307692307692,
+        "strict_black_box": 86.10833333333333,
+        "transformer_black_box": 89.23333333333333,
+        "cnn": 82.98333333333333
+      }
+    },
+    "BUDGET_40": {
+      "role": "new",
+      "reused": false,
+      "rerun": true,
+      "status": "completed",
+      "exit_code": 0,
+      "attack_started_utc": "2026-10-27T05:48:22.668012+00:00",
+      "attack_finished_utc": "2026-10-27T06:12:38.668012+00:00",
+      "attack_log": "outputs/logs/prd_s42_analysis_20261027/budget_40.log",
+      "attack_elapsed_seconds": 1456,
+      "output_dir": "outputs/attack/prd_s42_analysis_20261027_budget_40",
+      "image_count": 1000,
+      "command": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --drop-ratios 0.102040816327,0.102040816327 --output-dir outputs/attack/prd_s42_analysis_20261027_budget_40",
+      "attack_params_path": "outputs/attack/prd_s42_analysis_20261027_budget_40/attack_params.json",
+      "attack_params_sha256": "f13a4f82aee0a07a9358f72840787cb96fec2f3f5306f28024bdb4ec70200302",
+      "transfer_csv_path": "outputs/attack/prd_s42_analysis_20261027_budget_40/transfer.csv",
+      "transfer_csv_sha256": "6545e2ef8cda157b2eb332d147a85a38a5f6e7e99241ccaad8ecd82380c1f253",
+      "transfer_json_path": "outputs/attack/prd_s42_analysis_20261027_budget_40/transfer.json",
+      "transfer_json_sha256": "f782a7a4429c040c02278851f1e3d9823f18a85d0e58d6f8c434e54b79f80038",
+      "archive_directory": "results/prd_s42_fpr_analysis_run_artifacts/BUDGET_40",
+      "archive_attack_params_sha256": "f13a4f82aee0a07a9358f72840787cb96fec2f3f5306f28024bdb4ec70200302",
+      "archive_transfer_csv_sha256": "6545e2ef8cda157b2eb332d147a85a38a5f6e7e99241ccaad8ecd82380c1f253",
+      "archive_transfer_json_sha256": "f782a7a4429c040c02278851f1e3d9823f18a85d0e58d6f8c434e54b79f80038",
+      "evaluation": {
+        "status": "completed",
+        "exit_code": 0,
+        "started_utc": "2026-10-27T08:36:24Z",
+        "finished_utc": "2026-10-27T08:37:40Z",
+        "elapsed_seconds": 76,
+        "rows": 13,
+        "log": "outputs/logs/prd_s42_analysis_20261027/eval_budget_40.log",
+        "command": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_budget_40"
+      },
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.102040816327,
+          0.102040816327
+        ],
+        "drop_counts": [
+          20,
+          20
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "noise_structure": "opponent",
+        "noise_direction_variances": [
+          0.5,
+          1.25,
+          1.25
+        ],
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 88.43846153846154,
+        "strict_black_box": 87.5,
+        "transformer_black_box": 89.98333333333333,
+        "cnn": 85.01666666666667
+      }
+    },
+    "NOISE_ISOTROPIC_RGB": {
+      "role": "new",
+      "reused": false,
+      "rerun": true,
+      "status": "completed",
+      "exit_code": 0,
+      "attack_started_utc": "2026-10-27T06:12:39.407544+00:00",
+      "attack_finished_utc": "2026-10-27T06:36:52.407544+00:00",
+      "attack_log": "outputs/logs/prd_s42_analysis_20261027/noise_isotropic_rgb.log",
+      "attack_elapsed_seconds": 1453,
+      "output_dir": "outputs/attack/prd_s42_analysis_20261027_noise_isotropic_rgb",
+      "image_count": 1000,
+      "command": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --noise-structure isotropic_rgb --output-dir outputs/attack/prd_s42_analysis_20261027_noise_isotropic_rgb",
+      "attack_params_path": "outputs/attack/prd_s42_analysis_20261027_noise_isotropic_rgb/attack_params.json",
+      "attack_params_sha256": "8959c8b11fa4dd2bb354c3f41437321df04b95548b487921f02153a570608a2d",
+      "transfer_csv_path": "outputs/attack/prd_s42_analysis_20261027_noise_isotropic_rgb/transfer.csv",
+      "transfer_csv_sha256": "d024631a80911d67f60f74d2420267bcdfb5e03bd2e875724c424f9ab9525da7",
+      "transfer_json_path": "outputs/attack/prd_s42_analysis_20261027_noise_isotropic_rgb/transfer.json",
+      "transfer_json_sha256": "e7c1bd3f756fef32fa057bb0af2ee23530a3f3dae808efeaf47c40038b0b8197",
+      "archive_directory": "results/prd_s42_fpr_analysis_run_artifacts/NOISE_ISOTROPIC_RGB",
+      "archive_attack_params_sha256": "8959c8b11fa4dd2bb354c3f41437321df04b95548b487921f02153a570608a2d",
+      "archive_transfer_csv_sha256": "d024631a80911d67f60f74d2420267bcdfb5e03bd2e875724c424f9ab9525da7",
+      "archive_transfer_json_sha256": "e7c1bd3f756fef32fa057bb0af2ee23530a3f3dae808efeaf47c40038b0b8197",
+      "evaluation": {
+        "status": "completed",
+        "exit_code": 0,
+        "started_utc": "2026-10-27T08:37:40Z",
+        "finished_utc": "2026-10-27T08:38:56Z",
+        "elapsed_seconds": 76,
+        "rows": 13,
+        "log": "outputs/logs/prd_s42_analysis_20261027/eval_noise_isotropic_rgb.log",
+        "command": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_noise_isotropic_rgb"
+      },
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [
+          10,
+          10
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "noise_structure": "isotropic_rgb",
+        "noise_direction_variances": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 87.9,
+        "strict_black_box": 86.93333333333334,
+        "transformer_black_box": 89.68333333333334,
+        "cnn": 84.18333333333334
+      }
+    },
+    "PAIR_ORIGINAL_ORIGINAL": {
+      "role": "new",
+      "reused": false,
+      "rerun": true,
+      "status": "completed",
+      "exit_code": 0,
+      "attack_started_utc": "2026-10-27T06:36:51.982830+00:00",
+      "attack_finished_utc": "2026-10-27T07:00:56.982830+00:00",
+      "attack_log": "outputs/logs/prd_s42_analysis_20261027/pair_original_original.log",
+      "attack_elapsed_seconds": 1445,
+      "output_dir": "outputs/attack/prd_s42_analysis_20261027_pair_original_original",
+      "image_count": 1000,
+      "command": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --input-diversity-phase-shift-set 0,0 --output-dir outputs/attack/prd_s42_analysis_20261027_pair_original_original",
+      "attack_params_path": "outputs/attack/prd_s42_analysis_20261027_pair_original_original/attack_params.json",
+      "attack_params_sha256": "5aa6796e4cfa614a0edc2c0f77756e194e81feb3251724accfa16e773becb4af",
+      "transfer_csv_path": "outputs/attack/prd_s42_analysis_20261027_pair_original_original/transfer.csv",
+      "transfer_csv_sha256": "d1b2aee6ae428b0a87b7487801465c92dcaa0fe77b59f974c3a0494ddb45a623",
+      "transfer_json_path": "outputs/attack/prd_s42_analysis_20261027_pair_original_original/transfer.json",
+      "transfer_json_sha256": "def8cc1d7ea91c009eee1a8ec75a01ce45e47fdd8cb329a22b88bb4686da36de",
+      "archive_directory": "results/prd_s42_fpr_analysis_run_artifacts/PAIR_ORIGINAL_ORIGINAL",
+      "archive_attack_params_sha256": "5aa6796e4cfa614a0edc2c0f77756e194e81feb3251724accfa16e773becb4af",
+      "archive_transfer_csv_sha256": "d1b2aee6ae428b0a87b7487801465c92dcaa0fe77b59f974c3a0494ddb45a623",
+      "archive_transfer_json_sha256": "def8cc1d7ea91c009eee1a8ec75a01ce45e47fdd8cb329a22b88bb4686da36de",
+      "evaluation": {
+        "status": "completed",
+        "exit_code": 0,
+        "started_utc": "2026-10-27T08:38:56Z",
+        "finished_utc": "2026-10-27T08:40:10Z",
+        "elapsed_seconds": 74,
+        "rows": 13,
+        "log": "outputs/logs/prd_s42_analysis_20261027/eval_pair_original_original.log",
+        "command": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_pair_original_original"
+      },
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [
+          10,
+          10
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "noise_structure": "opponent",
+        "noise_direction_variances": [
+          0.5,
+          1.25,
+          1.25
+        ],
+        "input_diversity_groups": 10,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            0,
+            0
+          ]
+        ],
+        "input_diversity_total_views": 20,
+        "mask_schedule_count_per_image": 100,
+        "checkpoint_mask_selection_count_per_image": 200,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 81.54615384615383,
+        "strict_black_box": 80.01666666666667,
+        "transformer_black_box": 84.0,
+        "cnn": 76.03333333333335
+      }
+    },
+    "GROUPS_1": {
+      "role": "new",
+      "reused": false,
+      "rerun": true,
+      "status": "completed",
+      "exit_code": 0,
+      "attack_started_utc": "2026-10-27T08:28:23.667634+00:00",
+      "attack_finished_utc": "2026-10-27T08:31:07.667634+00:00",
+      "attack_log": "outputs/logs/prd_s42_analysis_20261027/groups_1.log",
+      "attack_elapsed_seconds": 164,
+      "output_dir": "outputs/attack/prd_s42_analysis_20261027_groups_1",
+      "image_count": 1000,
+      "command": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --input-diversity-groups 1 --output-dir outputs/attack/prd_s42_analysis_20261027_groups_1",
+      "attack_params_path": "outputs/attack/prd_s42_analysis_20261027_groups_1/attack_params.json",
+      "attack_params_sha256": "658608e609226f2ef16057e12a538335448378f1e75dee61bf0def103005cf99",
+      "transfer_csv_path": "outputs/attack/prd_s42_analysis_20261027_groups_1/transfer.csv",
+      "transfer_csv_sha256": "3fd6584ab725058214d8b02c238987086c48d3ea3724473a5afa5a89f3409010",
+      "transfer_json_path": "outputs/attack/prd_s42_analysis_20261027_groups_1/transfer.json",
+      "transfer_json_sha256": "4d2333867148b130422e69860ec8e76d935c268771d3b0da3e41c958c4eb48e6",
+      "archive_directory": "results/prd_s42_fpr_analysis_run_artifacts/GROUPS_1",
+      "archive_attack_params_sha256": "658608e609226f2ef16057e12a538335448378f1e75dee61bf0def103005cf99",
+      "archive_transfer_csv_sha256": "3fd6584ab725058214d8b02c238987086c48d3ea3724473a5afa5a89f3409010",
+      "archive_transfer_json_sha256": "4d2333867148b130422e69860ec8e76d935c268771d3b0da3e41c958c4eb48e6",
+      "evaluation": {
+        "status": "completed",
+        "exit_code": 0,
+        "started_utc": "2026-10-27T08:46:26Z",
+        "finished_utc": "2026-10-27T08:47:41Z",
+        "elapsed_seconds": 75,
+        "rows": 13,
+        "log": "outputs/logs/prd_s42_analysis_20261027/eval_groups_1.log",
+        "command": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_groups_1"
+      },
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [
+          10,
+          10
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "noise_structure": "opponent",
+        "noise_direction_variances": [
+          0.5,
+          1.25,
+          1.25
+        ],
+        "input_diversity_groups": 1,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 2,
+        "mask_schedule_count_per_image": 10,
+        "checkpoint_mask_selection_count_per_image": 20,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 75.56923076923077,
+        "strict_black_box": 73.725,
+        "transformer_black_box": 77.26666666666667,
+        "cnn": 70.18333333333334
+      }
+    },
+    "GROUPS_2": {
+      "role": "new",
+      "reused": false,
+      "rerun": true,
+      "status": "completed",
+      "exit_code": 0,
+      "attack_started_utc": "2026-10-27T08:23:16.249915+00:00",
+      "attack_finished_utc": "2026-10-27T08:28:23.249915+00:00",
+      "attack_log": "outputs/logs/prd_s42_analysis_20261027/groups_2.log",
+      "attack_elapsed_seconds": 307,
+      "output_dir": "outputs/attack/prd_s42_analysis_20261027_groups_2",
+      "image_count": 1000,
+      "command": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --input-diversity-groups 2 --output-dir outputs/attack/prd_s42_analysis_20261027_groups_2",
+      "attack_params_path": "outputs/attack/prd_s42_analysis_20261027_groups_2/attack_params.json",
+      "attack_params_sha256": "b68b4dd9a93e36b069e26e65f4e68a3bae073b980f8cc00f4adbed35516ec44d",
+      "transfer_csv_path": "outputs/attack/prd_s42_analysis_20261027_groups_2/transfer.csv",
+      "transfer_csv_sha256": "3579acccf4d6ab79fe7b3dc35dead29c2b3637961dc2c310b8f39c2c6eca9628",
+      "transfer_json_path": "outputs/attack/prd_s42_analysis_20261027_groups_2/transfer.json",
+      "transfer_json_sha256": "93a024d493737608856501aae0622a0dfdb7495439870090e9c9276912d21f37",
+      "archive_directory": "results/prd_s42_fpr_analysis_run_artifacts/GROUPS_2",
+      "archive_attack_params_sha256": "b68b4dd9a93e36b069e26e65f4e68a3bae073b980f8cc00f4adbed35516ec44d",
+      "archive_transfer_csv_sha256": "3579acccf4d6ab79fe7b3dc35dead29c2b3637961dc2c310b8f39c2c6eca9628",
+      "archive_transfer_json_sha256": "93a024d493737608856501aae0622a0dfdb7495439870090e9c9276912d21f37",
+      "evaluation": {
+        "status": "completed",
+        "exit_code": 0,
+        "started_utc": "2026-10-27T08:45:11Z",
+        "finished_utc": "2026-10-27T08:46:26Z",
+        "elapsed_seconds": 75,
+        "rows": 13,
+        "log": "outputs/logs/prd_s42_analysis_20261027/eval_groups_2.log",
+        "command": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_groups_2"
+      },
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [
+          10,
+          10
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "noise_structure": "opponent",
+        "noise_direction_variances": [
+          0.5,
+          1.25,
+          1.25
+        ],
+        "input_diversity_groups": 2,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 4,
+        "mask_schedule_count_per_image": 20,
+        "checkpoint_mask_selection_count_per_image": 40,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 81.22307692307693,
+        "strict_black_box": 79.76666666666668,
+        "transformer_black_box": 83.06666666666666,
+        "cnn": 76.46666666666667
+      }
+    },
+    "GROUPS_5": {
+      "role": "new",
+      "reused": false,
+      "rerun": true,
+      "status": "completed",
+      "exit_code": 0,
+      "attack_started_utc": "2026-10-27T08:10:58.486695+00:00",
+      "attack_finished_utc": "2026-10-27T08:23:15.486695+00:00",
+      "attack_log": "outputs/logs/prd_s42_analysis_20261027/groups_5.log",
+      "attack_elapsed_seconds": 737,
+      "output_dir": "outputs/attack/prd_s42_analysis_20261027_groups_5",
+      "image_count": 1000,
+      "command": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --input-diversity-groups 5 --output-dir outputs/attack/prd_s42_analysis_20261027_groups_5",
+      "attack_params_path": "outputs/attack/prd_s42_analysis_20261027_groups_5/attack_params.json",
+      "attack_params_sha256": "d10c2919b4c861d66ded5c1dada7bae1740f10844abfd820667c8a09e0704ecf",
+      "transfer_csv_path": "outputs/attack/prd_s42_analysis_20261027_groups_5/transfer.csv",
+      "transfer_csv_sha256": "e54d294a93f6fdea8b497c83ca67445711c051234e358fc3db43ef6dfa61c6d4",
+      "transfer_json_path": "outputs/attack/prd_s42_analysis_20261027_groups_5/transfer.json",
+      "transfer_json_sha256": "d9bd87587bcbc2f22ac2fe803e32fa1cdf8bdd6e1d641b14dfc3db7f70a5615a",
+      "archive_directory": "results/prd_s42_fpr_analysis_run_artifacts/GROUPS_5",
+      "archive_attack_params_sha256": "d10c2919b4c861d66ded5c1dada7bae1740f10844abfd820667c8a09e0704ecf",
+      "archive_transfer_csv_sha256": "e54d294a93f6fdea8b497c83ca67445711c051234e358fc3db43ef6dfa61c6d4",
+      "archive_transfer_json_sha256": "d9bd87587bcbc2f22ac2fe803e32fa1cdf8bdd6e1d641b14dfc3db7f70a5615a",
+      "evaluation": {
+        "status": "completed",
+        "exit_code": 0,
+        "started_utc": "2026-10-27T08:43:55Z",
+        "finished_utc": "2026-10-27T08:45:11Z",
+        "elapsed_seconds": 76,
+        "rows": 13,
+        "log": "outputs/logs/prd_s42_analysis_20261027/eval_groups_5.log",
+        "command": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_groups_5"
+      },
+      "attack_params": {
+        "attack_method": "progressive_route_disruption",
+        "seed": 42,
+        "whitebox_model": "vit_base_patch16_224",
+        "epsilon": 0.06274509803921569,
+        "step_size": 0.006274509803921568,
+        "steps": 10,
+        "momentum_decay": 1.0,
+        "progressive_drop_enabled": true,
+        "opponent_noise_enabled": true,
+        "checkpoints": [
+          "block3",
+          "block10"
+        ],
+        "drop_ratios": [
+          0.051020408163,
+          0.051020408163
+        ],
+        "drop_counts": [
+          10,
+          10
+        ],
+        "grids": [
+          [
+            14,
+            14
+          ],
+          [
+            14,
+            14
+          ]
+        ],
+        "opponent_noise_strength": 0.2,
+        "noise_structure": "opponent",
+        "noise_direction_variances": [
+          0.5,
+          1.25,
+          1.25
+        ],
+        "input_diversity_groups": 5,
+        "input_diversity_views_per_group": 2,
+        "input_diversity_phase_shift_set": [
+          [
+            4,
+            4
+          ],
+          [
+            8,
+            8
+          ],
+          [
+            12,
+            12
+          ]
+        ],
+        "input_diversity_total_views": 10,
+        "mask_schedule_count_per_image": 50,
+        "checkpoint_mask_selection_count_per_image": 100,
+        "model_mean": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "model_std": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "num_images": 1000
+      },
+      "summary_asr_pct": {
+        "overall": 85.70769230769231,
+        "strict_black_box": 84.56666666666666,
+        "transformer_black_box": 87.61666666666666,
+        "cnn": 81.51666666666667
+      }
+    }
+  },
+  "run_order": [
+    "REF_FULL",
+    "REF_DROP",
+    "REF_NOISE",
+    "POS_EARLY",
+    "POS_MIDDLE",
+    "POS_LATE",
+    "COUNT_ONE_EARLY",
+    "COUNT_ONE_LATE",
+    "COUNT_THREE",
+    "BUDGET_10",
+    "BUDGET_40",
+    "NOISE_ISOTROPIC_RGB",
+    "PAIR_ORIGINAL_ORIGINAL",
+    "GROUPS_1",
+    "GROUPS_2",
+    "GROUPS_5"
+  ],
+  "attack_commands": {
+    "POS_EARLY": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --vit-analysis-checkpoints block1,block4 --output-dir outputs/attack/prd_s42_analysis_20261027_pos_early",
+    "POS_MIDDLE": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --vit-analysis-checkpoints block5,block8 --output-dir outputs/attack/prd_s42_analysis_20261027_pos_middle",
+    "POS_LATE": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --vit-analysis-checkpoints block8,block11 --output-dir outputs/attack/prd_s42_analysis_20261027_pos_late",
+    "COUNT_ONE_EARLY": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --vit-analysis-checkpoints block3 --drop-ratios 0.102040816327 --output-dir outputs/attack/prd_s42_analysis_20261027_count_one_early",
+    "COUNT_ONE_LATE": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --vit-analysis-checkpoints block10 --drop-ratios 0.102040816327 --output-dir outputs/attack/prd_s42_analysis_20261027_count_one_late",
+    "COUNT_THREE": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --vit-analysis-checkpoints block3,block6,block10 --drop-ratios 0.035714285714,0.030612244898,0.035714285714 --output-dir outputs/attack/prd_s42_analysis_20261027_count_three",
+    "BUDGET_10": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --drop-ratios 0.025510204082,0.025510204082 --output-dir outputs/attack/prd_s42_analysis_20261027_budget_10",
+    "BUDGET_40": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --drop-ratios 0.102040816327,0.102040816327 --output-dir outputs/attack/prd_s42_analysis_20261027_budget_40",
+    "NOISE_ISOTROPIC_RGB": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --noise-structure isotropic_rgb --output-dir outputs/attack/prd_s42_analysis_20261027_noise_isotropic_rgb",
+    "PAIR_ORIGINAL_ORIGINAL": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --input-diversity-phase-shift-set 0,0 --output-dir outputs/attack/prd_s42_analysis_20261027_pair_original_original",
+    "GROUPS_1": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --input-diversity-groups 1 --output-dir outputs/attack/prd_s42_analysis_20261027_groups_1",
+    "GROUPS_2": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --input-diversity-groups 2 --output-dir outputs/attack/prd_s42_analysis_20261027_groups_2",
+    "GROUPS_5": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure opponent --drop-ratios 0.051020408163,0.051020408163 --input-diversity-groups 5 --output-dir outputs/attack/prd_s42_analysis_20261027_groups_5"
+  },
+  "evaluation_commands": {
+    "POS_EARLY": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_pos_early",
+    "POS_MIDDLE": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_pos_middle",
+    "POS_LATE": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_pos_late",
+    "COUNT_ONE_EARLY": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_count_one_early",
+    "COUNT_ONE_LATE": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_count_one_late",
+    "COUNT_THREE": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_count_three",
+    "BUDGET_10": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_budget_10",
+    "BUDGET_40": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_budget_40",
+    "NOISE_ISOTROPIC_RGB": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_noise_isotropic_rgb",
+    "PAIR_ORIGINAL_ORIGINAL": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_pair_original_original",
+    "GROUPS_1": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_groups_1",
+    "GROUPS_2": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_groups_2",
+    "GROUPS_5": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_groups_5"
+  },
+  "artifact_layout": {
+    "summary": "results/prd_s42_1000_fpr_analysis_summary.csv",
+    "per_target": "results/prd_s42_1000_fpr_analysis_per_target.csv",
+    "differences": "results/prd_s42_1000_fpr_analysis_differences.csv",
+    "provenance": "results/prd_s42_1000_fpr_analysis_provenance.json",
+    "report": "results/prd_s42_1000_fpr_analysis.md",
+    "run_artifacts": "results/prd_s42_fpr_analysis_run_artifacts/<experiment_id>/"
+  },
+  "completion": {
+    "new_completed": [
+      "POS_EARLY",
+      "POS_MIDDLE",
+      "POS_LATE",
+      "COUNT_ONE_EARLY",
+      "COUNT_ONE_LATE",
+      "COUNT_THREE",
+      "BUDGET_10",
+      "BUDGET_40",
+      "NOISE_ISOTROPIC_RGB",
+      "PAIR_ORIGINAL_ORIGINAL",
+      "GROUPS_1",
+      "GROUPS_2",
+      "GROUPS_5"
+    ],
+    "new_failed": [],
+    "not_run": [],
+    "new_configurations": 13,
+    "reference_configurations": 3,
+    "unique_configurations": 16,
+    "source_target_evaluations": 169
+  },
+  "validation": {
+    "new_runs_completed": 13,
+    "new_runs_failed": 0,
+    "images_per_new_run": 1000,
+    "new_image_sets_match_reference_sample_set": true,
+    "transfer_rows_per_new_run": 13,
+    "per_target_total_images": 1000,
+    "drop_counts_observed": {
+      "POS_EARLY": [
+        10,
+        10
+      ],
+      "POS_MIDDLE": [
+        10,
+        10
+      ],
+      "POS_LATE": [
+        10,
+        10
+      ],
+      "COUNT_ONE_EARLY": [
+        20
+      ],
+      "COUNT_ONE_LATE": [
+        20
+      ],
+      "COUNT_THREE": [
+        7,
+        6,
+        7
+      ],
+      "BUDGET_10": [
+        5,
+        5
+      ],
+      "BUDGET_40": [
+        20,
+        20
+      ],
+      "NOISE_ISOTROPIC_RGB": [
+        10,
+        10
+      ],
+      "PAIR_ORIGINAL_ORIGINAL": [
+        10,
+        10
+      ],
+      "GROUPS_1": [
+        10,
+        10
+      ],
+      "GROUPS_2": [
+        10,
+        10
+      ],
+      "GROUPS_5": [
+        10,
+        10
+      ]
+    },
+    "sample_order_sha256_matches_existing_provenance": true,
+    "label_order_sha256_matches_existing_provenance": true,
+    "reference_strict_asr_percent_recomputed": {
+      "REF_FULL": 87.05833333333332,
+      "REF_DROP": 70.65833333333332,
+      "REF_NOISE": 77.78333333333333
+    }
+  }
+}
