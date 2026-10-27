@@ -25,13 +25,8 @@ LAYER_COUNT = 12
 GRID_SIZE = (14, 14)
 COLOR_LIMITS = (0.0, 1.0)
 COLOR_ANCHORS = (
-    (49, 54, 149),
-    (0, 114, 189),
-    (0, 188, 212),
-    (76, 175, 80),
-    (255, 235, 59),
-    (255, 152, 0),
-    (213, 0, 0),
+    (45, 95, 210),
+    (215, 55, 70),
 )
 
 
@@ -160,7 +155,7 @@ def save_sample_elements(
             "colorbar_label": "Normalized patch score",
             "vmin": COLOR_LIMITS[0],
             "vmax": COLOR_LIMITS[1],
-            "colormap": "continuous blue-cyan-green-yellow-orange-red spectrum",
+            "colormap": "continuous blue-to-red RGB gradient",
             "color_anchors_rgb": [list(color) for color in COLOR_ANCHORS],
             "color_anchor_positions": [index / (len(COLOR_ANCHORS) - 1) for index in range(len(COLOR_ANCHORS))],
             "color_interpolation": "linear RGB between adjacent anchors",

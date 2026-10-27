@@ -118,16 +118,16 @@ class Figure1Tests(unittest.TestCase):
         overlay = render_heatmap_overlay(image, scores, (2, 2), alpha=1)
         self.assertEqual(overlay.size, image.size)
         self.assertEqual(overlay.getpixel((8, 8)), COLOR_ANCHORS[0])
-        self.assertEqual(overlay.getpixel((24, 8)), COLOR_ANCHORS[3])
+        self.assertEqual(overlay.getpixel((24, 8)), (130, 75, 140))
         self.assertEqual(overlay.getpixel((8, 24)), COLOR_ANCHORS[-1])
-        self.assertEqual(overlay.getpixel((24, 24)), (255, 194, 30))
+        self.assertEqual(overlay.getpixel((24, 24)), (172, 65, 105))
         self.assertEqual(overlay.getpixel((1, 1)), overlay.getpixel((15, 15)))
         self.assertNotEqual(overlay.getpixel((16, 8)), overlay.getpixel((24, 8)))
         narrow_range = render_heatmap_overlay(image, scores * 0.125 + 0.375, (2, 2), alpha=1)
         self.assertEqual(narrow_range.tobytes(), overlay.tobytes())
         constant = render_heatmap_overlay(image, torch.full((4,), 0.3), (2, 2), alpha=1)
         for position in ((8, 8), (24, 8), (8, 24), (24, 24)):
-            self.assertEqual(constant.getpixel(position), COLOR_ANCHORS[3])
+            self.assertEqual(constant.getpixel(position), (130, 75, 140))
 
     def test_export_writes_exact_first_50_sample_folders_and_complete_csv(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -175,7 +175,8 @@ class Figure1Tests(unittest.TestCase):
             self.assertEqual(metadata["overlay"]["constant_score_value"], 0.5)
             self.assertEqual(metadata["overlay"]["colorbar_label"], "Normalized patch score")
             self.assertEqual(metadata["overlay"]["color_anchors_rgb"], [list(color) for color in COLOR_ANCHORS])
-            self.assertEqual(metadata["overlay"]["color_anchor_positions"], [index / 6 for index in range(7)])
+            self.assertEqual(metadata["overlay"]["color_anchor_positions"], [0.0, 1.0])
+            self.assertEqual(metadata["overlay"]["colormap"], "continuous blue-to-red RGB gradient")
             self.assertEqual(metadata["overlay"]["color_interpolation"], "linear RGB between adjacent anchors")
             with Image.open(sample / "input.png") as saved:
                 self.assertEqual(saved.getpixel((10, 10)), (0, 60, 140))
