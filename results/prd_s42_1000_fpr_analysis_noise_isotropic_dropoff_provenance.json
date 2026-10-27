@@ -1,0 +1,371 @@
+{
+  "analysis": "Post-hoc follow-up to the PRD section 4.4 noise-structure analysis",
+  "pre_specified": false,
+  "rationale": "Requested after the main analysis to test whether the drop-on baseline masks the opponent-vs-isotropic RGB noise-structure difference.",
+  "generated_utc": "2026-10-27T09:33:39.379152+00:00",
+  "code_commit_at_run": "3940e6fe8360c5f7f57d353d2a107746e88fc3e6",
+  "primary_protocol": "fpr",
+  "targets": [
+    "vit_base_patch16_224",
+    "cait_s24_224",
+    "pit_b_224",
+    "visformer_small",
+    "swin_tiny_patch4_window7_224",
+    "deit_tiny_patch16_224",
+    "coat_tiny",
+    "resnet18",
+    "vgg16",
+    "densenet121",
+    "efficientnet_b0",
+    "mobilenet_v3_small",
+    "resnext50_32x4d"
+  ],
+  "num_images": 1000,
+  "seed": 42,
+  "asr_definition": "1 - adversarial accuracy over all 1000 images; no clean-correct filtering.",
+  "summary_metrics": {
+    "primary": "strict black-box mean ASR over the 12 targets excluding vit_base_patch16_224",
+    "transformer_black_box": "mean ASR over the six black-box Transformer targets",
+    "cnn": "mean ASR over the six CNN targets",
+    "differences": "percentage points",
+    "statistics": "No confidence intervals, resampling, significance tests, McNemar tests, or p-values."
+  },
+  "environment": {
+    "conda_env": "att-atk",
+    "python": "3.10.19",
+    "torch": "2.10.0+cu128",
+    "torch_cuda": "12.8",
+    "timm": "1.0.24",
+    "torchvision": "0.25.0+cu128",
+    "gpu": "NVIDIA GeForce RTX 3080",
+    "gpu_total_memory_bytes": 10354753536,
+    "driver": "580.76.05",
+    "platform": "Linux-5.4.0-126-generic-x86_64-with-glibc2.35",
+    "generation_batch_size": 48,
+    "evaluation_batch_size": 32,
+    "tf32": "disabled for evaluation with --no-tf32",
+    "amp": "disabled"
+  },
+  "data": {
+    "image_dir": "data/clean_resized_images",
+    "annotations_path": "data/image_name_to_class_id_and_name.json",
+    "annotations_sha256": "56d8845af2c4d8af0590d5f4e771c5d1a09317c4882502c64b249ffcd8ca75be",
+    "num_images": 1000,
+    "sample_order_sha256": "b182c97d353f8b2b7aaa05e57e55467485cbda4943005256e7bc6f50f54c1e94",
+    "label_order_sha256": "7f220ccf352c1597c0736bf8d8105dbc14a295279036de88e90bec53e51b181e",
+    "first_sample": "ILSVRC2012_val_00000031.png",
+    "last_sample": "ILSVRC2012_val_00049870.png"
+  },
+  "fixed_attack_settings": {
+    "whitebox_model": "vit_base_patch16_224",
+    "epsilon": 0.06274509803921569,
+    "step_size": 0.006274509803921569,
+    "steps": 10,
+    "momentum_decay": 1.0,
+    "checkpoints": [
+      "block3",
+      "block10"
+    ],
+    "progressive_drop_enabled": false,
+    "drop_counts": [],
+    "noise_structure": "isotropic_rgb",
+    "noise_direction_variances": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "noise_beta": 0.2,
+    "groups": 10,
+    "views_per_group": 2,
+    "views_per_step": 20,
+    "phase_shift_set": [
+      [
+        4,
+        4
+      ],
+      [
+        8,
+        8
+      ],
+      [
+        12,
+        12
+      ]
+    ],
+    "generation_batch_size": 48,
+    "gradient_aggregation": "direct mean of view pixel gradients",
+    "update": "momentum accumulation (coefficient 1), sign update, L-infinity projection"
+  },
+  "evaluation": {
+    "protocol": "fpr",
+    "batch_size": 32,
+    "tf32": false,
+    "amp": false,
+    "strict_black_box_excludes": [
+      "vit_base_patch16_224"
+    ],
+    "asr_uses_all_samples": true,
+    "command": "python transfer_eval.py --protocol fpr --batch-size 32 --no-tf32 --image-dir outputs/attack/prd_s42_analysis_20261027_noise_isotropic_rgb_drop_off"
+  },
+  "new_run": {
+    "experiment_id": "NOISE_ISOTROPIC_RGB_DROP_OFF",
+    "status": "completed",
+    "exit_code": 0,
+    "started_utc": "2026-10-27T09:10:28.240818+00:00",
+    "finished_utc": "2026-10-27T09:30:17.240818+00:00",
+    "attack_elapsed_seconds": 1189,
+    "output_dir": "outputs/attack/prd_s42_analysis_20261027_noise_isotropic_rgb_drop_off",
+    "image_count": 1000,
+    "command": "python main.py --whitebox-model vit_base_patch16_224 --batch-size 48 --num-workers 4 --max-attacked-samples 1000 --steps 10 --epsilon 0.06274509803921569 --step-size 0.006274509803921568 --opponent-noise-strength 0.2 --input-diversity-groups 10 --input-diversity-views-per-group 2 --input-diversity-phase-shift-set '4,4;8,8;12,12' --noise-structure isotropic_rgb --no-progressive-drop --output-dir outputs/attack/prd_s42_analysis_20261027_noise_isotropic_rgb_drop_off",
+    "attack_params_path": "outputs/attack/prd_s42_analysis_20261027_noise_isotropic_rgb_drop_off/attack_params.json",
+    "attack_params_sha256": "03022e8d5b74b22df150e4dd0c105b58757cfb2b318fbc3165ea9a677926f345",
+    "transfer_csv_path": "outputs/attack/prd_s42_analysis_20261027_noise_isotropic_rgb_drop_off/transfer.csv",
+    "transfer_csv_sha256": "16c7ce58bc411c389f4afd2c07a5fb2026cdcddc8a2f21871c316e71caaeabf5",
+    "transfer_json_path": "outputs/attack/prd_s42_analysis_20261027_noise_isotropic_rgb_drop_off/transfer.json",
+    "transfer_json_sha256": "913c357985626b303094f13fa267d42441063bb971012407d6227bfe7b06a519",
+    "archive_directory": "results/prd_s42_fpr_analysis_run_artifacts/NOISE_ISOTROPIC_RGB_DROP_OFF",
+    "archive_attack_params_sha256": "03022e8d5b74b22df150e4dd0c105b58757cfb2b318fbc3165ea9a677926f345",
+    "archive_transfer_csv_sha256": "16c7ce58bc411c389f4afd2c07a5fb2026cdcddc8a2f21871c316e71caaeabf5",
+    "archive_transfer_json_sha256": "913c357985626b303094f13fa267d42441063bb971012407d6227bfe7b06a519",
+    "evaluation": {
+      "status": "completed",
+      "exit_code": 0,
+      "started_utc": "2026-10-27T09:31:11Z",
+      "finished_utc": "2026-10-27T09:32:28Z",
+      "elapsed_seconds": 77,
+      "rows": 13,
+      "log": "outputs/logs/prd_s42_analysis_20261027/followup_eval_noise_isotropic_rgb_drop_off.log"
+    },
+    "attack_params": {
+      "attack_method": "progressive_route_disruption",
+      "seed": 42,
+      "whitebox_model": "vit_base_patch16_224",
+      "epsilon": 0.06274509803921569,
+      "step_size": 0.006274509803921568,
+      "steps": 10,
+      "momentum_decay": 1.0,
+      "progressive_drop_enabled": false,
+      "opponent_noise_enabled": true,
+      "checkpoints": [
+        "block3",
+        "block10"
+      ],
+      "drop_ratios": [
+        0.051020408163,
+        0.051020408163
+      ],
+      "drop_counts": [],
+      "grids": [],
+      "opponent_noise_strength": 0.2,
+      "noise_structure": "isotropic_rgb",
+      "noise_direction_variances": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "input_diversity_groups": 10,
+      "input_diversity_views_per_group": 2,
+      "input_diversity_phase_shift_set": [
+        [
+          4,
+          4
+        ],
+        [
+          8,
+          8
+        ],
+        [
+          12,
+          12
+        ]
+      ],
+      "input_diversity_total_views": 20,
+      "mask_schedule_count_per_image": 100,
+      "checkpoint_mask_selection_count_per_image": 200,
+      "model_mean": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "model_std": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "num_images": 1000
+    },
+    "metrics_pct": {
+      "strict_black_box": 77.39166666666665,
+      "overall": 78.93076923076923,
+      "transformer_black_box": 80.53333333333333,
+      "cnn": 74.25
+    }
+  },
+  "references": {
+    "REF_BASE_MAIN_2X2": {
+      "inclusion": "main_2x2_context",
+      "transfer_csv_path": "results/prd_s42_fpr_run_artifacts/base_vit/transfer.csv",
+      "transfer_csv_sha256": "4dcf6b0de02f18432bbeec3a417c1cfb6ad2b60d3a2eeddf3f301bd54830c2a0",
+      "transfer_json_path": "results/prd_s42_fpr_run_artifacts/base_vit/transfer.json",
+      "transfer_json_sha256": "ddb8369e860b827634c8ce6dc7b0a13a51030783cd1b3efc09f9fd11e16e933d",
+      "attack_params_path": "results/prd_s42_fpr_run_artifacts/base_vit/attack_params.json",
+      "attack_params_sha256": "303c27369494b5831e3ee1f4a5e7d8c8da6428aa519c3a5487baa60aa1508c7c",
+      "strict_black_box_asr_pct": 61.541666666666664,
+      "overall_asr_pct": 64.5,
+      "transformer_black_box_asr_pct": 65.36666666666666,
+      "cnn_asr_pct": 57.71666666666667
+    },
+    "REF_NOISE": {
+      "inclusion": "reused_analysis_reference",
+      "transfer_csv_path": "results/prd_s42_fpr_run_artifacts/noise_vit/transfer.csv",
+      "transfer_csv_sha256": "2cb4a62e1a63c95b565231e8138d31665ad1ac88a4cca87cb741ff2b08cd7558",
+      "transfer_json_path": "results/prd_s42_fpr_run_artifacts/noise_vit/transfer.json",
+      "transfer_json_sha256": "c5a08ccdc0a51f198dc2c713684404a001b9c5acd1ffcacc59e70c784b100172",
+      "attack_params_path": "results/prd_s42_fpr_run_artifacts/noise_vit/attack_params.json",
+      "attack_params_sha256": "b88c86a15a50f7c5a0640fd2c53f27067c4670ad0ea0c386a3dd1921b310604b",
+      "strict_black_box_asr_pct": 77.78333333333333,
+      "overall_asr_pct": 79.32307692307691,
+      "transformer_black_box_asr_pct": 80.88333333333333,
+      "cnn_asr_pct": 74.68333333333334
+    },
+    "REF_DROP": {
+      "inclusion": "reused_analysis_reference",
+      "transfer_csv_path": "results/prd_s42_fpr_run_artifacts/drop_vit/transfer.csv",
+      "transfer_csv_sha256": "cae15d508fd1b38f61f94a039d848f83c1dfeda35d58ab70ee721e399d696d8e",
+      "transfer_json_path": "results/prd_s42_fpr_run_artifacts/drop_vit/transfer.json",
+      "transfer_json_sha256": "1ab3f7aeca433967b6dd22e03c2c951d7bf1e33f064548c396f6ccf8a4bbc2e7",
+      "attack_params_path": "results/prd_s42_fpr_run_artifacts/drop_vit/attack_params.json",
+      "attack_params_sha256": "de854218bd1db33d6ca0169f0df59cc7fc199eeb51a1cea3b26eae0f73bec715",
+      "strict_black_box_asr_pct": 70.65833333333332,
+      "overall_asr_pct": 72.91538461538461,
+      "transformer_black_box_asr_pct": 74.93333333333334,
+      "cnn_asr_pct": 66.38333333333334
+    },
+    "REF_FULL": {
+      "inclusion": "reused_analysis_reference",
+      "transfer_csv_path": "results/prd_s42_fpr_run_artifacts/full_vit/transfer.csv",
+      "transfer_csv_sha256": "d6305d463ba41deba636c2d38034b612c05fca7ad058884edfcc988aa064b1fe",
+      "transfer_json_path": "results/prd_s42_fpr_run_artifacts/full_vit/transfer.json",
+      "transfer_json_sha256": "23d347d79fca866c6092c368bbe78382abe1faa5ab645913bc64e4558cf5fb91",
+      "attack_params_path": "results/prd_s42_fpr_run_artifacts/full_vit/attack_params.json",
+      "attack_params_sha256": "4de803e7c49d188ab5445652fb83ab088cf4b71320dd0608d93b4294d0c6e3b8",
+      "strict_black_box_asr_pct": 87.05833333333332,
+      "overall_asr_pct": 88.02307692307691,
+      "transformer_black_box_asr_pct": 89.76666666666667,
+      "cnn_asr_pct": 84.35000000000001
+    },
+    "NOISE_ISOTROPIC_RGB": {
+      "inclusion": "pre_specified_new",
+      "transfer_csv_path": "results/prd_s42_fpr_analysis_run_artifacts/NOISE_ISOTROPIC_RGB/transfer.csv",
+      "transfer_csv_sha256": "d024631a80911d67f60f74d2420267bcdfb5e03bd2e875724c424f9ab9525da7",
+      "transfer_json_path": "results/prd_s42_fpr_analysis_run_artifacts/NOISE_ISOTROPIC_RGB/transfer.json",
+      "transfer_json_sha256": "e7c1bd3f756fef32fa057bb0af2ee23530a3f3dae808efeaf47c40038b0b8197",
+      "attack_params_path": "results/prd_s42_fpr_analysis_run_artifacts/NOISE_ISOTROPIC_RGB/attack_params.json",
+      "attack_params_sha256": "8959c8b11fa4dd2bb354c3f41437321df04b95548b487921f02153a570608a2d",
+      "strict_black_box_asr_pct": 86.93333333333334,
+      "overall_asr_pct": 87.9,
+      "transformer_black_box_asr_pct": 89.68333333333334,
+      "cnn_asr_pct": 84.18333333333334
+    }
+  },
+  "comparisons": [
+    {
+      "comparison_id": "ISO_DROPOFF_vs_REF_NOISE",
+      "variant": "NOISE_ISOTROPIC_RGB_DROP_OFF",
+      "reference": "REF_NOISE",
+      "overall_delta_pp": -0.3923076923076918,
+      "strict_black_box_delta_pp": -0.39166666666666794,
+      "transformer_black_box_delta_pp": -0.34999999999999476,
+      "cnn_delta_pp": -0.43333333333333,
+      "note": "Noise-structure effect without progressive drop: isotropic minus opponent."
+    },
+    {
+      "comparison_id": "ISO_DROPON_vs_REF_FULL",
+      "variant": "NOISE_ISOTROPIC_RGB",
+      "reference": "REF_FULL",
+      "overall_delta_pp": -0.12307692307691465,
+      "strict_black_box_delta_pp": -0.12499999999998623,
+      "transformer_black_box_delta_pp": -0.08333333333333526,
+      "cnn_delta_pp": -0.16666666666667052,
+      "note": "Noise-structure effect with progressive drop: isotropic minus opponent (repeats the pre-specified comparison)."
+    },
+    {
+      "comparison_id": "REF_NOISE_vs_REF_BASE",
+      "variant": "REF_NOISE",
+      "reference": "REF_BASE_MAIN_2X2",
+      "overall_delta_pp": 14.823076923076917,
+      "strict_black_box_delta_pp": 16.241666666666667,
+      "transformer_black_box_delta_pp": 15.516666666666667,
+      "cnn_delta_pp": 16.96666666666666,
+      "note": "Opponent noise effect without progressive drop."
+    },
+    {
+      "comparison_id": "ISO_DROPOFF_vs_REF_BASE",
+      "variant": "NOISE_ISOTROPIC_RGB_DROP_OFF",
+      "reference": "REF_BASE_MAIN_2X2",
+      "overall_delta_pp": 14.430769230769226,
+      "strict_black_box_delta_pp": 15.849999999999998,
+      "transformer_black_box_delta_pp": 15.166666666666673,
+      "cnn_delta_pp": 16.53333333333333,
+      "note": "Isotropic RGB noise effect without progressive drop."
+    },
+    {
+      "comparison_id": "REF_FULL_vs_REF_DROP",
+      "variant": "REF_FULL",
+      "reference": "REF_DROP",
+      "overall_delta_pp": 15.10769230769231,
+      "strict_black_box_delta_pp": 16.400000000000002,
+      "transformer_black_box_delta_pp": 14.833333333333332,
+      "cnn_delta_pp": 17.966666666666665,
+      "note": "Opponent noise effect with progressive drop."
+    },
+    {
+      "comparison_id": "ISO_DROPON_vs_REF_DROP",
+      "variant": "NOISE_ISOTROPIC_RGB",
+      "reference": "REF_DROP",
+      "overall_delta_pp": 14.984615384615395,
+      "strict_black_box_delta_pp": 16.275000000000016,
+      "transformer_black_box_delta_pp": 14.749999999999996,
+      "cnn_delta_pp": 17.799999999999994,
+      "note": "Isotropic RGB noise effect with progressive drop."
+    },
+    {
+      "comparison_id": "REF_FULL_vs_REF_NOISE",
+      "variant": "REF_FULL",
+      "reference": "REF_NOISE",
+      "overall_delta_pp": 8.699999999999996,
+      "strict_black_box_delta_pp": 9.275,
+      "transformer_black_box_delta_pp": 8.883333333333344,
+      "cnn_delta_pp": 9.666666666666668,
+      "note": "Progressive drop effect under opponent noise."
+    },
+    {
+      "comparison_id": "ISO_DROPON_vs_ISO_DROPOFF",
+      "variant": "NOISE_ISOTROPIC_RGB",
+      "reference": "NOISE_ISOTROPIC_RGB_DROP_OFF",
+      "overall_delta_pp": 8.969230769230773,
+      "strict_black_box_delta_pp": 9.541666666666682,
+      "transformer_black_box_delta_pp": 9.150000000000002,
+      "cnn_delta_pp": 9.933333333333326,
+      "note": "Progressive drop effect under isotropic RGB noise."
+    }
+  ],
+  "artifact_layout": {
+    "summary": "results/prd_s42_1000_fpr_analysis_noise_isotropic_dropoff_summary.csv",
+    "differences": "results/prd_s42_1000_fpr_analysis_noise_isotropic_dropoff_differences.csv",
+    "provenance": "results/prd_s42_1000_fpr_analysis_noise_isotropic_dropoff_provenance.json",
+    "report": "results/prd_s42_1000_fpr_analysis_noise_isotropic_dropoff_addendum.md",
+    "run_artifacts": "results/prd_s42_fpr_analysis_run_artifacts/NOISE_ISOTROPIC_RGB_DROP_OFF/"
+  },
+  "completion": {
+    "new_completed": [
+      "NOISE_ISOTROPIC_RGB_DROP_OFF"
+    ],
+    "new_failed": [],
+    "not_run": [],
+    "new_configurations": 1,
+    "target_evaluations": 13,
+    "images_per_run": 1000
+  },
+  "post_hoc_note": "This unit is a post-hoc diagnostic requested after the main analysis. It is not included in the pre-specified 13-configuration matrix or the 16-configuration summary/differences/provenance files, which remain unchanged."
+}

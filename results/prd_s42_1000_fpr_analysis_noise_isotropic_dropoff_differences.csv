@@ -1,0 +1,9 @@
+comparison_id,variant,reference,overall_delta_pp,strict_black_box_delta_pp,transformer_black_box_delta_pp,cnn_delta_pp,note
+ISO_DROPOFF_vs_REF_NOISE,NOISE_ISOTROPIC_RGB_DROP_OFF,REF_NOISE,-0.392308,-0.391667,-0.350000,-0.433333,Noise-structure effect without progressive drop: isotropic minus opponent.
+ISO_DROPON_vs_REF_FULL,NOISE_ISOTROPIC_RGB,REF_FULL,-0.123077,-0.125000,-0.083333,-0.166667,Noise-structure effect with progressive drop: isotropic minus opponent (repeats the pre-specified comparison).
+REF_NOISE_vs_REF_BASE,REF_NOISE,REF_BASE_MAIN_2X2,14.823077,16.241667,15.516667,16.966667,Opponent noise effect without progressive drop.
+ISO_DROPOFF_vs_REF_BASE,NOISE_ISOTROPIC_RGB_DROP_OFF,REF_BASE_MAIN_2X2,14.430769,15.850000,15.166667,16.533333,Isotropic RGB noise effect without progressive drop.
+REF_FULL_vs_REF_DROP,REF_FULL,REF_DROP,15.107692,16.400000,14.833333,17.966667,Opponent noise effect with progressive drop.
+ISO_DROPON_vs_REF_DROP,NOISE_ISOTROPIC_RGB,REF_DROP,14.984615,16.275000,14.750000,17.800000,Isotropic RGB noise effect with progressive drop.
+REF_FULL_vs_REF_NOISE,REF_FULL,REF_NOISE,8.700000,9.275000,8.883333,9.666667,Progressive drop effect under opponent noise.
+ISO_DROPON_vs_ISO_DROPOFF,NOISE_ISOTROPIC_RGB,NOISE_ISOTROPIC_RGB_DROP_OFF,8.969231,9.541667,9.150000,9.933333,Progressive drop effect under isotropic RGB noise.
