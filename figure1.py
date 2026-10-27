@@ -23,7 +23,7 @@ OUTPUT_DIR = ROOT / "outputs" / "figure1"
 SAMPLE_COUNT = 50
 LAYER_COUNT = 12
 GRID_SIZE = (14, 14)
-COLOR_LIMITS = (-1.0, 1.0)
+COLOR_LIMITS = (0.0, 1.0)
 COLOR_ANCHORS = ((33, 102, 172), (247, 247, 247), (178, 24, 43))
 
 
@@ -82,7 +82,12 @@ def render_heatmap_overlay(
     if image.width % cols or image.height % rows:
         raise ValueError("image dimensions must be divisible by the patch grid")
 
-    values = scores.detach().float().cpu().clamp(*COLOR_LIMITS)
+    values = scores.detach().float().cpu()
+    minimum, maximum = values.min(), values.max()
+    if maximum > minimum:
+        values = ((values - minimum) / (maximum - minimum)).clamp(*COLOR_LIMITS)
+    else:
+        values = torch.full_like(values, 0.5)
     positions = (values - COLOR_LIMITS[0]) / (COLOR_LIMITS[1] - COLOR_LIMITS[0]) * 2
     lower = positions.floor().long().clamp(max=1)
     fraction = (positions - lower).unsqueeze(1)
@@ -142,6 +147,9 @@ def save_sample_elements(
         "indices": "layer is 1-based; patch_index, row, col are 0-based; patch_index = row * grid_width + col",
         "overlay": {
             "alpha": alpha,
+            "normalization": "per-image, per-layer min-max over all local patch scores; CSV retains raw cosine similarities",
+            "constant_score_value": 0.5,
+            "colorbar_label": "Normalized patch score",
             "vmin": COLOR_LIMITS[0],
             "vmax": COLOR_LIMITS[1],
             "color_anchors_low_mid_high_rgb": [list(color) for color in COLOR_ANCHORS],

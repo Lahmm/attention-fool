@@ -112,15 +112,21 @@ class Figure1Tests(unittest.TestCase):
         self.assertFalse(adapter.training)
         self.assertFalse(torch.equal(observed.scores[:, 0], observed.scores[:, -1]))
 
-    def test_overlay_preserves_discrete_grid_and_shared_color_scale(self):
+    def test_overlay_preserves_discrete_grid_and_uses_layerwise_min_max(self):
         image = Image.new("RGB", (32, 32), (80, 90, 100))
-        overlay = render_heatmap_overlay(image, torch.tensor([-1.0, 0.0, 1.0, 0.5]), (2, 2), alpha=1)
+        scores = torch.tensor([-1.0, 0.0, 1.0, 0.5])
+        overlay = render_heatmap_overlay(image, scores, (2, 2), alpha=1)
         self.assertEqual(overlay.size, image.size)
         self.assertEqual(overlay.getpixel((8, 8)), COLOR_ANCHORS[0])
         self.assertEqual(overlay.getpixel((24, 8)), COLOR_ANCHORS[1])
         self.assertEqual(overlay.getpixel((8, 24)), COLOR_ANCHORS[2])
         self.assertEqual(overlay.getpixel((1, 1)), overlay.getpixel((15, 15)))
         self.assertNotEqual(overlay.getpixel((16, 8)), overlay.getpixel((24, 8)))
+        narrow_range = render_heatmap_overlay(image, scores * 0.125 + 0.375, (2, 2), alpha=1)
+        self.assertEqual(narrow_range.tobytes(), overlay.tobytes())
+        constant = render_heatmap_overlay(image, torch.full((4,), 0.3), (2, 2), alpha=1)
+        for position in ((8, 8), (24, 8), (8, 24), (24, 24)):
+            self.assertEqual(constant.getpixel(position), COLOR_ANCHORS[1])
 
     def test_export_writes_exact_first_50_sample_folders_and_complete_csv(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -162,7 +168,11 @@ class Figure1Tests(unittest.TestCase):
             self.assertEqual(metadata["image_name"], "image_000.png")
             self.assertEqual(metadata["global_representation"],
                              "fixed final encoder CLS token after model.norm, shared by all observation layers")
-            self.assertEqual((metadata["overlay"]["vmin"], metadata["overlay"]["vmax"]), (-1, 1))
+            self.assertEqual((metadata["overlay"]["vmin"], metadata["overlay"]["vmax"]), (0, 1))
+            self.assertEqual(metadata["overlay"]["normalization"],
+                             "per-image, per-layer min-max over all local patch scores; CSV retains raw cosine similarities")
+            self.assertEqual(metadata["overlay"]["constant_score_value"], 0.5)
+            self.assertEqual(metadata["overlay"]["colorbar_label"], "Normalized patch score")
             with Image.open(sample / "input.png") as saved:
                 self.assertEqual(saved.getpixel((10, 10)), (0, 60, 140))
 
