@@ -8,7 +8,7 @@ from importlib.metadata import PackageNotFoundError, version
 import json
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset
@@ -70,20 +70,17 @@ def extract_layerwise_scores(adapter, normalized_inputs: torch.Tensor) -> Layerw
     return LayerwiseObservation(torch.stack(scores, dim=1), logits, initial.grid_size)
 
 
-def render_heatmap_overlay(
-    image: Image.Image,
+def render_heatmap(
     scores: torch.Tensor,
     grid_size: tuple[int, int],
-    *,
-    alpha: float = 0.45,
+    image_size: tuple[int, int],
 ) -> Image.Image:
-    if not 0 < alpha <= 1:
-        raise ValueError("overlay alpha must satisfy 0 < alpha <= 1")
     rows, cols = grid_size
-    if scores.shape != (rows * cols,) or not torch.isfinite(scores).all():
+    if rows <= 0 or cols <= 0 or scores.shape != (rows * cols,) or not torch.isfinite(scores).all():
         raise ValueError("one finite score is required for each grid location")
-    if image.width % cols or image.height % rows:
-        raise ValueError("image dimensions must be divisible by the patch grid")
+    width, height = image_size
+    if width <= 0 or height <= 0:
+        raise ValueError("heatmap dimensions must be positive")
 
     values = scores.detach().float().cpu()
     minimum, maximum = values.min(), values.max()
@@ -91,25 +88,16 @@ def render_heatmap_overlay(
         values = ((values - minimum) / (maximum - minimum)).clamp(*COLOR_LIMITS)
     else:
         values = torch.full_like(values, 0.5)
+    values = F.interpolate(
+        values.reshape(1, 1, rows, cols), size=(height, width),
+        mode="bilinear", align_corners=False,
+    ).reshape(-1).clamp(*COLOR_LIMITS)
     positions = (values - COLOR_LIMITS[0]) / (COLOR_LIMITS[1] - COLOR_LIMITS[0]) * (len(COLOR_ANCHORS) - 1)
     lower = positions.floor().long().clamp(max=len(COLOR_ANCHORS) - 2)
     fraction = (positions - lower).unsqueeze(1)
     palette = torch.tensor(COLOR_ANCHORS, dtype=torch.float32)
     colors = ((1 - fraction) * palette[lower] + fraction * palette[lower + 1]).round().byte()
-    heatmap = Image.new("RGB", (cols, rows))
-    heatmap.putdata([tuple(color) for color in colors.tolist()])
-    nearest = getattr(Image, "Resampling", Image).NEAREST
-    heatmap = heatmap.resize(image.size, resample=nearest)
-    overlay = Image.blend(image.convert("RGB"), heatmap, alpha)
-    draw = ImageDraw.Draw(overlay, "RGBA")
-    for col in range(1, cols):
-        x = col * image.width // cols
-        draw.line((x, 0, x, image.height - 1), fill=(30, 30, 30, 120))
-    for row in range(1, rows):
-        y = row * image.height // rows
-        draw.line((0, y, image.width - 1, y), fill=(30, 30, 30, 120))
-    draw.rectangle((0, 0, image.width - 1, image.height - 1), outline=(30, 30, 30, 120))
-    return overlay
+    return Image.frombytes("RGB", image_size, bytes(colors.reshape(-1).tolist()))
 
 
 def save_sample_elements(
@@ -118,16 +106,14 @@ def save_sample_elements(
     scores: torch.Tensor,
     grid_size: tuple[int, int],
     metadata: dict,
-    *,
-    alpha: float = 0.45,
 ) -> None:
     if scores.shape != (LAYER_COUNT, grid_size[0] * grid_size[1]):
         raise ValueError("expected all 12 layers and all local patch scores")
     directory.mkdir(parents=True, exist_ok=True)
     image.convert("RGB").save(directory / "input.png")
     for layer, layer_scores in enumerate(scores, start=1):
-        overlay = render_heatmap_overlay(image, layer_scores, grid_size, alpha=alpha)
-        overlay.save(directory / f"overlay_block{layer:02d}.png")
+        heatmap = render_heatmap(layer_scores, grid_size, image.size)
+        heatmap.save(directory / f"heatmap_block{layer:02d}.png")
 
     with (directory / "patch_scores.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
@@ -148,8 +134,7 @@ def save_sample_elements(
         "score": "cosine similarity of each block's local token and the final encoder CLS",
         "input": "clean image, no attack, token drop, feature noise, or translation",
         "indices": "layer is 1-based; patch_index, row, col are 0-based; patch_index = row * grid_width + col",
-        "overlay": {
-            "alpha": alpha,
+        "heatmap": {
             "normalization": "per-image, per-layer min-max over all local patch scores; CSV retains raw cosine similarities",
             "constant_score_value": 0.5,
             "colorbar_label": "Normalized patch score",
@@ -159,8 +144,7 @@ def save_sample_elements(
             "color_anchors_rgb": [list(color) for color in COLOR_ANCHORS],
             "color_anchor_positions": [index / (len(COLOR_ANCHORS) - 1) for index in range(len(COLOR_ANCHORS))],
             "color_interpolation": "linear RGB between adjacent anchors",
-            "resampling": "nearest",
-            "grid_line_width": 1,
+            "resampling": "bilinear on normalized scores before color mapping; align_corners=False",
         },
     }
     (directory / "metadata.json").write_text(
@@ -181,10 +165,9 @@ def export_figure1_elements(
     output_dir: Path,
     *,
     batch_size: int = 4,
-    alpha: float = 0.45,
 ) -> None:
-    if batch_size <= 0 or not 0 < alpha <= 1:
-        raise ValueError("batch size must be positive and overlay alpha must be in (0,1]")
+    if batch_size <= 0:
+        raise ValueError("batch size must be positive")
     if len(dataset) < SAMPLE_COUNT:
         raise ValueError(f"Figure 1 requires at least {SAMPLE_COUNT} annotated images")
     selected = dataset.samples[:SAMPLE_COUNT]
@@ -251,7 +234,7 @@ def export_figure1_elements(
                 }
                 save_sample_elements(
                     output_dir / folder_names[sample_index], image,
-                    observation.scores[offset], observation.grid_size, metadata, alpha=alpha,
+                    observation.scores[offset], observation.grid_size, metadata,
                 )
             print(f"Figure 1 elements: {int(indices[-1]) + 1}/{SAMPLE_COUNT}", flush=True)
 
@@ -261,14 +244,13 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--image-dir", default=str(ROOT / "data" / "clean_resized_images"))
     parser.add_argument("--annotations-path", default=str(ROOT / "data" / "image_name_to_class_id_and_name.json"))
     parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--overlay-alpha", type=float, default=0.45)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto")
     return parser.parse_args(argv)
 
 
 def main(args: argparse.Namespace) -> None:
-    if args.batch_size <= 0 or not 0 < args.overlay_alpha <= 1:
-        raise ValueError("batch size must be positive and overlay alpha must be in (0,1]")
+    if args.batch_size <= 0:
+        raise ValueError("batch size must be positive")
     torch.manual_seed(SEED)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(SEED)
@@ -284,9 +266,9 @@ def main(args: argparse.Namespace) -> None:
             "pretrained weights in data/huggingface; model loading uses the repository's offline cache."
         ) from exc
     export_figure1_elements(
-        adapter, dataset, OUTPUT_DIR, batch_size=args.batch_size, alpha=args.overlay_alpha,
+        adapter, dataset, OUTPUT_DIR, batch_size=args.batch_size,
     )
-    print(f"Saved 50 sample folders with 12 overlays and all patch scores each to {OUTPUT_DIR}")
+    print(f"Saved 50 sample folders with 12 heatmaps and all patch scores each to {OUTPUT_DIR}")
 
 
 if __name__ == "__main__":
