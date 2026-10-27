@@ -16,7 +16,7 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 from tqdm import tqdm
 
 from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, build_whitebox_model
-from progressive_attack import ProgressiveRouteDisruptionAttacker
+from progressive_attack import NOISE_DIRECTION_VARIANCES, ProgressiveRouteDisruptionAttacker
 from utils import DEVICE, SEED, load_data, save_adversarial_images
 
 
@@ -46,6 +46,40 @@ def parse_float_list(value: str) -> tuple[float, ...]:
     if not values:
         raise argparse.ArgumentTypeError("float list cannot be empty")
     return values
+
+
+def parse_checkpoint_list(value: str) -> tuple[str, ...]:
+    items = tuple(item.strip() for item in value.split(",") if item.strip())
+    if not items:
+        raise argparse.ArgumentTypeError("checkpoint list cannot be empty")
+    indices = []
+    for item in items:
+        suffix = item.removeprefix("block")
+        if not item.startswith("block") or not suffix.isdigit():
+            raise argparse.ArgumentTypeError("checkpoints must use the form block<k>")
+        indices.append(int(suffix))
+    if any(index < 1 for index in indices):
+        raise argparse.ArgumentTypeError("checkpoints must use positive block indices")
+    if len(set(indices)) != len(indices):
+        raise argparse.ArgumentTypeError("checkpoints must not repeat")
+    if any(left >= right for left, right in zip(indices, indices[1:])):
+        raise argparse.ArgumentTypeError("checkpoints must be strictly increasing")
+    return tuple(f"block{index}" for index in indices)
+
+
+def apply_vit_analysis_checkpoints(model, checkpoints, drop_ratios) -> None:
+    if checkpoints is None:
+        return
+    if model.model_name != "vit_base_patch16_224":
+        raise ValueError("--vit-analysis-checkpoints is restricted to vit_base_patch16_224.")
+    indices = tuple(int(item.removeprefix("block")) for item in checkpoints)
+    block_count = len(model.model.blocks)
+    if any(index < 1 or index > block_count for index in indices):
+        raise ValueError(f"analysis checkpoints must lie in block1..block{block_count}.")
+    ratios = model.drop_ratios if drop_ratios is None else drop_ratios
+    if len(ratios) != len(checkpoints):
+        raise ValueError("analysis checkpoints and drop ratios must have the same length.")
+    model.checkpoints = tuple(checkpoints)
 
 
 def validate_output_dir(output_dir: str) -> Path:
@@ -136,6 +170,18 @@ def parse_args() -> argparse.Namespace:
         help="One ratio per checkpoint; omitted values use the source adapter defaults.",
     )
     parser.add_argument(
+        "--vit-analysis-checkpoints",
+        type=parse_checkpoint_list,
+        default=None,
+        help="ViT-B analysis-only checkpoint override, e.g. block5,block8.",
+    )
+    parser.add_argument(
+        "--noise-structure",
+        choices=tuple(NOISE_DIRECTION_VARIANCES),
+        default="opponent",
+        help="RGB noise direction variances: opponent (default) or isotropic_rgb.",
+    )
+    parser.add_argument(
         "--opponent-noise-strength",
         type=float,
         default=None,
@@ -165,11 +211,15 @@ def main(args: argparse.Namespace) -> None:
         prefetch_factor=args.prefetch_factor,
     )
     model = build_whitebox_model(model_name=args.whitebox_model)
+    apply_vit_analysis_checkpoints(
+        model, args.vit_analysis_checkpoints, args.drop_ratios
+    )
     attacker = ProgressiveRouteDisruptionAttacker(
         model=model,
         progressive_drop=not args.no_progressive_drop,
         drop_ratios=args.drop_ratios,
         opponent_noise_strength=args.opponent_noise_strength,
+        noise_structure=args.noise_structure,
         epsilon=args.epsilon,
         step_size=args.step_size,
         steps=args.steps,

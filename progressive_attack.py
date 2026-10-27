@@ -9,6 +9,12 @@ import torch.nn.functional as F
 from utils import DEVICE, SEED, IMAGENET_MEAN, IMAGENET_STD
 
 
+NOISE_DIRECTION_VARIANCES = {
+    "opponent": (0.5, 1.25, 1.25),
+    "isotropic_rgb": (1.0, 1.0, 1.0),
+}
+
+
 @dataclass(frozen=True)
 class ProgressiveMaskSelection:
     checkpoint: str
@@ -69,6 +75,7 @@ class ProgressiveRouteDisruptionAttacker:
         progressive_drop: bool = True,
         drop_ratios: tuple[float, ...] | None = None,
         opponent_noise_strength: float | None = None,
+        noise_structure: str = "opponent",
         epsilon: float = 16.0 / 255.0,
         step_size: float | None = None,
         steps: int = 10,
@@ -91,6 +98,8 @@ class ProgressiveRouteDisruptionAttacker:
             raise ValueError("actual progressive views must be <= 20.")
         if input_diversity_views_per_group == 2 and not input_diversity_phase_shift_set:
             raise ValueError("phase shift set cannot be empty.")
+        if noise_structure not in NOISE_DIRECTION_VARIANCES:
+            raise ValueError(f"unsupported noise structure: {noise_structure!r}.")
         if opponent_noise_strength is None:
             opponent_noise_strength = model.opponent_noise_strength
         if opponent_noise_strength < 0:
@@ -108,6 +117,8 @@ class ProgressiveRouteDisruptionAttacker:
         self.progressive_checkpoints = model.checkpoints
         self.progressive_drop_ratios = tuple(float(value) for value in ratios)
         self.opponent_noise_strength = float(opponent_noise_strength)
+        self.noise_structure = noise_structure
+        self.noise_direction_variances = NOISE_DIRECTION_VARIANCES[noise_structure]
         self.epsilon = float(epsilon)
         self.steps = int(steps)
         self.step_size = float(step_size) if step_size is not None else self.epsilon / self.steps
@@ -252,9 +263,10 @@ class ProgressiveRouteDisruptionAttacker:
         coefficients = torch.randn(
             batch, count, 3, kernel_h, kernel_w, device=local.device, dtype=local.dtype
         )
-        luma = 0.5**0.5 * coefficients[:, :, 0:1]
-        red_green = 1.25**0.5 * coefficients[:, :, 1:2]
-        yellow_blue = 1.25**0.5 * coefficients[:, :, 2:3]
+        luma_variance, red_green_variance, yellow_blue_variance = self.noise_direction_variances
+        luma = luma_variance**0.5 * coefficients[:, :, 0:1]
+        red_green = red_green_variance**0.5 * coefficients[:, :, 1:2]
+        yellow_blue = yellow_blue_variance**0.5 * coefficients[:, :, 2:3]
         pixel_noise = torch.cat(
             (
                 3**-0.5 * luma + 2**-0.5 * red_green + 6**-0.5 * yellow_blue,
@@ -381,6 +393,10 @@ class ProgressiveRouteDisruptionAttacker:
             "drop_counts": list(self._progressive_mask_counts),
             "grids": [list(grid) for grid in self._progressive_mask_grids],
             "opponent_noise_strength": self.opponent_noise_strength,
+            "noise_structure": self.noise_structure if self.opponent_noise_strength > 0 else "none",
+            "noise_direction_variances": (
+                list(self.noise_direction_variances) if self.opponent_noise_strength > 0 else []
+            ),
             "input_diversity_groups": self.input_diversity_groups,
             "input_diversity_views_per_group": self.input_diversity_views_per_group,
             "input_diversity_phase_shift_set": (

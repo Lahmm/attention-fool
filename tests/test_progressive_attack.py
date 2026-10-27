@@ -187,6 +187,81 @@ class ProgressiveAttackTests(unittest.TestCase):
         repeated = attacker.attack_batch(images, labels)
         torch.testing.assert_close(first, repeated, rtol=0, atol=0)
 
+    def test_analysis_checkpoint_override_controls_traversal_depth(self):
+        model = make_model()
+        model.checkpoints = ('block1', 'block4')
+        attacker = ProgressiveRouteDisruptionAttacker(
+            model, steps=1, input_diversity_groups=1,
+            drop_ratios=(10 / 196, 10 / 196), device=torch.device('cpu'),
+        )
+        schedule = attacker._build_mask_schedule(self.pixels)
+        self.assertEqual(schedule.checkpoints, ('block1', 'block4'))
+        self.assertEqual(schedule.counts, (10, 10))
+
+    def test_analysis_drop_budgets_record_actual_integer_counts(self):
+        settings = (
+            (('block3', 'block10'), (5 / 196, 5 / 196), (5, 5)),
+            (('block3', 'block10'), (20 / 196, 20 / 196), (20, 20)),
+            (('block3', 'block6', 'block10'), (7 / 196, 6 / 196, 7 / 196), (7, 6, 7)),
+        )
+        for checkpoints, ratios, counts in settings:
+            with self.subTest(checkpoints=checkpoints, counts=counts):
+                model = make_model()
+                model.checkpoints = checkpoints
+                attacker = ProgressiveRouteDisruptionAttacker(
+                    model, steps=1, input_diversity_groups=1,
+                    drop_ratios=ratios, device=torch.device('cpu'),
+                )
+                schedule = attacker._build_mask_schedule(self.pixels)
+                self.assertEqual(schedule.checkpoints, checkpoints)
+                self.assertEqual(schedule.counts, counts)
+                self.assertEqual(sum(schedule.counts), sum(counts))
+
+    def test_zero_phase_shift_preserves_pixels_and_masks(self):
+        attacker = make_attacker(input_diversity_phase_shift_set=((0, 0),))
+        schedule = attacker._build_mask_schedule(self.pixels)
+        shifted = attacker._phase_mask_schedule(
+            schedule, [(0, 0)], height=self.pixels.size(-2), width=self.pixels.size(-1)
+        )
+        for original, transformed in zip(schedule.masks, shifted.masks):
+            self.assertTrue(torch.equal(original, transformed))
+        shifted_pixels = attacker._apply_samplewise_phase_shifts(self.pixels, [(0, 0)])
+        self.assertTrue(torch.equal(shifted_pixels, self.pixels))
+
+    def test_zero_shift_pair_keeps_two_independent_noisy_views_per_group(self):
+        attacker = make_attacker(
+            input_diversity_groups=2, input_diversity_phase_shift_set=((0, 0),)
+        )
+        pixels = self.pixels.clone().requires_grad_(True)
+        with patch.object(attacker, '_build_mask_schedule',
+                          wraps=attacker._build_mask_schedule) as schedules, \
+             patch.object(attacker, '_strict_opponent_feature_noise',
+                          wraps=attacker._strict_opponent_feature_noise) as noise:
+            gradient = attacker._attack_gradients(pixels, self.labels)
+        self.assertEqual(schedules.call_count, 2)
+        self.assertEqual(noise.call_count, 4)
+        self.assertEqual(attacker._actual_forward_view_count, 4)
+        self.assertTrue(torch.isfinite(gradient).all())
+
+    def test_isotropic_rgb_noise_changes_directions_but_keeps_rms(self):
+        opponent = make_attacker()
+        isotropic = make_attacker(noise_structure='isotropic_rgb')
+        self.assertEqual(opponent.noise_direction_variances, (0.5, 1.25, 1.25))
+        self.assertEqual(isotropic.noise_direction_variances, (1.0, 1.0, 1.0))
+        state = opponent.model.begin_progressive_forward(self.pixels.repeat(2, 1, 1, 1))
+        torch.manual_seed(SEED)
+        opponent_noise = opponent._strict_opponent_feature_noise(state)
+        torch.manual_seed(SEED)
+        isotropic_noise = isotropic._strict_opponent_feature_noise(state)
+        self.assertFalse(torch.equal(opponent_noise, isotropic_noise))
+        expected_rms = 0.2 * state.local_tokens.detach().square().mean((1, 2)).sqrt()
+        for noise in (opponent_noise, isotropic_noise):
+            actual_rms = noise.square().mean((1, 2)).sqrt()
+            torch.testing.assert_close(actual_rms, expected_rms)
+        params = isotropic.parameters()
+        self.assertEqual(params['noise_structure'], 'isotropic_rgb')
+        self.assertEqual(params['noise_direction_variances'], [1.0, 1.0, 1.0])
+
     def test_disabling_progressive_drop_skips_schedules_and_keeps_optimization(self):
         attacker = make_attacker(
             progressive_drop=False, opponent_noise_strength=0.0,
