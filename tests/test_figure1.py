@@ -117,17 +117,17 @@ class Figure1Tests(unittest.TestCase):
         heatmap = render_heatmap(scores, (2, 2), (32, 32))
         self.assertEqual(heatmap.size, (32, 32))
         self.assertEqual(heatmap.getpixel((0, 0)), COLOR_ANCHORS[0])
-        self.assertEqual(heatmap.getpixel((31, 0)), (130, 75, 140))
+        self.assertEqual(heatmap.getpixel((31, 0)), COLOR_ANCHORS[3])
         self.assertEqual(heatmap.getpixel((0, 31)), COLOR_ANCHORS[-1])
-        self.assertEqual(heatmap.getpixel((31, 31)), (172, 65, 105))
+        self.assertEqual(heatmap.getpixel((31, 31)), (255, 194, 30))
         transition = [heatmap.getpixel((x, 0)) for x in range(8, 24)]
         self.assertEqual(len(set(transition)), 16)
-        self.assertTrue(all(left[0] < right[0] for left, right in zip(transition, transition[1:])))
-        self.assertTrue(all(left[2] > right[2] for left, right in zip(transition, transition[1:])))
+        self.assertTrue(all(max(abs(a - b) for a, b in zip(left, right)) <= 32
+                            for left, right in zip(transition, transition[1:])))
         narrow_range = render_heatmap(scores * 0.125 + 0.375, (2, 2), (32, 32))
         self.assertEqual(narrow_range.tobytes(), heatmap.tobytes())
         constant = render_heatmap(torch.full((4,), 0.3), (2, 2), (32, 32))
-        self.assertEqual(constant.getextrema(), ((130, 130), (75, 75), (140, 140)))
+        self.assertEqual(constant.getextrema(), ((76, 76), (175, 175), (80, 80)))
 
     def test_export_writes_exact_first_50_sample_folders_and_complete_csv(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -184,8 +184,9 @@ class Figure1Tests(unittest.TestCase):
             self.assertEqual(metadata["heatmap"]["constant_score_value"], 0.5)
             self.assertEqual(metadata["heatmap"]["colorbar_label"], "Normalized patch score")
             self.assertEqual(metadata["heatmap"]["color_anchors_rgb"], [list(color) for color in COLOR_ANCHORS])
-            self.assertEqual(metadata["heatmap"]["color_anchor_positions"], [0.0, 1.0])
-            self.assertEqual(metadata["heatmap"]["colormap"], "continuous blue-to-red RGB gradient")
+            self.assertEqual(metadata["heatmap"]["color_anchor_positions"], [index / 6 for index in range(7)])
+            self.assertEqual(metadata["heatmap"]["colormap"],
+                             "continuous blue-cyan-green-yellow-orange-red rainbow gradient")
             self.assertEqual(metadata["heatmap"]["color_interpolation"], "linear RGB between adjacent anchors")
             self.assertEqual(metadata["heatmap"]["resampling"],
                              "bilinear on normalized scores before color mapping; align_corners=False")

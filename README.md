@@ -94,7 +94,7 @@ python figure1.py
 所有文件写入 `outputs/figure1/<图像名称去除扩展名>/`，共 50 个样本子目录。每个目录包含：
 
 - `input.png`：与模型输入空间对齐的 RGB 原图。
-- `heatmap_block01.png` 至 `heatmap_block12.png`：平滑 patch-score 热力图与原图的叠加图，不绘制网格线或边框。默认使用 45% 热图与 55% 原图混合。每张图像的每层独立对 196 个原始余弦分数做 min–max 归一化，再将 14×14 的归一化分数按双线性插值平滑放大至 224×224（`align_corners=False`），最后映射到连续蓝→紫→红渐变。蓝色 `RGB(45,95,210)` 和红色 `RGB(215,55,70)` 两个端点之间按 RGB 线性插值。配图色条应标注为 `Normalized patch score`，左端 0 为蓝色，右端 1 为红色。颜色表示各层内部的相对高低；整层分数相同时统一映射到 0.5（紫色）。平滑插值仅用于显示。
+- `heatmap_block01.png` 至 `heatmap_block12.png`：平滑 patch-score 热力图与原图的叠加图，不绘制网格线或边框。默认使用 45% 热图与 55% 原图混合。每张图像的每层独立对 196 个原始余弦分数做 min–max 归一化，再将 14×14 的归一化分数按双线性插值平滑放大至 224×224（`align_corners=False`），最后映射到连续蓝→青→绿→黄→橙→红的彩虹渐变，相邻颜色控制点之间按 RGB 线性插值。配图色条应标注为 `Normalized patch score`，左端 0 为蓝色，右端 1 为红色。颜色表示各层内部的相对高低；整层分数相同时统一映射到 0.5（绿色）。平滑插值仅用于显示。
 - `patch_scores.csv`：全部 2352 个真实分数，列为 `layer,patch_index,row,col,score`。层编号为 1–12，patch 索引和行列坐标从 0 开始，`patch_index = row * 14 + col`。自行选定 `(row,col)` 后，按 `layer` 排序即可得到 12 个曲线数据点。
 - `metadata.json`：样本顺序、输入图像 SHA-256、模型及预处理配置、观察位置、坐标约定和热图色标。
 
