@@ -24,7 +24,15 @@ SAMPLE_COUNT = 50
 LAYER_COUNT = 12
 GRID_SIZE = (14, 14)
 COLOR_LIMITS = (0.0, 1.0)
-COLOR_ANCHORS = ((33, 102, 172), (247, 247, 247), (178, 24, 43))
+COLOR_ANCHORS = (
+    (49, 54, 149),
+    (0, 114, 189),
+    (0, 188, 212),
+    (76, 175, 80),
+    (255, 235, 59),
+    (255, 152, 0),
+    (213, 0, 0),
+)
 
 
 @dataclass
@@ -88,8 +96,8 @@ def render_heatmap_overlay(
         values = ((values - minimum) / (maximum - minimum)).clamp(*COLOR_LIMITS)
     else:
         values = torch.full_like(values, 0.5)
-    positions = (values - COLOR_LIMITS[0]) / (COLOR_LIMITS[1] - COLOR_LIMITS[0]) * 2
-    lower = positions.floor().long().clamp(max=1)
+    positions = (values - COLOR_LIMITS[0]) / (COLOR_LIMITS[1] - COLOR_LIMITS[0]) * (len(COLOR_ANCHORS) - 1)
+    lower = positions.floor().long().clamp(max=len(COLOR_ANCHORS) - 2)
     fraction = (positions - lower).unsqueeze(1)
     palette = torch.tensor(COLOR_ANCHORS, dtype=torch.float32)
     colors = ((1 - fraction) * palette[lower] + fraction * palette[lower + 1]).round().byte()
@@ -152,7 +160,10 @@ def save_sample_elements(
             "colorbar_label": "Normalized patch score",
             "vmin": COLOR_LIMITS[0],
             "vmax": COLOR_LIMITS[1],
-            "color_anchors_low_mid_high_rgb": [list(color) for color in COLOR_ANCHORS],
+            "colormap": "continuous blue-cyan-green-yellow-orange-red spectrum",
+            "color_anchors_rgb": [list(color) for color in COLOR_ANCHORS],
+            "color_anchor_positions": [index / (len(COLOR_ANCHORS) - 1) for index in range(len(COLOR_ANCHORS))],
+            "color_interpolation": "linear RGB between adjacent anchors",
             "resampling": "nearest",
             "grid_line_width": 1,
         },

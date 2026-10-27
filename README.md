@@ -94,7 +94,7 @@ python figure1.py
 所有文件写入 `outputs/figure1/<图像名称去除扩展名>/`，共 50 个样本子目录。每个目录包含：
 
 - `input.png`：与模型输入空间对齐的 RGB 原图。
-- `overlay_block01.png` 至 `overlay_block12.png`：每层完整 14×14 网格热图叠加图，最近邻放大，绘制 patch 边界。每张图像的每层独立对 196 个原始余弦分数做 min–max 归一化，使用范围为 `[0,1]` 的蓝—白—红色标，色条标注为 `Normalized patch score`。颜色表示各层内部的相对高低；整层分数相同时统一映射到 0.5（白色）。默认叠加透明度为 0.45。
+- `overlay_block01.png` 至 `overlay_block12.png`：每层完整 14×14 网格热图叠加图，最近邻放大，绘制 patch 边界。每张图像的每层独立对 196 个原始余弦分数做 min–max 归一化，映射到范围为 `[0,1]` 的连续蓝→青→绿→黄→橙→红色谱，相邻颜色控制点之间按 RGB 线性插值。配图色条应标注为 `Normalized patch score`，左端 0 为蓝色，右端 1 为红色。颜色表示各层内部的相对高低；整层分数相同时统一映射到 0.5（绿色）。默认叠加透明度为 0.45。
 - `patch_scores.csv`：全部 2352 个真实分数，列为 `layer,patch_index,row,col,score`。层编号为 1–12，patch 索引和行列坐标从 0 开始，`patch_index = row * 14 + col`。自行选定 `(row,col)` 后，按 `layer` 排序即可得到 12 个曲线数据点。
 - `metadata.json`：样本顺序、输入图像 SHA-256、模型及预处理配置、观察位置、坐标约定和热图色标。
 
