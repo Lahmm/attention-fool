@@ -83,6 +83,23 @@ RUN_REAL_PRD_ADAPTERS=1 python -m unittest tests.test_progressive_adapters
 
 权重准备工具 `experiments/download_fpr_models.py` 保留，负责缓存 FPR 目标和额外的 PiT-T／DeiT-B distilled 源权重，不执行攻击或评估。
 
+## Figure 1 跨层观察元素
+
+```bash
+python figure1.py
+```
+
+该入口使用预训练 ViT-B/16，对按标注图像名称排序的前 50 个有效样本进行干净前向观察，采集全部 12 个 block 完整输出处、最终 `model.norm` 之前的局部 token 与同层 CLS 的余弦相似度。图像使用现有的 224×224 输入，以模型自身的 mean/std 归一化；固定 seed 42。运行前需安装依赖，并在 `data/huggingface` 准备好对应预训练权重。
+
+所有文件写入 `outputs/figure1/<图像名称去除扩展名>/`，共 50 个样本子目录。每个目录包含：
+
+- `input.png`：与模型输入空间对齐的 RGB 原图。
+- `overlay_block01.png` 至 `overlay_block12.png`：每层完整 14×14 网格热图叠加图，最近邻放大，绘制 patch 边界。所有样本、层共享蓝—白—红色标，固定范围为余弦相似度的 `[-1,1]`，默认叠加透明度为 0.45。
+- `patch_scores.csv`：全部 2352 个真实分数，列为 `layer,patch_index,row,col,score`。层编号为 1–12，patch 索引和行列坐标从 0 开始，`patch_index = row * 14 + col`。自行选定 `(row,col)` 后，按 `layer` 排序即可得到 12 个曲线数据点。
+- `metadata.json`：样本顺序、输入图像 SHA-256、模型及预处理配置、观察位置、坐标约定和热图色标。
+
+脚本保留全部位置的数据，不选择固定位置、不生成曲线或完整拼图。首个 batch 会核对采集路径与模型原生前向的 logits 一致。可用 `--batch-size`、`--device cpu/cuda/mps`、`--overlay-alpha` 调整执行及叠加设置，`--image-dir` 和 `--annotations-path` 可指定输入。再次运行会更新相同样本目录中的导出文件；若目录内包含其他样本子目录，则报错并保留已有文件。
+
 ```bash
 pip install -r requirements.txt
 ```
