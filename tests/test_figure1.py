@@ -87,7 +87,7 @@ class Figure1Tests(unittest.TestCase):
         with self.assertRaises(ValueError):
             compute_patch_scores(local, torch.zeros_like(global_repr))
 
-    def test_observation_preserves_native_forward_and_scores_complete_block_outputs(self):
+    def test_observation_preserves_native_forward_and_uses_final_normalized_cls(self):
         adapter = ObservationAdapter()
         x = torch.linspace(-1, 1, 3 * 224 * 224).reshape(1, 3, 224, 224)
         observed = extract_layerwise_scores(adapter, x)
@@ -95,9 +95,19 @@ class Figure1Tests(unittest.TestCase):
         self.assertEqual(observed.grid_size, (14, 14))
         with torch.no_grad():
             torch.testing.assert_close(observed.logits, adapter(x), rtol=0, atol=0)
-            first = adapter.model.blocks[0](adapter.model.initial_tokens(x))
-            expected = torch.nn.functional.cosine_similarity(first[:, 1:], first[:, :1], dim=-1)
-            torch.testing.assert_close(observed.scores[:, 0], expected)
+            tokens = adapter.model.initial_tokens(x)
+            snapshots = []
+            for block in adapter.model.blocks:
+                tokens = block(tokens)
+                snapshots.append(tokens.clone())
+            final_cls = adapter.model.norm(tokens)[:, :1]
+            for layer, snapshot in enumerate(snapshots):
+                expected = torch.nn.functional.cosine_similarity(snapshot[:, 1:], final_cls, dim=-1)
+                torch.testing.assert_close(observed.scores[:, layer], expected)
+            same_layer = torch.nn.functional.cosine_similarity(snapshots[0][:, 1:], snapshots[0][:, :1], dim=-1)
+            raw_final = torch.nn.functional.cosine_similarity(snapshots[0][:, 1:], snapshots[-1][:, :1], dim=-1)
+            self.assertFalse(torch.allclose(observed.scores[:, 0], same_layer))
+            self.assertFalse(torch.allclose(observed.scores[:, 0], raw_final))
         self.assertFalse(observed.scores.requires_grad)
         self.assertFalse(adapter.training)
         self.assertFalse(torch.equal(observed.scores[:, 0], observed.scores[:, -1]))
@@ -150,6 +160,8 @@ class Figure1Tests(unittest.TestCase):
             metadata = json.loads((sample / "metadata.json").read_text())
             self.assertEqual(metadata["sample_index"], 0)
             self.assertEqual(metadata["image_name"], "image_000.png")
+            self.assertEqual(metadata["global_representation"],
+                             "fixed final encoder CLS token after model.norm, shared by all observation layers")
             self.assertEqual((metadata["overlay"]["vmin"], metadata["overlay"]["vmax"]), (-1, 1))
             with Image.open(sample / "input.png") as saved:
                 self.assertEqual(saved.getpixel((10, 10)), (0, 60, 140))

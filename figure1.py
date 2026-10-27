@@ -36,7 +36,7 @@ class LayerwiseObservation:
 
 def compute_patch_scores(local: torch.Tensor, global_repr: torch.Tensor) -> torch.Tensor:
     if local.ndim != 3 or global_repr.shape != (local.size(0), local.size(2)):
-        raise ValueError("expected local [B,N,D] and same-layer global representation [B,D]")
+        raise ValueError("expected local [B,N,D] and global representation [B,D]")
     local = local.float()
     global_repr = global_repr.float()
     if not torch.isfinite(local).all() or not torch.isfinite(global_repr).all():
@@ -56,11 +56,14 @@ def extract_layerwise_scores(adapter, normalized_inputs: torch.Tensor) -> Layerw
     if prefix.size(1) != 1:
         raise ValueError("Figure 1 observation requires the single-CLS ViT-B/16 model")
     tokens = torch.cat((prefix, initial.local_tokens), dim=1)
-    scores = []
+    local_snapshots = []
     for block in adapter.model.blocks:
         tokens = block(tokens)
-        scores.append(compute_patch_scores(tokens[:, 1:], tokens[:, 0]).cpu())
-    logits = adapter.model.forward_head(adapter.model.norm(tokens)).cpu()
+        local_snapshots.append(tokens[:, 1:].cpu().clone())
+    final_tokens = adapter.model.norm(tokens)
+    final_cls = final_tokens[:, 0].cpu()
+    scores = [compute_patch_scores(local, final_cls) for local in local_snapshots]
+    logits = adapter.model.forward_head(final_tokens).cpu()
     return LayerwiseObservation(torch.stack(scores, dim=1), logits, initial.grid_size)
 
 
@@ -133,8 +136,8 @@ def save_sample_elements(
         "image_size_wh": list(image.size),
         "patch_size_hw": [image.height // grid_size[0], image.width // grid_size[1]],
         "observation_boundary": "complete block output, before final model.norm",
-        "global_representation": "CLS token at the same block output",
-        "score": "cosine similarity of local token and same-layer CLS",
+        "global_representation": "fixed final encoder CLS token after model.norm, shared by all observation layers",
+        "score": "cosine similarity of each block's local token and the final encoder CLS",
         "input": "clean image, no attack, token drop, feature noise, or translation",
         "indices": "layer is 1-based; patch_index, row, col are 0-based; patch_index = row * grid_width + col",
         "overlay": {
