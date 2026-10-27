@@ -164,12 +164,21 @@ class Figure1Tests(unittest.TestCase):
             expected_scores = extract_layerwise_scores(adapter, normalized).scores[0]
             csv_scores = torch.tensor([float(row["score"]) for row in rows]).reshape(12, 196)
             torch.testing.assert_close(csv_scores, expected_scores, rtol=0, atol=0)
+            with Image.open(sample / "input.png") as source:
+                expected_overlay = Image.blend(
+                    source.convert("RGB"), render_heatmap(expected_scores[0], (14, 14), source.size), 0.45,
+                )
+            with Image.open(sample / "heatmap_block01.png") as saved:
+                self.assertEqual(saved.tobytes(), expected_overlay.tobytes())
             metadata = json.loads((sample / "metadata.json").read_text())
             self.assertEqual(metadata["sample_index"], 0)
             self.assertEqual(metadata["image_name"], "image_000.png")
             self.assertEqual(metadata["global_representation"],
                              "fixed final encoder CLS token after model.norm, shared by all observation layers")
             self.assertEqual((metadata["heatmap"]["vmin"], metadata["heatmap"]["vmax"]), (0, 1))
+            self.assertEqual(metadata["heatmap"]["alpha"], 0.45)
+            self.assertEqual(metadata["heatmap"]["rendering"],
+                             "RGB image blended with smooth heatmap; no grid or border")
             self.assertEqual(metadata["heatmap"]["normalization"],
                              "per-image, per-layer min-max over all local patch scores; CSV retains raw cosine similarities")
             self.assertEqual(metadata["heatmap"]["constant_score_value"], 0.5)

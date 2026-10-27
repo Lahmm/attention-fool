@@ -106,14 +106,19 @@ def save_sample_elements(
     scores: torch.Tensor,
     grid_size: tuple[int, int],
     metadata: dict,
+    *,
+    alpha: float = 0.45,
 ) -> None:
+    if not 0 < alpha <= 1:
+        raise ValueError("overlay alpha must satisfy 0 < alpha <= 1")
     if scores.shape != (LAYER_COUNT, grid_size[0] * grid_size[1]):
         raise ValueError("expected all 12 layers and all local patch scores")
     directory.mkdir(parents=True, exist_ok=True)
     image.convert("RGB").save(directory / "input.png")
     for layer, layer_scores in enumerate(scores, start=1):
         heatmap = render_heatmap(layer_scores, grid_size, image.size)
-        heatmap.save(directory / f"heatmap_block{layer:02d}.png")
+        overlay = Image.blend(image.convert("RGB"), heatmap, alpha)
+        overlay.save(directory / f"heatmap_block{layer:02d}.png")
 
     with (directory / "patch_scores.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
@@ -135,6 +140,8 @@ def save_sample_elements(
         "input": "clean image, no attack, token drop, feature noise, or translation",
         "indices": "layer is 1-based; patch_index, row, col are 0-based; patch_index = row * grid_width + col",
         "heatmap": {
+            "alpha": alpha,
+            "rendering": "RGB image blended with smooth heatmap; no grid or border",
             "normalization": "per-image, per-layer min-max over all local patch scores; CSV retains raw cosine similarities",
             "constant_score_value": 0.5,
             "colorbar_label": "Normalized patch score",
@@ -165,9 +172,10 @@ def export_figure1_elements(
     output_dir: Path,
     *,
     batch_size: int = 4,
+    alpha: float = 0.45,
 ) -> None:
-    if batch_size <= 0:
-        raise ValueError("batch size must be positive")
+    if batch_size <= 0 or not 0 < alpha <= 1:
+        raise ValueError("batch size must be positive and overlay alpha must be in (0,1]")
     if len(dataset) < SAMPLE_COUNT:
         raise ValueError(f"Figure 1 requires at least {SAMPLE_COUNT} annotated images")
     selected = dataset.samples[:SAMPLE_COUNT]
@@ -234,7 +242,7 @@ def export_figure1_elements(
                 }
                 save_sample_elements(
                     output_dir / folder_names[sample_index], image,
-                    observation.scores[offset], observation.grid_size, metadata,
+                    observation.scores[offset], observation.grid_size, metadata, alpha=alpha,
                 )
             print(f"Figure 1 elements: {int(indices[-1]) + 1}/{SAMPLE_COUNT}", flush=True)
 
@@ -244,13 +252,14 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--image-dir", default=str(ROOT / "data" / "clean_resized_images"))
     parser.add_argument("--annotations-path", default=str(ROOT / "data" / "image_name_to_class_id_and_name.json"))
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--overlay-alpha", type=float, default=0.45)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto")
     return parser.parse_args(argv)
 
 
 def main(args: argparse.Namespace) -> None:
-    if args.batch_size <= 0:
-        raise ValueError("batch size must be positive")
+    if args.batch_size <= 0 or not 0 < args.overlay_alpha <= 1:
+        raise ValueError("batch size must be positive and overlay alpha must be in (0,1]")
     torch.manual_seed(SEED)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(SEED)
@@ -266,9 +275,9 @@ def main(args: argparse.Namespace) -> None:
             "pretrained weights in data/huggingface; model loading uses the repository's offline cache."
         ) from exc
     export_figure1_elements(
-        adapter, dataset, OUTPUT_DIR, batch_size=args.batch_size,
+        adapter, dataset, OUTPUT_DIR, batch_size=args.batch_size, alpha=args.overlay_alpha,
     )
-    print(f"Saved 50 sample folders with 12 heatmaps and all patch scores each to {OUTPUT_DIR}")
+    print(f"Saved 50 sample folders with 12 heatmap overlays and all patch scores each to {OUTPUT_DIR}")
 
 
 if __name__ == "__main__":
