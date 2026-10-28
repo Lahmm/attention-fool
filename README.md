@@ -83,6 +83,20 @@ RUN_REAL_PRD_ADAPTERS=1 python -m unittest tests.test_progressive_adapters
 
 权重准备工具 `experiments/download_fpr_models.py` 保留，负责缓存 FPR 目标和额外的 PiT-T／DeiT-B distilled 源权重，不执行攻击或评估。
 
+## Figure 2 首次迭代素材
+
+```bash
+python figure2.py
+```
+
+使用与 Figure 1 相同排序的前 50 个有效样本，输出到 `outputs/figure2/<样本名>/`。固定预训练 ViT-B/16、seed 42、block3/block10 各清零 10 个 token，保持默认 opponent noise 和 10 groups×2 views。仅执行第一步，显式使用原 10 步设置的步长 `epsilon/10`，保存第一个 group 的两个分支；全部 20 个视图参与该步像素更新。
+
+每个样本目录包含 `x_t.png`、`x_t_grid.png`、`x_t_plus_1.png`、`trace.pt`、`drop_positions.csv` 和 `metadata.json`。`group00/original/` 与 `group00/translated/` 分别包含真实视图及网格图、实际采样的 RGB 噪声显示图、等效加噪输入预览、初始特征加噪前后及噪声本身的逐 token RMS 图，以及每个 checkpoint 的 mask、mask 叠加图和清零前后的 RMS 图。网格按实际 14×14 空间位置绘制；RMS 图共享状态尺度，两视图 RGB 噪声显示共享零中心尺度，具体映射记录于元数据。
+
+噪声直接截取实际随机采样和实际返回的投影噪声，不重新抽样。脚本验证等效 RGB 输入投影后的初始特征与真正的加噪特征一致；`noisy_equivalent_clipped.png` 是截断到显示范围的预览，未截断数据保存在 `trace.pt`。`*_mask_on_view.png` 是实际特征清零位置的空间示意，模型前向仍执行特征 hard-zero。各 checkpoint 单独显示自己的 mask。实际像素更新结果为 `x_t_plus_1.png`，精确浮点像素同时保存在 `trace.pt`。
+
+采集类、局部随机采样拦截和临时实例包装全部位于 `figure2.py`，普通攻击入口不受影响；包装在异常退出时也会恢复。可用 `--batch-size`、`--device`、`--image-dir`、`--annotations-path` 配置执行。批次布局会影响随机采样，实际 batch size 和样本索引记录在元数据中。运行需要已安装的依赖及 `data/huggingface` 内对应预训练权重；再次运行更新相同样本的素材。
+
 ## Figure 1 跨层观察元素
 
 ```bash
