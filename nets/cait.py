@@ -10,6 +10,7 @@ class CaiTAdapter(ProgressiveAdapter):
     checkpoints = ("block17", "block23")
     drop_ratios = (0.010204081633, 0.142857142857)
     dynamic_checkpoint = True
+    checkpoint_score_reference = "final CLS after class-attention, before final LayerNorm; raw local block outputs"
 
     def begin_progressive_forward(self, x):
         base = self.model
@@ -65,7 +66,7 @@ class CaiTAdapter(ProgressiveAdapter):
         cls = self.model.cls_token.expand(local.size(0), -1, -1)
         for block in self.model.blocks_token_only:
             cls = block(local, cls)
-        reference = self.model.norm(torch.cat((cls, local), dim=1))[:, 0]
+        reference = cls[:, 0]
         return select_variance_peaks([
             (f"block{index + 1}", f"block{index}", state.grid_size, values, reference)
             for index, values in enumerate(snapshots)

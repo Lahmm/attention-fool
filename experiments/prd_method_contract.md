@@ -17,7 +17,7 @@
 ## 逐样本定位
 
 1. 每张干净图像只在完整攻击开始前做一次无 drop、无特征噪声的完整前向。逐个保存完整 block 输出的局部 token，不额外应用最终 `model.norm`。
-2. ViT 和 distilled DeiT 使用最终 `model.norm` 后的分类 CLS 作为所有层共享的参照。DeiT 排除 CLS 和 distillation 两个 prefix。CaiT 使用全部局部 block、class-attention 和最终归一化之后的 CLS。PiT 使用各 stage 末端的原始 CLS 作为该 stage 的固定参照，最后一个 stage 使用最终归一化后的 CLS。
+2. ViT 和 distilled DeiT 使用最终 `model.norm` 后的分类 CLS 作为所有层共享的参照。DeiT 排除 CLS 和 distillation 两个 prefix。CaiT 按 2026-10-29 用户确认，使用全部局部 block 和 class-attention 之后、最终 `model.norm` 之前的 CLS；分类前向仍正常执行最终归一化。PiT 使用各 stage 末端的原始 CLS 作为该 stage 的固定参照，最后一个 stage 使用最终归一化后的 CLS。
 3. 对每张图、每个 block，以 float32 计算局部 token 与参照的余弦相似度，eps=1e-8，限制数值到 [-1,1]；以 float64 计算原始分数的总体方差，分母为该层原生局部 token 数。局部表示与评分保留在模型设备上，最终将各层方差和有效性标记一次性传回 CPU 后选层。定位不使用 min–max，不跨图平均。非有限值或零范数表征会报错。
 4. 每张图选择方差最大的 block；并列选择前向顺序最早者。drop 放在峰值 block 的输入处，即前一 block 输出后。该选择在所有攻击步和视图中固定。
 5. `block0` 是第一个 block 的输入；PiT 的 `stageN_block0` 是该 stage pooling 和 stage norm 之后、第一个 block 的输入。跨 stage 的边界不挪到 pooling 之前。
@@ -45,6 +45,6 @@ RMS 在单样本全部初始局部位置和通道上计算。特征 RMS 与投�
 
 ## 记录与评估
 
-动态 `attack_params.json` 保存定位定义、总比例、并列规则，以及逐样本图像名、峰值层、checkpoint、峰值方差、网格、实际 drop 数和实际比例。保存跨 batch 的 checkpoint 频次；不把最后一个子组的固定参数当作整批结果。
+动态 `attack_params.json` 保存定位定义、总比例、并列规则，以及逐样本图像名、峰值层、checkpoint、峰值方差、网格、实际 drop 数和实际比例。CaiT 额外保存 `patch_score_reference`，标明 class-attention 后、最终 LayerNorm 前的 CLS 参照。保存跨 batch 的 checkpoint 频次；不把最后一个子组的固定参数当作整批结果。
 
 迁移评估仍以 FPR13 为主。ASR 为全部对抗样本上的 `1 - adversarial accuracy`。`results/` 仅保存 FPR13 数值和参数；已有固定 checkpoint 结果不会作为动态版本结果重标。

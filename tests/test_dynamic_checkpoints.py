@@ -66,6 +66,37 @@ class DynamicCheckpointTests(unittest.TestCase):
                 self.assertAlmostEqual(choice.variance, float(variances[peak, sample]))
             self.assertFalse(model.training)
 
+    def test_cait_uses_raw_final_cls_after_class_attention_without_final_layernorm(self):
+        torch.manual_seed(42)
+        adapter = build_whitebox_model('cait_s24_224', pretrained=False, device=torch.device('cpu'))
+        pixels = torch.linspace(.1, .9, 2 * 3 * 224 * 224).reshape(2, 3, 224, 224)
+        with torch.no_grad():
+            local = adapter.begin_progressive_forward(pixels).local_tokens
+            snapshots = []
+            for block in adapter.model.blocks:
+                local = block(local)
+                snapshots.append(local.clone())
+            cls = adapter.model.cls_token.expand(2, -1, -1)
+            for block in adapter.model.blocks_token_only:
+                cls = block(local, cls)
+        with patch('nets.cait.select_variance_peaks', wraps=select_variance_peaks) as scoring, \
+             patch.object(adapter.model.norm, 'forward', side_effect=AssertionError('final LayerNorm during scoring')):
+            choices = adapter.select_variance_checkpoints(pixels)
+        observations = scoring.call_args.args[0]
+        self.assertEqual(len(observations), 24)
+        for index, observation in enumerate(observations):
+            self.assertEqual(observation[:2], (f'block{index+1}', f'block{index}'))
+            torch.testing.assert_close(observation[3], snapshots[index], rtol=0, atol=0)
+            torch.testing.assert_close(observation[4], cls[:, 0], rtol=0, atol=0)
+        variances = torch.stack([F.cosine_similarity(local, cls, dim=-1, eps=1e-8).clamp(-1, 1)
+                                 .double().var(dim=1, unbiased=False) for local in snapshots])
+        for sample, choice in enumerate(choices):
+            peak = int(variances[:, sample].argmax())
+            self.assertEqual(choice.checkpoint, f'block{peak}')
+            self.assertAlmostEqual(choice.variance, float(variances[peak, sample]))
+        attacker = ProgressiveRouteDisruptionAttacker(adapter, device=torch.device('cpu'))
+        self.assertEqual(attacker.parameters()['patch_score_reference'], adapter.checkpoint_score_reference)
+
     def test_mixed_batch_selects_once_and_keeps_boundaries_across_steps_and_phase_views(self):
         model = make_model()
         model.dynamic_checkpoint = True

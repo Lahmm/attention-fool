@@ -36,7 +36,7 @@ current adversarial pixels
 | DeiT-B distilled | 12 个 block 中逐图选取方差峰前边界 | 20/196 ≈ 10.2041% | 0.2 |
 | PiT-B（额外保留） | 固定 `stage2_block1,stage3_block2,stage3_block3` | 沿用 5/2/6 的原生配置 | 0.4 |
 
-ViT、DeiT 使用最终 `model.norm` 后的分类 CLS；DeiT 的 distillation token 不作为参照或局部 token。CaiT 使用 class-attention 模块及最终归一化之后的 CLS。PiT 每个 stage 使用该 stage 末端的原始 CLS，最后一个 stage 使用最终归一化后的 CLS。局部 token 均取完整 block 输出，不额外应用最终 `model.norm`。先用 float32 计算原始余弦分数，再用 float64 计算层内总体方差；不做 min–max，不跨样本平均。方差并列时选择前向顺序最早的 block。
+ViT、DeiT 使用最终 `model.norm` 后的分类 CLS；DeiT 的 distillation token 不作为参照或局部 token。CaiT 使用全部 class-attention 模块之后、最终 `model.norm` 之前的 CLS。PiT 每个 stage 使用该 stage 末端的原始 CLS，最后一个 stage 使用最终归一化后的 CLS。局部 token 均取完整 block 输出，不额外应用最终 `model.norm`。先用 float32 计算原始余弦分数，再用 float64 计算层内总体方差；不做 min–max，不跨样本平均。方差并列时选择前向顺序最早的 block。CaiT 的参照定义记录在 `attack_params.json` 的 `patch_score_reference` 中。
 
 `block0` 表示第一个 block 的输入。PiT 的 `stageN_block0` 表示该 stage 完成 pooling 和 stage norm 后、第一个 block 之前的输入。PiT-T 的局部网格为 27×27、14×14、7×7；按所选网格乘总比例取整。总比例统一保留 12 位小数，drop 数为 `max(1, round(N*r))`，实际比例随整数化记录。不同 checkpoint 的样本保持在同一 batch 中，沿原生层序共同前进；到达一个边界时，仅清零选择该边界的样本，其他样本的 mask 全为零。损失使用完整 batch 的均值。
 

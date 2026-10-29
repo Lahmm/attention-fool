@@ -509,6 +509,9 @@ class ProgressiveRouteDisruptionAttacker:
                 "checkpoint_histogram": dict(Counter(item["checkpoint"] for item in self.checkpoint_selections)),
                 "sample_checkpoints": list(self.checkpoint_selections),
             })
+            reference = getattr(self.model, "checkpoint_score_reference", None)
+            if reference is not None:
+                params["patch_score_reference"] = reference
         else:
             params.update({
                 "checkpoints": list(self.progressive_checkpoints),
