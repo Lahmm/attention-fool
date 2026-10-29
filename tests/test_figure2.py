@@ -28,6 +28,7 @@ def make_adapter():
     adapter.model_mean = (0.485, 0.456, 0.406)
     adapter.model_std = (0.229, 0.224, 0.225)
     adapter.model = TinyViT(1)
+    adapter.dynamic_checkpoint = False
     adapter.model.patch_embed.proj = nn.Conv2d(3, 4, kernel_size=16, stride=16, bias=False)
     return adapter.eval()
 

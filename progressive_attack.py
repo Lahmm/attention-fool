@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
+import math
 
 import torch
 import torch.nn.functional as F
@@ -73,6 +75,7 @@ class ProgressiveRouteDisruptionAttacker:
         model,
         *,
         progressive_drop: bool = True,
+        dynamic_checkpoint: bool | None = None,
         drop_ratios: tuple[float, ...] | None = None,
         opponent_noise_strength: float | None = None,
         noise_structure: str = "opponent",
@@ -105,14 +108,21 @@ class ProgressiveRouteDisruptionAttacker:
         if opponent_noise_strength < 0:
             raise ValueError("opponent noise strength must be non-negative.")
         ratios = tuple(model.drop_ratios if drop_ratios is None else drop_ratios)
-        if len(ratios) != len(model.checkpoints):
+        dynamic = bool(model.dynamic_checkpoint if dynamic_checkpoint is None else dynamic_checkpoint)
+        if dynamic:
+            ratios = (round(math.fsum(ratios), 12),)
+        elif len(ratios) != len(model.checkpoints):
             raise ValueError("checkpoint/drop-ratio count mismatch.")
-        if progressive_drop and any(ratio <= 0 or ratio > 0.5 for ratio in ratios):
+        if progressive_drop and (
+            not ratios or any(not math.isfinite(ratio) or ratio <= 0 or ratio > 0.5 for ratio in ratios)
+        ):
             raise ValueError("each drop ratio must satisfy 0 < ratio <= 0.5.")
 
         self.model = model
         self.model.eval()
         self.progressive_drop = bool(progressive_drop)
+        self._dynamic_checkpoint_policy = dynamic
+        self.dynamic_checkpoint = bool(dynamic and progressive_drop)
         self.device = device if device is not None else DEVICE
         self.progressive_checkpoints = model.checkpoints
         self.progressive_drop_ratios = tuple(float(value) for value in ratios)
@@ -136,6 +146,9 @@ class ProgressiveRouteDisruptionAttacker:
         self._actual_forward_view_count = 0
         self._progressive_mask_counts: tuple[int, ...] = ()
         self._progressive_mask_grids: tuple[tuple[int, int], ...] = ()
+        self._active_checkpoint = None
+        self._loss_batch_size = None
+        self.checkpoint_selections = []
 
     def _denormalize(self, images: torch.Tensor) -> torch.Tensor:
         return images * self.pixel_std + self.pixel_mean
@@ -162,11 +175,16 @@ class ProgressiveRouteDisruptionAttacker:
         return mask.detach()
 
     def _build_mask_schedule(self, pixels: torch.Tensor) -> ProgressiveMaskSchedule:
+        checkpoints = self.progressive_checkpoints
+        if self.dynamic_checkpoint:
+            if self._active_checkpoint is None:
+                raise ValueError("select a clean-image checkpoint before building attack schedules")
+            checkpoints = (self._active_checkpoint,)
         with torch.no_grad():
             state = self.model.begin_progressive_forward(self._normalize(pixels.detach()))
             selections: list[ProgressiveMaskSelection] = []
             for checkpoint, ratio in zip(
-                self.progressive_checkpoints, self.progressive_drop_ratios
+                checkpoints, self.progressive_drop_ratios
             ):
                 state = self.model.advance_progressive_state(state, checkpoint)
                 state.validate()
@@ -306,6 +324,8 @@ class ProgressiveRouteDisruptionAttacker:
                     )
                 state = self.model.apply_progressive_mask(state, item.mask)
         logits = self.model.finish_progressive_forward(state)
+        if self._loss_batch_size is not None:
+            return F.cross_entropy(logits, labels, reduction="sum") / self._loss_batch_size
         return F.cross_entropy(logits, labels)
 
     def _iter_attack_losses(
@@ -366,19 +386,54 @@ class ProgressiveRouteDisruptionAttacker:
         clean = self._denormalize(images).detach()
         adversarial = clean.clone()
         momentum = torch.zeros_like(adversarial)
-        for _ in range(self.steps):
-            self._actual_forward_view_count = 0
-            pixels = adversarial.detach().requires_grad_(True)
-            gradient = self._attack_gradients(pixels, labels)
-            self._check_view_count()
-            momentum = momentum + gradient
-            adversarial = adversarial + self.step_size * momentum.sign()
-            delta = torch.clamp(adversarial - clean, -self.epsilon, self.epsilon)
-            adversarial = torch.clamp(clean + delta, 0, 1).detach()
+        groups = {}
+        if self.dynamic_checkpoint:
+            with torch.no_grad():
+                choices = self.model.select_variance_checkpoints(self._normalize(clean))
+            if len(choices) != clean.size(0):
+                raise ValueError("one variance checkpoint is required for each clean sample")
+            offset = len(self.checkpoint_selections)
+            for index, choice in enumerate(choices):
+                groups.setdefault(choice.checkpoint, []).append(index)
+                count = max(1, int(round(choice.grid_size[0] * choice.grid_size[1] * self.progressive_drop_ratios[0])))
+                self.checkpoint_selections.append({
+                    "sample_index": offset + index, "checkpoint": choice.checkpoint,
+                    "peak_layer": choice.peak_layer, "peak_variance": choice.variance,
+                    "grid_size": list(choice.grid_size), "drop_count": count,
+                    "actual_drop_ratio": count / (choice.grid_size[0] * choice.grid_size[1]),
+                })
+            groups = {checkpoint: torch.tensor(indices, device=self.device)
+                      for checkpoint, indices in groups.items()}
+        try:
+            for _ in range(self.steps):
+                pixels = adversarial.detach().requires_grad_(True)
+                if self.dynamic_checkpoint:
+                    self._loss_batch_size = clean.size(0)
+                    gradient = torch.zeros_like(pixels)
+                    for checkpoint, indices in groups.items():
+                        self._active_checkpoint = checkpoint
+                        self._actual_forward_view_count = 0
+                        group_pixels = pixels.index_select(0, indices).detach().requires_grad_(True)
+                        group_gradient = self._attack_gradients(group_pixels, labels.index_select(0, indices))
+                        self._check_view_count()
+                        gradient.index_copy_(0, indices, group_gradient)
+                else:
+                    self._actual_forward_view_count = 0
+                    gradient = self._attack_gradients(pixels, labels)
+                    self._check_view_count()
+                momentum = momentum + gradient
+                adversarial = adversarial + self.step_size * momentum.sign()
+                delta = torch.clamp(adversarial - clean, -self.epsilon, self.epsilon)
+                adversarial = torch.clamp(clean + delta, 0, 1).detach()
+        finally:
+            self._active_checkpoint = None
+            self._loss_batch_size = None
         return self._normalize_output(adversarial)
 
     def parameters(self):
-        return {
+        schedules = self.steps * self.input_diversity_groups if self.progressive_drop else 0
+        checkpoints_per_schedule = 1 if self.dynamic_checkpoint else len(self.progressive_checkpoints)
+        params = {
             "attack_method": "progressive_route_disruption",
             "seed": SEED,
             "whitebox_model": self.model.model_name,
@@ -388,10 +443,6 @@ class ProgressiveRouteDisruptionAttacker:
             "momentum_decay": 1.0,
             "progressive_drop_enabled": self.progressive_drop,
             "opponent_noise_enabled": self.opponent_noise_strength > 0,
-            "checkpoints": list(self.progressive_checkpoints),
-            "drop_ratios": list(self.progressive_drop_ratios),
-            "drop_counts": list(self._progressive_mask_counts),
-            "grids": [list(grid) for grid in self._progressive_mask_grids],
             "opponent_noise_strength": self.opponent_noise_strength,
             "noise_structure": self.noise_structure if self.opponent_noise_strength > 0 else "none",
             "noise_direction_variances": (
@@ -404,8 +455,26 @@ class ProgressiveRouteDisruptionAttacker:
                 if self.input_diversity_views_per_group == 2 else []
             ),
             "input_diversity_total_views": self.input_diversity_groups * self.input_diversity_views_per_group,
-            "mask_schedule_count_per_image": self.steps * self.input_diversity_groups,
-            "checkpoint_mask_selection_count_per_image": self.steps * self.input_diversity_groups * len(self.progressive_checkpoints),
+            "mask_schedule_count_per_image": schedules,
+            "checkpoint_mask_selection_count_per_image": schedules * checkpoints_per_schedule,
             "model_mean": self.model_mean.flatten().tolist(),
             "model_std": self.model_std.flatten().tolist(),
         }
+        if self._dynamic_checkpoint_policy:
+            params.update({
+                "checkpoint_selection_enabled": self.dynamic_checkpoint,
+                "checkpoint_selection": "per-sample maximum clean raw patch-score population variance; drop before peak block",
+                "checkpoint_tie_break": "earliest block in native forward order",
+                "total_drop_ratio": self.progressive_drop_ratios[0],
+                "drop_count_rounding": "total ratio rounded to 12 decimals; max(1, round(native token count * ratio))",
+                "checkpoint_histogram": dict(Counter(item["checkpoint"] for item in self.checkpoint_selections)),
+                "sample_checkpoints": list(self.checkpoint_selections),
+            })
+        else:
+            params.update({
+                "checkpoints": list(self.progressive_checkpoints),
+                "drop_ratios": list(self.progressive_drop_ratios),
+                "drop_counts": list(self._progressive_mask_counts),
+                "grids": [list(grid) for grid in self._progressive_mask_grids],
+            })
+        return params

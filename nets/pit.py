@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from .base import ProgressiveAdapter, ProgressiveState
+from .base import ProgressiveAdapter, ProgressiveState, select_variance_peaks
 
 
 class PiTAdapter(ProgressiveAdapter):
@@ -12,11 +12,13 @@ class PiTAdapter(ProgressiveAdapter):
     checkpoints = ("stage2_block1", "stage3_block2", "stage3_block3")
     drop_ratios = (0.07142857142857142, 0.04081632653061224, 0.04081632653061224)
     opponent_noise_strength = 0.4
+    dynamic_checkpoint = True
 
     def __init__(self, model_name=None, *, pretrained=True, device=None):
         super().__init__(model_name, pretrained=pretrained, device=device)
         if self.model_name == "pit_b_224":
             self.drop_ratios = (0.02081165, 0.03125, 0.09375)
+            self.dynamic_checkpoint = False
 
     def begin_progressive_forward(self, x):
         base = self.model
@@ -66,14 +68,19 @@ class PiTAdapter(ProgressiveAdapter):
     def advance_progressive_state(
         self, state: ProgressiveState, checkpoint_id: str
     ) -> ProgressiveState:
-        if checkpoint_id not in self.checkpoints:
+        try:
+            target_stage, target_block = self._parse_progressive_checkpoint(checkpoint_id)
+        except (ValueError, TypeError):
+            raise ValueError(f"unsupported PiT checkpoint: {checkpoint_id!r}.") from None
+        if (not 0 <= target_stage < len(self.model.transformers)
+                or not 0 <= target_block <= len(self.model.transformers[target_stage].blocks)
+                or checkpoint_id != f"stage{target_stage + 1}_block{target_block}"):
             raise ValueError(f"unsupported PiT progressive checkpoint: {checkpoint_id!r}.")
-        target_stage, target_block = self._parse_progressive_checkpoint(checkpoint_id)
         stage_index = int(state.context["stage_index"])
         block_index = int(state.context["block_index"])
         prepared = bool(state.context["stage_prepared"])
-        if (target_stage, target_block) <= (stage_index, block_index):
-            raise ValueError("PiT progressive checkpoints must be strictly increasing.")
+        if (target_stage, target_block) < (stage_index, block_index):
+            raise ValueError("PiT checkpoint is before the current state.")
         spatial = self._pit_spatial(state)
         cls = state.context["cls_token"]
         prefix_count = cls.size(1)
@@ -127,3 +134,24 @@ class PiTAdapter(ProgressiveAdapter):
             block_index = 0
             prepared = False
         return self.model.forward_head(self.model.norm(cls))
+
+    @torch.no_grad()
+    def select_variance_checkpoints(self, normalized_inputs):
+        self.eval()
+        state = self.begin_progressive_forward(normalized_inputs.to(self.device))
+        spatial = self._pit_spatial(state)
+        cls = state.context["cls_token"]
+        observations = []
+        for stage_index, stage in enumerate(self.model.transformers):
+            tokens, grid = self._prepare_pit_stage(stage_index, spatial, cls)
+            snapshots = []
+            for block in stage.blocks:
+                tokens = block(tokens)
+                snapshots.append(tokens[:, cls.size(1):].cpu().clone())
+            spatial, cls = self._split_pit_tokens(tokens, cls.size(1), grid)
+            reference = (self.model.norm(cls) if stage_index == len(self.model.transformers) - 1
+                         else cls)[:, 0].cpu()
+            for index, local in enumerate(snapshots):
+                observations.append((f"stage{stage_index + 1}_block{index + 1}",
+                                     f"stage{stage_index + 1}_block{index}", grid, local, reference))
+        return select_variance_peaks(observations)

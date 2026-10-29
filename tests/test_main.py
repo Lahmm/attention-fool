@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader, Dataset
 
 import main
 from tests.test_progressive_attack import make_model
+from nets.base import SampleCheckpoint
 from utils import SEED
 
 
@@ -95,3 +96,27 @@ class MainTests(unittest.TestCase):
         for directory in ('.', 'outputs/attack', '/private/tmp'):
             with self.subTest(directory=directory), self.assertRaises(ValueError):
                 main.validate_output_dir(directory)
+
+    def test_dynamic_metadata_tracks_each_image_across_batches(self):
+        model = make_model()
+        model.dynamic_checkpoint = True
+        choices = [(SampleCheckpoint('block0', 'block1', .1, (14, 14)),
+                    SampleCheckpoint('block10', 'block11', .2, (14, 14))),
+                   (SampleCheckpoint('block2', 'block3', .3, (14, 14)),)]
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(sys, 'argv', ['main.py', '--steps', '1', '--input-diversity-groups', '1',
+                                      '--input-diversity-views-per-group', '1', '--max-attacked-samples', '3']):
+            with patch.object(main, 'validate_output_dir', return_value=Path(directory)), \
+                 patch.object(main, 'load_data', return_value=DataLoader(IndexedDataset(), batch_size=2)), \
+                 patch.object(main, 'DEVICE', torch.device('cpu')), \
+                 patch.object(main, 'build_whitebox_model', return_value=model), \
+                 patch.object(model, 'select_variance_checkpoints', side_effect=choices) as select:
+                main.main(main.parse_args())
+            self.assertEqual(select.call_count, 2)
+            params = json.loads((Path(directory) / 'attack_params.json').read_text())
+            self.assertEqual(params['num_images'], 3)
+            self.assertEqual([item['image_name'] for item in params['sample_checkpoints']],
+                             ['image_0.png', 'image_1.png', 'image_2.png'])
+            self.assertEqual([item['checkpoint'] for item in params['sample_checkpoints']],
+                             ['block0', 'block10', 'block2'])
+            self.assertEqual(params['checkpoint_mask_selection_count_per_image'], 1)

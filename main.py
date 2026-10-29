@@ -80,6 +80,7 @@ def apply_vit_analysis_checkpoints(model, checkpoints, drop_ratios) -> None:
     if len(ratios) != len(checkpoints):
         raise ValueError("analysis checkpoints and drop ratios must have the same length.")
     model.checkpoints = tuple(checkpoints)
+    model.dynamic_checkpoint = False
 
 
 def validate_output_dir(output_dir: str) -> Path:
@@ -167,7 +168,7 @@ def parse_args() -> argparse.Namespace:
         "--drop-ratios",
         type=parse_float_list,
         default=None,
-        help="One ratio per checkpoint; omitted values use the source adapter defaults.",
+        help="Dynamic sources use the sum as their per-image drop ratio; PiT-B uses one ratio per fixed checkpoint.",
     )
     parser.add_argument(
         "--vit-analysis-checkpoints",
@@ -238,6 +239,8 @@ def main(args: argparse.Namespace) -> None:
     )
     params = attacker.parameters()
     params["num_images"] = len(sample_ids)
+    for selection in params.get("sample_checkpoints", []):
+        selection["image_name"] = sample_ids[selection["sample_index"]]
     (output_dir / "attack_params.json").write_text(
         json.dumps(params, indent=2, ensure_ascii=False),
         encoding="utf-8",

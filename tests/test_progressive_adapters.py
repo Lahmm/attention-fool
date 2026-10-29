@@ -20,6 +20,9 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(ViTAdapter.checkpoints, ('block3', 'block10'))
         self.assertEqual(CaiTAdapter.checkpoints, ('block17', 'block23'))
         self.assertEqual(PiTAdapter.checkpoints, ('stage2_block1', 'stage3_block2', 'stage3_block3'))
+        self.assertTrue(ViTAdapter.dynamic_checkpoint)
+        self.assertTrue(CaiTAdapter.dynamic_checkpoint)
+        self.assertTrue(PiTAdapter.dynamic_checkpoint)
         with self.assertRaises(ValueError):
             build_whitebox_model('visformer_small')
 
@@ -31,7 +34,7 @@ class AdapterTests(unittest.TestCase):
             'vit_base_patch16_224': (((14, 14), (14, 14)), (10, 10)),
             'deit_base_distilled_patch16_224': (((14, 14), (14, 14)), (10, 10)),
             'cait_s24_224': (((14, 14), (14, 14)), (2, 28)),
-            'pit_ti_224': (((14, 14), (7, 7), (7, 7)), (4, 2, 5)),
+            'pit_ti_224': (((14, 14), (7, 7), (7, 7)), (14, 2, 2)),
             'pit_b_224': (((16, 16), (8, 8), (8, 8)), (5, 2, 6)),
         }
         for name in WHITEBOX_MODEL_CHOICES:
@@ -51,8 +54,20 @@ class AdapterTests(unittest.TestCase):
                         self.assertEqual(model.checkpoints, ('block3', 'block10'))
                 attacker = ProgressiveRouteDisruptionAttacker(model, steps=1, input_diversity_groups=1,
                                                               device=torch.device('cpu'))
+                if model.dynamic_checkpoint:
+                    choice = model.select_variance_checkpoints(pixels)[0]
+                    attacker._active_checkpoint = choice.checkpoint
+                    expected_grid = (choice.grid_size,)
+                    count = max(1, int(round(choice.grid_size[0] * choice.grid_size[1] * attacker.progressive_drop_ratios[0])))
+                    expected_counts = (count,)
+                    with torch.no_grad():
+                        boundary = model.advance_progressive_state(model.begin_progressive_forward(pixels), choice.checkpoint)
+                        torch.testing.assert_close(model.finish_progressive_forward(boundary), native, rtol=0, atol=0)
+                else:
+                    self.assertEqual(name, 'pit_b_224')
+                    expected_grid, expected_counts = expected[name]
                 schedule = attacker._build_mask_schedule(pixels)
-                self.assertEqual((schedule.grid_sizes, schedule.counts), expected[name])
+                self.assertEqual((schedule.grid_sizes, schedule.counts), (expected_grid, expected_counts))
                 state = model.begin_progressive_forward(pixels)
                 for selection in schedule.selections:
                     state = model.advance_progressive_state(state, selection.checkpoint)

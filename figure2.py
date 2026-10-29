@@ -50,7 +50,7 @@ class Figure2Attacker(ProgressiveRouteDisruptionAttacker):
         super().__init__(
             model, steps=1, step_size=(16 / 255) / NOMINAL_STEPS,
             input_diversity_groups=10, input_diversity_views_per_group=2,
-            device=device,
+            device=device, dynamic_checkpoint=False,
         )
         self.recorder = Figure2Recorder()
         self._active_view = None

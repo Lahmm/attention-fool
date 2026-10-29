@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from .base import ProgressiveAdapter, ProgressiveState
+from .base import ProgressiveAdapter, ProgressiveState, select_variance_peaks
 
 DEFAULT_MODEL_NAME = "vit_base_patch16_224"
 
@@ -13,6 +13,7 @@ class ViTAdapter(ProgressiveAdapter):
     default_model_name = DEFAULT_MODEL_NAME
     checkpoints = ("block3", "block10")
     drop_ratios = (0.051020408163, 0.051020408163)
+    dynamic_checkpoint = True
 
     def __init__(self, model_name=None, *, pretrained=True, device=None):
         super().__init__(model_name, pretrained=pretrained, device=device)
@@ -33,12 +34,15 @@ class ViTAdapter(ProgressiveAdapter):
         return state
 
     def advance_progressive_state(self, state, checkpoint_id):
-        if checkpoint_id not in self.checkpoints:
+        suffix = checkpoint_id.removeprefix("block")
+        if not checkpoint_id.startswith("block") or not suffix.isdigit():
             raise ValueError(f"unsupported ViT checkpoint: {checkpoint_id!r}.")
-        target = int(checkpoint_id.removeprefix("block"))
+        target = int(suffix)
         start = state.context["block_index"]
-        if target <= start:
-            raise ValueError("checkpoints must be strictly increasing.")
+        if target < start or target > len(self.model.blocks):
+            raise ValueError("ViT checkpoint is outside the remaining block trajectory.")
+        if target == start:
+            return state
         tokens = torch.cat((state.context["prefix_tokens"], state.local_tokens), dim=1)
         for block in self.model.blocks[start:target]:
             tokens = block(tokens)
@@ -53,3 +57,19 @@ class ViTAdapter(ProgressiveAdapter):
         for block in self.model.blocks[state.context["block_index"]:]:
             tokens = block(tokens)
         return self.model.forward_head(self.model.norm(tokens))
+
+    @torch.no_grad()
+    def select_variance_checkpoints(self, normalized_inputs):
+        self.eval()
+        state = self.begin_progressive_forward(normalized_inputs.to(self.device))
+        prefix = state.context["prefix_tokens"]
+        tokens = torch.cat((prefix, state.local_tokens), dim=1)
+        snapshots = []
+        for block in self.model.blocks:
+            tokens = block(tokens)
+            snapshots.append(tokens[:, prefix.size(1):].cpu().clone())
+        reference = self.model.norm(tokens)[:, 0].cpu()
+        return select_variance_peaks([
+            (f"block{index + 1}", f"block{index}", state.grid_size, local, reference)
+            for index, local in enumerate(snapshots)
+        ])

@@ -1,30 +1,39 @@
 # PRD 方法与执行契约
 
-PRD 的两项核心机制是全部初始局部特征上的 RGB opponent-channel random noise，以及 checkpoint-wise progressive random token drop。
+2026-10-29 按用户确认更新执行方式：四个主要源模型在攻击前，按每张干净图像自身的原始 patch-score 层内方差定位一个 checkpoint，然后执行随机 token drop 和初始 RGB opponent-channel noise。以下约定适用于新执行；已有 FPR13 结果保留其实际固定 checkpoint 参数。
 
 ## 源与随机设置
 
-当前论文四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled，另保留 PiT-B；Visformer 源实现已移除。所有新执行在入口设置 PyTorch 全局 seed 42；固定 batch 布局和执行流程时可复现采样。按照用户的实验报告约定，历史 `randomness.py` seed 42 与当前 PyTorch seed 42 视为统一 seed-42 标准，不因随机实现差异重跑参数未变的单元。
+四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled，额外保留固定边界的 PiT-B。所有新执行在入口设置 PyTorch 全局 seed 42；固定 batch 布局和执行流程时可复现采样。历史 `randomness.py` seed 42 与当前 PyTorch seed 42 仍按用户约定视为统一报告标准；改变 checkpoint 策略后的测量需要重新执行。
 
-| Source | Checkpoints | Native grids | Drop counts | Opponent strength |
-| --- | --- | --- | --- | ---: |
-| ViT-B/16 | `block3,block10` | 14×14, 14×14 | 10, 10 | 0.2 |
-| CaiT-S24 | `block17,block23` | 14×14, 14×14 | 2, 28 | 0.2 |
-| PiT-T | `stage2_block1,stage3_block2,stage3_block3` | 14×14, 7×7, 7×7 | 14, 2, 2 | 0.4 |
-| DeiT-B distilled | `block2,block9` | 14×14, 14×14 | 10, 10 | 0.2 |
-| PiT-B（额外保留） | `stage2_block1,stage3_block2,stage3_block3` | 16×16, 8×8, 8×8 | 5, 2, 6 | 0.4 |
+| Source | 观察范围 | 单样本总 drop 比例 | Opponent strength |
+| --- | --- | ---: | ---: |
+| ViT-B/16 | 全部 12 个 block | 20/196 | 0.2 |
+| CaiT-S24 | 全部 24 个局部 token block | 30/196 | 0.2 |
+| PiT-T | 三个 stage 的全部 2+6+4 个 block | 14/196 + 2/49 + 2/49 = 30/196 | 0.4 |
+| DeiT-B distilled | 全部 12 个 block | 20/196 | 0.2 |
+| PiT-B（额外保留） | 固定 stage2_block1、stage3_block2、stage3_block3 | 原 drop ratios 0.02081165、0.03125、0.09375 | 0.4 |
 
-PiT-T 的初始网格为 27×27，PiT-B 为 31×31；上表列出各 checkpoint 的实际网格。PiT-T 当前 drop ratios 为 `0.07142857142857142,0.04081632653061224,0.04081632653061224`，对应 14/2/2；额外保留的 PiT-B 仍为 `0.02081165,0.03125,0.09375`，对应 5/2/6。DeiT-B distilled 保留两个 prefix 并使用原生分类输出。
+## 逐样本定位
 
-## 执行顺序
+1. 每张干净图像只在完整攻击开始前做一次无 drop、无特征噪声的完整前向。逐个保存完整 block 输出的局部 token，不额外应用最终 `model.norm`。
+2. ViT 和 distilled DeiT 使用最终 `model.norm` 后的分类 CLS 作为所有层共享的参照。DeiT 排除 CLS 和 distillation 两个 prefix。CaiT 使用全部局部 block、class-attention 和最终归一化之后的 CLS。PiT 使用各 stage 末端的原始 CLS 作为该 stage 的固定参照，最后一个 stage 使用最终归一化后的 CLS。
+3. 对每张图、每个 block，以 float32 计算局部 token 与参照的余弦相似度，eps=1e-8，限制数值到 [-1,1]；以 float64 计算原始分数的总体方差，分母为该层原生局部 token 数。定位不使用 min–max，不跨图平均。非有限值或零范数表征会报错。
+4. 每张图选择方差最大的 block；并列选择前向顺序最早者。drop 放在峰值 block 的输入处，即前一 block 输出后。该选择在所有攻击步和视图中固定。
+5. `block0` 是第一个 block 的输入；PiT 的 `stageN_block0` 是该 stage pooling 和 stage norm 之后、第一个 block 的输入。跨 stage 的边界不挪到 pooling 之前。
+6. 同批样本可以使用不同边界。每步按边界分组计算视图梯度，并按原样本顺序合回；分组损失以原 batch 大小归一化，保持完整 batch 的平均尺度。
 
-1. 每个 step/group 从当前对抗像素构建 fresh schedule。无梯度地顺序到达 checkpoint，在全部原生局部位置中均匀、无放回抽样，立即 hard-zero 并继续遍历，保存 mask、数量和网格。
-2. 每个可微视图只构建一次初始状态。将本视图独立采样的 opponent noise 加到全部初始局部特征，包括未来会被清零的位置。prefix 保持原值。
-3. 按 schedule 顺序到达 checkpoint，清零选中 token 的全部通道，从改变后的状态继续传播。不同 checkpoint 独立抽样，允许重复位置；网格与 token 数不因清零改变。
-4. 默认原始／平移两个视图。平移使用反射填充裁剪，mask 同步映射到图像空间、平移后按原生网格 occupancy top-k 保持 drop 数量。
-5. 默认 10 groups×2 views。各视图对当前像素求梯度，直接平均后以系数 1 累积动量，执行 sign 更新、相对干净输入的 L∞ 投影和 [0,1] 截断；默认 10 steps、epsilon=16/255、步长 epsilon/steps。
+总比例按原配置各 drop ratio 求和并保留 12 位小数。所选边界处从全部当前局部 token 均匀、无放回抽样 `max(1, round(N*r))` 个位置。PiT-T 的 N 为 729、196 或 49；实际 drop 数与实际比例逐样本记录。PiT-B 额外源保留原固定三边界。
 
-`--input-diversity-views-per-group` 保留 1、2 两种设置用于消融。单视图时不采样平移，不构造平移图像或变换 masks，每组仍独立生成 schedule 和初始噪声。默认平移集合为 (4,4)/(8,8)/(12,12)，每步总视图不超过 20。
+## 攻击执行顺序
+
+1. 定位结束后，每个 step/group 在当前对抗像素上构建新 mask schedule；动态四源每条 schedule 只有该图选定的一个边界。位置始终均匀随机抽样，分数不选择被清零的 token。
+2. 每个可微视图只构建一次初始状态。在全部初始局部位置加独立采样的 opponent noise，包括未来会被清零的位置。prefix 不变。
+3. 到达选定边界，清零所选局部 token 的全部通道，再继续同一次前向。原生网格和 token 数保持不变。
+4. 默认原始／平移两个视图。平移使用反射填充裁剪，mask 同步映射到图像空间、平移后按原生网格 occupancy top-k 保持 drop 数量。同组两视图使用相同模型边界。
+5. 默认 10 groups×2 views。像素梯度直接平均，以系数 1 累积动量，再做 sign 更新、相对干净输入的 L∞ 投影和 [0,1] 截断。默认 10 steps、epsilon=16/255、步长 epsilon/steps。动态四源每图产生 100 条 schedule、100 次 checkpoint mask selection。
+
+`--input-diversity-views-per-group` 保留 1、2 两种消融设置。单视图不采样平移；默认平移集合为 (4,4)/(8,8)/(12,12)，每步每图视图不超过 20。关闭 progressive drop 时跳过方差定位。显式 ViT 固定边界分析参数和 Figure 2 固定版本素材入口用于复现原配置，普通四源入口默认动态定位。
 
 ## 噪声
 
@@ -32,12 +41,10 @@ PiT-T 的初始网格为 27×27，PiT-B 为 31×31；上表列出各 checkpoint 
 
 `η = W ξ_RGB`，`η_hat = β RMS(H0)/RMS(η) · η`，`H0_noise = H0 + η_hat`。
 
-RMS 在单样本全部初始局部位置和通道上计算。特征 RMS 与投影权重固定 detach；不提供可导尺度变体。噪声每个可微视图只注入一次。
+RMS 在单样本全部初始局部位置和通道上计算。特征 RMS 与投影权重固定 detach。噪声每个可微视图只注入一次。
 
 ## 记录与评估
 
-`attack_params.json` 保存实际配置，包括 seed 42、源模型、checkpoint、drop 数量／网格、噪声强度和视图设置。攻击路径不计算或输出梯度诊断。当前迁移测试以 FPR 13-target 协议为主；`results/` 仅保存 FPR13 协议的数值与实验记录。ASR 为全部对抗样本上的 `1 - adversarial accuracy`。
+动态 `attack_params.json` 保存定位定义、总比例、并列规则，以及逐样本图像名、峰值层、checkpoint、峰值方差、网格、实际 drop 数和实际比例。保存跨 batch 的 checkpoint 频次；不把最后一个子组的固定参数当作整批结果。
 
-非 FPR13 结果文件已从当前 `results/` 目录清理，旧协议数据可在 Git 历史中查询。
-
-当前 seed-42 四源 FPR13 完整 PRD 的 Overall ASR 为 89.72%，严格黑盒 ASR 为 89.29%；当前配置的主结果、消融和参数归档见 [FPR 实验记录](../results/prd_s42_1000_fpr_ablation.md)。2026-10-23 已完成 PiT-T 和 distilled DeiT-B 的 drop/full 配置更新重跑。
+迁移评估仍以 FPR13 为主。ASR 为全部对抗样本上的 `1 - adversarial accuracy`。`results/` 仅保存 FPR13 数值和参数；已有固定 checkpoint 结果不会作为动态版本结果重标。

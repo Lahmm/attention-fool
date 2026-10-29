@@ -47,7 +47,9 @@ def make_model(prefixes=1):
     torch.manual_seed(SEED)
     model_name = 'vit_base_patch16_224' if prefixes == 1 else 'deit_base_distilled_patch16_224'
     with patch('timm.create_model', return_value=TinyViT(prefixes)):
-        return ViTAdapter(model_name, pretrained=False, device=torch.device('cpu'))
+        model = ViTAdapter(model_name, pretrained=False, device=torch.device('cpu'))
+    model.dynamic_checkpoint = False
+    return model
 
 
 def make_attacker(**overrides):

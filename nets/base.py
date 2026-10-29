@@ -6,6 +6,7 @@ from pathlib import Path
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from utils import DEVICE
 
@@ -13,6 +14,39 @@ LOCAL_HF_CACHE = Path(__file__).resolve().parents[1] / "data" / "huggingface"
 os.environ["HF_HOME"] = str(LOCAL_HF_CACHE)
 os.environ["HF_HUB_CACHE"] = str(LOCAL_HF_CACHE / "hub")
 os.environ["HF_HUB_OFFLINE"] = "1"
+
+
+@dataclass(frozen=True)
+class SampleCheckpoint:
+    checkpoint: str
+    peak_layer: str
+    variance: float
+    grid_size: tuple[int, int]
+
+
+def select_variance_peaks(observations):
+    if not observations:
+        raise ValueError("at least one block observation is required")
+    variances = []
+    for layer, checkpoint, grid, local, reference in observations:
+        local, reference = local.float(), reference.float()
+        if local.ndim != 3 or reference.shape != (local.size(0), local.size(2)):
+            raise ValueError("expected local [B,N,D] and CLS [B,D]")
+        if local.size(1) != grid[0] * grid[1]:
+            raise ValueError("observation grid does not match the local tokens")
+        if not torch.isfinite(local).all() or not torch.isfinite(reference).all():
+            raise ValueError("non-finite checkpoint observation")
+        if (local.norm(dim=-1) == 0).any() or (reference.norm(dim=-1) == 0).any():
+            raise ValueError("cosine similarity requires nonzero representations")
+        scores = F.cosine_similarity(local, reference[:, None], dim=-1, eps=1e-8).clamp(-1, 1)
+        variances.append(scores.double().var(dim=1, unbiased=False))
+    values = torch.stack(variances)
+    peaks = values.argmax(dim=0)
+    return tuple(
+        SampleCheckpoint(observations[index][1], observations[index][0],
+                         float(values[index, sample]), observations[index][2])
+        for sample, index in enumerate(peaks.tolist())
+    )
 
 
 @dataclass
@@ -42,6 +76,7 @@ class ProgressiveAdapter(nn.Module):
     checkpoints: tuple[str, ...] = ()
     drop_ratios: tuple[float, ...] = ()
     opponent_noise_strength = 0.2
+    dynamic_checkpoint = False
 
     def __init__(self, model_name=None, *, pretrained=True, device=None):
         super().__init__()
@@ -66,6 +101,9 @@ class ProgressiveAdapter(nn.Module):
         raise NotImplementedError
 
     def finish_progressive_forward(self, state):
+        raise NotImplementedError
+
+    def select_variance_checkpoints(self, normalized_inputs):
         raise NotImplementedError
 
     @staticmethod
