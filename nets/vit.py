@@ -34,12 +34,9 @@ class ViTAdapter(ProgressiveAdapter):
         return state
 
     def advance_progressive_state(self, state, checkpoint_id):
-        suffix = checkpoint_id.removeprefix("block")
-        if not checkpoint_id.startswith("block") or not suffix.isdigit():
-            raise ValueError(f"unsupported ViT checkpoint: {checkpoint_id!r}.")
-        target = int(suffix)
+        target = self.checkpoint_order(checkpoint_id)
         start = state.context["block_index"]
-        if target < start or target > len(self.model.blocks):
+        if target < start:
             raise ValueError("ViT checkpoint is outside the remaining block trajectory.")
         if target == start:
             return state
@@ -58,6 +55,17 @@ class ViTAdapter(ProgressiveAdapter):
             tokens = block(tokens)
         return self.model.forward_head(self.model.norm(tokens))
 
+    def checkpoint_order(self, checkpoint_id):
+        suffix = checkpoint_id.removeprefix("block")
+        if (not checkpoint_id.startswith("block") or not suffix.isdigit()
+                or not 0 <= int(suffix) <= len(self.model.blocks)):
+            raise ValueError(f"unsupported ViT checkpoint: {checkpoint_id!r}.")
+        return int(suffix)
+
+    def checkpoint_grid_size(self, checkpoint_id):
+        self.checkpoint_order(checkpoint_id)
+        return tuple(self.model.patch_embed.grid_size)
+
     @torch.no_grad()
     def select_variance_checkpoints(self, normalized_inputs):
         self.eval()
@@ -67,8 +75,8 @@ class ViTAdapter(ProgressiveAdapter):
         snapshots = []
         for block in self.model.blocks:
             tokens = block(tokens)
-            snapshots.append(tokens[:, prefix.size(1):].cpu().clone())
-        reference = self.model.norm(tokens)[:, 0].cpu()
+            snapshots.append(tokens[:, prefix.size(1):].clone())
+        reference = self.model.norm(tokens)[:, 0]
         return select_variance_peaks([
             (f"block{index + 1}", f"block{index}", state.grid_size, local, reference)
             for index, local in enumerate(snapshots)

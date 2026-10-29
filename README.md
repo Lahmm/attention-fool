@@ -38,7 +38,9 @@ current adversarial pixels
 
 ViT、DeiT 使用最终 `model.norm` 后的分类 CLS；DeiT 的 distillation token 不作为参照或局部 token。CaiT 使用 class-attention 模块及最终归一化之后的 CLS。PiT 每个 stage 使用该 stage 末端的原始 CLS，最后一个 stage 使用最终归一化后的 CLS。局部 token 均取完整 block 输出，不额外应用最终 `model.norm`。先用 float32 计算原始余弦分数，再用 float64 计算层内总体方差；不做 min–max，不跨样本平均。方差并列时选择前向顺序最早的 block。
 
-`block0` 表示第一个 block 的输入。PiT 的 `stageN_block0` 表示该 stage 完成 pooling 和 stage norm 后、第一个 block 之前的输入。PiT-T 的局部网格为 27×27、14×14、7×7；按所选网格乘总比例取整。总比例统一保留 12 位小数，drop 数为 `max(1, round(N*r))`，实际比例随整数化记录。每个 batch 内按边界分组前向，再按原样本顺序合回梯度；损失保持原完整 batch 的平均尺度。
+`block0` 表示第一个 block 的输入。PiT 的 `stageN_block0` 表示该 stage 完成 pooling 和 stage norm 后、第一个 block 之前的输入。PiT-T 的局部网格为 27×27、14×14、7×7；按所选网格乘总比例取整。总比例统一保留 12 位小数，drop 数为 `max(1, round(N*r))`，实际比例随整数化记录。不同 checkpoint 的样本保持在同一 batch 中，沿原生层序共同前进；到达一个边界时，仅清零选择该边界的样本，其他样本的 mask 全为零。损失使用完整 batch 的均值。
+
+生成 mask 直接使用选层时记录的网格和原生模型几何，不额外前向。干净选层的局部表示与分数计算留在模型设备上，仅将各层方差和有效性检查结果批量传回 CPU。相位选择使用 PyTorch 的 CPU 随机函数，反射平移按 batch 执行；固定 seed、batch 和执行流程时可复现。
 
 所有新执行统一使用 seed **42**。`--drop-ratios` 对四个动态源表示各值之和，即单图总比例；省略时使用上表预算。PiT-B 仍按每个固定 checkpoint 分别设置。显式 `--vit-analysis-checkpoints` 仅用于固定边界的 ViT 对照，并关闭逐样本定位。
 

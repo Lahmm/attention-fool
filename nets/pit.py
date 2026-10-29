@@ -38,6 +38,28 @@ class PiTAdapter(ProgressiveAdapter):
         stage_text, block_text = checkpoint_id.split("_")
         return int(stage_text.removeprefix("stage")) - 1, int(block_text.removeprefix("block"))
 
+    def checkpoint_order(self, checkpoint_id):
+        try:
+            stage, block = self._parse_progressive_checkpoint(checkpoint_id)
+        except (ValueError, TypeError):
+            raise ValueError(f"unsupported PiT checkpoint: {checkpoint_id!r}.") from None
+        if (not 0 <= stage < len(self.model.transformers)
+                or not 0 <= block <= len(self.model.transformers[stage].blocks)
+                or checkpoint_id != f"stage{stage + 1}_block{block}"):
+            raise ValueError(f"unsupported PiT checkpoint: {checkpoint_id!r}.")
+        return stage, block
+
+    def checkpoint_grid_size(self, checkpoint_id):
+        target_stage, _ = self.checkpoint_order(checkpoint_id)
+        grid = tuple(self.model.patch_embed.grid_size)
+        for stage in self.model.transformers[:target_stage + 1]:
+            if stage.pool is not None:
+                conv = stage.pool.conv
+                grid = tuple((size + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
+                             for size, padding, dilation, kernel, stride in zip(
+                                 grid, conv.padding, conv.dilation, conv.kernel_size, conv.stride))
+        return grid
+
     @staticmethod
     def _pit_spatial(state: ProgressiveState) -> torch.Tensor:
         batch, _, channels = state.local_tokens.shape
@@ -68,14 +90,7 @@ class PiTAdapter(ProgressiveAdapter):
     def advance_progressive_state(
         self, state: ProgressiveState, checkpoint_id: str
     ) -> ProgressiveState:
-        try:
-            target_stage, target_block = self._parse_progressive_checkpoint(checkpoint_id)
-        except (ValueError, TypeError):
-            raise ValueError(f"unsupported PiT checkpoint: {checkpoint_id!r}.") from None
-        if (not 0 <= target_stage < len(self.model.transformers)
-                or not 0 <= target_block <= len(self.model.transformers[target_stage].blocks)
-                or checkpoint_id != f"stage{target_stage + 1}_block{target_block}"):
-            raise ValueError(f"unsupported PiT progressive checkpoint: {checkpoint_id!r}.")
+        target_stage, target_block = self.checkpoint_order(checkpoint_id)
         stage_index = int(state.context["stage_index"])
         block_index = int(state.context["block_index"])
         prepared = bool(state.context["stage_prepared"])
@@ -147,10 +162,10 @@ class PiTAdapter(ProgressiveAdapter):
             snapshots = []
             for block in stage.blocks:
                 tokens = block(tokens)
-                snapshots.append(tokens[:, cls.size(1):].cpu().clone())
+                snapshots.append(tokens[:, cls.size(1):].clone())
             spatial, cls = self._split_pit_tokens(tokens, cls.size(1), grid)
             reference = (self.model.norm(cls) if stage_index == len(self.model.transformers) - 1
-                         else cls)[:, 0].cpu()
+                         else cls)[:, 0]
             for index, local in enumerate(snapshots):
                 observations.append((f"stage{stage_index + 1}_block{index + 1}",
                                      f"stage{stage_index + 1}_block{index}", grid, local, reference))

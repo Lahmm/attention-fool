@@ -23,8 +23,9 @@ class ProgressiveMaskSelection:
     mask: torch.Tensor
     count: int
     grid_size: tuple[int, int]
+    active_samples: torch.Tensor | None = None
 
-    def validate(self, *, batch_size: int) -> None:
+    def validate(self, *, batch_size: int, check_counts: bool = True) -> None:
         token_count = self.grid_size[0] * self.grid_size[1]
         if self.mask.shape != (batch_size, token_count):
             raise ValueError(
@@ -33,9 +34,21 @@ class ProgressiveMaskSelection:
             )
         if self.mask.dtype != torch.bool:
             raise ValueError("progressive masks must be boolean.")
+        if not 0 < self.count <= token_count:
+            raise ValueError("progressive drop count must fit the local grid.")
+        if self.active_samples is not None and (
+            self.active_samples.shape != (batch_size,)
+            or self.active_samples.dtype != torch.bool
+            or self.active_samples.device != self.mask.device
+        ):
+            raise ValueError("active samples must be a boolean vector on the mask device.")
+        if not check_counts:
+            return
         expected = torch.full(
             (batch_size,), self.count, device=self.mask.device, dtype=torch.long
         )
+        if self.active_samples is not None:
+            expected = expected.masked_fill(~self.active_samples, 0)
         if not torch.equal(self.mask.sum(dim=1), expected):
             raise ValueError("progressive mask counts differ within a batch.")
 
@@ -44,11 +57,11 @@ class ProgressiveMaskSelection:
 class ProgressiveMaskSchedule:
     selections: tuple[ProgressiveMaskSelection, ...]
 
-    def validate(self, *, batch_size: int) -> None:
+    def validate(self, *, batch_size: int, check_counts: bool = True) -> None:
         if not self.selections:
             raise ValueError("a progressive schedule must contain selections.")
         for selection in self.selections:
-            selection.validate(batch_size=batch_size)
+            selection.validate(batch_size=batch_size, check_counts=check_counts)
 
     @property
     def checkpoints(self) -> tuple[str, ...]:
@@ -65,6 +78,15 @@ class ProgressiveMaskSchedule:
     @property
     def grid_sizes(self) -> tuple[tuple[int, int], ...]:
         return tuple(item.grid_size for item in self.selections)
+
+
+@dataclass(frozen=True)
+class _CheckpointMaskLayout:
+    checkpoint: str
+    grid_size: tuple[int, int]
+    ratio: float
+    sample_indices: torch.Tensor | None = None
+    active_samples: torch.Tensor | None = None
 
 
 class ProgressiveRouteDisruptionAttacker:
@@ -146,8 +168,11 @@ class ProgressiveRouteDisruptionAttacker:
         self._actual_forward_view_count = 0
         self._progressive_mask_counts: tuple[int, ...] = ()
         self._progressive_mask_grids: tuple[tuple[int, int], ...] = ()
-        self._active_checkpoint = None
-        self._loss_batch_size = None
+        self._dynamic_mask_layout = None
+        self._fixed_mask_layout = tuple(
+            _CheckpointMaskLayout(checkpoint, model.checkpoint_grid_size(checkpoint), ratio)
+            for checkpoint, ratio in zip(self.progressive_checkpoints, self.progressive_drop_ratios)
+        ) if self.progressive_drop and not self.dynamic_checkpoint else ()
         self.checkpoint_selections = []
 
     def _denormalize(self, images: torch.Tensor) -> torch.Tensor:
@@ -175,35 +200,52 @@ class ProgressiveRouteDisruptionAttacker:
         return mask.detach()
 
     def _build_mask_schedule(self, pixels: torch.Tensor) -> ProgressiveMaskSchedule:
-        checkpoints = self.progressive_checkpoints
-        if self.dynamic_checkpoint:
-            if self._active_checkpoint is None:
-                raise ValueError("select a clean-image checkpoint before building attack schedules")
-            checkpoints = (self._active_checkpoint,)
-        with torch.no_grad():
-            state = self.model.begin_progressive_forward(self._normalize(pixels.detach()))
-            selections: list[ProgressiveMaskSelection] = []
-            for checkpoint, ratio in zip(
-                checkpoints, self.progressive_drop_ratios
-            ):
-                state = self.model.advance_progressive_state(state, checkpoint)
-                state.validate()
-                mask = self._sample_random_mask(
-                    batch_size=state.local_tokens.size(0),
-                    token_count=state.local_tokens.size(1),
-                    ratio=ratio,
-                    device=state.local_tokens.device,
-                )
-                count = int(mask.sum(dim=1)[0].item())
-                selections.append(
-                    ProgressiveMaskSelection(checkpoint, mask, count, state.grid_size)
-                )
-                state = self.model.apply_progressive_mask(state, mask)
+        layout = self._dynamic_mask_layout if self.dynamic_checkpoint else self._fixed_mask_layout
+        if layout is None:
+            raise ValueError("select clean-image checkpoints before building attack schedules")
+        selections = []
+        for item in layout:
+            token_count = math.prod(item.grid_size)
+            sample_count = pixels.size(0) if item.sample_indices is None else item.sample_indices.numel()
+            sampled = self._sample_random_mask(
+                batch_size=sample_count, token_count=token_count,
+                ratio=item.ratio, device=pixels.device,
+            )
+            if item.sample_indices is None:
+                mask = sampled
+            else:
+                mask = torch.zeros(pixels.size(0), token_count, dtype=torch.bool, device=pixels.device)
+                mask.index_copy_(0, item.sample_indices, sampled)
+            selections.append(ProgressiveMaskSelection(
+                item.checkpoint, mask, max(1, round(token_count * item.ratio)),
+                item.grid_size, item.active_samples,
+            ))
         schedule = ProgressiveMaskSchedule(tuple(selections))
-        schedule.validate(batch_size=pixels.size(0))
+        schedule.validate(batch_size=pixels.size(0), check_counts=False)
         self._progressive_mask_counts = schedule.counts
         self._progressive_mask_grids = schedule.grid_sizes
         return schedule
+
+    def _prepare_dynamic_mask_layout(self, choices, batch_size: int) -> None:
+        if len(choices) != batch_size:
+            raise ValueError("one variance checkpoint is required for each clean sample")
+        groups = {}
+        grids = {}
+        for index, choice in enumerate(choices):
+            grid = self.model.checkpoint_grid_size(choice.checkpoint)
+            if choice.grid_size != grid:
+                raise ValueError("selected checkpoint grid differs from native model geometry")
+            groups.setdefault(choice.checkpoint, []).append(index)
+            grids[choice.checkpoint] = grid
+        layout = []
+        for checkpoint in sorted(groups, key=self.model.checkpoint_order):
+            indices = torch.tensor(groups[checkpoint], device=self.device, dtype=torch.long)
+            active = torch.zeros(batch_size, device=self.device, dtype=torch.bool)
+            active.index_fill_(0, indices, True)
+            layout.append(_CheckpointMaskLayout(
+                checkpoint, grids[checkpoint], self.progressive_drop_ratios[0], indices, active,
+            ))
+        self._dynamic_mask_layout = tuple(layout)
 
     @staticmethod
     def _mask_to_image(
@@ -236,16 +278,29 @@ class ProgressiveRouteDisruptionAttacker:
     def _apply_samplewise_phase_shifts(
         self, tensor: torch.Tensor, phases: list[tuple[int, int]]
     ) -> torch.Tensor:
-        return torch.cat(
-            [self._apply_phase_shift(tensor[index : index + 1], *phase) for index, phase in enumerate(phases)],
-            dim=0,
-        )
+        if len(phases) != tensor.size(0):
+            raise ValueError("one phase is required per sample")
+        height, width = tensor.shape[-2:]
+        if any(abs(dx) >= width or abs(dy) >= height for dx, dy in phases):
+            raise ValueError("reflection phase must be smaller than the image dimensions")
+        shifts = torch.tensor(phases, device=tensor.device, dtype=torch.long)
+        rows = torch.arange(height, device=tensor.device)[None, :] - shifts[:, 1:2]
+        cols = torch.arange(width, device=tensor.device)[None, :] - shifts[:, 0:1]
+        if height > 1:
+            rows = rows.remainder(2 * (height - 1))
+            rows = torch.minimum(rows, 2 * (height - 1) - rows)
+        if width > 1:
+            cols = cols.remainder(2 * (width - 1))
+            cols = torch.minimum(cols, 2 * (width - 1) - cols)
+        indices = (rows[:, :, None] * width + cols[:, None, :]).flatten(1)
+        flat = tensor.flatten(2)
+        return flat.gather(2, indices[:, None].expand(-1, flat.size(1), -1)).view_as(tensor)
 
     def _pick_input_diversity_phases(
         self, batch_size: int, device: torch.device
     ) -> list[tuple[int, int]]:
         indices = torch.randint(
-            len(self.input_diversity_phase_shift_set), (batch_size,), device=device
+            len(self.input_diversity_phase_shift_set), (batch_size,), device="cpu"
         ).tolist()
         return [self.input_diversity_phase_shift_set[index] for index in indices]
 
@@ -265,11 +320,14 @@ class ProgressiveRouteDisruptionAttacker:
             indices = torch.argsort(occupancy, dim=1, descending=True, stable=True)[:, : item.count]
             shifted = torch.zeros_like(item.mask)
             shifted.scatter_(1, indices, True)
+            if item.active_samples is not None:
+                shifted &= item.active_samples[:, None]
             selections.append(
-                ProgressiveMaskSelection(item.checkpoint, shifted.detach(), item.count, item.grid_size)
+                ProgressiveMaskSelection(item.checkpoint, shifted.detach(), item.count, item.grid_size,
+                                         item.active_samples)
             )
         shifted_schedule = ProgressiveMaskSchedule(tuple(selections))
-        shifted_schedule.validate(batch_size=schedule.selections[0].mask.size(0))
+        shifted_schedule.validate(batch_size=schedule.selections[0].mask.size(0), check_counts=False)
         return shifted_schedule
 
     def _strict_opponent_feature_noise(self, state) -> torch.Tensor:
@@ -324,8 +382,6 @@ class ProgressiveRouteDisruptionAttacker:
                     )
                 state = self.model.apply_progressive_mask(state, item.mask)
         logits = self.model.finish_progressive_forward(state)
-        if self._loss_batch_size is not None:
-            return F.cross_entropy(logits, labels, reduction="sum") / self._loss_batch_size
         return F.cross_entropy(logits, labels)
 
     def _iter_attack_losses(
@@ -386,48 +442,31 @@ class ProgressiveRouteDisruptionAttacker:
         clean = self._denormalize(images).detach()
         adversarial = clean.clone()
         momentum = torch.zeros_like(adversarial)
-        groups = {}
-        if self.dynamic_checkpoint:
-            with torch.no_grad():
-                choices = self.model.select_variance_checkpoints(self._normalize(clean))
-            if len(choices) != clean.size(0):
-                raise ValueError("one variance checkpoint is required for each clean sample")
-            offset = len(self.checkpoint_selections)
-            for index, choice in enumerate(choices):
-                groups.setdefault(choice.checkpoint, []).append(index)
-                count = max(1, int(round(choice.grid_size[0] * choice.grid_size[1] * self.progressive_drop_ratios[0])))
-                self.checkpoint_selections.append({
-                    "sample_index": offset + index, "checkpoint": choice.checkpoint,
-                    "peak_layer": choice.peak_layer, "peak_variance": choice.variance,
-                    "grid_size": list(choice.grid_size), "drop_count": count,
-                    "actual_drop_ratio": count / (choice.grid_size[0] * choice.grid_size[1]),
-                })
-            groups = {checkpoint: torch.tensor(indices, device=self.device)
-                      for checkpoint, indices in groups.items()}
         try:
+            if self.dynamic_checkpoint:
+                with torch.no_grad():
+                    choices = self.model.select_variance_checkpoints(self._normalize(clean))
+                self._prepare_dynamic_mask_layout(choices, clean.size(0))
+                offset = len(self.checkpoint_selections)
+                for index, choice in enumerate(choices):
+                    count = max(1, round(math.prod(choice.grid_size) * self.progressive_drop_ratios[0]))
+                    self.checkpoint_selections.append({
+                        "sample_index": offset + index, "checkpoint": choice.checkpoint,
+                        "peak_layer": choice.peak_layer, "peak_variance": choice.variance,
+                        "grid_size": list(choice.grid_size), "drop_count": count,
+                        "actual_drop_ratio": count / math.prod(choice.grid_size),
+                    })
             for _ in range(self.steps):
                 pixels = adversarial.detach().requires_grad_(True)
-                if self.dynamic_checkpoint:
-                    self._loss_batch_size = clean.size(0)
-                    gradient = torch.zeros_like(pixels)
-                    for checkpoint, indices in groups.items():
-                        self._active_checkpoint = checkpoint
-                        self._actual_forward_view_count = 0
-                        group_pixels = pixels.index_select(0, indices).detach().requires_grad_(True)
-                        group_gradient = self._attack_gradients(group_pixels, labels.index_select(0, indices))
-                        self._check_view_count()
-                        gradient.index_copy_(0, indices, group_gradient)
-                else:
-                    self._actual_forward_view_count = 0
-                    gradient = self._attack_gradients(pixels, labels)
-                    self._check_view_count()
+                self._actual_forward_view_count = 0
+                gradient = self._attack_gradients(pixels, labels)
+                self._check_view_count()
                 momentum = momentum + gradient
                 adversarial = adversarial + self.step_size * momentum.sign()
                 delta = torch.clamp(adversarial - clean, -self.epsilon, self.epsilon)
                 adversarial = torch.clamp(clean + delta, 0, 1).detach()
         finally:
-            self._active_checkpoint = None
-            self._loss_batch_size = None
+            self._dynamic_mask_layout = None
         return self._normalize_output(adversarial)
 
     def parameters(self):

@@ -56,7 +56,7 @@ class AdapterTests(unittest.TestCase):
                                                               device=torch.device('cpu'))
                 if model.dynamic_checkpoint:
                     choice = model.select_variance_checkpoints(pixels)[0]
-                    attacker._active_checkpoint = choice.checkpoint
+                    attacker._prepare_dynamic_mask_layout((choice,), 1)
                     expected_grid = (choice.grid_size,)
                     count = max(1, int(round(choice.grid_size[0] * choice.grid_size[1] * attacker.progressive_drop_ratios[0])))
                     expected_counts = (count,)
@@ -67,7 +67,10 @@ class AdapterTests(unittest.TestCase):
                     self.assertEqual(name, 'pit_b_224')
                     expected_grid, expected_counts = expected[name]
                 schedule = attacker._build_mask_schedule(pixels)
+                schedule.validate(batch_size=1)
                 self.assertEqual((schedule.grid_sizes, schedule.counts), (expected_grid, expected_counts))
+                for item in schedule.selections:
+                    self.assertEqual(model.checkpoint_grid_size(item.checkpoint), item.grid_size)
                 state = model.begin_progressive_forward(pixels)
                 for selection in schedule.selections:
                     state = model.advance_progressive_state(state, selection.checkpoint)

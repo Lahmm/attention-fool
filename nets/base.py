@@ -28,19 +28,26 @@ def select_variance_peaks(observations):
     if not observations:
         raise ValueError("at least one block observation is required")
     variances = []
+    finite = []
+    nonzero = []
     for layer, checkpoint, grid, local, reference in observations:
         local, reference = local.float(), reference.float()
         if local.ndim != 3 or reference.shape != (local.size(0), local.size(2)):
             raise ValueError("expected local [B,N,D] and CLS [B,D]")
         if local.size(1) != grid[0] * grid[1]:
             raise ValueError("observation grid does not match the local tokens")
-        if not torch.isfinite(local).all() or not torch.isfinite(reference).all():
-            raise ValueError("non-finite checkpoint observation")
-        if (local.norm(dim=-1) == 0).any() or (reference.norm(dim=-1) == 0).any():
-            raise ValueError("cosine similarity requires nonzero representations")
+        finite.append(torch.isfinite(local).all() & torch.isfinite(reference).all())
+        nonzero.append((local.norm(dim=-1) > 0).all() & (reference.norm(dim=-1) > 0).all())
         scores = F.cosine_similarity(local, reference[:, None], dim=-1, eps=1e-8).clamp(-1, 1)
         variances.append(scores.double().var(dim=1, unbiased=False))
     values = torch.stack(variances)
+    checks = torch.stack((torch.stack(finite).all(), torch.stack(nonzero).all()))
+    packed = torch.cat((values.flatten(), checks.to(values))).cpu()
+    if not bool(packed[-2]):
+        raise ValueError("non-finite checkpoint observation")
+    if not bool(packed[-1]):
+        raise ValueError("cosine similarity requires nonzero representations")
+    values = packed[:-2].reshape(values.shape)
     peaks = values.argmax(dim=0)
     return tuple(
         SampleCheckpoint(observations[index][1], observations[index][0],
@@ -104,6 +111,12 @@ class ProgressiveAdapter(nn.Module):
         raise NotImplementedError
 
     def select_variance_checkpoints(self, normalized_inputs):
+        raise NotImplementedError
+
+    def checkpoint_order(self, checkpoint_id):
+        raise NotImplementedError
+
+    def checkpoint_grid_size(self, checkpoint_id):
         raise NotImplementedError
 
     @staticmethod

@@ -18,19 +18,19 @@
 
 1. 每张干净图像只在完整攻击开始前做一次无 drop、无特征噪声的完整前向。逐个保存完整 block 输出的局部 token，不额外应用最终 `model.norm`。
 2. ViT 和 distilled DeiT 使用最终 `model.norm` 后的分类 CLS 作为所有层共享的参照。DeiT 排除 CLS 和 distillation 两个 prefix。CaiT 使用全部局部 block、class-attention 和最终归一化之后的 CLS。PiT 使用各 stage 末端的原始 CLS 作为该 stage 的固定参照，最后一个 stage 使用最终归一化后的 CLS。
-3. 对每张图、每个 block，以 float32 计算局部 token 与参照的余弦相似度，eps=1e-8，限制数值到 [-1,1]；以 float64 计算原始分数的总体方差，分母为该层原生局部 token 数。定位不使用 min–max，不跨图平均。非有限值或零范数表征会报错。
+3. 对每张图、每个 block，以 float32 计算局部 token 与参照的余弦相似度，eps=1e-8，限制数值到 [-1,1]；以 float64 计算原始分数的总体方差，分母为该层原生局部 token 数。局部表示与评分保留在模型设备上，最终将各层方差和有效性标记一次性传回 CPU 后选层。定位不使用 min–max，不跨图平均。非有限值或零范数表征会报错。
 4. 每张图选择方差最大的 block；并列选择前向顺序最早者。drop 放在峰值 block 的输入处，即前一 block 输出后。该选择在所有攻击步和视图中固定。
 5. `block0` 是第一个 block 的输入；PiT 的 `stageN_block0` 是该 stage pooling 和 stage norm 之后、第一个 block 的输入。跨 stage 的边界不挪到 pooling 之前。
-6. 同批样本可以使用不同边界。每步按边界分组计算视图梯度，并按原样本顺序合回；分组损失以原 batch 大小归一化，保持完整 batch 的平均尺度。
+6. 同批样本可以使用不同边界。每个视图保持完整 batch，按模型原生顺序遍历本批选择的边界；每个边界只清零选择它的样本，其余样本的 mask 为零。所有样本共同经过 pooling、归一化和后续 block，token 数与网格保持原生结构。损失为完整 batch 的均值。
 
 总比例按原配置各 drop ratio 求和并保留 12 位小数。所选边界处从全部当前局部 token 均匀、无放回抽样 `max(1, round(N*r))` 个位置。PiT-T 的 N 为 729、196 或 49；实际 drop 数与实际比例逐样本记录。PiT-B 额外源保留原固定三边界。
 
 ## 攻击执行顺序
 
-1. 定位结束后，每个 step/group 在当前对抗像素上构建新 mask schedule；动态四源每条 schedule 只有该图选定的一个边界。位置始终均匀随机抽样，分数不选择被清零的 token。
+1. 定位结束后，每个 step/group 根据已知网格和 drop 比例构建新 mask schedule，不为生成 mask 执行额外前向，也不从 GPU 回读 mask 计数。固定源的网格由其 patch embedding 和 pooling 几何计算。动态四源每张图仍只有选定的一个边界；整批 schedule 包含本批边界的并集，并记录各边界的有效样本。位置始终均匀随机抽样，分数不选择被清零的 token。
 2. 每个可微视图只构建一次初始状态。在全部初始局部位置加独立采样的 opponent noise，包括未来会被清零的位置。prefix 不变。
 3. 到达选定边界，清零所选局部 token 的全部通道，再继续同一次前向。原生网格和 token 数保持不变。
-4. 默认原始／平移两个视图。平移使用反射填充裁剪，mask 同步映射到图像空间、平移后按原生网格 occupancy top-k 保持 drop 数量。同组两视图使用相同模型边界。
+4. 默认原始／平移两个视图。平移通过整批索引实现反射填充裁剪的相同映射，mask 同步映射到图像空间、平移后按原生网格 occupancy top-k 保持 drop 数量。未选择当前边界的样本在两个视图中都保持全零 mask。同组两视图使用相同模型边界。相位在 CPU 上通过 PyTorch 全局随机函数采样，避免 GPU 标量回读。
 5. 默认 10 groups×2 views。像素梯度直接平均，以系数 1 累积动量，再做 sign 更新、相对干净输入的 L∞ 投影和 [0,1] 截断。默认 10 steps、epsilon=16/255、步长 epsilon/steps。动态四源每图产生 100 条 schedule、100 次 checkpoint mask selection。
 
 `--input-diversity-views-per-group` 保留 1、2 两种消融设置。单视图不采样平移；默认平移集合为 (4,4)/(8,8)/(12,12)，每步每图视图不超过 20。关闭 progressive drop 时跳过方差定位。显式 ViT 固定边界分析参数和 Figure 2 固定版本素材入口用于复现原配置，普通四源入口默认动态定位。

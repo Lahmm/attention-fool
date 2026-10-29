@@ -65,8 +65,10 @@ class ProgressiveAttackTests(unittest.TestCase):
 
     def test_schedule_uses_current_vit_budget_and_fresh_masks(self):
         attacker = make_attacker()
-        first = attacker._build_mask_schedule(self.pixels)
-        second = attacker._build_mask_schedule(self.pixels)
+        with patch.object(attacker.model, 'begin_progressive_forward', side_effect=AssertionError('mask forward')), \
+             patch.object(torch, 'equal', side_effect=AssertionError('mask synchronization')):
+            first = attacker._build_mask_schedule(self.pixels)
+            second = attacker._build_mask_schedule(self.pixels)
         self.assertEqual(first.checkpoints, ('block3', 'block10'))
         self.assertEqual(first.counts, (10, 10))
         self.assertEqual(first.grid_sizes, ((14, 14), (14, 14)))
@@ -111,6 +113,19 @@ class ProgressiveAttackTests(unittest.TestCase):
         shifted = make_attacker()._apply_phase_shift(original, 8, 8)
         torch.testing.assert_close(shifted[..., 8:, 8:], original[..., :-8, :-8])
         self.assertEqual(float(shifted[0, 0, 0, 0]), float(original[0, 0, 8, 8]))
+
+    def test_batched_reflection_matches_individual_shifts_and_gradients(self):
+        attacker = make_attacker()
+        phases = [(0, 0), (8, 12), (-8, 4), (12, -12)]
+        pixels = self.pixels.repeat(4, 1, 1, 1).requires_grad_(True)
+        expected = torch.cat([attacker._apply_phase_shift(pixels[i:i+1], *phase)
+                              for i, phase in enumerate(phases)])
+        actual = attacker._apply_samplewise_phase_shifts(pixels, phases)
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+        weights = torch.linspace(-1, 1, pixels.numel()).reshape_as(pixels)
+        actual_grad = torch.autograd.grad((actual * weights).sum(), pixels)[0]
+        expected_grad = torch.autograd.grad((expected * weights).sum(), pixels)[0]
+        torch.testing.assert_close(actual_grad, expected_grad, rtol=0, atol=0)
 
     def test_noise_is_rms_matched_per_image_with_stopped_scale(self):
         attacker = make_attacker()
