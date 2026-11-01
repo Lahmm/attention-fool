@@ -2,13 +2,15 @@
 
 本目录仅保留 FPR 13-target 迁移结果及其参数、消融、ASR 差值与来源记录，使用 FPR 对齐的模型和预处理。非 FPR13 结果文件已清理，历史内容可从 Git 历史查询。ASR 定义为 `1 - adversarial accuracy`，分母为全部评估样本。
 
-## 当前主协议结果
+## 已归档固定配置结果
 
-当前四源设置已完成 seed 42、1000 张图像的 FPR13 完整 PRD 与 2×2 机制消融。2026-10-23 对 PiT-T 和 distilled DeiT-B 的 `drop/full` 四个单元完成重跑；其余 12 个单元沿用参数未变的 2026-10-19 测量。按照用户约定，历史 `randomness.py` seed 42 与当前 PyTorch seed 42 统一作为 seed-42 标准，随机实现差异不要求补跑。
+本页已归档数值属于固定多 checkpoint＋opponent 配置。当前论文转向方差选层与随机 token drop，共同增强采用 i.i.d. RGB 采样；叙事及动态运行索引见 [故事文档](../experiments/prd_paper_story.md)。已有数值与参数保持原标签。
+
+该固定四源设置已完成 seed 42、1000 张图像的 FPR13 完整攻击与 2×2 消融。2026-10-23 对 PiT-T 和 distilled DeiT-B 的 `drop/full` 四个单元完成重跑；其余 12 个单元沿用参数未变的 2026-10-19 测量。按照用户约定，历史 `randomness.py` seed 42 与当前 PyTorch seed 42 统一作为 seed-42 标准，随机实现差异不要求补跑。
 
 完整 PRD 四源平均 **Overall ASR 为 89.72%**，**严格黑盒 ASR 为 89.29%**。Transformer 平均为 **90.65%**，CNN 平均为 **88.63%**。
 
-| 源模型 | 当前 checkpoint / drop 数量 | Overall ASR | Strict black-box ASR | Transformer ASR | CNN ASR |
+| 源模型 | 固定配置 checkpoint / drop 数量 | Overall ASR | Strict black-box ASR | Transformer ASR | CNN ASR |
 | --- | --- | ---: | ---: | ---: | ---: |
 | ViT-B/16 | block3、block10 / 10、10 | 88.02% | 87.06% | 91.17% | 84.35% |
 | CaiT-S24 | block17、block23 / 2、28 | 90.24% | 89.50% | 92.63% | 87.45% |
@@ -38,4 +40,4 @@
 | [Provenance JSON](prd_s42_1000_fpr_provenance.json) | seed 约定、运行参数、日期、代码提交和校验哈希 |
 | [原始记录目录](prd_s42_fpr_run_artifacts/) | 全部 16 个单元的参数与原始迁移 CSV/JSON |
 
-方法执行契约见 [PRD 方法记录](../experiments/prd_method_contract.md)，服务器产物位置见 [写作交接](../experiments/server_handoff_inventory.md)。论文以 ASR 呈现迁移性；patch-score 用于动机可视化，观察材料从实际样本与层输出准备。
+方法执行契约见 [PRD 方法记录](../experiments/prd_method_contract.md)，服务器产物位置见 [写作交接](../experiments/server_handoff_inventory.md)。论文以 ASR 呈现迁移性；当前 patch score 同时用于动态观察和层内方差选层，层内 drop 位置仍均匀随机抽样。

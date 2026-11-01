@@ -1,40 +1,35 @@
-# Progressive Route Disruption
+# PRD：方差指导选层与随机 token drop
 
-本项目研究面向黑盒迁移的 **Progressive Route Disruption（PRD）**。我们观察到：同一个局部 token 与全局表示的余弦相似度会随网络深度发生明显变化，高 patch-score 的区域也随之迁移与更替。局部证据参与全局表示形成的过程是动态的。当前执行版先对每张干净图像定位 patch-score 层内方差最大的 block，再在该 block 输入处随机清零局部 token；RGB 对手通道噪声继续扰动全部初始局部特征。
-
-2026-10-29 起，四个主要源模型默认按样本自身的方差峰值选择一个 checkpoint。Patch score 用于选层；该层内的 drop 位置仍从全部局部 token 中均匀随机抽取。
+更新日期：2026-11-01。PRD 暂为仓库工作名称，论文方法名待定。论文聚焦局部—全局关联的层内方差定位与选定边界的随机 token 干预。
 
 ## 方法主线
 
-PRD 只有两个核心机制：
+同一位置的局部 token 与全局表示的关联沿深度变化，各层具有不同的局部关联分布。方法在每张干净图像上完成一次无 drop、无增强噪声的前向，计算原始 patch-score 的层内总体方差，选择方差最大的 block，并在该 block 的输入处均匀随机 hard-zero 局部 token。
 
-1. **逐样本方差定位与随机 token drop**：攻击开始前，用无 drop、无特征噪声的干净前向采集各完整 block 的输出，计算原始 patch-score 的总体方差；在方差最大 block 的输入处 hard-zero 随机局部 token，并继续同一次前向传播；
-2. **RGB opponent-channel random noise**：在亮度、红绿和黄蓝方向采样，经模型真实初始 RGB projection 映射并在特征空间 RMS matching，注入全部初始局部特征，包括之后会被 drop 的位置；CLS/prefix 不加噪声。
-
-每张图只在攻击开始前定位一次，全部攻击步共享该图的 checkpoint；同一 batch 中各图可以使用不同边界。每个 attack step、每个 augmentation group 都生成新的随机 mask。Original view 使用该 mask，phase view 使用其空间变换后的对应 mask。默认 10 steps × 10 groups × 2 views，每张图对应 100 条 schedule 和 100 次 mask selection。
+每张图只选层一次，全部攻击步与视图保持该边界固定；每个 step/group 重新抽取位置。同批样本可以选不同边界。原始／平移视图使用空间对应 mask。默认 10 steps×10 groups×2 views，每张图有 100 次原始 mask 抽样。
 
 ```text
-clean image → per-image maximum raw patch-score variance → fixed per-image boundary
+clean image → raw patch scores → within-layer variance → selected block input
 current adversarial pixels
-→ fresh uniformly random token mask at that boundary
-→ original schedule / spatially transformed phase schedule
-→ RGB opponent-channel noise on all initial local features
-→ traversal to the selected block input and local-token hard zeroing
-→ raw 20-view gradient mean
-→ MI projected update
+→ fresh uniform mask at that fixed per-image boundary
+→ original / translated views with corresponding masks
+→ single-boundary local-token hard zeroing and continued forward
+→ mean pixel gradient → momentum and projected update
 ```
+
+论文将 i.i.d. RGB 投影噪声作为普通随机特征增强，构造和参数放入补充材料，不单列为贡献。代码当前默认仍为 opponent，显式 `--noise-structure isotropic_rgb` 使用 i.i.d. RGB 采样；此次写作调整未修改代码默认或已有结果。采样经真实初始 RGB 投影并 RMS 匹配，覆盖全部初始局部位置，prefix 不变；投影后特征可以相关。
 
 ## 当前配置
 
 论文当前四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled；PiT-B 额外保留源支持。Visformer 仅作为评估目标和历史结果中的模型保留。
 
-| Source | Checkpoint 选择 | 总 drop 比例 | Opponent strength |
+| Source | Checkpoint 选择 | 总 drop 比例 | 特征增强强度 β |
 | --- | --- | ---: | ---: |
 | ViT-B/16 | 12 个 block 中逐图选取方差峰前边界 | 20/196 ≈ 10.2041% | 0.2 |
 | CaiT-S24 | 24 个局部 block 中逐图选取方差峰前边界 | 30/196 ≈ 15.3061% | 0.2 |
 | PiT-T | 全部 stage 的 2+6+4 个 block 中逐图选择 | 30/196 ≈ 15.3061% | 0.4 |
 | DeiT-B distilled | 12 个 block 中逐图选取方差峰前边界 | 20/196 ≈ 10.2041% | 0.2 |
-| PiT-B（额外保留） | 固定 `stage2_block1,stage3_block2,stage3_block3` | 沿用 5/2/6 的原生配置 | 0.4 |
+| PiT-B（额外保留） | 固定 `stage2_block1,stage3_block2,stage3_block3` | 按原固定比例与原生网格计算 | 0.4 |
 
 ViT、DeiT 使用最终 `model.norm` 后的分类 CLS；DeiT 的 distillation token 不作为参照或局部 token。CaiT 使用全部 class-attention 模块之后、最终 `model.norm` 之前的 CLS。PiT 每个 stage 使用该 stage 末端的原始 CLS，最后一个 stage 使用最终归一化后的 CLS。局部 token 均取完整 block 输出，不额外应用最终 `model.norm`。先用 float32 计算原始余弦分数，再用 float64 计算层内总体方差；不做 min–max，不跨样本平均。方差并列时选择前向顺序最早的 block。CaiT 的参照定义记录在 `attack_params.json` 的 `patch_score_reference` 中。
 
@@ -45,18 +40,18 @@ ViT、DeiT 使用最终 `model.norm` 后的分类 CLS；DeiT 的 distillation to
 所有新执行统一使用 seed **42**。`--drop-ratios` 对四个动态源表示各值之和，即单图总比例；省略时使用上表预算。PiT-B 仍按每个固定 checkpoint 分别设置。显式 `--vit-analysis-checkpoints` 仅用于固定边界的 ViT 对照，并关闭逐样本定位。
 
 ```bash
-python main.py --whitebox-model vit_base_patch16_224 --output-dir outputs/attack/prd_vit
-python main.py --whitebox-model pit_ti_224 --output-dir outputs/attack/prd_pit_t
-python main.py --whitebox-model deit_base_distilled_patch16_224 --output-dir outputs/attack/prd_deit_b
+python main.py --whitebox-model vit_base_patch16_224 --noise-structure isotropic_rgb --output-dir outputs/attack/prd_vit
+python main.py --whitebox-model pit_ti_224 --noise-structure isotropic_rgb --output-dir outputs/attack/prd_pit_t
+python main.py --whitebox-model deit_base_distilled_patch16_224 --noise-structure isotropic_rgb --output-dir outputs/attack/prd_deit_b
 ```
 
-`--input-diversity-views-per-group 1` 使用原始视图，`2` 使用原始／平移配对（默认）；`--input-diversity-groups` 控制每步组数，每步总视图不超过 20。初始 opponent noise 的特征 RMS 和投影权重固定停止梯度。像素梯度平均后直接进行系数为 1 的动量累积与投影更新。
+`--input-diversity-views-per-group 1` 使用原始视图，`2` 使用原始／平移配对（默认）；`--input-diversity-groups` 控制每步组数，每步总视图不超过 20。初始特征增强的特征 RMS 和投影权重固定停止梯度。像素梯度平均后直接进行系数为 1 的动量累积与投影更新。
 
 `main.py` 在运行开始时统一设置 PyTorch seed 42，mask、噪声和 phase 直接使用 PyTorch 随机函数；固定 batch 和执行流程时可重复采样。入口保存对抗 PNG 与 `attack_params.json`。动态执行记录每张图的图像名、方差峰值层、峰前 checkpoint、峰值方差、原生网格、实际 drop 数和比例，以及所有样本的 checkpoint 频次。现存实验运行脚本已移除，使用上述入口执行方法。
 
-## 1000-image transfer results
+## 1000-image transfer records
 
-当前评估协议为 **FPR13**。下表是已完成的固定 checkpoint 版本：seed 42、1000 张图像，2026-10-23 更新 PiT-T 和 distilled DeiT-B 的 drop/full 消融单元。逐样本动态 checkpoint 版本尚未完成同规模评估，下表数值属于固定版本。
+当前评估协议为 **FPR13**。下表是已完成的固定 checkpoint 版本：seed 42、1000 张图像，2026-10-23 更新 PiT-T 和 distilled DeiT-B 的 drop/full 消融单元。下表数值属于固定多 checkpoint＋opponent 配置。动态选层的四源同规模评估已完成，仍使用 opponent；本地原始目录和 ASR 见 [故事与证据索引](experiments/prd_paper_story.md)。最终 i.i.d. 配置的主表须对应实际运行记录。
 
 | Source | Overall ASR | Strict black-box |
 | --- | ---: | ---: |
@@ -66,9 +61,9 @@ python main.py --whitebox-model deit_base_distilled_patch16_224 --output-dir out
 | DeiT-B distilled（block2/block9） | 94.80% | 94.80% |
 | **Four-source mean** | **89.72%** | **89.29%** |
 
-完整逐目标矩阵、2×2 消融和 ASR 差值见 [FPR13 实验记录](results/prd_s42_1000_fpr_ablation.md)。[results 索引](results/README.md) 和 [轻量原始参数／迁移记录](results/prd_s42_fpr_run_artifacts/) 随 Git 提交，可在其他机器查看。历史 randomness.py seed 42 与当前 PyTorch seed 42 按用户约定作为统一报告标准。
+上述历史固定配置的完整逐目标矩阵、2×2 消融和 ASR 差值见 [FPR13 实验记录](results/prd_s42_1000_fpr_ablation.md)。[results 索引](results/README.md) 和 [轻量原始参数／迁移记录](results/prd_s42_fpr_run_artifacts/) 随 Git 提交，可在其他机器查看。历史 randomness.py seed 42 与当前 PyTorch seed 42 按用户约定作为统一报告标准。
 
-方法执行顺序见 [PRD 方法记录](experiments/prd_method_contract.md)。论文叙事、主实验记录与建议写作结构见 [PRD 论文叙事文档](experiments/prd_paper_story.md)。
+当前论文围绕选层对照、token 选择对照和迁移 ASR 组织，旧双机制消融保留原配置含义。方法执行顺序见 [PRD 方法记录](experiments/prd_method_contract.md)。论文叙事、主实验记录与建议写作结构见 [PRD 论文叙事文档](experiments/prd_paper_story.md)。
 
 异地写作所需的当前主实验参数、原始记录和服务器材料位置见 [写作交接与文件清单](experiments/server_handoff_inventory.md)。
 

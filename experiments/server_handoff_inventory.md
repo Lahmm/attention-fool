@@ -1,12 +1,14 @@
-# PRD 写作交接与材料清单
+# 论文写作交接与材料清单
 
-更新日期：2026-10-26。本地分支为 `prd`；当前主结果为 seed-42、四源、1000 图像、FPR13。更新的四个攻击单元运行代码为 `2d2625b`。相对路径均以仓库根目录为起点。
+更新日期：2026-11-01。本地分支为 `prd`。相对路径均以仓库根目录为起点。论文主线为方差指导选层与随机 token drop，i.i.d. RGB 投影噪声归入共同增强，正式方法名待定。
 
-## 主线与主实验
+## 主线与实验状态
 
-PRD 以随深度演化的局部证据为动机，在全部初始局部特征中加入 RGB opponent-channel 投影噪声，随后在同一前向轨迹的多个 checkpoint 随机 hard-zero 局部 token。执行顺序与当前源参数见 [方法契约](prd_method_contract.md)。
+一次干净前向确定最大原始 patch-score 层内方差 block，在其输入处实施随机 token drop；边界固定，位置按 step/group 重采样。方法见 [执行契约](prd_method_contract.md)，叙事、章节和图表见 [故事](prd_paper_story.md) 与 [蓝图](cvpr2027_writing_blueprint.md)。
 
-四源为 ViT-B/16、CaiT-S24、PiT-T 和 distilled DeiT-B。完整 PRD Overall ASR 为 **89.72%**，严格黑盒 ASR 为 **89.29%**。全部 16 个消融单元使用相同 1000 张图像；每个单元在 FPR13 的 13 个目标上评估。完整数值、ASR 差值与来源见 [FPR 实验记录](../results/prd_s42_1000_fpr_ablation.md)。
+本地已有动态选层四源各 1000 图像、13 目标评估，仍为 opponent 增强。当前 CaiT 定义对应后续 preln 运行。最终 i.i.d. 配置与匹配选层矩阵需要实际记录支持。代码默认 opponent 未在此次文档任务中修改。
+
+已归档固定多 checkpoint/opponent 配置的 Overall 89.72%、strict 89.29% 和完整 2×2 消融保留原含义。新增动态记录不从旧表改标签生成，所有 ASR 使用全部对抗样本。
 
 ## 随 Git 提交的材料
 
@@ -15,7 +17,7 @@ PRD 以随深度演化的局部证据为动机，在全部初始局部特征中�
 | `AGENTS.md`、`README.md` | 方法主线、操作约定与结果入口 |
 | `progressive_attack.py`、`main.py`、`nets/` | 当前攻击实现与架构遍历 |
 | `transfer_eval.py`、`experiments/fpr_target_protocol.md` | FPR13 目标模型、权重及预处理 |
-| `results/prd_s42_1000_fpr_ablation.md` | 主表、逐目标矩阵、完整 2×2 消融及 ASR 差值 |
+| `results/prd_s42_1000_fpr_ablation.md` | 历史固定配置主表、逐目标矩阵、2×2 消融及直接差值 |
 | `results/prd_s42_1000_fpr_summary.csv` | 各源、各单元及四源宏平均 |
 | `results/prd_s42_1000_fpr_per_target.csv` | 208 项 source/cell/target ASR |
 | `results/prd_s42_1000_fpr_effects.csv` | 消融 ASR 效应点估计 |
@@ -25,7 +27,23 @@ PRD 以随深度演化的局部证据为动机，在全部初始局部特征中�
 
 当前 `results/` 只保留 FPR13 实验数值与来源材料。旧协议及已清理的观察统计可从 Git 历史查询；动机可视化从实际样本与层输出另行准备。
 
-## 服务器原件
+## 当前动态与 token 选择原件
+
+下列目录均含参数与评估记录，位于 `outputs/attack/`，不随 Git 提交。各动态目录含 1000 条选层记录和 13 目标迁移 CSV/JSON。
+
+| 目录 | 内容 |
+| --- | --- |
+| `prd_dynamic_variance_s42_20261029T031203Z_vit/` | ViT 动态选层＋opponent |
+| `prd_dynamic_variance_s42_20261029T031203Z_pit_t/` | PiT-T 动态选层＋opponent |
+| `prd_dynamic_variance_s42_20261029T031203Z_deit_b/` | distilled DeiT-B 动态选层＋opponent |
+| `prd_cait_preln_variance_s42_20261029T070204Z/` | 当前 CaiT 参照定义的动态选层＋opponent |
+| `prd_dynamic_variance_s42_20261029T031203Z_cait/` | 早期 CaiT 参照运行，另行保留，不替代后续 preln 记录 |
+| `vit_drop_selection_s42_20261029T125456Z/` | 固定 block10 六组 token 策略，10 groups×2 views，含 asr_comparison.csv |
+| `vit_drop_selection_g1v2_s42_20261101T131251Z/` | 固定 block10 六组 token 策略，1 group×2 views，含 asr_comparison.csv |
+
+最终 i.i.d. 主表确定后另行归档必要的轻量 FPR13 参数与原始迁移记录。`figure1.py` 已支持 ViT 原始分数导出，完整方差曲线与新版 Fig. 2 尚需准备；`figure2.py` 当前仍生成旧固定双 checkpoint 素材。
+
+## 历史固定配置与通用服务器原件
 
 | 路径 | 用途 |
 | --- | --- |

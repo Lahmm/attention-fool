@@ -1,12 +1,12 @@
 # PRD 方法与执行契约
 
-2026-10-29 按用户确认更新执行方式：四个主要源模型在攻击前，按每张干净图像自身的原始 patch-score 层内方差定位一个 checkpoint，然后执行随机 token drop 和初始 RGB opponent-channel noise。以下约定适用于新执行；已有 FPR13 结果保留其实际固定 checkpoint 参数。
+2026-11-01 更新叙事与增强定位。四个主要源模型在攻击前，按每张干净图像自身的原始 patch-score 层内方差定位一个 checkpoint，然后在峰值 block 输入处随机 token drop。论文核心为统计选层与随机干预；i.i.d. RGB 投影噪声作为共同随机特征增强，详细构造放入补充材料。代码默认仍为 opponent，需显式 `--noise-structure isotropic_rgb` 采用 i.i.d. 采样。本次文档更新不改变代码默认和已有测量。
 
 ## 源与随机设置
 
-四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled，额外保留固定边界的 PiT-B。所有新执行在入口设置 PyTorch 全局 seed 42；固定 batch 布局和执行流程时可复现采样。历史 `randomness.py` seed 42 与当前 PyTorch seed 42 仍按用户约定视为统一报告标准；改变 checkpoint 策略后的测量需要重新执行。
+四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled，额外保留固定边界的 PiT-B。所有新执行在入口设置 PyTorch 全局 seed 42；固定 batch 布局和执行流程时可复现采样。历史 `randomness.py` seed 42 与当前 PyTorch seed 42 仍按用户约定视为统一报告标准；改变 checkpoint 策略、drop 参数或实际增强分布后的报告需要对应配置的测量。
 
-| Source | 观察范围 | 单样本总 drop 比例 | Opponent strength |
+| Source | 观察范围 | 单样本总 drop 比例 | 特征增强强度 β |
 | --- | --- | ---: | ---: |
 | ViT-B/16 | 全部 12 个 block | 20/196 | 0.2 |
 | CaiT-S24 | 全部 24 个局部 token block | 30/196 | 0.2 |
@@ -28,23 +28,25 @@
 ## 攻击执行顺序
 
 1. 定位结束后，每个 step/group 根据已知网格和 drop 比例构建新 mask schedule，不为生成 mask 执行额外前向，也不从 GPU 回读 mask 计数。固定源的网格由其 patch embedding 和 pooling 几何计算。动态四源每张图仍只有选定的一个边界；整批 schedule 包含本批边界的并集，并记录各边界的有效样本。位置始终均匀随机抽样，分数不选择被清零的 token。
-2. 每个可微视图只构建一次初始状态。在全部初始局部位置加独立采样的 opponent noise，包括未来会被清零的位置。prefix 不变。
+2. 每个可微视图只构建一次初始状态。在全部初始局部位置加该视图独立采样的投影特征增强，包括未来会被清零的位置。prefix 不变。最终论文采用显式 isotropic_rgb 设置；旧运行按记录中的噪声配置解释。
 3. 到达选定边界，清零所选局部 token 的全部通道，再继续同一次前向。原生网格和 token 数保持不变。
 4. 默认原始／平移两个视图。平移通过整批索引实现反射填充裁剪的相同映射，mask 同步映射到图像空间、平移后按原生网格 occupancy top-k 保持 drop 数量。未选择当前边界的样本在两个视图中都保持全零 mask。同组两视图使用相同模型边界。相位在 CPU 上通过 PyTorch 全局随机函数采样，避免 GPU 标量回读。
 5. 默认 10 groups×2 views。像素梯度直接平均，以系数 1 累积动量，再做 sign 更新、相对干净输入的 L∞ 投影和 [0,1] 截断。默认 10 steps、epsilon=16/255、步长 epsilon/steps。动态四源每图产生 100 条 schedule、100 次 checkpoint mask selection。
 
 `--input-diversity-views-per-group` 保留 1、2 两种消融设置。单视图不采样平移；默认平移集合为 (4,4)/(8,8)/(12,12)，每步每图视图不超过 20。关闭 progressive drop 时跳过方差定位。显式 ViT 固定边界分析参数和 Figure 2 固定版本素材入口用于复现原配置，普通四源入口默认动态定位。
 
-## 噪声
+## 共同随机特征增强（补充材料设置）
 
-亮度、红绿、黄蓝方向为 `(1,1,1)/√3`、`(1,-1,0)/√2`、`(1,1,-2)/√6`，采样方差为 `0.5,1.25,1.25`。每个初始局部位置按 RGB 投影核采样，使用真实投影权重 W 映射：
+论文采用 `--noise-structure isotropic_rgb`：三个正交 RGB 方向的独立高斯系数方差均为 1，等价于投影前 RGB 空间的 i.i.d. 标准高斯采样。使用真实初始投影权重 W 映射并 RMS 匹配：
 
-`η = W ξ_RGB`，`η_hat = β RMS(H0)/RMS(η) · η`，`H0_noise = H0 + η_hat`。
+`η = W ξ_RGB`，`η_hat = β RMS(H0)/RMS(η) · η`，`H0_aug = H0 + η_hat`。
 
-RMS 在单样本全部初始局部位置和通道上计算。特征 RMS 与投影权重固定 detach。噪声每个可微视图只注入一次。
+RMS 在单样本全部初始局部位置和通道上计算。特征 RMS 与投影权重固定 detach。每个可微视图注入一次，覆盖全部初始局部位置，prefix 不变。投影后的特征可以相关，i.i.d. 描述投影前采样。
+
+代码当前默认 `opponent` 保持方差 `0.5,1.25,1.25`，对应亮度、红绿、黄蓝正交基；历史记录保留真实设置。此配置差异只作为实现与实验来源事实记录，噪声不再单列为论文机制、贡献或正文方法小节。
 
 ## 记录与评估
 
 动态 `attack_params.json` 保存定位定义、总比例、并列规则，以及逐样本图像名、峰值层、checkpoint、峰值方差、网格、实际 drop 数和实际比例。CaiT 额外保存 `patch_score_reference`，标明 class-attention 后、最终 LayerNorm 前的 CLS 参照。保存跨 batch 的 checkpoint 频次；不把最后一个子组的固定参数当作整批结果。
 
-迁移评估仍以 FPR13 为主。ASR 为全部对抗样本上的 `1 - adversarial accuracy`。`results/` 仅保存 FPR13 数值和参数；已有固定 checkpoint 结果不会作为动态版本结果重标。
+迁移评估仍以 FPR13 为主。ASR 为全部对抗样本上的 `1 - adversarial accuracy`。`results/` 仅保存 FPR13 数值和参数；已有固定 checkpoint/opponent 结果保持原标签；动态四源 opponent 评估已完成，索引见 [故事记录](prd_paper_story.md)。最终动态 i.i.d. 结果需对应实际配置，不从旧表重标。

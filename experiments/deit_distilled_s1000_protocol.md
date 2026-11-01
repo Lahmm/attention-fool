@@ -1,9 +1,9 @@
 # DeiT-B distilled 源配置
 
-当前 DeiT-B 源模型为 `deit_base_distilled_patch16_224`。与 ViT-B/16 共享 PRD 遍历，默认 checkpoint 为 block2、block9，各清零 10/196 个局部 token；opponent strength 为 0.2。ViT-B/16 的默认 checkpoint 仍为 block3、block10。
+更新日期：2026-11-01。当前源模型为 `deit_base_distilled_patch16_224`。对每张干净图像计算十二个完整 block 输出的原始局部 token／最终归一化分类 CLS 余弦分数，以层内总体方差最大者定位，在该 block 输入处随机 hard-zero。每图只选一次边界，总 drop 比例为 20/196；每个 step/group 重采样位置。
 
-初始状态将局部 token 与两个 prefix（CLS、distillation）分开。初始噪声和 checkpoint masks 仅作用于局部 token，最终调用模型原生 forward_head，在 eval 模式下平均两个分类 head。
+CLS 与 distillation 两个 prefix 从局部 token 中排除，初始随机特征增强与 drop 都仅作用于局部位置。模型原生 forward_head 在 eval 模式下平均两个分类 head。方法细节见 [执行契约](prd_method_contract.md)。
 
-新执行统一使用 seed 42，通过 `main.py --whitebox-model deit_base_distilled_patch16_224` 调用。原始／平移视图为默认设置，保留视图数消融参数。目标协议由 `transfer_eval.py --protocol project|fpr` 单独选择。
+论文采用共同 i.i.d. RGB 投影特征增强，显式运行 `main.py --whitebox-model deit_base_distilled_patch16_224 --noise-structure isotropic_rgb`。代码当前默认仍为 opponent，β=0.2；本次仅更新文档。新执行 seed 42，原始／平移配对，保留 `--input-diversity-views-per-group` 消融；迁移评估使用 `transfer_eval.py --protocol fpr`。
 
-测试覆盖原生与恢复前向一致、两个 prefix 保护、实际清零数量及有限非零像素梯度。旧实验结果保留原测量含义，不因本次源支持调整改写。
+已完成的动态/opponent 千图记录位于 `outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_deit_b/`。旧固定 block2/block9 各 10 token 的结果保留原含义。最终 i.i.d. 主表须对应实际运行，证据索引见 [故事记录](prd_paper_story.md)。

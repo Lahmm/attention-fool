@@ -1,54 +1,89 @@
-# PRD 论文叙事与主实验记录
+# 论文故事与 outline：方差指导选层和随机 token drop
 
-当前主实验使用 seed 42、四源、1000 图像和 FPR13；2026-10-23 更新了 PiT-T 与 distilled DeiT-B 的 drop/full 四个单元。当前结果的数值入口为 [FPR 实验记录](../results/prd_s42_1000_fpr_ablation.md)。当前论文源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled，额外保留 PiT-B。
+更新日期：2026-11-01，依据用户确认的写作重心调整。PRD 暂作为仓库工作名称；论文方法名与标题待讨论确定。本文档是写作规划，论文自然段仍仅在对话中交付。
 
-当前执行顺序见 [PRD 方法记录](prd_method_contract.md)。
+## 1. 中心叙事
 
-本文的中心贡献是 **Progressive Route Disruption（PRD）**：一种面向跨模型迁移的攻击方法。主线聚焦完整方法的设计与迁移效果，核心机制只有两个：沿模型深度的 checkpoint-wise progressive random token drop，以及施加在全部初始局部特征上的 RGB opponent-channel noise。
+图像的局部表示在网络传播中持续变化，它们与全局表示的关联也随深度重新分布。通过实际样本的跨层 patch-score 可视化呈现这一过程，再用每层局部—全局相似度的方差描述局部关联的分散程度。方法为每张干净输入计算一个干预深度，在方差峰值 block 的输入处均匀随机清零部分局部 token，并通过多次随机前向计算优化像素扰动。论文以选层对照、token 选择对照和跨模型迁移 ASR 检验这一设计。
 
-## 核心故事
+核心链条：**关联随深度变化 → 干预深度的选择问题 → 原始分数的层内方差定位 → 选定边界的随机 drop → ASR 验证**。
 
-1. **观察。** 同一个局部 token 与全局表示的余弦相似度会随网络深度发生明显变化，高 patch-score 的 patch 位置也会随层数变化而迁移与更替。用同一样本的多层 patch-score 可视化展示这一动态过程，让读者看到局部证据如何在前向传播中演化。Patch score 用于呈现发现，PRD 的执行由随机 checkpoint schedule 驱动。
-2. **方法。** PRD 在多个架构专属 checkpoint 顺序地随机选择局部 token 并 hard-zero；每次 drop 后，模型都在已改变的 hidden state 上继续前向传播。每个攻击 step、每个 augmentation group 都重新构造随机 schedule。原始视图使用该 schedule，相位视图使用对应的空间变换 schedule。
-3. **互补扰动。** PRD 在全部初始局部特征上加入噪声，包括未来会被 drop 的位置；噪声从亮度、红绿、黄蓝三个 RGB 对手方向采样，经源模型的初始 RGB projection 映射到特征空间并进行 RMS 匹配。
-4. **结果。** 四种源架构各攻击 1000 张图像，在相同的 FPR13 的 13 个目标模型上评估。PRD 的四源平均 Overall ASR 为 **89.72%**，平均严格黑盒 ASR 为 **89.29%**。
+跨层动态观察负责提出问题，层内方差负责落实选层，随机 drop 负责实施干预。全文贡献集中在这一完整设计。i.i.d. 噪声作为统一的随机特征增强设置；空间配对、视图梯度平均、动量和投影更新组成优化流程。
 
-适合摘要或引言的核心表述：
+## 2. 五个论证节点
 
-> 随着图像向网络深处传播，同一个局部 token 与全局表示的关联会发生明显变化，高 patch-score 的区域也不断更替。这一动态发现启发我们沿着表示形成的过程发起攻击。我们提出 Progressive Route Disruption，在多个 checkpoint 对演化中的局部表示施加重新采样的随机中断，同时用 RGB 对手通道噪声扰动全部初始局部表示。在四种源架构、每源 1000 图像和 FPR13 的 13 个目标模型的评估中，PRD 取得 89.29% 的平均严格黑盒 ASR。
+| 节点 | 读者需要理解的内容 | 证据或方法内容 |
+| --- | --- | --- |
+| 观察表示演化 | 同一位置的局部 token 与全局表示的关联沿深度变化，高分区域随之更替 | 实际样本的跨层 patch-score 图，固定位置曲线可作辅助 |
+| 提出干预深度问题 | 各层具有不同的局部关联分布，需要确定随机干预的位置 | 将跨层观察连接到层内分布与方差曲线 |
+| 定义统计选层 | 最大层内方差是可直接计算的定位规则 | 原始余弦分数、总体方差、峰值 block 与其输入边界 |
+| 实施随机干预 | 在定位边界从全部局部位置均匀抽样并 hard-zero，再继续前向 | 每个 step/group 重采样位置，空间配对共享对应 mask |
+| 验证设计 | 选层规则、层内策略和完整攻击分别取得什么 ASR | 匹配设置的选层表、token 选择表、四源 FPR13 主表 |
 
-## 方法事实与配置
+同一 token 跨层变化和同一层不同 token 的分数差异是两个不同的观察维度。前者建立动态背景，后者直接定义选层统计。方差表示局部—全局关联的分散程度；关于选层效果的结论由 ASR 对照给出。
 
-PRD 默认使用 10 个迭代 step、每步 10 个 augmentation group、每组 2 个视图。一个 step/group 构造一条新 schedule，因此每张图像有 100 条随机 schedule；ViT 的两个 checkpoint 对应 200 次 mask selection。不同 checkpoint 独立采样，允许重复选中同一空间位置。相位视图共享原始 schedule 的空间变换结果，而非另抽一套 mask。
+## 3. 方法事实与算法骨架
 
-当前各源的 checkpoint、实际网格和 drop 数见 [方法契约](prd_method_contract.md)。PiT-T 使用 14/2/2 的 checkpoint 丢弃数，PiT-B 额外保留自身的 5/2/6 配置；DeiT-B distilled 保留两个 prefix。每组视图数仍支持 1/2 消融。
+1. 每张干净图像在攻击开始前做一次无 drop、无特征增强噪声的完整前向，采集各完整 block 输出的局部表示。
+2. 计算局部 token 与架构对应全局参照的原始余弦分数，以该层全部局部 token 为分母计算总体方差；选取方差最大的 block，并列取前向顺序最早者。
+3. 将干预放在峰值 block 的输入处。峰值在 block 输出处观测，清零在该 block 执行之前实施。每张图只选层一次，全部攻击步与视图保持该图的边界固定。
+4. 每个 step/group 从选定边界的全部局部位置均匀、无放回抽取指定数量，清零所选 token 的全部通道。token 数量与原生网格保持不变，模型继续同一次前向。
+5. 默认原始／反射平移两个视图；平移视图使用原始 mask 的空间对应变换，按原生网格 occupancy top-k 保持 drop 数量。
+6. 平均各视图的像素梯度，直接累积动量，执行 sign 更新、相对干净输入的 L∞ 投影与像素截断。
 
-相位配对、20-view 梯度平均、动量和投影更新属于攻击的实现流程；论文贡献陈述保持在上述两项核心机制上。
+“动态”指根据输入计算边界；位置在攻击期间重新采样。默认 seed 42、10 steps、10 groups×2 views，每张图有 100 次原始 mask 抽样，每个视图只在该图选定的一个边界 drop。同批样本可以选取不同边界，整批遍历它们的并集时仅干预对应样本。
 
-## 已完成的 1000 图像主实验
+当前四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled。总 drop 比例分别为 20/196、30/196、30/196、20/196；多尺度模型在所选原生网格计算实际数量。PiT-B 作为额外源保留现有固定边界支持，单独记录。架构参照、取整和执行细节见 [方法契约](prd_method_contract.md)。
 
-ASR 定义为 `1 - adversarial accuracy`，分母为全部 1000 张评估样本。目标集由 7 个 Transformer 和 6 个 CNN 组成；Overall 对 13 个目标取平均。严格黑盒只排除完全同名源目标，因此 ViT-B/16 和 CaiT-S24 各为 12 个目标，PiT-T 和 distilled DeiT-B 各为 13 个目标。
+## 4. 增强设置与贡献组织
 
-| 源模型 | Overall ASR | Transformer 平均 | CNN 平均 | 严格黑盒 Overall |
-| --- | ---: | ---: | ---: | ---: |
-| ViT-B/16 | 88.02% | 91.17% | 84.35% | 87.06% |
-| CaiT-S24 | 90.24% | 92.63% | 87.45% | 89.50% |
-| PiT-T | 85.81% | 81.90% | 90.37% | 85.81% |
-| DeiT-B distilled | 94.80% | 96.90% | 92.35% | 94.80% |
-| **四源平均** | 89.72% | 90.65% | 88.63% | 89.29% |
+采用 i.i.d. RGB 采样经初始投影映射并 RMS 匹配的随机特征增强。i.i.d. 指投影前 RGB 采样；投影后的特征可以相关。噪声注入覆盖全部初始局部位置，prefix 保持不变。具体构造、强度与注入位置放入补充材料的共同实现设置。
 
-主结果 52 项 source-target 评估均覆盖 1000 张图像。数值依据为 [FPR 逐目标表](../results/prd_s42_1000_fpr_per_target.csv)、[汇总表](../results/prd_s42_1000_fpr_summary.csv) 和 [各单元原始记录](../results/prd_s42_fpr_run_artifacts/)。
+摘要、引言、贡献、结论、核心流程图不突出噪声；方法章不设置独立噪声小节。主文围绕选层与随机 drop 组织，补充材料如实记录共同增强。颜色方向对照保留为辅助记录。
 
-## 论文组织建议
+本次调整仅修改文档。代码默认仍为 `opponent`；已有 `--noise-structure isotropic_rgb` 支持 i.i.d. RGB 采样。已有 opponent 测量保留原标签，最终主表需要对应实际 i.i.d. 配置。
 
-1. **Introduction：** 用动态 patch 排序引出“在表示演化过程中施加干预”的设计问题；概括 PRD 的两个机制与四架构迁移结果。
-2. **Observation and motivation：** 以同一样本的多层 patch-score 图和 token 分数变化曲线展示动态发现。可视化从实际样本和层输出准备；当前 results 仅保留 FPR13 迁移结果，辅助观察统计需另行准备。
-3. **Method：** 用一张流程图呈现“当前对抗样本 → 新随机 schedule → 原始/相位配对 → 全部初始局部特征处的 RGB opponent-channel noise → 顺序 checkpoint drop → 梯度聚合与投影更新”。给出四个 adapter 的原生网格及默认预算。
-4. **Experiments：** 主表展示四种源模型对 FPR13 的 13 个目标模型的迁移；报告 Overall、Transformer、CNN 和严格黑盒 ASR。公开方法比较统一数据、`16/255` 扰动预算、源/目标模型和 ASR 分母。
-5. **Ablation and analysis：** 通过 ASR 对照呈现 progressive drop、opponent noise 及其组合的效果；围绕 checkpoint、drop budget、噪声强度和实际样本展开。梯度诊断只用于内部实验分析。
+贡献建议为两点：
 
-## 表达约定与结论主线
+1. 提出方差指导的选层与随机 token 干预：从一次干净前向确定输入对应边界，在该边界均匀随机 hard-zero 局部 token，用于迁移攻击优化。
+2. 通过四源 FPR13 迁移 ASR、选层对照、token 选择与预算分析，验证完整方法和关键设计。
 
-从动态发现进入方法：局部 token 与全局表示的关联沿深度变化，高分区域随之更替；PRD 顺着这一演化过程施加逐 checkpoint 随机中断，并扰动初始局部表示。以四源平均严格黑盒 ASR 89.29% 呈现完整方法的迁移表现。
+## 5. 正文章节与图表
 
-表达直接、鲜明，围绕发现、设计和结果展开。省去对未提出主张的澄清，把篇幅用于描绘动态过程和解释方法。ASR 是论文的迁移性表征；effective rank 等梯度诊断保留在内部过程记录。完整约定见 `AGENTS.md` 的 Paper-writing objective and voice。
+正文采用 Introduction、Related Work、Method、Experiments、Conclusion。方法章为 3.1 Preliminaries、3.2 Depth-wise Local–Global Alignment、3.3 Variance-Guided Layer Selection and Random Token Drop、3.4 Attack Optimization。
+
+实验章为 4.1 Experimental Setup、4.2 Main Transfer Results、4.3 Layer Selection、4.4 Token Dropping and Additional Analysis。完整章节任务、算法、图表和写作顺序见 [写作蓝图](cvpr2027_writing_blueprint.md)。
+
+- Fig. 1：真实样本的跨层 patch-score 图、原始分数方差曲线、峰值 block 与输入边界。热图层内归一化只用于显示，方差使用原始分数。
+- Fig. 2：一次干净选层与迭代攻击双支路；突出边界固定、随机 mask、空间配对、单边界 hard-zero 与梯度更新。
+- Table 1：最终方法的四源迁移主结果与同协议比较。
+- Table 2：匹配增强、drop 比例和优化预算的选层对照。
+- Table 3：层内 token 选择与固定／重采样策略对照。
+- Fig. 3（可选）：drop 比例或 ASR—计算预算关系。架构全配置与选层频次放入补充材料。
+
+## 6. 现有证据与待准备内容
+
+已在本地核实四源动态选层、每源 1000 图像、FPR13 的 13 目标评估；这些运行仍使用 opponent 增强。采用当前参照定义的记录为：
+
+| Source | Overall ASR | Strict black-box ASR | 本地原始运行目录（`outputs/attack/` 下） |
+| --- | ---: | ---: | --- |
+| ViT-B/16 | 88.13% | 87.15% | `prd_dynamic_variance_s42_20261029T031203Z_vit/` |
+| CaiT-S24 | 83.22% | 82.34% | `prd_cait_preln_variance_s42_20261029T070204Z/` |
+| PiT-T | 83.60% | 83.60% | `prd_dynamic_variance_s42_20261029T031203Z_pit_t/` |
+| DeiT-B distilled | 94.38% | 94.38% | `prd_dynamic_variance_s42_20261029T031203Z_deit_b/` |
+
+各目录包含 `attack_params.json`、`transfer.csv`、`transfer.json`。CaiT 使用 class-attention 后、最终 LayerNorm 前 CLS 的后续运行；早期 CaiT 参照不同的运行另行保留。原始目录不随 Git 分发。
+
+旧固定多 checkpoint 的四源 Overall 89.72%、strict 89.29% 以及 2×2 消融保存在 [历史配置实验记录](../results/prd_s42_1000_fpr_ablation.md)。它们作为历史配置证据，数值与参数不改写。当前动态表与旧配置表同时改变了配置，选层收益通过匹配的单边界对照检验。
+
+ViT 的动态记录中 996/1000 张图选择 `block10`；选层分布按真实频次展示。十组视图下，六组 token 选择实验的 high-random/low-random/random strict ASR 为 87.28%/87.19%/87.24%，random-fix 为 87.11%；一组视图下 random/random-fix 为 75.23%/75.35%。这些固定 `block10` 的实验支持简洁随机策略的使用，重采样的作用按直接差值呈现。原始表位于 `outputs/attack/vit_drop_selection_{s42_20261029T125456Z,g1v2_s42_20261101T131251Z}/asr_comparison.csv`。
+
+优先准备最终 i.i.d. 配置的四源结果、匹配设置的固定单层／随机选层／方差选层／无 drop 对照，以及 Fig. 1 的原始方差曲线。现有 Figure 2 是旧固定双 checkpoint 的素材，需另行准备当前单边界流程图。此次文档更新不执行这些实验或修改图像脚本。
+
+ASR 定义为全部评估对抗样本上的 `1 - adversarial accuracy`。严格黑盒排除完全相同的源目标；四源等权汇总。所有机制结论使用 ASR 与直接 ASR 差值，梯度诊断留在内部分析。
+
+## 7. 表达与写作约定
+
+围绕观察、选层、随机干预和 ASR 写作。正文不再沿用“双核心机制”或“多 checkpoint 顺序中断”的方法描述。保持直接、鲜明、肯定的语言，以真实样本和数值推进论证。
+
+每次论文交付仍为一个英文自然段及对应中文翻译，讨论确认后继续。图表占位、公式呈现与本地文件操作遵循 `AGENTS.md`。

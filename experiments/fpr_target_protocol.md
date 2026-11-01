@@ -14,4 +14,6 @@ ASR 使用所有输入的对抗样本，不做 clean-correct 筛选。使用 `--
 
 相关依据：[FPR 论文](https://arxiv.org/html/2503.15404v1)、[官方模型加载](https://github.com/RYC-98/FPR/blob/main/transferattack/utils.py)。当前目标架构与预处理对齐，并不据此声称本地 Transformer 权重与官方二进制文件逐字节相同。
 
-当前配置的 seed-42、1000 图像四源结果和 2×2 消融见 [FPR 完整实验记录](../results/prd_s42_1000_fpr_ablation.md)；Overall ASR 为 89.72%，严格黑盒 ASR 为 89.29%。全部单元的轻量参数／迁移原始记录保存在受 Git 管理的 `results/prd_s42_fpr_run_artifacts/`。
+历史固定多 checkpoint/opponent 配置的 seed-42、1000 图像四源结果和 2×2 消融见 [FPR 完整实验记录](../results/prd_s42_1000_fpr_ablation.md)；Overall ASR 为 89.72%，严格黑盒 ASR 为 89.29%。全部单元的轻量参数／迁移原始记录保存在受 Git 管理的 `results/prd_s42_fpr_run_artifacts/`。
+
+当前动态选层四源的本地 opponent 记录及当前 CaiT 参照运行见 [故事与证据索引](prd_paper_story.md)。论文采用共同 i.i.d. 增强，最终表需对应实际配置；固定配置的 89.29% strict ASR 保留历史标签。

@@ -1,328 +1,248 @@
-# PRD：CVPR 2027 论文写作蓝图
+# CVPR 2027 写作蓝图：方差指导选层与随机 token drop
 
-材料统一日期：2026-10-26。当前本地分支：`prd`。主实验采用 seed-42 四源、1000 图像、FPR13 结果，2026-10-23 完成配置更新的四个消融单元，运行代码为 `2d2625b`。方法执行契约见 [PRD 方法记录](prd_method_contract.md)，数值入口为 `results/prd_s42_1000_fpr_per_target.csv` 和 `results/prd_s42_1000_fpr_summary.csv`。
+更新日期：2026-11-01。依据用户确认的主线收紧方案，整体替换原双核心机制与多 checkpoint 写作安排。PRD 暂作为仓库工作名称；方法名与标题待讨论确定。本文档规划章节、算法、图表和证据准备，论文自然段仍只在对话中交付。
 
-## 1. 项目目标与本文档工作内容
+## 1. 目标、中心问题与写作边界
 
-项目的主要任务是：依据本地 PRD 分支的实现与实验材料，以已有四源、1000 图像、FPR13 目标结果作为主实验，撰写面向 CVPR 2027 投稿的论文。
+论文研究根据输入表示统计确定随机 token 干预的深度，并通过这一干预优化可迁移对抗扰动。核心设计是**原始 patch-score 的层内方差选层＋选定边界的均匀随机 token drop**。
 
-本文档承担写作前的整体理解、论证组织、章节设计与写作顺序规划。已有主实验是论文的事实基础；必要的补充比较和机制验证围绕这一基础开展。方法保持两个核心机制：checkpoint-wise progressive random token drop 与 RGB opponent-channel random noise。
+故事顺序：**局部—全局关联沿深度变化 → 干预深度的选择问题 → 方差定位 → 单边界随机 drop → 迁移 ASR 验证**。跨层观察建立动态背景，层内方差定义选层规则，ASR 对照检验设计效果。
 
-全文采用以 PRD 为中心的方法论文结构：Introduction、Related Work、Progressive Route Disruption、Experiments、Conclusion。Preliminaries 放在方法章开头；动态观察在引言中呈现，并在 progressive drop 小节中直接连接到方法设计。正文的章节编号与逐节任务见本文档 §6。
+i.i.d. RGB 采样经初始投影映射与 RMS 匹配的随机特征增强作为统一设置；具体构造放入补充材料。摘要、引言、贡献、结论和核心图不突出噪声，不单设噪声方法小节。空间配对、梯度平均和投影更新组成完整优化流程。
 
-建议工作标题：**Progressive Route Disruption for Transferable Adversarial Attacks**。
+本次仅修改文档。现有代码默认仍为 `opponent`，显式 `--noise-structure isotropic_rgb` 支持 i.i.d. RGB 采样；已有 opponent 记录保持原标签。最终方法表对应实际 i.i.d. 配置，当前文档不宣称已完成该配置的四源主实验。
 
-写作约定：直接讲发现、设计与结果，用鲜明的动态过程吸引读者。动机以同一样本的 token 分数变化和高 patch-score 区域的迁移为中心；ASR 呈现迁移效果。梯度诊断保留为内部分析工具。省去针对未提出主张的反复澄清，让每一段推进论文主线。长期约定已记录在 `AGENTS.md` 的 Paper-writing objective and voice。
+## 2. 研究故事与贡献
 
-## 2. 材料与证据层级
+### 2.1 从动态观察进入干预深度问题
 
-| 材料 | 用途 | 写作地位 |
-| --- | --- | --- |
-| `AGENTS.md`、`README.md`、`experiments/prd_method_contract.md` | 确认单一方法、执行顺序、配置与术语 | 当前主线约束 |
-| `progressive_attack.py`、`main.py`、`nets/*.py` | 核对 schedule、噪声、遍历与更新 | 方法事实依据 |
-| `main.py`、`utils.py`、`transfer_eval.py` | 核对固定 PyTorch seed、数据、预处理与 ASR | 实验协议依据 |
-| `tests/*.py` | 当前执行行为与 optional real-model 验证 | 行为契约 |
-| `experiments/prd_paper_story.md` | 论文故事与表达约定 | 叙事起点 |
-| `experiments/progressive_cross_arch_mainline_s1000.md` | 当前正式配置、汇总和 4×13 逐目标表 | 主实验说明 |
-| `results/prd_s42_fpr_run_artifacts/` | 16 个单元的参数和原始迁移表 | 主实验原始记录 |
-| `results/prd_s42_1000_fpr_per_target.csv`、`results/prd_s42_1000_fpr_summary.csv` | 52 项 full 主结果及完整 208 项消融评估 | 制作主表与消融表的数值依据 |
-| `results/prd_s42_1000_fpr_provenance.json` | 各单元参数、日期、代码提交、样本及文件哈希 | 可复核性依据 |
-| 实际样本的多层 patch-score 图与变化曲线（待准备） | 展示局部证据随深度变化 | 动机证据 |
-| `experiments/server_handoff_inventory.md` | 本地材料与服务器当前运行目录 | 文件可用性依据 |
+同一位置的局部 token 与全局表示的余弦相似度沿深度变化，高分 patch 区域也随之更替。使用真实样本的跨层 patch-score 图展示这一过程。接着呈现各层局部 token 分数的分布与方差曲线，将读者引向干预深度的确定。
 
-主实验 full 包含 52 项 source-target 结果；16 个消融单元共 208 项评估。所有单元使用相同 1000 图像输入集与全部样本 ASR 分母，汇总与原始迁移记录均已归档。
+同一 token 跨层变化描述表示演化；同一层不同 token 的分数差异定义定位统计。两者分别呈现，避免用一种现象代替另一种统计。方差的直接含义是局部—全局关联的分散程度。选层有效性由后续匹配设置的 ASR 对照验证。
 
-当前主实验的对抗图像、replay manifests、逐样本预测和日志保存在服务器。本地保存完整结果 CSV、参数与环境记录；样本可视化和进一步逐样本分析从当前运行目录取得原件。
+### 2.2 方差选层与随机干预
 
-## 3. 研究故事：观察、设计问题、方法与验证
+每张干净图像在攻击前进行一次完整前向，计算各层原始余弦分数的总体方差，选择峰值 block。在该 block 的输入边界，从全部局部 token 中均匀抽样并 hard-zero；模型在改变后的状态上继续前向。
 
-### 3.1 起点：高分 patch 随深度迁移，局部证据持续演化
+“动态”表示根据输入计算选层。边界在该图的全部攻击步与视图中固定，drop 位置按 step/group 重采样。Patch score 用于选层与解释观察，层内位置由均匀随机抽样决定。
 
-随着同一张图像向网络深处传播，同一个局部 token 与全局表示的余弦相似度会发生明显变化，高 patch-score 的 patch 位置也会随层数变化而迁移与更替。局部证据参与全局表示形成的过程是动态的，这就是故事的出发点。
+### 2.3 贡献组织
 
-用同一样本的多层 patch-score 图展示高分区域的更替，再用若干固定位置 token 的分数曲线呈现其与全局表示关联的变化。先让读者看到这一过程，再提供辅助统计。
+1. 提出方差指导的选层与随机 token 干预方法：从一次干净前向确定输入对应边界，在该边界随机 hard-zero 局部 token，用于迁移攻击优化。
+2. 在四源 FPR13 上报告迁移 ASR，并通过选层、token 选择与预算对照检验关键设计。
 
-正文中，Introduction 用代表性样本与 Fig. 1 引出这一发现；§3.2 Progressive Random Token Drop 简洁定义 patch-score、展开动机，并紧接着介绍沿深度的随机中断。更多样本、观察层对和统计放入补充材料 D。
+动态观察融入第一项的动机。贡献不再按噪声与 drop 两个模块拆分。标题围绕 layer selection、random token dropping、transferable adversarial attacks 组织；正式名称另行确认。
 
-观察以 local/global 表示的余弦相似度定义 patch-score，global 表示依架构使用 CLS 或 GAP。动机证据从实际样本的多层分数图与变化曲线准备；旧观察统计快照已从 results 清理，辅助统计另行准备，具体观察层对随图说明。
+## 3. 方法定义与完整算法
 
-### 3.2 设计问题：如何干预持续演化的局部证据？
+### 3.1 必要符号与定位统计
 
-推荐的叙事连接：既然局部证据在前向传播中持续演化，攻击也可以沿着这一过程展开，在不同深度反复干预正在形成的表示。
+给定干净图像 $x$、真实标签 $y$ 和源模型，攻击约束为 $\|x_{\mathrm{adv}}-x\|_\infty\leq\epsilon$。源模型用于生成扰动，目标模型用于迁移评估。
 
-PRD 将这一想法落实为逐 checkpoint 的随机局部中断：每一次中断都改变接下来的传播状态，后续中断继续作用于已经演化的表示。重新采样让局部干预在不同 step、group 和深度上展开。
+记完整 block $\ell$ 输出的局部 token 为 $h_{\ell,i}(x)$，对应架构全局参照为 $g_\ell(x)$，局部 token 数为 $N_\ell$：
 
-### 3.3 核心机制一：逐 checkpoint 的随机局部中断
+$$
+s_{\ell,i}(x)=\frac{h_{\ell,i}(x)^\top g_\ell(x)}{\|h_{\ell,i}(x)\|_2\|g_\ell(x)\|_2},\qquad
+\bar s_\ell(x)=\frac{1}{N_\ell}\sum_i s_{\ell,i}(x).
+$$
 
-在每个攻击 step、每个 augmentation group 上重新抽取 schedule。每个 checkpoint 从其当前原生网格的全部 local-token 位置中，均匀、无放回抽取指定数量。不同 checkpoint 独立采样，允许跨 checkpoint 重复位置。
+$$
+v_\ell(x)=\frac{1}{N_\ell}\sum_i(s_{\ell,i}(x)-\bar s_\ell(x))^2,\qquad
+\ell^\star(x)=\arg\max_\ell v_\ell(x).
+$$
 
-每次到达 checkpoint 后立即将选中 token 的所有通道 hard-zero，然后沿已改变的状态继续同一次前向传播。token 数量和网格保持不变；此前归零的位置在后续计算中可能重新产生非零表示。
+定位使用原始分数，不做 min–max、不跨图平均。并列选择原生前向顺序最早的 block。观测在峰值 block 输出，干预在该 block 输入；图、公式和算法统一这一位置关系。对每张图只定位一次，定位过程停止梯度。
 
-Route 指局部表示沿后续网络计算传播的轨迹。Progressive 强调每一次中断之后，模型继续在已经改变的状态上前向传播。
+ViT/DeiT 使用最终归一化后的分类 CLS；CaiT 使用 class-attention 后、最终 LayerNorm 前 CLS；PiT 使用 stage 末端 CLS，最后 stage 使用最终归一化后的 CLS。架构差异在设置中简述、补充材料完整记录。细节见 [方法契约](prd_method_contract.md)。
 
-### 3.4 核心机制二：扰动初始局部表示的 RGB 对手通道投影噪声
+### 3.2 单边界随机 token drop
 
-噪声从亮度、红绿、黄蓝三个 RGB 方向采样，通过源模型真实的初始 RGB 卷积权重投影，并根据初始特征 RMS 匹配尺度；在 checkpoint 遍历前注入全部初始局部特征，包括未来被 drop 的位置。CLS/prefix 保持原值。
+设所选输入边界有 $N(x)$ 个局部位置，总比例为 $r$，则 $k(x)=\max(1,\operatorname{round}(N(x)r))$。每个攻击步 $t$、group $g$ 独立抽样：
 
-三个方向的采样方差为 0.5、1.25、1.25，为扰动赋予不同的亮度与色度能量。初始 RGB 投影把这一颜色结构映射到源模型的特征空间，RMS 匹配控制扰动强度。
+$$
+S_{t,g}(x)\sim\operatorname{Uniform}\{S\subseteq[N(x)]:|S|=k(x)\}.
+$$
 
-两项机制形成清楚的分工：progressive drop 中断局部证据的传播，opponent noise 扰动初始局部表示。消融实验通过 ASR 呈现各项机制与组合的效果。
+以 $M_{t,g}$ 表示所选位置的布尔 mask，按通道广播：
 
-### 3.5 可用于后续引言的中心论点
+$$
+\widetilde H_{\mathrm{in}}^{\ell^\star}=(1-M_{t,g})\odot H_{\mathrm{in}}^{\ell^\star}.
+$$
 
-随着图像向网络深处传播，同一个局部 token 与全局表示的关联会发生明显变化，高 patch-score 的区域也不断更替。PRD 沿着这一演化过程，在多个 checkpoint 反复随机中断局部表示的传播，同时用 RGB 对手通道噪声扰动初始局部表示。四种源架构到 FPR13 的 13 个目标模型的主实验取得 89.29% 的平均严格黑盒 ASR，呈现完整方法的迁移效果。
+清零所选 token 的全部通道，prefix 保持原值，token 数量与原生网格保持不变，后续计算从该状态继续。不同样本可选择不同边界；整批遍历边界并集时只作用于选择当前边界的样本。每张图、每个视图仍只有一个干预边界。
 
-## 4. 方法实现备忘：用于正文第 3 章
+### 3.3 空间配对与优化
 
-本节整理当前执行流程、公式与配置。
+默认每组包含原始与反射平移视图。原始视图使用 $M_{t,g}$；平移视图使用其对应空间变换，并以原生网格 occupancy top-k 保持实际 drop 数量。同组两视图使用同一模型边界。平移梯度回传至当前像素 $x_t$。
 
-当前 FPR13 参数、逐目标结果与完整机制消融均已归档；非 FPR13 旧数值从当前 results 清理，历史内容可在 Git 中查询。
+以 $\mathcal L_{g,v}(x_t,y)$ 表示按照共同增强设置、对应 mask 完成的视图交叉熵。像素梯度直接平均，再以系数 1 累积动量：
 
-写作时按正文 §3.1–§3.4 的任务分配内容；四架构 checkpoint 与预算表安排在 Experimental Setup，adapter 细节安排在补充材料 B。
+$$
+g_t=\frac{1}{GV}\sum_{g=1}^{G}\sum_{v=1}^{V}\nabla_{x_t}\mathcal L_{g,v}(x_t,y),\qquad
+m_{t+1}=m_t+g_t.
+$$
 
-### 4.1 完整流程
+$$
+x_{t+1}=\Pi_{\mathcal B_\infty(x,\epsilon)\cap[0,1]^d}
+\left(x_t+\alpha\operatorname{sign}(m_{t+1})\right).
+$$
 
-1. 从当前对抗像素开始，为本 step/group 构建 fresh schedule；构建过程遍历 checkpoint 并立即应用 mask，不计算 patch-score。
-2. 保存各 checkpoint 的原生网格与 mask；原始视图使用此 schedule。
-3. 为构建空间输入多样性，用反射填充的轻微像素平移构造 phase view，改变图像内容相对局部采样网格的对齐。把同一 schedule 的 mask 同步变换；映回各 checkpoint 原生网格时按 occupancy top-k 保持 drop 数量。
-4. 对每个视图，在全部初始 RGB 局部特征处注入该视图独立抽取的 opponent noise；然后顺序到达 checkpoint、hard-zero、继续前向并计算真实标签 CE loss。
-5. 对两个视图的损失分别求关于当前像素的梯度；10 groups 提供 20 个梯度，直接取平均。
-6. 直接对视图平均梯度进行动量累积、sign 更新、相对干净输入的 L∞ 投影与 [0,1] 截断。
-7. 重复 10 steps，保存最终像素对抗图像；目标模型评估使用各自 timm transform。
+默认 seed 42、$T=10$、$G=10$、$V=2$、$\epsilon=16/255$、$\alpha=\epsilon/T$。每图 100 次原始 mask 抽样；平移 mask 由对应变换获得。保留 `--input-diversity-views-per-group` 的 1/2 消融。
 
-流程图按实际执行顺序呈现：先采样 checkpoint mask，再构造原始／平移视图及空间对应的 schedules；各视图独立在全部初始局部特征处注入噪声，随后顺序执行 progressive traversal，最后聚合像素梯度。phase 指图像内容相对局部采样网格的空间偏移。
+### 3.4 Algorithm 1 的逐步内容
 
-### 4.2 推荐的最小公式集合
-
-无目标攻击使用真实标签交叉熵，目标约束是 `||x_adv − x||∞ ≤ 16/255`。
-
-对于 step t、group g、checkpoint c，设原生网格有 N_c 个位置，drop 数量为 k_c：
-
-`S_(t,g,c) ~ Uniform({S ⊂ [N_c] : |S| = k_c})`。
-
-checkpoint 干预写为：
-
-`H_c^+ = (1 − M_(t,g,c)) ⊙ H_c^-`，其中 mask 沿通道广播，后续网络从 `H_c^+` 继续。
-
-对手通道基为：
-
-`q_L=(1,1,1)/√3`，`q_RG=(1,−1,0)/√2`，`q_YB=(1,1,−2)/√6`。
-
-每个初始 token 的卷积核位置采样独立标准正态系数，用 `√0.5, √1.25, √1.25` 缩放后组合为 RGB 噪声，再由卷积权重 W 投影。写为：
-
-`η = W ξ_RGB`，`η_hat = β · RMS(H_0) / RMS(η) · η`。
-
-RMS 在单样本的全部初始 token 和通道上计算；实现中对特征 RMS 与投影权重使用 detach。初始注入写为 `H_0^noise = H_0 + η_hat`，覆盖全部局部位置。
-
-空间配对损失、像素梯度与更新写为：
-
-记 `ℓ(x,y;S,η)` 为使用 checkpoint schedule S、初始局部特征噪声 η 的 PRD 前向交叉熵；T_Δ 为反射填充平移，A_Δ(S) 为保持各 checkpoint drop 数量的对应 schedule 空间变换。η_0、η_1 为两个视图独立采样并 RMS 匹配的噪声：
-
-`L_pair(x,y;S,Δ) = (1/2)[ℓ(x,y;S,η_0) + ℓ(T_Δ x,y;A_Δ(S),η_1)]`；
-
-`g_t = (1/G) Σ_(g=1..G) ∇_(x_t) L_pair(x_t,y;S_(t,g),Δ_(t,g))`；
-
-默认 G=10，每组两个视图，对应每步 20 个像素梯度的直接平均。平移视图的梯度通过 T_Δ 回传至当前像素 x_t。
-
-`m_(t+1) = m_t + g_t`；
-
-`x_(t+1) = Clip_[0,1](x + Clip_[-ε,ε](x_t + (ε/10) sign(m_(t+1)) − x))`。
-
-动量直接累积视图平均梯度，更新过程按上述递推式描述。
-
-### 4.3 全部初始局部特征的噪声注入
-
-噪声范围覆盖当前架构的全部初始局部特征，独立于后续 checkpoint mask。ViT/CaiT 在初始 patch 特征处注入；PiT 在其 adapter 定义的初始 RGB 特征处注入，DeiT 在初始局部 patch 特征处注入。随后按各 checkpoint 原生网格执行 hard-zero。
-
-每个可微视图在初始位置注入一次噪声，随后随特征传播。到达 checkpoint 时，按随机 mask 清零局部 token；相位 mask 按图像空间平移与原生网格 occupancy 保持 drop 数量。
-
-完整执行顺序见 [PRD 方法记录](prd_method_contract.md)。
-
-### 4.4 当前源配置与 FPR13 主表
-
-论文当前四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled；PiT-B 额外保留。新执行固定 seed 42，主表与消融均采用当前参数匹配的 FPR13 测量。
-
-| Source | Checkpoints | 原生网格 | Drop 数量 | Opponent β |
-| --- | --- | --- | --- | ---: |
-| ViT-B/16 | block3, block10 | 14×13, 14×13 | 10, 10 | 0.2 |
-| CaiT-S24 | block17, block23 | 14×13, 14×13 | 2, 28 | 0.2 |
-| PiT-T | stage2_block1, stage3_block2, stage3_block3 | 14×13, 7×7, 7×7 | 14, 2, 2 | 0.4 |
-| DeiT-B distilled | block2, block9 | 14×13, 14×13 | 10, 10 | 0.2 |
-| PiT-B（额外保留） | stage2_block1, stage3_block2, stage3_block3 | 16×16, 8×8, 8×8 | 5, 2, 6 | 0.4 |
-
-ViT/DeiT drop ratios 为 `0.051020408163,0.051020408163`；PiT-T 为 `0.07142857142857142,0.04081632653061224,0.04081632653061224`，PiT-B 额外保留 `0.02081165,0.03125,0.09375`，按实际原生网格计算数量。DeiT 的两个 prefix 都保留。四源默认 10 steps、epsilon=16/255、步长 epsilon/steps、动量系数 1、10 groups×2 views、平移集合 (4,4)/(8,8)/(12,12)。保留每组视图数 1/2 的消融入口。每图 100 条 schedule；ViT/CaiT/DeiT 200 次 mask selection，PiT 300 次。
-
-计算量记录包含 schedule 构建遍历和视图前向/反向；效率分析使用实测运行时间或完整计算量。
-
-## 5. 现有结果与贡献组织
-
-### 5.1 当前 FPR13 主实验结果
-
-| Source | Overall（13 目标） | Transformer（7） | CNN（6） | 严格黑盒 |
-| --- | ---: | ---: | ---: | ---: |
-| ViT-B/16 | 88.02% | 91.17% | 84.35% | 87.06% |
-| CaiT-S24 | 90.24% | 92.63% | 87.45% | 89.50% |
-| PiT-T | 85.81% | 81.90% | 90.37% | 85.81% |
-| DeiT-B distilled | 94.80% | 96.90% | 92.35% | 94.80% |
-| 四源宏平均 | 89.72% | 90.65% | 88.63% | 89.29% |
-
-摘要与引言可报告 89.29% 的四源平均严格黑盒 ASR，并在主表提供 89.72% Overall ASR。严格黑盒只排除完全同名的源目标，ViT/CaiT 对 12 个目标取平均，PiT-T/distilled DeiT-B 对全部 13 个目标取平均。
-
-ASR = `1 − correct/total`，分母是全部 1000 张评估对抗图像，不筛选 target-clean-correct 子集。full 主结果为 52 项 source-target 评估；完整 2×2 消融共 208 项评估。主表和消融 CSV、参数与原始迁移记录见 results 的 FPR13 记录。
-
-### 5.2 论文评价与内部分析的分工
-
-论文统一用 ASR 呈现迁移性。主实验、方法比较、机制消融和参数分析都围绕 ASR 组织。effective rank 等梯度诊断保存在内部实验记录，用于研究过程中的检查和分析；正文与补充材料的迁移论证均采用 ASR。
-
-### 5.3 建议的贡献组织
-
-1. **提出 Progressive Route Disruption。** 从局部证据随深度演化的观察出发，在同一前向轨迹的多个 checkpoint 以 fresh、uniform random masks 反复中断局部 token 的传播。
-2. **构造初始局部表示的结构化扰动。** 从 RGB 对手方向采样噪声，经源模型真实初始 RGB 投影映射并匹配特征 RMS，施加于全部初始局部特征，与 progressive disruption 共同组成 PRD。
-3. **验证跨模型与跨架构迁移效果。** 在四种源架构、每源 1000 图像和 FPR13 的 13 个目标模型上评估完整方法，报告 ASR，并通过组件消融与参数分析展开各机制的作用。
-
-贡献段将动态发现、逐深度干预设计和 ASR 验证连接起来。四架构实例化呈现方法适用性。Related Work 围绕 PatchOut、深层 self-ensemble、token gradient regularization、surrogate/model augmentation 梳理具体差异。
-
-## 6. 正文章节：每一节要解决什么问题
-
-全文以提出和验证 PRD 为中心，采用下面的五章结构。以下编号指论文正文；本蓝图 §3 的研究故事与 §4 的实现备忘是写作材料的组织方式。
-
-| 章节 | 目的与作用 | 本文应写的内容与产物 |
-| --- | --- | --- |
-| Title | 让读者立即知道方法与任务 | PRD + transferable adversarial attacks |
-| Abstract | 用最短篇幅交代问题、方法、验证和意义 | 深度证据演化→两机制→四源/1000 图/FPR13 目标→89.29% 严格黑盒；比较增益须等同协议结果 |
-| 1. Introduction | 建立值得解决的问题，解释设计选择与贡献 | 迁移攻击场景；动态局部证据观察；干预演化轨迹的设计问题；两机制；贡献三点；开篇概念图 |
-| 2. Related Work | 把创新放入最接近的已有研究 | 迁移优化/输入变换；token/patch attack；self-ensemble/model augmentation；特征噪声。每类说明与 PRD 的具体关系 |
-| 3. Progressive Route Disruption | 从动态观察进入设计，完整提出 PRD | 3.1 Preliminaries；3.2 Progressive Random Token Drop（含观察与动机）；3.3 RGB Opponent-Channel Noise；3.4 Optimization with Spatial Input Diversity |
-| 4. Experiments | 呈现完整方法与各机制的迁移效果 | 4.1 Experimental Setup；4.2 Main Transfer Results；4.3 Component Ablations；4.4 Analysis |
-| 5. Conclusion | 以方法与验证结果收束全文 | 动态局部证据启发 PRD→两机制组成完整攻击→主要 ASR 结果 |
-| Limitations / responsible use 段落 | 简洁交代方法适用范围与安全研究用途 | 参数选择、计算预算与目标范围；按篇幅及正式投稿要求安排 |
-| References | 提供研究来源，明确方法定位 | 引用实际使用的相关文献，核对题名、版本与结论 |
-
-### 6.1 方法章：从必要定义进入两个机制
-
-| 小节 | 目的与内容 | 公式、图表与篇幅安排 |
-| --- | --- | --- |
-| **3.1 Preliminaries** | 简短交代无目标迁移攻击：源模型的参数与梯度用于样本生成，黑盒目标模型用于迁移评估；生成过程不使用目标模型的参数、梯度或查询反馈。定义图像、标签、扰动约束和后文所需的局部表示、层与 checkpoint 符号 | 给出攻击目标与 L∞ 约束；符号随需要引入。保持简洁，让读者尽快进入 PRD |
-| **3.2 Progressive Random Token Drop** | 从同一 token 的分数变化与高分 patch 的位置更替出发，说明干预随表示演化沿深度展开。随后定义每个 step/group 的 fresh schedule、各 checkpoint 的独立均匀抽样、hard-zero 和继续传播 | patch-score 定义用于解释观察；配合 Fig. 1，接着给出随机集合与 checkpoint 更新公式。主体篇幅用于 progressive 设计 |
-| **3.3 RGB Opponent-Channel Noise** | 解释初始局部表示的结构化扰动。定义亮度、红绿、黄蓝方向，经真实 RGB 投影映射、feature RMS 匹配，在全部初始局部特征处注入一次，再随网络传播 | 给出对手通道基、投影噪声与 RMS 匹配公式，说明其在 Fig. 2 中的注入位置 |
-| **3.4 Optimization with Spatial Input Diversity** | 先说明轻微平移构建空间输入多样性，使两项核心干预覆盖不同内容—局部采样网格对齐下的前向过程；再定义原始／平移视图、空间对应的 schedules 和各视图独立初始噪声，最后聚合梯度并进行投影更新 | Fig. 2、Algorithm 1、配对损失与整体更新公式。明确 phase 的作用及配对关系，简洁交代视图梯度平均、动量与投影 |
-
-Preliminaries 提供理解 PRD 所需的背景与符号。方法章的核心是“动态观察 → progressive 设计 → opponent noise → 空间输入多样性下的完整优化”。四源的具体 checkpoint、drop 数量和噪声强度放在正文 §4.1 配置表；各架构的 traversal 与投影几何在补充材料 B 展开。
-
-§3.1–§3.3 保持现有写作安排与已写内容；空间配对的动机、符号和算法衔接集中在 §3.4。该小节按三个自然段推进：①固定局部采样网格下的空间对齐，以及平移如何构建输入多样性，ViT 的 patch 划分作直观例子；②反射平移、对应 mask 的映射与固定 drop 数量、两个视图独立初始噪声；③配对损失、跨组梯度平均与像素更新。空间配对是两项核心机制共同执行的输入增强策略；贡献组织继续采用 §5.3 的两机制与 ASR 验证。
-
-### 6.2 实验章：用 ASR 组织方法验证
-
-实验子节应完整回答：
-
-- **4.1 Experimental Setup：** 哪些图像、标签和权重，攻击预算、source/target、预处理、seed 和 ASR 定义是什么？给出四架构配置表。
-- **4.2 Main Transfer Results：** 在 ViT 与 CNN 目标上分别表现如何？报告 Overall 与严格黑盒 ASR，并在取得同协议结果后展开外部方法比较。
-- **4.3 Component Ablations：** 固定空间配对和采样预算，progressive drop、opponent noise 及其组合分别取得什么 ASR？两项机制怎样共同贡献完整方法的效果？
-- **4.4 Analysis：** checkpoint、drop budget、颜色方向与噪声强度怎样影响 ASR？固定每步视图预算时空间配对带来多少 ASR 变化，保留配对时减少 groups 的影响如何？计算代价如何，定性样本呈现什么特点？
-
-空间配对与预算分析需要在当前 FPR13 目标与预处理下准备 ASR 对照。固定 groups/views 的原始／原始与原始／平移对照应保持共享 schedule、独立噪声和全部其他设置一致，以分离空间平移的作用；旧协议数值不作为当前 FPR13 表中的测量。
-
-Introduction 首先呈现问题与动态发现，再概括 PRD 及结果。§3.2 用观察直接引出机制定义；§4 用 ASR 完成验证。正文中的代表性发现、两个机制和主实验形成连续叙事，扩展观察与复现细节按 §7 安排。
-
-## 7. 补充材料及图表计划
-
-### 7.1 补充材料目录
-
-| 部分 | 作用 |
+| 阶段 | 算法操作 |
 | --- | --- |
-| A. Complete implementation and algorithm | 完整伪代码、mask 变换、RMS/stop-gradient、动量、投影与 PNG 保存细节 |
-| B. Architecture adapters | 四源原生阶段、初始投影几何、CLS/GAP/卷积前端、相位 mask 的跨尺度变换 |
-| C. Reproducibility and evaluation protocol | 样本 ID、权重版本、环境、seed、运行参数、原始表、指标定义与参数选择过程 |
-| D. Extended motivating observation | 扩展正文 §3.2 的动机：score 定义、层对、空间对齐、更多真实样本的分数图与变化曲线，及辅助统计 |
-| E. Extended results and sensitivity | 逐目标结果、参数扫描/基线与消融，标注其与当前配置的对应关系 |
-| F. Qualitative cases and computational cost | 成功/失败案例、可视化与实测计算代价 |
+| 输入 | 干净图像、标签、源模型、扰动预算、步数、group/view 数和 drop 总比例 |
+| 一次定位 | 无 drop、无增强噪声的干净前向；逐层原始 patch score → 总体方差 → 峰值 block → 对应输入边界 |
+| 初始化 | 记录原生网格与 $k$，设置 $x_0=x$、$m_0=0$ |
+| 每步每组抽样 | 在记录的边界全部局部位置均匀、无放回抽取 $k$ 个位置 |
+| 空间配对 | 原始／平移视图及对应 mask，边界固定，drop 数量保持 |
+| 视图前向 | 按共同增强设置构建前向，在选定输入边界 hard-zero，再继续计算真实标签交叉熵 |
+| 梯度聚合 | 求各视图关于当前像素的梯度并直接平均 |
+| 像素更新 | 动量累积、sign 更新、L∞ 投影与像素截断 |
+| 输出 | 最终对抗图像 |
 
-正文保留主要 ASR 比较和机制消融，补充材料展开复现细节与扩展结果。
+正文算法将共同增强作为统一设置，不另设噪声机制或颜色方向公式。补充材料如实给出每个视图初始局部特征的增强执行过程。当前 i.i.d. 指 RGB 空间采样，经真实初始投影与 RMS 匹配后的特征可以相关。
 
-### 7.2 图表与证据准备
+## 4. 正文章节与段落任务
 
-| 图表 | 要回答的问题 | 当前材料状态 |
+| 章节 | 作用 | 产物 |
 | --- | --- | --- |
-| Fig. 1 动态发现与设计直觉 | 同一 token 分数如何变化，高分 patch 如何随深度更替，怎样引出沿深度的干预？ | 用于 Introduction 与 §3.2；代表性样本的多层图与分数曲线待从实际层输出准备，辅助观察统计另行准备 |
-| Fig. 2 PRD 完整流程 | 两个空间视图怎样构造，对应干预与像素更新在哪里发生？ | 用于 §3.3–§3.4；显示原始／平移分支、同一 schedule 的空间对应变换、各视图全部初始局部特征独立加噪声后顺序 drop，以及梯度汇合。输入处可用小示意展示内容与 patch 网格的对齐变化；可依据实现绘制 |
-| Algorithm 1 PRD | 怎样从 x 生成 x_adv？ | 放在 §3.4，显式列出 fresh schedule、偏移采样、对应 schedule 变换、两视图损失与梯度聚合，再进行投影更新 |
-| Table 1 实验配置 | 四架构如何实例化共同机制？ | 放在 §4.1；参数已完整归档，主文简表、补充全表 |
-| Table 2 主实验与比较 | 对哪些目标可迁移，与可比方法相比怎样？ | 放在 §4.2；PRD 4×13 已有，公平外部比较尚未在当前归档中提供 |
-| Table 3 核心消融 | 两机制分别贡献什么，组合取得什么 ASR？ | 放在 §4.3；当前 FPR13 完整 2×2 因子结果和 ASR 差值已归档 |
-| Fig. 3 ASR 参数分析 | checkpoint、drop budget 和噪声强度怎样影响迁移效果？ | 放在 §4.4；按当前随机 PRD 配置准备对应 ASR 对照。空间配对与采样预算使用 FPR13 下的紧凑 ASR 表呈现，固定 groups/views 的平移对照待补 |
-| Supplement qualitative cases | 对抗样本外观、成功与失败如何？ | 当前主实验对抗图像在服务器；本地有迁移 CSV、保留参数与环境记录 |
+| Title / Abstract | 压缩中心问题、方法与验证 | 方差选层＋随机 drop＋实际最终配置的迁移结果；名称另定 |
+| 1. Introduction | 从表示演化建立干预深度问题，概括设计与贡献 | 动态观察 → 层内分布 → 选层＋随机干预 → ASR；承接 Fig. 1 |
+| 2. Related Work | 定位干预深度与 token 处理方式 | token/patch attacks、model randomization、中间表示与迁移攻击 |
+| 3. Method | 解释统计定位、随机干预和完整优化 | 四个小节，见下表 |
+| 4. Experiments | 用 ASR 检验完整方法和关键设计 | 四个小节，见下表 |
+| 5. Conclusion | 收束设计与已验证结果 | 表示统计定位干预深度，随机 token 干预与迁移 ASR |
+| References / 投稿要求部分 | 支持定位与复核 | 核对原论文；适用范围与研究用途按正式投稿要求安排 |
 
-## 8. 写作材料准备：围绕发现与 ASR 展开
+### 4.1 方法章
 
-### 8.1 可以现在写的部分
-
-§3 Method 的完整初稿（包括 §3.2 的动态观察与设计动机）、实际算法、四架构配置，以及 §4.1 Experimental Setup 和 §4.2 已有 ASR 主表的说明。
-
-### 8.2 接下来准备的材料
-
-1. **动态发现的可视化。** 选取真实样本，排列不同深度的 patch-score 图，标出高分区域的更替；以固定位置 token 的分数曲线展示其沿深度的变化。
-2. **同协议 ASR 比较。** 使用相同 1000 样本、source/target 权重及预处理、ε=16/255 和 ASR 分母；共同报告计算预算。
-3. **两机制的 ASR 消融。** 固定 seed 42、固定空间配对和采样预算，比较共同优化底座、仅 progressive、仅 opponent 与完整 PRD。消融使用当前方法定义，固定 schedule 与噪声构造的对应设置。
-4. **Progressive 参数分析。** 在当前随机 PRD 配置下，用 ASR 对照呈现 checkpoint 位置、数量和 drop budget 的效果；按原生网格说明各项预算。
-5. **Opponent 参数分析。** 在全部初始局部特征的统一注入位置与 feature RMS 定义下，围绕颜色方向和噪声强度准备 ASR 分析。
-6. **实验设置和过程记录。** 简洁记录四架构 checkpoint、drop 数量、噪声强度、样本集、权重、环境和评估流程。
-7. **结果说明与计算代价。** 根据写作需要准备 clean accuracy、逐样本统计、生成时间和显存记录，配合已有 ASR 主表呈现实验结果。关联空间配对／采样预算消融的原始记录，并补充固定 groups/views 的平移对照。
-
-已有主表固定为论文的主实验。写作先推进方法与结果初稿，后续材料围绕动态发现、两项机制和 ASR 评价补充。
-
-## 9. 相关工作定位的起始清单
-
-### 9.1 方法论文的组织参考
-
-正文采用 FPR 的整体组织方式，并参考 TGR 简洁进入核心设计的写法；GNS-HFA 提供在各机制中连接观察与设计的参考。
-
-| 论文 | 已核对的组织方式 | 本文采用的写作安排 |
+| 小节 | 自然段的任务顺序 | 公式与图表 |
 | --- | --- | --- |
-| [TGR（CVPR 2023）](https://openaccess.thecvf.com/content/CVPR2023/papers/Zhang_Transferable_Adversarial_Attacks_on_Vision_Transformers_With_Token_Gradient_Regularization_CVPR_2023_paper.pdf) | Method 开头定义符号与约束，随后介绍机制和实现 | Preliminaries 简洁，尽快进入 progressive 设计 |
-| [FPR（CVPR 2025）](https://openaccess.thecvf.com/content/CVPR2025/papers/Ren_Improving_Adversarial_Transferability_on_Vision_Transformers_via_Forward_Propagation_Refinement_CVPR_2025_paper.pdf) | Methodology 内的 Preliminary、两个机制和协同讨论 | 方法章内安排 Preliminaries、两个核心机制和完整算法 |
-| [GNS-HFA（ICLR 2024）](https://proceedings.iclr.cc/paper_files/paper/2024/file/e25198b6a75f74277ee3a2bd4165d9ef-Paper-Conference.pdf) | 独立 Preliminaries，Method 按两个机制展开并结合各自观察 | §3.2 从动态发现直接进入 progressive drop；§3.3 展开初始结构化噪声 |
+| 3.1 Preliminaries | 简述任务与预算；引入局部表示和全局参照的必要符号 | 攻击约束，尽快进入设计 |
+| 3.2 Depth-wise Local–Global Alignment | ①真实样本的跨层关联变化；②局部关联分布与层内方差，将观察连接到干预深度问题 | Fig. 1、分数和方差定义 |
+| 3.3 Variance-Guided Layer Selection and Random Token Drop | ①逐图选层与峰前输入边界；②均匀随机集合与 hard-zero；③边界固定、位置重采样及空间对应的执行关系 | 最大方差规则、随机集合与 mask 公式；方法主体篇幅 |
+| 3.4 Attack Optimization | ①空间输入配对及 mask 对应；②视图损失、梯度平均与更新，串联完整算法 | Fig. 2、Algorithm 1、梯度与更新式 |
 
-### 9.2 研究定位与比较对象
+§3.2 保持紧凑，服务 §3.3 的设计动机。共同增强的详细构造放入补充材料。多架构原生结构和实现细节不占用核心论证篇幅。
 
-以下近邻文献的题名及摘要已核验，作为精读和方法定位的起点。
+### 4.2 实验章
 
-- [Towards Transferable Adversarial Attacks on Vision Transformers（PNA/PatchOut，AAAI 2022）](https://ojs.aaai.org/index.php/AAAI/article/view/20169)：需要核对 patch 随机化的位置、粒度与梯度使用方式。
-- [On Improving Adversarial Transferability of Vision Transformers（Self-Ensemble/Token Refinement，ICLR 2022）](https://arxiv.org/abs/2106.04169)：需要区分多深度判别分支与同一轨迹上的顺序状态中断。
-- [Transferable Adversarial Attacks on Vision Transformers With Token Gradient Regularization（CVPR 2023）](https://openaccess.thecvf.com/content/CVPR2023/html/Zhang_Transferable_Adversarial_Attacks_on_Vision_Transformers_With_Token_Gradient_Regularization_CVPR_2023_paper.html)：需要区分 token 梯度处理与 PRD 的前向干预。
-- [FPR（CVPR 2025）](https://openaccess.thecvf.com/content/CVPR2025/papers/Ren_Improving_Adversarial_Transferability_on_Vision_Transformers_via_Forward_Propagation_Refinement_CVPR_2025_paper.pdf)：精读前向 attention/token refinement 与 PRD 顺序 hard-zero、初始 opponent noise 的设计差异。
-- [GNS-HFA（ICLR 2024）](https://proceedings.iclr.cc/paper_files/paper/2024/file/e25198b6a75f74277ee3a2bd4165d9ef-Paper-Conference.pdf)：精读梯度调整与频域变换，明确与 PRD 的干预位置和噪声构造的关系。
-- [Learning Transferable Adversarial Examples via Ghost Networks](https://arxiv.org/abs/1812.03413)：需要核对随机 surrogate 变体和梯度聚合的已有设计。
-- [ViT-EnsembleAttack（ICCV 2025）](https://openaccess.thecvf.com/content/ICCV2025/html/Cao_ViT-EnsembleAttack_Augmenting_Ensemble_Models_for_Stronger_Adversarial_Transferability_in_Vision_ICCV_2025_paper.html)：核对 model augmentation 与单 source PRD 的关系，比较时对齐 source 与计算预算。
-- [DIM（CVPR 2019）](https://openaccess.thecvf.com/content_CVPR_2019/html/Xie_Improving_Transferability_of_Adversarial_Examples_With_Input_Diversity_CVPR_2019_paper.html) 与 [TI attacks（CVPR 2019）](https://openaccess.thecvf.com/content_CVPR_2019/html/Dong_Evading_Defenses_to_Transferable_Adversarial_Examples_by_Translation-Invariant_Attacks_CVPR_2019_paper.html)：用于 §3.4 的输入多样性与平移攻击背景，说明 PRD 在平移配对中同步变换 checkpoint schedules 并聚合像素梯度。
+| 小节 | 要回答的问题 | 对照要求 |
+| --- | --- | --- |
+| 4.1 Experimental Setup | 哪些输入、标签、source/target、权重、预处理、随机设置、预算与 ASR 定义？ | 说明每源总比例和原生网格；共同增强细节见补充材料 |
+| 4.2 Main Transfer Results | 最终方法在各源、Transformer/CNN 目标和严格黑盒下的 ASR 如何？ | 同协议外部比较，记录完整计算预算 |
+| 4.3 Layer Selection | 方差规则相对固定单层、随机选层及共同底座的效果如何？ | 相同增强、比例、step/group/view；包含已有表现较强的固定单层 |
+| 4.4 Token Dropping and Additional Analysis | 层内选 token、固定/重采样、drop 比例与视图预算的影响？计算代价如何？ | 核验各比较对应配置；成本包括一次干净选层和全部视图前后向 |
 
-Related Work 说明已有方法如何处理 patch/token 和模型计算，以及 PRD 在干预位置、顺序传播与初始局部表示扰动上的设计特点。
+最低优先选层矩阵：无 drop、固定单层、每图随机选一层后保持、最大方差选层。固定单层包含有实际依据的强配置。多尺度源报告所选网格、实际 drop 数和比例。该矩阵直接检验中心贡献，先于扩展参数扫描。
 
-## 10. 写作顺序与每一步完成标准
+## 5. 图表结构
 
-推荐顺序：**确定动态观察图与方法流程 → 写完整 Method（含观察与动机）→ 实验设置与已有 ASR 结果 → 相关工作 → 引言 → ASR 消融与分析 → 结论 → 摘要与标题 → 补充材料和全文核对**。
+正文优先两张核心图、三张主要表；分析图按证据与篇幅安排。架构配置在 §4.1 简述，完整表放补充材料。
 
-文献精读与补充证据的准备从第一步开始，并行于写作；这里的顺序指章节初稿的产出顺序。
+| 标识 | 具体内容 | 论证作用与材料状态 |
+| --- | --- | --- |
+| Fig. 1 / `FIG1_ALIGNMENT_VARIANCE` | 真实样本的跨层 patch-score 热图、全部层原始方差曲线、峰值 block 与其输入边界；必要时加固定 token 曲线 | 把动态观察直接连接到定位规则。已有 `figure1.py` 可导出 ViT 原始分数与热图；方差曲线和完整编排待准备 |
+| Fig. 2 / `FIG2_LAYER_RANDOM_DROP` | 上支路一次干净选层，下支路迭代攻击；单边界随机 mask、空间配对、hard-zero、梯度汇合 | 显示边界固定和位置重采样。当前 `figure2.py` 仍是旧固定双 checkpoint 素材，需要另行更新或重制 |
+| Algorithm 1 | §3.4 的完整步骤 | 明确定位仅一次、峰前干预、实际预算与更新 |
+| Table 1 | 最终 i.i.d. 配置的四源迁移主结果与同协议比较，主指标为 strict ASR | 当前已有 opponent 动态四源记录，最终配置与外部比较需核对或补齐 |
+| Table 2 | 无 drop、固定单层、随机选层、方差选层 | 匹配设置，直接验证选层；完整最终矩阵待准备 |
+| Table 3 | 高/低分与全位置随机，固定/重采样策略 | 已有固定 block10 的六组结果；标明实际增强、groups 和边界，最终配置对照待核对 |
+| Fig. 3（可选） | drop 比例—ASR，或 ASR—完整计算预算 | 展示参数与成本，按最终配置准备 |
 
-| 次序 | 工作 | 为什么此时写 | 完成标准 |
-| --- | --- | --- | --- |
-| 0 | 固定主表、协议、术语，准备 Fig. 1 与 Fig. 2 | 确定方法论文的故事起点与完整流程 | 动态发现鲜明；图表内容与实际材料对应；主实验数字核对一致 |
-| 1 | §3.1–§3.4 Method、Algorithm 1 | 将观察、progressive 设计、初始噪声和完整算法写成连续章节 | §3.2 的样本观察自然进入设计；公式、噪声位置、mask 与更新可复现 |
-| 2 | §4.1 Experimental Setup 与 §4.2 Main Transfer Results | 呈现完整方法的 ASR 表现和实验设置 | 四源配置表与原始参数一致；主表由当前数据产生；指标与样本数清楚 |
-| 3 | §2 Related Work 初稿与差异表 | 确认近邻方法，再确定创新措辞 | TGR、FPR、GNS-HFA 等的差异有原论文/实现依据；公平比较方案明确 |
-| 4 | §1 Introduction 初稿 | 此时方法、证据、近邻工作均已清楚 | 问题→动态观察→PRD 设计→两机制→ASR 验证→贡献；Fig. 1 承接叙事 |
-| 5 | §4.3 Component Ablations、§4.4 Analysis 与适用范围说明 | 围绕两机制的效果、参数与成本展开 | 消融和参数分析以 ASR 呈现；计算与过程细节简洁说明 |
-| 6 | §5 Conclusion | 收束经过核验的结论 | 回答引言问题，以方法与 ASR 收束 |
-| 7 | Abstract 与 Title 定稿 | 准确压缩最终论文 | 首要指标用 89.29% strict；外部增益只在已有公平比较时写入 |
-| 8 | Supplement 与全文核对 | 补齐复现细节并检查各节一致性 | 术语、配置、指标、引用、图注、算法和章节编号对应一致 |
+热图可以逐层 min–max 归一化显示，色条标为 Normalized patch score。方差曲线使用原始余弦分数；显示归一化不进入选层。图中区分观测 block 输出与干预 block 输入。选层频次如实呈现，跨源差异和完整分布放补充材料。
 
-第一轮写作的具体交付物应是：含动态观察与动机的完整 Method 草稿、Algorithm 1、Fig. 1 与 Fig. 2 的内容方案、Experimental Setup 草稿、四源配置表，以及当前主表和说明。实际写作按 `AGENTS.md` 的逐自然段工作流推进：每次提供一个英文段落及对应中文翻译，讨论确认后再推进下一段。
+图表暂缺时遵循既有 `todonotes` 正文高亮约定，使用上表唯一标识及具体内容，纳入 `\listoftodos`。不在本地生成论文 LaTeX 文档。
 
-## 11. 篇幅与投稿安排
+## 6. 证据层级与已有材料
 
-截至核对日期，CVPR 2027 的 [Call for Papers](https://cvpr.thecvf.com/Conferences/2027/CallForPapers) 与 [Dates](https://cvpr.thecvf.com/Conferences/2027/Dates) 可访问：注册截止 2026-11-10 AoE、论文截止 2026-11-16 AoE、补充材料截止 2026-11-23 AoE。相应的北京时间截止为 11 月 11 日、17 日、24 日 19:59:59。
+### 6.1 方法与协议依据
 
-2027 CFP 链接的 Author Guidelines 页面在最初访问时返回 404。篇幅暂按 [CVPR 2026 Author Guidelines](https://cvpr.thecvf.com/Conferences/2026/AuthorGuidelines) 的 8 页正文（含图表）+参考文献规划，最终核对 2027 正式指南。
+| 材料 | 用途 |
+| --- | --- |
+| `AGENTS.md`、`experiments/prd_paper_story.md` | 当前主线、叙事与写作约定 |
+| `progressive_attack.py`、`nets/*.py`、`tests/test_dynamic_checkpoints.py` | 一次定位、原生边界、随机 mask、hard-zero 与更新行为 |
+| `experiments/prd_method_contract.md`、`main.py` | 执行事实、当前默认与显式 i.i.d. 设置 |
+| `transfer_eval.py`、`experiments/fpr_target_protocol.md` | FPR13 权重、预处理和全部样本 ASR |
+| `experiments/server_handoff_inventory.md` | 本地原始材料与可移交状态 |
 
-临时篇幅预算：Abstract 0.25 页、Introduction 1.25 页、Related Work 0.6 页、Method 2.6 页（含 §3.2 动态观察与动机）、Experiments/Analysis 3.0 页、Conclusion/Limitations 0.3 页，共 8 页。图表计入所属章节；这只是排版预算，不是固定比例。
+### 6.2 已完成的动态选层评估
 
-全文让读者先看到高分 patch 随深度迁移的动态发现，再理解 PRD 如何沿这一过程施加中断和扰动，最后通过 ASR 看到完整方法及两项机制的迁移效果。
+四源均已有每源 1000 图像、13 目标的动态选层原始记录，仍开启 opponent 增强。下表采用与当前参照定义一致的 CaiT 后续运行。
+
+| Source | Overall ASR | Strict ASR | `outputs/attack/` 下运行目录 |
+| --- | ---: | ---: | --- |
+| ViT-B/16 | 88.13% | 87.15% | `prd_dynamic_variance_s42_20261029T031203Z_vit/` |
+| CaiT-S24 | 83.22% | 82.34% | `prd_cait_preln_variance_s42_20261029T070204Z/` |
+| PiT-T | 83.60% | 83.60% | `prd_dynamic_variance_s42_20261029T031203Z_pit_t/` |
+| DeiT-B distilled | 94.38% | 94.38% | `prd_dynamic_variance_s42_20261029T031203Z_deit_b/` |
+
+每个目录包含 1000 条选层记录、13 行 `transfer.csv`（每目标 total=1000）、参数和汇总 JSON。早期动态 CaiT 的参照不同，使用后续 `preln` 运行对应当前实现。上述目录在服务器本地，不随 Git 提交；最终主表所需轻量记录在明确配置后另行归档。
+
+### 6.3 已有设计分析的用途
+
+| 材料 | 已有观察 | 新版用途 |
+| --- | --- | --- |
+| 固定配置 FPR13 主表与 2×2 消融 | 四源 Overall 89.72%、strict 89.29% | 历史固定多 checkpoint/opponent 配置，保留实际标签 |
+| 固定 ViT checkpoint 分析 | 单晚期 block10 strict 87.53%，旧双边界 87.06% | 选择强固定单层对照的依据 |
+| 噪声结构分析 | opponent/isotropic RGB 有 drop 相差 0.13 pp，无 drop 相差 0.39 pp | 支持颜色方向结构退出贡献，作为辅助记录 |
+| 六组 token 选择，10 groups | high-random/low-random/random strict 87.28/87.19/87.24%；random-fix 87.11% | 展示层内随机策略的实际表现，按差值解释重采样 |
+| 六组 token 选择，1 group | random/random-fix strict 75.23/75.35% | 不把重采样本身写成主要增益来源 |
+| 动态 ViT 选层频次 | 996/1000 张选中 block10 | 如实描述自动定位结果与频次，逐图收益由对照检验 |
+
+固定配置原始表见 `results/prd_s42_1000_fpr_{summary,per_target,effects}.csv` 及 `results/prd_s42_fpr_run_artifacts/`；分析见 `results/prd_s42_1000_fpr_analysis*.md`。六组原始表见 `outputs/attack/vit_drop_selection_s42_20261029T125456Z/asr_comparison.csv` 与 `outputs/attack/vit_drop_selection_g1v2_s42_20261101T131251Z/asr_comparison.csv`。六组实验固定 block10，增强仍为 opponent，不能直接当作最终动态 i.i.d. 消融。
+
+现有不同配置的表可并列记录，选层效果由匹配的单边界矩阵评估。历史随机实现的 seed 42 与当前 PyTorch seed 42 按用户约定统一报告；checkpoint、比例或实际增强分布变化需要对应配置的测量。
+
+## 7. 实验协议与配置记录
+
+论文四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled；PiT-B 额外支持单列。Visformer 为目标模型。FPR13 为 7 Transformer＋6 CNN，源与目标权重、预处理、数据顺序和预算在比较时一致。
+
+| Source | 观察范围 | 单图总 drop 比例 | 所选边界的局部网格 |
+| --- | --- | ---: | --- |
+| ViT-B/16 | 12 blocks | 20/196 | 14×14 |
+| CaiT-S24 | 24 个局部 blocks | 30/196 | 14×14 |
+| PiT-T | 全部 2+6+4 blocks | 30/196 | 27×27、14×14 或 7×7 |
+| DeiT-B distilled | 12 blocks | 20/196 | 14×14 |
+
+按边界原生网格计算实际丢弃数；不把旧多边界数量简单解释为动态源的固定 token 总数。最终对照保持总比例及共同设置一致，并报告整数化后的实际预算。
+
+ASR 为全部评估对抗样本的 $1-\mathrm{accuracy}$。Overall 对 13 目标平均；strict 只排除完全相同源目标，ViT/CaiT 为 12 目标，PiT-T/distilled DeiT-B 为 13 目标；四源等权汇总。迁移性与组件效果通过 ASR 和直接差值描述，梯度诊断仅用于内部分析。
+
+## 8. 补充材料
+
+| 部分 | 内容 |
+| --- | --- |
+| A. Implementation and augmentation | 完整算法、共同 i.i.d. RGB 随机特征增强的采样/投影/RMS/注入位置、空间 mask 映射、动量与保存设置 |
+| B. Architecture-specific definitions | 全局参照、原生 block/输入边界、prefix、PiT pooling 与网格、逐样本实际 drop 数 |
+| C. Reproducibility and evaluation | 样本、标签、权重、环境、seed、batch、完整参数和原始 ASR 表 |
+| D. Extended observation and layer selection | 更多真实样本、原始方差曲线、选层频次与跨源分布 |
+| E. Extended ASR comparisons | 逐目标结果、选层与 token 策略、参数和预算分析，配置对应清楚 |
+| F. Qualitative cases and cost | 对抗样本、成功/失败案例与完整计算成本 |
+
+## 9. 准备优先级与写作顺序
+
+| 顺序 | 任务 | 完成标准 |
+| --- | --- | --- |
+| 0 | 确认选层定义、Fig. 1 和最终配置对应关系 | 原始方差、峰值输出与干预输入一致；i.i.d. 与旧记录标签清楚 |
+| 1 | 写 §3.2–§3.3 | 动态观察进入统计选层与随机 drop；定义、符号可复核 |
+| 2 | 写 §3.1、§3.4、Algorithm 1 与 Fig. 2 方案 | 一次定位、位置采样、空间配对与像素更新完整连通 |
+| 3 | 实验设置、最终四源主表与选层矩阵 | 对应实际 i.i.d. 配置，底座与预算匹配；关键结果有原始记录 |
+| 4 | token 选择、比例与成本分析 | 结论按直接 ASR 差值组织；现有与最终配置明确对应 |
+| 5 | Related Work | 从原论文/实现核对干预深度、token 处理和优化差异 |
+| 6 | Introduction | 问题 → 动态观察 → 方差定位与随机干预 → ASR → 两点贡献 |
+| 7 | Conclusion、Abstract 与标题 | 只压缩经过验证的最终方法与结果，名称另行确认 |
+| 8 | 补充材料与全文核对 | 图、算法、配置、术语、记录和指标一致 |
+
+证据准备优先：最终 i.i.d. 四源记录；无 drop/固定强单层/随机选层/方差选层；Fig. 1 原始曲线与新版 Fig. 2。扩展参数扫描按中心问题和篇幅取舍。本次文档更新不启动实验或修改图像脚本。
+
+## 10. 文献定位与篇幅
+
+Related Work 围绕 PatchOut/PNA 的局部随机化、Self-Ensemble 的多深度使用、TGR 的 token 梯度处理、FPR 的前向表示处理、Ghost Networks 的模型随机化以及输入多样性方法组织。精读原文与实现，核对干预位置、层的确定方式、token 操作及计算预算后再写差异。保留这些对象作为阅读清单，外部增益只在已有同协议结果时写入。
+
+暂按 8 页正文规划，图表计入章节篇幅，正式篇幅与投稿日期另行核对。优先保证 Fig. 1、选层方法、主结果和选层对照的空间，压缩实现细节与扩展分析。
+
+实际撰写严格按 `AGENTS.md` 逐自然段推进：一次一个英文段落及忠实中文翻译，讨论确定后继续。待补图表使用正文可见的 todonotes 和统一清单；论文正文不写入本地文件。
