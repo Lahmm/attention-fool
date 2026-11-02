@@ -1,0 +1,27 @@
+{
+  "config": {
+    "id": "vit",
+    "model": "vit_base_patch16_224",
+    "attack_batch_size": 48,
+    "opponent_noise_strength": 0.2,
+    "expected_total_drop_ratio": 0.102040816326,
+    "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_vit",
+    "variance_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_vit"
+  },
+  "actual_attack_batch_size": 48,
+  "completed_utc": "2026-11-01T15:35:34.412200+00:00",
+  "source_commit": "ea607a6de2cf73bf50dfd6658b2d9e83575c954d",
+  "source_sha256": {
+    "main.py": "feaef6d32bd7b7a0af990edcbedd4b28ee95532198dae9a23ba98c43a6512343",
+    "progressive_attack.py": "08d8388bd5c0df844690d64c90c34e919d6079f05b7a9765441f08d707ed69c1",
+    "utils.py": "c1b94da3b250ca5263d6bc8b0e065aaea342c0e7b1f12fbf6efbfc21301b776a",
+    "transfer_eval.py": "aab43978a01cb90a722af1732835b5955c3b1fa491c19b2c3b9d3d7ff1618e85",
+    "nets/__init__.py": "8d74ef265778c6046e5f2cc00bbfbe0355507beae50d3fcc845399ce37e66df9",
+    "nets/base.py": "8556c9cfed4009766979874b68fb8844e589ea27bac3b37e2d345411080766ee",
+    "nets/cait.py": "53afeedf6dccf0b159572e0e4259032eb13782584da4ffef3d045ef55bb5e568",
+    "nets/pit.py": "586da201c5e38aa7e1ec5abc81565a14aa9936554ffd5f2cc3d66a4215ee1f4c",
+    "nets/vit.py": "df515a1e1f1ee6a0944e7d500356e3f578453d7594c54ed8c392923d46817297"
+  },
+  "samples_manifest": "/root/autodl-tmp/prd_jobs/second_raw_moment_s42_20261101T151302Z/samples.json",
+  "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_vit"
+}

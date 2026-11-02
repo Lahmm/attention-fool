@@ -41,3 +41,7 @@
 | [原始记录目录](prd_s42_fpr_run_artifacts/) | 全部 16 个单元的参数与原始迁移 CSV/JSON |
 
 方法执行契约见 [PRD 方法记录](../experiments/prd_method_contract.md)，服务器产物位置见 [写作交接](../experiments/server_handoff_inventory.md)。论文以 ASR 呈现迁移性；当前 patch score 同时用于动态观察和层内方差选层，层内 drop 位置仍均匀随机抽样。
+
+## 二阶原点矩选层独立测试
+
+[四源 FPR13 测试记录](prd_second_raw_moment_s42_1000_fpr/README.md) 保存逐图最大二阶原点矩选层的结果，以及相对现有方差选层运行的直接 ASR 差值。每源 1000 图、seed 42、10 steps、10 groups × 2 views，沿用对应基线的 opponent 增强及 drop 比例。此项仅为独立测试，攻击主线仍为最大方差选层；选层改动位于仓库外的执行快照，源码差异与参数、逐图选层和逐目标结果一并归档。
