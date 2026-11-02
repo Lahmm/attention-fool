@@ -1,0 +1,347 @@
+{
+  "created_utc": "2026-11-02T15:42:24.773624+00:00",
+  "experiment_only": true,
+  "job_dir": "/root/autodl-tmp/prd_jobs/normalized_std_abs_mean_s42_20261102T142706Z",
+  "manifest": {
+    "created_utc": "2026-11-02T14:27:06.733343+00:00",
+    "repository": "/root/autodl-tmp/attention-fool",
+    "source_commit": "0d2e28df886d52fc7f48e44a2d0ea1f5e495d389",
+    "source_sha256": {
+      "main.py": "feaef6d32bd7b7a0af990edcbedd4b28ee95532198dae9a23ba98c43a6512343",
+      "progressive_attack.py": "034557046426690d9b268735fa78e93d89a64ac9d9d0865185c5a06b90979226",
+      "utils.py": "c1b94da3b250ca5263d6bc8b0e065aaea342c0e7b1f12fbf6efbfc21301b776a",
+      "transfer_eval.py": "aab43978a01cb90a722af1732835b5955c3b1fa491c19b2c3b9d3d7ff1618e85",
+      "nets/__init__.py": "8d74ef265778c6046e5f2cc00bbfbe0355507beae50d3fcc845399ce37e66df9",
+      "nets/base.py": "19b5cc25f2f1fb7b39afca18c8eadf12e0c2a8e89064ef97c1da472302f9289f",
+      "nets/cait.py": "53afeedf6dccf0b159572e0e4259032eb13782584da4ffef3d045ef55bb5e568",
+      "nets/pit.py": "586da201c5e38aa7e1ec5abc81565a14aa9936554ffd5f2cc3d66a4215ee1f4c",
+      "nets/vit.py": "df515a1e1f1ee6a0944e7d500356e3f578453d7594c54ed8c392923d46817297"
+    },
+    "python": "/root/miniconda3/envs/att-atk/bin/python",
+    "seed": 42,
+    "num_images": 1000,
+    "steps": 10,
+    "epsilon": 0.06274509803921569,
+    "step_size": 0.006274509803921568,
+    "input_diversity_groups": 10,
+    "input_diversity_views_per_group": 2,
+    "phase_shifts": [
+      [
+        4,
+        4
+      ],
+      [
+        8,
+        8
+      ],
+      [
+        12,
+        12
+      ]
+    ],
+    "noise_structure": "opponent",
+    "checkpoint_policy": "per-image maximum sum of layer-max-normalized raw-score population standard deviation and absolute signed mean; no depth weight; earliest native block on ties; drop at selected block input; select once before attack",
+    "evaluation_protocol": "fpr",
+    "evaluation_batch_size": 32,
+    "evaluation_tf32": false,
+    "experiments": [
+      {
+        "id": "vit",
+        "model": "vit_base_patch16_224",
+        "attack_batch_size": 48,
+        "opponent_noise_strength": 0.2,
+        "expected_total_drop_ratio": 0.102040816326,
+        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_vit",
+        "variance_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_vit",
+        "second_raw_moment_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_vit",
+        "unnormalized_std_abs_mean_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_vit"
+      },
+      {
+        "id": "cait",
+        "model": "cait_s24_224",
+        "attack_batch_size": 16,
+        "opponent_noise_strength": 0.2,
+        "expected_total_drop_ratio": 0.15306122449,
+        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_cait",
+        "variance_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_cait_preln_variance_s42_20261029T070204Z",
+        "second_raw_moment_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_cait",
+        "unnormalized_std_abs_mean_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_cait"
+      },
+      {
+        "id": "pit_t",
+        "model": "pit_ti_224",
+        "attack_batch_size": 32,
+        "opponent_noise_strength": 0.4,
+        "expected_total_drop_ratio": 0.15306122449,
+        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_pit_t",
+        "variance_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_pit_t",
+        "second_raw_moment_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_pit_t",
+        "unnormalized_std_abs_mean_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_pit_t"
+      },
+      {
+        "id": "deit_b",
+        "model": "deit_base_distilled_patch16_224",
+        "attack_batch_size": 48,
+        "opponent_noise_strength": 0.2,
+        "expected_total_drop_ratio": 0.102040816326,
+        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_deit_b",
+        "variance_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_deit_b",
+        "second_raw_moment_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_deit_b",
+        "unnormalized_std_abs_mean_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_deit_b"
+      }
+    ],
+    "mainline_sha256": {
+      "main.py": "feaef6d32bd7b7a0af990edcbedd4b28ee95532198dae9a23ba98c43a6512343",
+      "progressive_attack.py": "728b7f927b5f52051e8c0fbef940e72bb14db5bb70ddb3968c925a9d04323040",
+      "utils.py": "c1b94da3b250ca5263d6bc8b0e065aaea342c0e7b1f12fbf6efbfc21301b776a",
+      "transfer_eval.py": "aab43978a01cb90a722af1732835b5955c3b1fa491c19b2c3b9d3d7ff1618e85",
+      "nets/__init__.py": "8d74ef265778c6046e5f2cc00bbfbe0355507beae50d3fcc845399ce37e66df9",
+      "nets/base.py": "b18e4d7936156c7dfad62eaa08e87fc8b945a7d36ea0a7077df994133afc7c22",
+      "nets/cait.py": "53afeedf6dccf0b159572e0e4259032eb13782584da4ffef3d045ef55bb5e568",
+      "nets/pit.py": "586da201c5e38aa7e1ec5abc81565a14aa9936554ffd5f2cc3d66a4215ee1f4c",
+      "nets/vit.py": "df515a1e1f1ee6a0944e7d500356e3f578453d7594c54ed8c392923d46817297"
+    },
+    "experiment_only": true,
+    "source_changes_sha256": "af2e886f6dcb725582d54a5f2840874848af9d0becb09d67e56e33b4255afffb",
+    "worker_sha256": "6702bd50e4878c1fabbd1219653360bf59134c45396144ba0640b555de2a9e8f",
+    "expected_checkpoint_validation": "exact match for every image",
+    "parent_job": "/root/autodl-tmp/prd_jobs/std_abs_mean_s42_20261102T081807Z",
+    "checkpoint_selection_metric": "layer_max_normalized_std_plus_abs_mean_raw_cosine",
+    "expected_score_absolute_tolerance": 1e-05,
+    "statistics_reference": {
+      "path": "/root/autodl-tmp/prd_jobs/patchscore_s42_1000_moments_20261029T075611Z/per_image_layer.csv",
+      "sha256": "ed226516cf4af85698bbdf6ceb2983d065d2eb69620a6822c315cbf01186dc49"
+    },
+    "expected_selections_sha256": "b0536fa503fcceef7ea868010b59b8c10d20874dbc6cbfd2d5bc13f93be9843b",
+    "samples_sha256": "966e9dee4e019c2f0fc9c3d2ae963ac6f8eacc454cd8b810f9f12fc5a0136dd0",
+    "archive_sha256": "77d2b3fca0eedc5505793627b953dd8c65959f3f769c7ff97408960cb8dd122e",
+    "verify_sha256": "a3f2b3390d745b9fb060e65c9093cd6620fccda162a3afe5e3dba819dfba1fe3",
+    "checkpoint_score_normalization": {
+      "scope": "per clean image across all candidate blocks",
+      "standard_deviation": "divide by maximum candidate population standard deviation",
+      "absolute_mean": "divide by maximum candidate absolute signed mean",
+      "zero_maximum_contribution": "zero"
+    },
+    "checkpoint_depth_weighting": false
+  },
+  "evidence": {
+    "vit": {
+      "normalized_std_abs_mean": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_vit",
+        "sha256": {
+          "attack_params.json": "44c72c7409a2520112d4194c9a60ebb630222acb2c357fe0de3d99a316a712e0",
+          "transfer.csv": "23ae6c0b49a67dd78d6ef3ddb81fac07a5cfaa8179dee086fcc5b5782cd42a99",
+          "transfer.json": "85de50a4d6be3c0710fd9c2243ca685a86cad93cde2eb1124510570b6e72d66f",
+          "predictions.json": "9930ba175af0dcd1a3c801d3e7498c3f7067dfa96a3f237bc2b156b88b9386c7"
+        }
+      },
+      "variance": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_vit",
+        "sha256": {
+          "attack_params.json": "b3b1fcd7b090d056d7379d0766e0cb31b72f64b49d55da09dde353e91f322710",
+          "transfer.csv": "a64796e52adc486d2180040c7a6721c919fcfb8fbd8ee47d52d6ae7eae5a0f4b",
+          "transfer.json": "75e160c92a01daac8f57420ff632affa5252fa8dd1a5c8483a680c74f52b32ce",
+          "predictions.json": "abeb354383fd852e38b7dd5a3c743c4b4ebaeec85d3c34023b3ac5749068db2b"
+        }
+      },
+      "second_raw_moment": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_vit",
+        "sha256": {
+          "attack_params.json": "407089103ad9d74af9cfa26eeb857bc652e6a4e101dab95a67fbda819bf3c4ea",
+          "transfer.csv": "2acf191d9369f1c16ecf86a1be0004a1d4958cc2985afe10119c83a1cbf168b1",
+          "transfer.json": "95c6adec2724a109838a3efd366794db12b7609fef32a41b911622c07804b9c7",
+          "predictions.json": "2d3b4c097afd5f388f481f197b84a625e7793eac3420919ccae567bb68f1806f"
+        }
+      },
+      "unnormalized_std_abs_mean": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_vit",
+        "sha256": {
+          "attack_params.json": "b2d32b9c731977215cd6c3b638abd0a503e9cdd2e2dc6ff7edd00d5e442955b6",
+          "transfer.csv": "9d458783cfa89f86194dc5463e69cbcf5c418b97c8420519a157d412ddb8b059",
+          "transfer.json": "d3f4dbf9809b0515e1a1a9dae4787d63589d8b92bbdb8618cbc37c73cb7f23b9",
+          "predictions.json": "8cdf042a3dfd88c8e871b02291057f9ea613eff84e0418d8dadb93a7a28f7bc3"
+        }
+      }
+    },
+    "cait": {
+      "normalized_std_abs_mean": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_cait",
+        "sha256": {
+          "attack_params.json": "c82ceb3a4a6f19a735ea4f4b2aae5850a4fbb25a171ada6f1c56d273352457d5",
+          "transfer.csv": "4fa80a08626efaf3157f4e268381c5843764c3a792942bdfab3b9d813dd5ec64",
+          "transfer.json": "3daa99e69f14433e4cf2bb999b317cdcd4765e76253283c62523b0200959adb4",
+          "predictions.json": "965a0509e1e7f245519d5f8f94bdf544b81e37fb1bd3649b126e767107cab164"
+        }
+      },
+      "variance": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_cait_preln_variance_s42_20261029T070204Z",
+        "sha256": {
+          "attack_params.json": "67c488fa9b09416adc2aca1a8b5e59d102ab1070a0e99bcd1bcbf63459add0eb",
+          "transfer.csv": "236ee9ec1b38704559b440df46fa28d47bb6c14fd11892811915788cebb7cb0a",
+          "transfer.json": "b6faf47dad638bc05dc32a39b49b3534591f634c77b4d6fd835d54c71e81e6ce",
+          "predictions.json": "ab0cb68cc46febc35c5791c0f46a35ebb1486510aeeb141761d78967fa935e7a"
+        }
+      },
+      "second_raw_moment": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_cait",
+        "sha256": {
+          "attack_params.json": "cae7d339aac94ebf7850e1280aad8f558d77a590669bb379eb2f8d7dc909fd09",
+          "transfer.csv": "7fdc8a35515150213acf25ba86fb10a795429c9c195be7f89937b2d2b37fcf01",
+          "transfer.json": "7c948a80a21652dbeefbbcd4f4b748ac8d2e7df644e562b5d66e865978dcd066",
+          "predictions.json": "c9389fe5f11038d3c8b8f6abc5e59ef8dc54946bdc0e1d35158da2dcccce8d67"
+        }
+      },
+      "unnormalized_std_abs_mean": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_cait",
+        "sha256": {
+          "attack_params.json": "ffe71f78a5e26b351b596432489ecbcd75dcb310b2c30ff85b22839274fe4db1",
+          "transfer.csv": "fd7e79571130b8847ae749c9911df96671e47a49a9e06fe2ec0f839b14509352",
+          "transfer.json": "33150d6e882cb5dd007c076f6247f9815d0184e139cf51cfb8b908aced8fc62e",
+          "predictions.json": "aee680e7a21eada7e67992404c2ab7f2289ebfa7e15ffd7e45abc0b504e2984d"
+        }
+      }
+    },
+    "pit_t": {
+      "normalized_std_abs_mean": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_pit_t",
+        "sha256": {
+          "attack_params.json": "7721894e71caf30c58e0d79a88ce4ae4c9f64aa25d1fc829f66ea424023d73a3",
+          "transfer.csv": "191f10808c772a6fd92f46e527e3e8814cc4f33a6c40298cea26ebf105d17e4a",
+          "transfer.json": "326031b59fca4fe3cafed23484015a0a18b5aaedc15ee1f61cff7f7c27a047fe",
+          "predictions.json": "6bea2450c62e4e79d7c85be5fca3d0ec87093d48e722c4d2a32c035c67c37b0b"
+        }
+      },
+      "variance": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_pit_t",
+        "sha256": {
+          "attack_params.json": "2cc3f44ee9a93c9244501d2999f5e0206b71d3b114129cff39a3d2cbe40ac792",
+          "transfer.csv": "703530fab2be2dd38d01993c66bd3f282c8dab5c46d793e0ac3e0713cb9ba0b0",
+          "transfer.json": "da48839c32a8f5659185b763ce465ad94a8af8eb395312b58b9deb835374cc44",
+          "predictions.json": "9a3b75c15d2815b416b93ffd44a2167bf6d9a948eb31fd13a2a6086331e8aeef"
+        }
+      },
+      "second_raw_moment": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_pit_t",
+        "sha256": {
+          "attack_params.json": "ae1dcbe3e600807bfd4ef6cd6fe7928faab9ab21cc83b3fc8ead49fb8ab74ca0",
+          "transfer.csv": "c058bc20df2dfe7e8a8a45c6dbcc81c834abc744b8352507a068b4a2bfcad547",
+          "transfer.json": "ef4250899cc28678a8e1aee134763b11e0532cde31c89b9f459350250f7de129",
+          "predictions.json": "368285ba3642e8e61bc0306d07c3624e52e3321fa38977886c7603fca05c52d2"
+        }
+      },
+      "unnormalized_std_abs_mean": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_pit_t",
+        "sha256": {
+          "attack_params.json": "54a5c50764a6ec80d7f6a7ba9cbe78b1491d1bf2d552e7f570e13ab9cb9680ed",
+          "transfer.csv": "004db13bdbe466a74a59bad7f794310cd04892891047137f5841aee7d3ef24ef",
+          "transfer.json": "bfbbd437a0ceabeff82e2a47b06faa2086bd67ca659fce5bbb46500b4ec727e5",
+          "predictions.json": "b086b920f4ba036d77483157b71884758485bb0479b920cca0881ac9ed4d323d"
+        }
+      }
+    },
+    "deit_b": {
+      "normalized_std_abs_mean": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_deit_b",
+        "sha256": {
+          "attack_params.json": "b8847b59794e93092bf07aab49dc2df0e5a9865dad1ffc817a3d7fe6e818c780",
+          "transfer.csv": "b91303110fb33b2915f2d72c6a5608c19be3be5c6ccb667cd821db3bcec260b5",
+          "transfer.json": "6f089c6166591ebca6f78f34d4824e75e77378c53e66b828e0548030dd80da5a",
+          "predictions.json": "4582beb94e0ab07032c6b678919260fe03dcfa2ea13c02f3a26311c10b49c63e"
+        }
+      },
+      "variance": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_deit_b",
+        "sha256": {
+          "attack_params.json": "0a5683a35a624d0432d87ba726cb097917312c94cccfe56352364e41590dbc73",
+          "transfer.csv": "6339092d173665a0cdbb5d806356ae4f13444558fb480980aac1bcabb4b2902f",
+          "transfer.json": "72ecd090ee94d5f8db3c462483c20b6f4c1bf2cc7f49228010e572368eaf6f1e",
+          "predictions.json": "afb697f7d3f68f9e4c67ed72d58d3af25d4580b8f7cb834d5fb235ca91f5d7b3"
+        }
+      },
+      "second_raw_moment": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_deit_b",
+        "sha256": {
+          "attack_params.json": "2d3cdb5c4659346b82b41f72cc2fe6480ec717731f540ecaa7d6921ca6b522ad",
+          "transfer.csv": "6e0b06da544e37498d9e62b4a0bcb1fb7eac6cea4c239e25f023543f3cb3115c",
+          "transfer.json": "9f23226efa378fcc96b918809ebf6224a6162180a49fc4e58cab8b56b3dc5095",
+          "predictions.json": "258b84468504c35de2bb719fbd0198ef2d72d92f0ee68c120fb7b0e9b1f68cec"
+        }
+      },
+      "unnormalized_std_abs_mean": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_deit_b",
+        "sha256": {
+          "attack_params.json": "71d973cdb3c109c76b11059172f14c68ae63f6488f3191831dacc6530e07dac7",
+          "transfer.csv": "6021bccd76c31bf094b2d3bace1e7a46b7ec37d79270ca9f2380c3f18f7c5e68",
+          "transfer.json": "2d6ea2873f466b3b04a5809d3cd29aa6c27650721d6cf5249194e5f0e1536ea2",
+          "predictions.json": "f8e6688ae08a39e3ba738ea8fe7be9e07585e1734fc1a17c5b39227235d573b2"
+        }
+      }
+    }
+  },
+  "source_changes_sha256": "af2e886f6dcb725582d54a5f2840874848af9d0becb09d67e56e33b4255afffb",
+  "expected_selections_sha256": "b0536fa503fcceef7ea868010b59b8c10d20874dbc6cbfd2d5bc13f93be9843b",
+  "clean_samples_manifest_sha256": "966e9dee4e019c2f0fc9c3d2ae963ac6f8eacc454cd8b810f9f12fc5a0136dd0",
+  "all_4000_selections_match_saved_moment_predictions": true,
+  "all_52_asrs_recomputed_from_saved_predictions": true,
+  "archive_sha256": {
+    "README.md": "4c9a4ac77265d1b52f16016a3e668a3c412134af008e4301c4208e7695c3056f",
+    "per_target.csv": "306d53f27562fb0139b42525c3400e9e61a62bf543e3aca095ad2a07297647ae",
+    "preflight.json": "0be09b49eecadd8da3fd293abfb3d17e89b2373eaec5d1fd438485c37759f72e",
+    "runs/cait/attack_params.json": "c82ceb3a4a6f19a735ea4f4b2aae5850a4fbb25a171ada6f1c56d273352457d5",
+    "runs/cait/execution.json": "23a7296eaa1c68dc2fbb597eb3650f96a5cfd1b74d1592688539cc5bdd087803",
+    "runs/cait/transfer.csv": "4fa80a08626efaf3157f4e268381c5843764c3a792942bdfab3b9d813dd5ec64",
+    "runs/cait/transfer.json": "3daa99e69f14433e4cf2bb999b317cdcd4765e76253283c62523b0200959adb4",
+    "runs/deit_b/attack_params.json": "b8847b59794e93092bf07aab49dc2df0e5a9865dad1ffc817a3d7fe6e818c780",
+    "runs/deit_b/execution.json": "06176ac3a63d959d09804896342ca9a2d3d9517cb70c6db8c84bb754305d6c14",
+    "runs/deit_b/transfer.csv": "b91303110fb33b2915f2d72c6a5608c19be3be5c6ccb667cd821db3bcec260b5",
+    "runs/deit_b/transfer.json": "6f089c6166591ebca6f78f34d4824e75e77378c53e66b828e0548030dd80da5a",
+    "runs/pit_t/attack_params.json": "7721894e71caf30c58e0d79a88ce4ae4c9f64aa25d1fc829f66ea424023d73a3",
+    "runs/pit_t/execution.json": "49a5b261d6c9f39bb6fb07c23d7f9593fc452a3cc66c4e61e1044b5d644117bd",
+    "runs/pit_t/transfer.csv": "191f10808c772a6fd92f46e527e3e8814cc4f33a6c40298cea26ebf105d17e4a",
+    "runs/pit_t/transfer.json": "326031b59fca4fe3cafed23484015a0a18b5aaedc15ee1f61cff7f7c27a047fe",
+    "runs/vit/attack_params.json": "44c72c7409a2520112d4194c9a60ebb630222acb2c357fe0de3d99a316a712e0",
+    "runs/vit/execution.json": "aab65e7d1f3e69d70e26035e836f8ab98196aa027ca974de47575db8045521b3",
+    "runs/vit/transfer.csv": "23ae6c0b49a67dd78d6ef3ddb81fac07a5cfaa8179dee086fcc5b5782cd42a99",
+    "runs/vit/transfer.json": "85de50a4d6be3c0710fd9c2243ca685a86cad93cde2eb1124510570b6e72d66f",
+    "second_raw_moment_references/cait/attack_params.json": "cae7d339aac94ebf7850e1280aad8f558d77a590669bb379eb2f8d7dc909fd09",
+    "second_raw_moment_references/cait/transfer.csv": "7fdc8a35515150213acf25ba86fb10a795429c9c195be7f89937b2d2b37fcf01",
+    "second_raw_moment_references/cait/transfer.json": "7c948a80a21652dbeefbbcd4f4b748ac8d2e7df644e562b5d66e865978dcd066",
+    "second_raw_moment_references/deit_b/attack_params.json": "2d3cdb5c4659346b82b41f72cc2fe6480ec717731f540ecaa7d6921ca6b522ad",
+    "second_raw_moment_references/deit_b/transfer.csv": "6e0b06da544e37498d9e62b4a0bcb1fb7eac6cea4c239e25f023543f3cb3115c",
+    "second_raw_moment_references/deit_b/transfer.json": "9f23226efa378fcc96b918809ebf6224a6162180a49fc4e58cab8b56b3dc5095",
+    "second_raw_moment_references/pit_t/attack_params.json": "ae1dcbe3e600807bfd4ef6cd6fe7928faab9ab21cc83b3fc8ead49fb8ab74ca0",
+    "second_raw_moment_references/pit_t/transfer.csv": "c058bc20df2dfe7e8a8a45c6dbcc81c834abc744b8352507a068b4a2bfcad547",
+    "second_raw_moment_references/pit_t/transfer.json": "ef4250899cc28678a8e1aee134763b11e0532cde31c89b9f459350250f7de129",
+    "second_raw_moment_references/vit/attack_params.json": "407089103ad9d74af9cfa26eeb857bc652e6a4e101dab95a67fbda819bf3c4ea",
+    "second_raw_moment_references/vit/transfer.csv": "2acf191d9369f1c16ecf86a1be0004a1d4958cc2985afe10119c83a1cbf168b1",
+    "second_raw_moment_references/vit/transfer.json": "95c6adec2724a109838a3efd366794db12b7609fef32a41b911622c07804b9c7",
+    "selection_counts.csv": "20cd917ecd2bcf2d07cc45e9238e4df0365f82f96128f30745dc7a83073af6ab",
+    "source_changes.patch": "af2e886f6dcb725582d54a5f2840874848af9d0becb09d67e56e33b4255afffb",
+    "summary.csv": "08f852edcce6c2c11a50dc58e847c09d1aeca749184703e70dcda87f6867c02f",
+    "unnormalized_std_abs_mean_references/cait/attack_params.json": "ffe71f78a5e26b351b596432489ecbcd75dcb310b2c30ff85b22839274fe4db1",
+    "unnormalized_std_abs_mean_references/cait/transfer.csv": "fd7e79571130b8847ae749c9911df96671e47a49a9e06fe2ec0f839b14509352",
+    "unnormalized_std_abs_mean_references/cait/transfer.json": "33150d6e882cb5dd007c076f6247f9815d0184e139cf51cfb8b908aced8fc62e",
+    "unnormalized_std_abs_mean_references/deit_b/attack_params.json": "71d973cdb3c109c76b11059172f14c68ae63f6488f3191831dacc6530e07dac7",
+    "unnormalized_std_abs_mean_references/deit_b/transfer.csv": "6021bccd76c31bf094b2d3bace1e7a46b7ec37d79270ca9f2380c3f18f7c5e68",
+    "unnormalized_std_abs_mean_references/deit_b/transfer.json": "2d6ea2873f466b3b04a5809d3cd29aa6c27650721d6cf5249194e5f0e1536ea2",
+    "unnormalized_std_abs_mean_references/pit_t/attack_params.json": "54a5c50764a6ec80d7f6a7ba9cbe78b1491d1bf2d552e7f570e13ab9cb9680ed",
+    "unnormalized_std_abs_mean_references/pit_t/transfer.csv": "004db13bdbe466a74a59bad7f794310cd04892891047137f5841aee7d3ef24ef",
+    "unnormalized_std_abs_mean_references/pit_t/transfer.json": "bfbbd437a0ceabeff82e2a47b06faa2086bd67ca659fce5bbb46500b4ec727e5",
+    "unnormalized_std_abs_mean_references/vit/attack_params.json": "b2d32b9c731977215cd6c3b638abd0a503e9cdd2e2dc6ff7edd00d5e442955b6",
+    "unnormalized_std_abs_mean_references/vit/transfer.csv": "9d458783cfa89f86194dc5463e69cbcf5c418b97c8420519a157d412ddb8b059",
+    "unnormalized_std_abs_mean_references/vit/transfer.json": "d3f4dbf9809b0515e1a1a9dae4787d63589d8b92bbdb8618cbc37c73cb7f23b9",
+    "validation.json": "c14e13a5f568da76f634e5912c4a178e8bf8cd2d0128e1b230e82f936fc35ab9",
+    "variance_references/cait/attack_params.json": "67c488fa9b09416adc2aca1a8b5e59d102ab1070a0e99bcd1bcbf63459add0eb",
+    "variance_references/cait/transfer.csv": "236ee9ec1b38704559b440df46fa28d47bb6c14fd11892811915788cebb7cb0a",
+    "variance_references/cait/transfer.json": "b6faf47dad638bc05dc32a39b49b3534591f634c77b4d6fd835d54c71e81e6ce",
+    "variance_references/deit_b/attack_params.json": "0a5683a35a624d0432d87ba726cb097917312c94cccfe56352364e41590dbc73",
+    "variance_references/deit_b/transfer.csv": "6339092d173665a0cdbb5d806356ae4f13444558fb480980aac1bcabb4b2902f",
+    "variance_references/deit_b/transfer.json": "72ecd090ee94d5f8db3c462483c20b6f4c1bf2cc7f49228010e572368eaf6f1e",
+    "variance_references/pit_t/attack_params.json": "2cc3f44ee9a93c9244501d2999f5e0206b71d3b114129cff39a3d2cbe40ac792",
+    "variance_references/pit_t/transfer.csv": "703530fab2be2dd38d01993c66bd3f282c8dab5c46d793e0ac3e0713cb9ba0b0",
+    "variance_references/pit_t/transfer.json": "da48839c32a8f5659185b763ce465ad94a8af8eb395312b58b9deb835374cc44",
+    "variance_references/vit/attack_params.json": "b3b1fcd7b090d056d7379d0766e0cb31b72f64b49d55da09dde353e91f322710",
+    "variance_references/vit/transfer.csv": "a64796e52adc486d2180040c7a6721c919fcfb8fbd8ee47d52d6ae7eae5a0f4b",
+    "variance_references/vit/transfer.json": "75e160c92a01daac8f57420ff632affa5252fa8dd1a5c8483a680c74f52b32ce"
+  }
+}

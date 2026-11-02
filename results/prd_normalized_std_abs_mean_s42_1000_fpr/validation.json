@@ -1,0 +1,101 @@
+{
+  "passed": true,
+  "seed": 42,
+  "kernel_checks": [
+    "separate layer-maximum normalization changes the unnormalized winner",
+    "normalizes standard deviation rather than variance",
+    "population standard deviation handles different native token counts",
+    "normalizers are per image and span all candidates, independent of batch companions",
+    "exact ties use earliest native observation",
+    "zero maximum standard deviation contributes zero",
+    "zero maximum absolute mean contributes zero",
+    "both maxima zero remain finite and select earliest",
+    "absolute signed mean preserves score under sign reversal",
+    "uses absolute mean, not mean of absolute token scores",
+    "positive tiny denominators are not clipped by an arbitrary epsilon",
+    "unique maximum is unchanged by observation permutation; no depth weighting",
+    "rejects nonfinite and zero representations",
+    "selection consumes no RNG"
+  ],
+  "saved_moments_validation": {
+    "vit": {
+      "samples": 1000,
+      "selected_checkpoints_match": 1000,
+      "checkpoint_histogram": {
+        "block10": 973,
+        "block11": 27
+      },
+      "input": "two-token representations matching saved per-layer means and population variances"
+    },
+    "pit_t": {
+      "samples": 1000,
+      "selected_checkpoints_match": 1000,
+      "checkpoint_histogram": {
+        "stage1_block0": 54,
+        "stage3_block1": 425,
+        "stage1_block1": 381,
+        "stage3_block2": 52,
+        "stage3_block3": 72,
+        "stage3_block0": 16
+      },
+      "input": "two-token representations matching saved per-layer means and population variances"
+    },
+    "deit_b": {
+      "samples": 1000,
+      "selected_checkpoints_match": 1000,
+      "checkpoint_histogram": {
+        "block9": 380,
+        "block11": 494,
+        "block8": 58,
+        "block10": 49,
+        "block0": 5,
+        "block6": 5,
+        "block2": 3,
+        "block5": 2,
+        "block4": 1,
+        "block1": 3
+      },
+      "input": "two-token representations matching saved per-layer means and population variances"
+    },
+    "cait": {
+      "samples": 1000,
+      "selected_checkpoints_match": 1000,
+      "checkpoint_histogram": {
+        "block23": 662,
+        "block17": 12,
+        "block22": 170,
+        "block21": 68,
+        "block16": 31,
+        "block0": 12,
+        "block3": 3,
+        "block18": 10,
+        "block15": 2,
+        "block6": 6,
+        "block10": 2,
+        "block20": 8,
+        "block19": 3,
+        "block2": 9,
+        "block1": 1,
+        "block8": 1
+      },
+      "input": "two-token representations matching saved per-layer means and population variances"
+    }
+  },
+  "raw_cait_validation": {
+    "samples": 1000,
+    "selected_checkpoints_match": 1000,
+    "input": "saved raw per-token CaiT scores; unit-vector cosine reconstruction"
+  },
+  "toy_attack_validation": {
+    "samples": 2,
+    "toy_model": true,
+    "clean_selection_calls": 1,
+    "steps": 2,
+    "groups": 2,
+    "views_per_group": 2,
+    "attack_parameters_verified": true,
+    "finite_outputs_and_perturbation_bound_verified": true
+  },
+  "full_attack_started": false,
+  "new_asr_measured": false
+}

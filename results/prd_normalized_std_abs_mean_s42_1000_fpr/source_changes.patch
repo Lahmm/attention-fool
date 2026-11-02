@@ -1,0 +1,79 @@
+--- mainline/progressive_attack.py
++++ experiment/progressive_attack.py
+@@ -453,6 +453,7 @@
+                     self.checkpoint_selections.append({
+                         "sample_index": offset + index, "checkpoint": choice.checkpoint,
+                         "peak_layer": choice.peak_layer, "peak_variance": choice.variance,
++                        "peak_normalized_std_abs_mean": choice.normalized_std_abs_mean,
+                         "grid_size": list(choice.grid_size), "drop_count": count,
+                         "actual_drop_ratio": count / math.prod(choice.grid_size),
+                     })
+@@ -502,7 +503,16 @@
+         if self._dynamic_checkpoint_policy:
+             params.update({
+                 "checkpoint_selection_enabled": self.dynamic_checkpoint,
+-                "checkpoint_selection": "per-sample maximum clean raw patch-score population variance; drop before peak block",
++                "checkpoint_selection": "per-sample maximum sum of clean raw patch-score population standard deviation and absolute mean, each divided by its layer maximum; drop before peak block",
++                "checkpoint_selection_metric": "layer_max_normalized_std_plus_abs_mean_raw_cosine",
++                "experiment_only": True,
++                "checkpoint_score_normalization": {
++                    "scope": "per clean image across all candidate blocks",
++                    "standard_deviation": "divide by maximum candidate population standard deviation",
++                    "absolute_mean": "divide by maximum candidate absolute signed mean",
++                    "zero_maximum_contribution": "zero",
++                },
++                "checkpoint_depth_weighting": False,
+                 "checkpoint_tie_break": "earliest block in native forward order",
+                 "total_drop_ratio": self.progressive_drop_ratios[0],
+                 "drop_count_rounding": "total ratio rounded to 12 decimals; max(1, round(native token count * ratio))",
+--- mainline/nets/base.py
++++ experiment/nets/base.py
+@@ -21,6 +21,7 @@
+     checkpoint: str
+     peak_layer: str
+     variance: float
++    normalized_std_abs_mean: float
+     grid_size: tuple[int, int]
+ 
+ 
+@@ -28,6 +29,8 @@
+     if not observations:
+         raise ValueError("at least one block observation is required")
+     variances = []
++    deviations = []
++    absolute_means = []
+     finite = []
+     nonzero = []
+     for layer, checkpoint, grid, local, reference in observations:
+@@ -40,7 +43,20 @@
+         nonzero.append((local.norm(dim=-1) > 0).all() & (reference.norm(dim=-1) > 0).all())
+         scores = F.cosine_similarity(local, reference[:, None], dim=-1, eps=1e-8).clamp(-1, 1)
+         variances.append(scores.double().var(dim=1, unbiased=False))
+-    values = torch.stack(variances)
++        deviations.append(scores.double().std(dim=1, unbiased=False))
++        absolute_means.append(scores.double().mean(dim=1).abs())
++    variance_values = torch.stack(variances).cpu()
++    deviation_values = torch.stack(deviations)
++    absolute_mean_values = torch.stack(absolute_means)
++    maximum_deviation = deviation_values.amax(dim=0, keepdim=True)
++    maximum_absolute_mean = absolute_mean_values.amax(dim=0, keepdim=True)
++    deviation_denominator = torch.where(
++        maximum_deviation > 0, maximum_deviation, torch.ones_like(maximum_deviation)
++    )
++    mean_denominator = torch.where(
++        maximum_absolute_mean > 0, maximum_absolute_mean, torch.ones_like(maximum_absolute_mean)
++    )
++    values = deviation_values / deviation_denominator + absolute_mean_values / mean_denominator
+     checks = torch.stack((torch.stack(finite).all(), torch.stack(nonzero).all()))
+     packed = torch.cat((values.flatten(), checks.to(values))).cpu()
+     if not bool(packed[-2]):
+@@ -51,7 +67,8 @@
+     peaks = values.argmax(dim=0)
+     return tuple(
+         SampleCheckpoint(observations[index][1], observations[index][0],
+-                         float(values[index, sample]), observations[index][2])
++                         float(variance_values[index, sample]), float(values[index, sample]),
++                         observations[index][2])
+         for sample, index in enumerate(peaks.tolist())
+     )
+ 

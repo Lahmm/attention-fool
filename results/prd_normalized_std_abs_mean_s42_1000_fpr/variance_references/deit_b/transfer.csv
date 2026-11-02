@@ -1,0 +1,14 @@
+target,correct,total,acc,asr
+vit_base_patch16_224,16,1000,0.016,0.984
+cait_s24_224,8,1000,0.008,0.992
+pit_b_224,42,1000,0.042,0.958
+visformer_small,44,1000,0.044,0.956
+swin_tiny_patch4_window7_224,33,1000,0.033,0.967
+deit_tiny_patch16_224,17,1000,0.017,0.983
+coat_tiny,72,1000,0.072,0.928
+resnet18,84,1000,0.084,0.916
+vgg16,90,1000,0.09,0.91
+densenet121,77,1000,0.077,0.923
+efficientnet_b0,45,1000,0.045,0.955
+mobilenet_v3_small,114,1000,0.114,0.886
+resnext50_32x4d,88,1000,0.088,0.912
