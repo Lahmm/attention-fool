@@ -1,0 +1,61 @@
+--- mainline/progressive_attack.py
++++ experiment/progressive_attack.py
+@@ -453,6 +453,7 @@
+                     self.checkpoint_selections.append({
+                         "sample_index": offset + index, "checkpoint": choice.checkpoint,
+                         "peak_layer": choice.peak_layer, "peak_variance": choice.variance,
++                        "peak_std_abs_mean": choice.std_abs_mean,
+                         "grid_size": list(choice.grid_size), "drop_count": count,
+                         "actual_drop_ratio": count / math.prod(choice.grid_size),
+                     })
+@@ -502,7 +503,9 @@
+         if self._dynamic_checkpoint_policy:
+             params.update({
+                 "checkpoint_selection_enabled": self.dynamic_checkpoint,
+-                "checkpoint_selection": "per-sample maximum clean raw patch-score population variance; drop before peak block",
++                "checkpoint_selection": "per-sample maximum clean raw patch-score population standard deviation plus absolute mean; drop before peak block",
++                "checkpoint_selection_metric": "std_plus_abs_mean_raw_cosine",
++                "experiment_only": True,
+                 "checkpoint_tie_break": "earliest block in native forward order",
+                 "total_drop_ratio": self.progressive_drop_ratios[0],
+                 "drop_count_rounding": "total ratio rounded to 12 decimals; max(1, round(native token count * ratio))",
+--- mainline/nets/base.py
++++ experiment/nets/base.py
+@@ -21,6 +21,7 @@
+     checkpoint: str
+     peak_layer: str
+     variance: float
++    std_abs_mean: float
+     grid_size: tuple[int, int]
+ 
+ 
+@@ -28,6 +29,7 @@
+     if not observations:
+         raise ValueError("at least one block observation is required")
+     variances = []
++    selection_scores = []
+     finite = []
+     nonzero = []
+     for layer, checkpoint, grid, local, reference in observations:
+@@ -40,7 +42,10 @@
+         nonzero.append((local.norm(dim=-1) > 0).all() & (reference.norm(dim=-1) > 0).all())
+         scores = F.cosine_similarity(local, reference[:, None], dim=-1, eps=1e-8).clamp(-1, 1)
+         variances.append(scores.double().var(dim=1, unbiased=False))
+-    values = torch.stack(variances)
++        selection_scores.append(scores.double().std(dim=1, unbiased=False)
++                       + scores.double().mean(dim=1).abs())
++    variance_values = torch.stack(variances).cpu()
++    values = torch.stack(selection_scores)
+     checks = torch.stack((torch.stack(finite).all(), torch.stack(nonzero).all()))
+     packed = torch.cat((values.flatten(), checks.to(values))).cpu()
+     if not bool(packed[-2]):
+@@ -51,7 +56,8 @@
+     peaks = values.argmax(dim=0)
+     return tuple(
+         SampleCheckpoint(observations[index][1], observations[index][0],
+-                         float(values[index, sample]), observations[index][2])
++                         float(variance_values[index, sample]), float(values[index, sample]),
++                         observations[index][2])
+         for sample, index in enumerate(peaks.tolist())
+     )
+ 

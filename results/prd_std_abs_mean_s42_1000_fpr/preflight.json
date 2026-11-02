@@ -1,0 +1,174 @@
+{
+  "completed_utc": "2026-11-02T08:25:13.974732+00:00",
+  "passed": true,
+  "sample_count": 1000,
+  "cases": [
+    {
+      "id": "vit",
+      "native_logit_max_error": 0.0,
+      "clean_selection_call_count": 1,
+      "executed_steps": 10,
+      "groups": 10,
+      "views_per_group": 2,
+      "max_pixel_change": 0.0627451241016388,
+      "total_drop_ratio": 0.102040816326,
+      "selected": [
+        {
+          "sample_index": 0,
+          "checkpoint": "block10",
+          "peak_layer": "block11",
+          "peak_variance": 0.02488710069128443,
+          "peak_std_abs_mean": 0.5475711490951611,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 20,
+          "actual_drop_ratio": 0.10204081632653061
+        },
+        {
+          "sample_index": 1,
+          "checkpoint": "block10",
+          "peak_layer": "block11",
+          "peak_variance": 0.031636995033501765,
+          "peak_std_abs_mean": 0.6091784422429359,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 20,
+          "actual_drop_ratio": 0.10204081632653061
+        }
+      ]
+    },
+    {
+      "id": "cait",
+      "native_logit_max_error": 0.0,
+      "clean_selection_call_count": 1,
+      "executed_steps": 10,
+      "groups": 10,
+      "views_per_group": 2,
+      "max_pixel_change": 0.0627451241016388,
+      "total_drop_ratio": 0.15306122449,
+      "selected": [
+        {
+          "sample_index": 0,
+          "checkpoint": "block23",
+          "peak_layer": "block24",
+          "peak_variance": 0.0017135825031634863,
+          "peak_std_abs_mean": 0.16821608812725272,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 30,
+          "actual_drop_ratio": 0.15306122448979592
+        },
+        {
+          "sample_index": 1,
+          "checkpoint": "block23",
+          "peak_layer": "block24",
+          "peak_variance": 0.0009826913504146235,
+          "peak_std_abs_mean": 0.12650068246677715,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 30,
+          "actual_drop_ratio": 0.15306122448979592
+        }
+      ]
+    },
+    {
+      "id": "pit_t",
+      "native_logit_max_error": 0.0,
+      "clean_selection_call_count": 1,
+      "executed_steps": 10,
+      "groups": 10,
+      "views_per_group": 2,
+      "max_pixel_change": 0.0627451241016388,
+      "total_drop_ratio": 0.15306122449,
+      "selected": [
+        {
+          "sample_index": 0,
+          "checkpoint": "stage1_block0",
+          "peak_layer": "stage1_block1",
+          "peak_variance": 0.013806898713247437,
+          "peak_std_abs_mean": 0.2933051485719188,
+          "grid_size": [
+            27,
+            27
+          ],
+          "drop_count": 112,
+          "actual_drop_ratio": 0.15363511659807957
+        },
+        {
+          "sample_index": 1,
+          "checkpoint": "stage3_block1",
+          "peak_layer": "stage3_block2",
+          "peak_variance": 0.016765271523223504,
+          "peak_std_abs_mean": 0.30048423177075656,
+          "grid_size": [
+            7,
+            7
+          ],
+          "drop_count": 8,
+          "actual_drop_ratio": 0.16326530612244897
+        }
+      ]
+    },
+    {
+      "id": "deit_b",
+      "native_logit_max_error": 0.0,
+      "clean_selection_call_count": 1,
+      "executed_steps": 10,
+      "groups": 10,
+      "views_per_group": 2,
+      "max_pixel_change": 0.0627451241016388,
+      "total_drop_ratio": 0.102040816326,
+      "selected": [
+        {
+          "sample_index": 0,
+          "checkpoint": "block9",
+          "peak_layer": "block10",
+          "peak_variance": 0.0020664086866358533,
+          "peak_std_abs_mean": 0.09380726020644733,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 20,
+          "actual_drop_ratio": 0.10204081632653061
+        },
+        {
+          "sample_index": 1,
+          "checkpoint": "block9",
+          "peak_layer": "block10",
+          "peak_variance": 0.0041050180004745945,
+          "peak_std_abs_mean": 0.1174594725121968,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 20,
+          "actual_drop_ratio": 0.10204081632653061
+        }
+      ]
+    }
+  ],
+  "fpr13_targets": [
+    "vit_base_patch16_224",
+    "cait_s24_224",
+    "pit_b_224",
+    "visformer_small",
+    "swin_tiny_patch4_window7_224",
+    "deit_tiny_patch16_224",
+    "coat_tiny",
+    "resnet18",
+    "vgg16",
+    "densenet121",
+    "efficientnet_b0",
+    "mobilenet_v3_small",
+    "resnext50_32x4d"
+  ]
+}

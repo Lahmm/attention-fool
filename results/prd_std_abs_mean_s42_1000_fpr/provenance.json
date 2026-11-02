@@ -1,0 +1,288 @@
+{
+  "created_utc": "2026-11-02T09:34:02.622566+00:00",
+  "experiment_only": true,
+  "job_dir": "/root/autodl-tmp/prd_jobs/std_abs_mean_s42_20261102T081807Z",
+  "manifest": {
+    "created_utc": "2026-11-02T08:18:07.098042+00:00",
+    "repository": "/root/autodl-tmp/attention-fool",
+    "source_commit": "8d7a5413d94c34aa0f1324508812a59e7b6557be",
+    "source_sha256": {
+      "main.py": "feaef6d32bd7b7a0af990edcbedd4b28ee95532198dae9a23ba98c43a6512343",
+      "progressive_attack.py": "c62b27f0a0729ca365b977cb3a492d7bd0a8d28647e68f1402aa1b6b0dcc3575",
+      "utils.py": "c1b94da3b250ca5263d6bc8b0e065aaea342c0e7b1f12fbf6efbfc21301b776a",
+      "transfer_eval.py": "aab43978a01cb90a722af1732835b5955c3b1fa491c19b2c3b9d3d7ff1618e85",
+      "nets/__init__.py": "8d74ef265778c6046e5f2cc00bbfbe0355507beae50d3fcc845399ce37e66df9",
+      "nets/base.py": "6bdc0836eefe011da363b23043b6c12fb1903f506ea72fa0adb6a3a12783b468",
+      "nets/cait.py": "53afeedf6dccf0b159572e0e4259032eb13782584da4ffef3d045ef55bb5e568",
+      "nets/pit.py": "586da201c5e38aa7e1ec5abc81565a14aa9936554ffd5f2cc3d66a4215ee1f4c",
+      "nets/vit.py": "df515a1e1f1ee6a0944e7d500356e3f578453d7594c54ed8c392923d46817297"
+    },
+    "python": "/root/miniconda3/envs/att-atk/bin/python",
+    "seed": 42,
+    "num_images": 1000,
+    "steps": 10,
+    "epsilon": 0.06274509803921569,
+    "step_size": 0.006274509803921568,
+    "input_diversity_groups": 10,
+    "input_diversity_views_per_group": 2,
+    "phase_shifts": [
+      [
+        4,
+        4
+      ],
+      [
+        8,
+        8
+      ],
+      [
+        12,
+        12
+      ]
+    ],
+    "noise_structure": "opponent",
+    "checkpoint_policy": "per-image maximum clean raw cosine population standard deviation plus absolute mean; earliest native block on ties; drop at its input; select once before attack",
+    "evaluation_protocol": "fpr",
+    "evaluation_batch_size": 32,
+    "evaluation_tf32": false,
+    "experiments": [
+      {
+        "id": "vit",
+        "model": "vit_base_patch16_224",
+        "attack_batch_size": 48,
+        "opponent_noise_strength": 0.2,
+        "expected_total_drop_ratio": 0.102040816326,
+        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_vit",
+        "variance_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_vit",
+        "second_raw_moment_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_vit"
+      },
+      {
+        "id": "cait",
+        "model": "cait_s24_224",
+        "attack_batch_size": 16,
+        "opponent_noise_strength": 0.2,
+        "expected_total_drop_ratio": 0.15306122449,
+        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_cait",
+        "variance_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_cait_preln_variance_s42_20261029T070204Z",
+        "second_raw_moment_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_cait"
+      },
+      {
+        "id": "pit_t",
+        "model": "pit_ti_224",
+        "attack_batch_size": 32,
+        "opponent_noise_strength": 0.4,
+        "expected_total_drop_ratio": 0.15306122449,
+        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_pit_t",
+        "variance_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_pit_t",
+        "second_raw_moment_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_pit_t"
+      },
+      {
+        "id": "deit_b",
+        "model": "deit_base_distilled_patch16_224",
+        "attack_batch_size": 48,
+        "opponent_noise_strength": 0.2,
+        "expected_total_drop_ratio": 0.102040816326,
+        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_deit_b",
+        "variance_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_deit_b",
+        "second_raw_moment_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_deit_b"
+      }
+    ],
+    "mainline_sha256": {
+      "main.py": "feaef6d32bd7b7a0af990edcbedd4b28ee95532198dae9a23ba98c43a6512343",
+      "progressive_attack.py": "728b7f927b5f52051e8c0fbef940e72bb14db5bb70ddb3968c925a9d04323040",
+      "utils.py": "c1b94da3b250ca5263d6bc8b0e065aaea342c0e7b1f12fbf6efbfc21301b776a",
+      "transfer_eval.py": "aab43978a01cb90a722af1732835b5955c3b1fa491c19b2c3b9d3d7ff1618e85",
+      "nets/__init__.py": "8d74ef265778c6046e5f2cc00bbfbe0355507beae50d3fcc845399ce37e66df9",
+      "nets/base.py": "b18e4d7936156c7dfad62eaa08e87fc8b945a7d36ea0a7077df994133afc7c22",
+      "nets/cait.py": "53afeedf6dccf0b159572e0e4259032eb13782584da4ffef3d045ef55bb5e568",
+      "nets/pit.py": "586da201c5e38aa7e1ec5abc81565a14aa9936554ffd5f2cc3d66a4215ee1f4c",
+      "nets/vit.py": "df515a1e1f1ee6a0944e7d500356e3f578453d7594c54ed8c392923d46817297"
+    },
+    "experiment_only": true,
+    "source_changes_sha256": "97f466a643fb36eded3b79d8e9957770069ad1fe4ce34f2067bf08af42b490ab",
+    "worker_sha256": "8bb45d6c1f27f40882d5f01889a529c7bfbe551d460fde2ea3f2f5b9e66ab5fc",
+    "expected_checkpoint_validation": "exact match for every image",
+    "parent_job": "/root/autodl-tmp/prd_jobs/second_raw_moment_s42_20261101T151302Z",
+    "checkpoint_selection_metric": "std_plus_abs_mean_raw_cosine",
+    "expected_score_absolute_tolerance": 1e-06,
+    "statistics_reference": {
+      "path": "/root/autodl-tmp/prd_jobs/patchscore_s42_1000_moments_20261029T075611Z/per_image_layer.csv",
+      "sha256": "ed226516cf4af85698bbdf6ceb2983d065d2eb69620a6822c315cbf01186dc49"
+    },
+    "expected_selections_sha256": "e9e801798a4eac8fa2ae23868c43b97bf33883cb38b8c0c49ad89d1bac02d3be",
+    "samples_sha256": "966e9dee4e019c2f0fc9c3d2ae963ac6f8eacc454cd8b810f9f12fc5a0136dd0",
+    "archive_sha256": "118398169f2a5e71e0fb73ba022f412c7cd72f203f3728aa2dfb653ae61e228b",
+    "verify_sha256": "5e52f8072fc9aa885274b9497149d9ef6eb727b1c452c3e1a47a3ac0018f33fb"
+  },
+  "evidence": {
+    "vit": {
+      "std_abs_mean": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_vit",
+        "sha256": {
+          "attack_params.json": "b2d32b9c731977215cd6c3b638abd0a503e9cdd2e2dc6ff7edd00d5e442955b6",
+          "transfer.csv": "9d458783cfa89f86194dc5463e69cbcf5c418b97c8420519a157d412ddb8b059",
+          "transfer.json": "d3f4dbf9809b0515e1a1a9dae4787d63589d8b92bbdb8618cbc37c73cb7f23b9",
+          "predictions.json": "8cdf042a3dfd88c8e871b02291057f9ea613eff84e0418d8dadb93a7a28f7bc3"
+        }
+      },
+      "variance": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_vit",
+        "sha256": {
+          "attack_params.json": "b3b1fcd7b090d056d7379d0766e0cb31b72f64b49d55da09dde353e91f322710",
+          "transfer.csv": "a64796e52adc486d2180040c7a6721c919fcfb8fbd8ee47d52d6ae7eae5a0f4b",
+          "transfer.json": "75e160c92a01daac8f57420ff632affa5252fa8dd1a5c8483a680c74f52b32ce",
+          "predictions.json": "abeb354383fd852e38b7dd5a3c743c4b4ebaeec85d3c34023b3ac5749068db2b"
+        }
+      },
+      "second_raw_moment": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_vit",
+        "sha256": {
+          "attack_params.json": "407089103ad9d74af9cfa26eeb857bc652e6a4e101dab95a67fbda819bf3c4ea",
+          "transfer.csv": "2acf191d9369f1c16ecf86a1be0004a1d4958cc2985afe10119c83a1cbf168b1",
+          "transfer.json": "95c6adec2724a109838a3efd366794db12b7609fef32a41b911622c07804b9c7",
+          "predictions.json": "2d3b4c097afd5f388f481f197b84a625e7793eac3420919ccae567bb68f1806f"
+        }
+      }
+    },
+    "cait": {
+      "std_abs_mean": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_cait",
+        "sha256": {
+          "attack_params.json": "ffe71f78a5e26b351b596432489ecbcd75dcb310b2c30ff85b22839274fe4db1",
+          "transfer.csv": "fd7e79571130b8847ae749c9911df96671e47a49a9e06fe2ec0f839b14509352",
+          "transfer.json": "33150d6e882cb5dd007c076f6247f9815d0184e139cf51cfb8b908aced8fc62e",
+          "predictions.json": "aee680e7a21eada7e67992404c2ab7f2289ebfa7e15ffd7e45abc0b504e2984d"
+        }
+      },
+      "variance": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_cait_preln_variance_s42_20261029T070204Z",
+        "sha256": {
+          "attack_params.json": "67c488fa9b09416adc2aca1a8b5e59d102ab1070a0e99bcd1bcbf63459add0eb",
+          "transfer.csv": "236ee9ec1b38704559b440df46fa28d47bb6c14fd11892811915788cebb7cb0a",
+          "transfer.json": "b6faf47dad638bc05dc32a39b49b3534591f634c77b4d6fd835d54c71e81e6ce",
+          "predictions.json": "ab0cb68cc46febc35c5791c0f46a35ebb1486510aeeb141761d78967fa935e7a"
+        }
+      },
+      "second_raw_moment": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_cait",
+        "sha256": {
+          "attack_params.json": "cae7d339aac94ebf7850e1280aad8f558d77a590669bb379eb2f8d7dc909fd09",
+          "transfer.csv": "7fdc8a35515150213acf25ba86fb10a795429c9c195be7f89937b2d2b37fcf01",
+          "transfer.json": "7c948a80a21652dbeefbbcd4f4b748ac8d2e7df644e562b5d66e865978dcd066",
+          "predictions.json": "c9389fe5f11038d3c8b8f6abc5e59ef8dc54946bdc0e1d35158da2dcccce8d67"
+        }
+      }
+    },
+    "pit_t": {
+      "std_abs_mean": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_pit_t",
+        "sha256": {
+          "attack_params.json": "54a5c50764a6ec80d7f6a7ba9cbe78b1491d1bf2d552e7f570e13ab9cb9680ed",
+          "transfer.csv": "004db13bdbe466a74a59bad7f794310cd04892891047137f5841aee7d3ef24ef",
+          "transfer.json": "bfbbd437a0ceabeff82e2a47b06faa2086bd67ca659fce5bbb46500b4ec727e5",
+          "predictions.json": "b086b920f4ba036d77483157b71884758485bb0479b920cca0881ac9ed4d323d"
+        }
+      },
+      "variance": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_pit_t",
+        "sha256": {
+          "attack_params.json": "2cc3f44ee9a93c9244501d2999f5e0206b71d3b114129cff39a3d2cbe40ac792",
+          "transfer.csv": "703530fab2be2dd38d01993c66bd3f282c8dab5c46d793e0ac3e0713cb9ba0b0",
+          "transfer.json": "da48839c32a8f5659185b763ce465ad94a8af8eb395312b58b9deb835374cc44",
+          "predictions.json": "9a3b75c15d2815b416b93ffd44a2167bf6d9a948eb31fd13a2a6086331e8aeef"
+        }
+      },
+      "second_raw_moment": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_pit_t",
+        "sha256": {
+          "attack_params.json": "ae1dcbe3e600807bfd4ef6cd6fe7928faab9ab21cc83b3fc8ead49fb8ab74ca0",
+          "transfer.csv": "c058bc20df2dfe7e8a8a45c6dbcc81c834abc744b8352507a068b4a2bfcad547",
+          "transfer.json": "ef4250899cc28678a8e1aee134763b11e0532cde31c89b9f459350250f7de129",
+          "predictions.json": "368285ba3642e8e61bc0306d07c3624e52e3321fa38977886c7603fca05c52d2"
+        }
+      }
+    },
+    "deit_b": {
+      "std_abs_mean": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_deit_b",
+        "sha256": {
+          "attack_params.json": "71d973cdb3c109c76b11059172f14c68ae63f6488f3191831dacc6530e07dac7",
+          "transfer.csv": "6021bccd76c31bf094b2d3bace1e7a46b7ec37d79270ca9f2380c3f18f7c5e68",
+          "transfer.json": "2d6ea2873f466b3b04a5809d3cd29aa6c27650721d6cf5249194e5f0e1536ea2",
+          "predictions.json": "f8e6688ae08a39e3ba738ea8fe7be9e07585e1734fc1a17c5b39227235d573b2"
+        }
+      },
+      "variance": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_deit_b",
+        "sha256": {
+          "attack_params.json": "0a5683a35a624d0432d87ba726cb097917312c94cccfe56352364e41590dbc73",
+          "transfer.csv": "6339092d173665a0cdbb5d806356ae4f13444558fb480980aac1bcabb4b2902f",
+          "transfer.json": "72ecd090ee94d5f8db3c462483c20b6f4c1bf2cc7f49228010e572368eaf6f1e",
+          "predictions.json": "afb697f7d3f68f9e4c67ed72d58d3af25d4580b8f7cb834d5fb235ca91f5d7b3"
+        }
+      },
+      "second_raw_moment": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_deit_b",
+        "sha256": {
+          "attack_params.json": "2d3cdb5c4659346b82b41f72cc2fe6480ec717731f540ecaa7d6921ca6b522ad",
+          "transfer.csv": "6e0b06da544e37498d9e62b4a0bcb1fb7eac6cea4c239e25f023543f3cb3115c",
+          "transfer.json": "9f23226efa378fcc96b918809ebf6224a6162180a49fc4e58cab8b56b3dc5095",
+          "predictions.json": "258b84468504c35de2bb719fbd0198ef2d72d92f0ee68c120fb7b0e9b1f68cec"
+        }
+      }
+    }
+  },
+  "source_changes_sha256": "97f466a643fb36eded3b79d8e9957770069ad1fe4ce34f2067bf08af42b490ab",
+  "expected_selections_sha256": "e9e801798a4eac8fa2ae23868c43b97bf33883cb38b8c0c49ad89d1bac02d3be",
+  "clean_samples_manifest_sha256": "966e9dee4e019c2f0fc9c3d2ae963ac6f8eacc454cd8b810f9f12fc5a0136dd0",
+  "all_4000_selections_match_saved_moment_predictions": true,
+  "all_52_asrs_recomputed_from_saved_predictions": true,
+  "archive_sha256": {
+    "README.md": "af72bbe3a288283d20d869879d3ce0461df6dfc11542f5c82ca7f3c80e26ba87",
+    "per_target.csv": "e6199a8b04943bd6e93a50052058248f4ed07db88aa8acd6216f3a0819d52297",
+    "preflight.json": "efe7078d2520df7af48859299b1c169ab88f8bbc52098eabd326904abf4fb42d",
+    "runs/cait/attack_params.json": "ffe71f78a5e26b351b596432489ecbcd75dcb310b2c30ff85b22839274fe4db1",
+    "runs/cait/execution.json": "feaa4dd52710ecba5ede227777f7d669c0b5ee4df8f6d2c55077b0a3dc6dca01",
+    "runs/cait/transfer.csv": "fd7e79571130b8847ae749c9911df96671e47a49a9e06fe2ec0f839b14509352",
+    "runs/cait/transfer.json": "33150d6e882cb5dd007c076f6247f9815d0184e139cf51cfb8b908aced8fc62e",
+    "runs/deit_b/attack_params.json": "71d973cdb3c109c76b11059172f14c68ae63f6488f3191831dacc6530e07dac7",
+    "runs/deit_b/execution.json": "a951adf75ffa4ec0b45c8f9c89f59f461ed79f7bb41f3a5d9a88c01be28f2195",
+    "runs/deit_b/transfer.csv": "6021bccd76c31bf094b2d3bace1e7a46b7ec37d79270ca9f2380c3f18f7c5e68",
+    "runs/deit_b/transfer.json": "2d6ea2873f466b3b04a5809d3cd29aa6c27650721d6cf5249194e5f0e1536ea2",
+    "runs/pit_t/attack_params.json": "54a5c50764a6ec80d7f6a7ba9cbe78b1491d1bf2d552e7f570e13ab9cb9680ed",
+    "runs/pit_t/execution.json": "b95e396172040b7db9370754c0e6eed6137928a84f33a14915289aa33f991362",
+    "runs/pit_t/transfer.csv": "004db13bdbe466a74a59bad7f794310cd04892891047137f5841aee7d3ef24ef",
+    "runs/pit_t/transfer.json": "bfbbd437a0ceabeff82e2a47b06faa2086bd67ca659fce5bbb46500b4ec727e5",
+    "runs/vit/attack_params.json": "b2d32b9c731977215cd6c3b638abd0a503e9cdd2e2dc6ff7edd00d5e442955b6",
+    "runs/vit/execution.json": "55806de6b68e583ca08cd8da0c15a129b68a82e778a4c24d798285070ca21db3",
+    "runs/vit/transfer.csv": "9d458783cfa89f86194dc5463e69cbcf5c418b97c8420519a157d412ddb8b059",
+    "runs/vit/transfer.json": "d3f4dbf9809b0515e1a1a9dae4787d63589d8b92bbdb8618cbc37c73cb7f23b9",
+    "second_raw_moment_references/cait/attack_params.json": "cae7d339aac94ebf7850e1280aad8f558d77a590669bb379eb2f8d7dc909fd09",
+    "second_raw_moment_references/cait/transfer.csv": "7fdc8a35515150213acf25ba86fb10a795429c9c195be7f89937b2d2b37fcf01",
+    "second_raw_moment_references/cait/transfer.json": "7c948a80a21652dbeefbbcd4f4b748ac8d2e7df644e562b5d66e865978dcd066",
+    "second_raw_moment_references/deit_b/attack_params.json": "2d3cdb5c4659346b82b41f72cc2fe6480ec717731f540ecaa7d6921ca6b522ad",
+    "second_raw_moment_references/deit_b/transfer.csv": "6e0b06da544e37498d9e62b4a0bcb1fb7eac6cea4c239e25f023543f3cb3115c",
+    "second_raw_moment_references/deit_b/transfer.json": "9f23226efa378fcc96b918809ebf6224a6162180a49fc4e58cab8b56b3dc5095",
+    "second_raw_moment_references/pit_t/attack_params.json": "ae1dcbe3e600807bfd4ef6cd6fe7928faab9ab21cc83b3fc8ead49fb8ab74ca0",
+    "second_raw_moment_references/pit_t/transfer.csv": "c058bc20df2dfe7e8a8a45c6dbcc81c834abc744b8352507a068b4a2bfcad547",
+    "second_raw_moment_references/pit_t/transfer.json": "ef4250899cc28678a8e1aee134763b11e0532cde31c89b9f459350250f7de129",
+    "second_raw_moment_references/vit/attack_params.json": "407089103ad9d74af9cfa26eeb857bc652e6a4e101dab95a67fbda819bf3c4ea",
+    "second_raw_moment_references/vit/transfer.csv": "2acf191d9369f1c16ecf86a1be0004a1d4958cc2985afe10119c83a1cbf168b1",
+    "second_raw_moment_references/vit/transfer.json": "95c6adec2724a109838a3efd366794db12b7609fef32a41b911622c07804b9c7",
+    "selection_counts.csv": "1d9d355c42ed0fb3dba596437610babb166f342ebe14aa77688a6af6c1a96770",
+    "source_changes.patch": "97f466a643fb36eded3b79d8e9957770069ad1fe4ce34f2067bf08af42b490ab",
+    "summary.csv": "0cca96a6190a3fe082a729eba9a12f3e57735afb1b60d8dd23cde1a50546d82d",
+    "validation.json": "cd843c8e2bf724a5ede6fc5b7a4ef117c2a4d0ccfaa2bf2e75f5438b99121868",
+    "variance_references/cait/attack_params.json": "67c488fa9b09416adc2aca1a8b5e59d102ab1070a0e99bcd1bcbf63459add0eb",
+    "variance_references/cait/transfer.csv": "236ee9ec1b38704559b440df46fa28d47bb6c14fd11892811915788cebb7cb0a",
+    "variance_references/cait/transfer.json": "b6faf47dad638bc05dc32a39b49b3534591f634c77b4d6fd835d54c71e81e6ce",
+    "variance_references/deit_b/attack_params.json": "0a5683a35a624d0432d87ba726cb097917312c94cccfe56352364e41590dbc73",
+    "variance_references/deit_b/transfer.csv": "6339092d173665a0cdbb5d806356ae4f13444558fb480980aac1bcabb4b2902f",
+    "variance_references/deit_b/transfer.json": "72ecd090ee94d5f8db3c462483c20b6f4c1bf2cc7f49228010e572368eaf6f1e",
+    "variance_references/pit_t/attack_params.json": "2cc3f44ee9a93c9244501d2999f5e0206b71d3b114129cff39a3d2cbe40ac792",
+    "variance_references/pit_t/transfer.csv": "703530fab2be2dd38d01993c66bd3f282c8dab5c46d793e0ac3e0713cb9ba0b0",
+    "variance_references/pit_t/transfer.json": "da48839c32a8f5659185b763ce465ad94a8af8eb395312b58b9deb835374cc44",
+    "variance_references/vit/attack_params.json": "b3b1fcd7b090d056d7379d0766e0cb31b72f64b49d55da09dde353e91f322710",
+    "variance_references/vit/transfer.csv": "a64796e52adc486d2180040c7a6721c919fcfb8fbd8ee47d52d6ae7eae5a0f4b",
+    "variance_references/vit/transfer.json": "75e160c92a01daac8f57420ff632affa5252fa8dd1a5c8483a680c74f52b32ce"
+  }
+}

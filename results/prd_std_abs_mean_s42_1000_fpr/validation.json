@@ -1,0 +1,96 @@
+{
+  "passed": true,
+  "seed": 42,
+  "kernel_checks": [
+    "distinguishes std-plus-absolute-mean from second raw moment",
+    "distinguishes std-plus-absolute-mean from population variance",
+    "uses population standard deviation rather than sample standard deviation",
+    "uses absolute signed mean rather than signed mean",
+    "sign reversal preserves selection and score",
+    "ties select earliest observation",
+    "selects each image independently in a mixed batch",
+    "rejects nonfinite and zero representations",
+    "selection consumes no RNG"
+  ],
+  "saved_moments_validation": {
+    "vit": {
+      "samples": 1000,
+      "selected_checkpoints_match": 1000,
+      "checkpoint_histogram": {
+        "block10": 822,
+        "block11": 178
+      },
+      "input": "two-token representations matching saved per-layer means and population variances"
+    },
+    "pit_t": {
+      "samples": 1000,
+      "selected_checkpoints_match": 1000,
+      "checkpoint_histogram": {
+        "stage1_block0": 41,
+        "stage3_block1": 466,
+        "stage1_block1": 360,
+        "stage3_block2": 39,
+        "stage3_block3": 72,
+        "stage3_block0": 22
+      },
+      "input": "two-token representations matching saved per-layer means and population variances"
+    },
+    "deit_b": {
+      "samples": 1000,
+      "selected_checkpoints_match": 1000,
+      "checkpoint_histogram": {
+        "block9": 377,
+        "block11": 493,
+        "block8": 55,
+        "block10": 59,
+        "block2": 3,
+        "block0": 5,
+        "block6": 3,
+        "block5": 2,
+        "block4": 1,
+        "block1": 2
+      },
+      "input": "two-token representations matching saved per-layer means and population variances"
+    },
+    "cait": {
+      "samples": 1000,
+      "selected_checkpoints_match": 1000,
+      "checkpoint_histogram": {
+        "block23": 703,
+        "block22": 162,
+        "block21": 54,
+        "block17": 9,
+        "block0": 14,
+        "block3": 3,
+        "block16": 20,
+        "block15": 2,
+        "block6": 3,
+        "block18": 11,
+        "block10": 1,
+        "block2": 10,
+        "block20": 3,
+        "block7": 2,
+        "block19": 2,
+        "block8": 1
+      },
+      "input": "two-token representations matching saved per-layer means and population variances"
+    }
+  },
+  "raw_cait_validation": {
+    "samples": 1000,
+    "selected_checkpoints_match": 1000,
+    "input": "saved raw per-token CaiT scores; unit-vector cosine reconstruction"
+  },
+  "toy_attack_validation": {
+    "samples": 2,
+    "toy_model": true,
+    "clean_selection_calls": 1,
+    "steps": 2,
+    "groups": 2,
+    "views_per_group": 2,
+    "attack_parameters_verified": true,
+    "finite_outputs_and_perturbation_bound_verified": true
+  },
+  "full_attack_started": false,
+  "new_asr_measured": false
+}
