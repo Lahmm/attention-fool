@@ -1,0 +1,43 @@
+{
+  "config": {
+    "id": "pit_t_stage1_block1",
+    "model": "pit_ti_224",
+    "checkpoints": [
+      "stage1_block1"
+    ],
+    "drop_ratios": [
+      0.15306122449
+    ],
+    "expected_drop_counts": [
+      112
+    ],
+    "expected_grids": [
+      [
+        27,
+        27
+      ]
+    ],
+    "opponent_noise_strength": 0.4,
+    "attack_batch_size": 32,
+    "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_fixed_single_layer_controls_s42_20261103T012446Z_pit_t_stage1_block1",
+    "fixed_reference_dir": "/root/autodl-tmp/prd_jobs/checkpoint_stats_s42_20261028T091110Z/artifacts/pit_variance_stage3_block3",
+    "normalized_reference_dir": "/root/autodl-tmp/attention-fool/results/prd_normalized_std_abs_mean_s42_1000_fpr/runs/pit_t",
+    "previous_same_checkpoint_dir": "/root/autodl-tmp/prd_jobs/checkpoint_stats_s42_20261028T091110Z/artifacts/pit_mean_stage1_block1"
+  },
+  "actual_attack_batch_size": 32,
+  "completed_utc": "2026-11-03T01:57:16.561782+00:00",
+  "source_commit": "a9e3ee931962be5b3c4f7d4691463eba79660615",
+  "source_sha256": {
+    "main.py": "feaef6d32bd7b7a0af990edcbedd4b28ee95532198dae9a23ba98c43a6512343",
+    "progressive_attack.py": "728b7f927b5f52051e8c0fbef940e72bb14db5bb70ddb3968c925a9d04323040",
+    "utils.py": "c1b94da3b250ca5263d6bc8b0e065aaea342c0e7b1f12fbf6efbfc21301b776a",
+    "transfer_eval.py": "aab43978a01cb90a722af1732835b5955c3b1fa491c19b2c3b9d3d7ff1618e85",
+    "nets/__init__.py": "8d74ef265778c6046e5f2cc00bbfbe0355507beae50d3fcc845399ce37e66df9",
+    "nets/base.py": "b18e4d7936156c7dfad62eaa08e87fc8b945a7d36ea0a7077df994133afc7c22",
+    "nets/cait.py": "53afeedf6dccf0b159572e0e4259032eb13782584da4ffef3d045ef55bb5e568",
+    "nets/pit.py": "586da201c5e38aa7e1ec5abc81565a14aa9936554ffd5f2cc3d66a4215ee1f4c",
+    "nets/vit.py": "df515a1e1f1ee6a0944e7d500356e3f578453d7594c54ed8c392923d46817297"
+  },
+  "samples_manifest": "/root/autodl-tmp/prd_jobs/fixed_single_layer_controls_s42_20261103T012446Z/samples.json",
+  "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_fixed_single_layer_controls_s42_20261103T012446Z_pit_t_stage1_block1"
+}

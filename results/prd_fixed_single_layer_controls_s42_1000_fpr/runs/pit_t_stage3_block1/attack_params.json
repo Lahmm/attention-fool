@@ -1,0 +1,69 @@
+{
+  "attack_method": "progressive_route_disruption",
+  "seed": 42,
+  "whitebox_model": "pit_ti_224",
+  "epsilon": 0.06274509803921569,
+  "step_size": 0.006274509803921568,
+  "steps": 10,
+  "momentum_decay": 1.0,
+  "progressive_drop_enabled": true,
+  "opponent_noise_enabled": true,
+  "opponent_noise_strength": 0.4,
+  "noise_structure": "opponent",
+  "noise_direction_variances": [
+    0.5,
+    1.25,
+    1.25
+  ],
+  "input_diversity_groups": 10,
+  "input_diversity_views_per_group": 2,
+  "input_diversity_phase_shift_set": [
+    [
+      4,
+      4
+    ],
+    [
+      8,
+      8
+    ],
+    [
+      12,
+      12
+    ]
+  ],
+  "input_diversity_total_views": 20,
+  "mask_schedule_count_per_image": 100,
+  "checkpoint_mask_selection_count_per_image": 100,
+  "model_mean": [
+    0.48500001430511475,
+    0.4560000002384186,
+    0.4059999883174896
+  ],
+  "model_std": [
+    0.2290000021457672,
+    0.2240000069141388,
+    0.22499999403953552
+  ],
+  "checkpoints": [
+    "stage3_block1"
+  ],
+  "drop_ratios": [
+    0.15306122449
+  ],
+  "drop_counts": [
+    8
+  ],
+  "grids": [
+    [
+      7,
+      7
+    ]
+  ],
+  "num_images": 1000,
+  "experiment_only": true,
+  "fixed_checkpoint_test_id": "pit_t_stage3_block1",
+  "checkpoint_selection_enabled": false,
+  "checkpoint_histogram": {
+    "stage3_block1": 1000
+  }
+}
