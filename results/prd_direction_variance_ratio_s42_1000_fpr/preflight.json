@@ -1,0 +1,174 @@
+{
+  "completed_utc": "2026-11-03T09:10:35.204917+00:00",
+  "passed": true,
+  "sample_count": 1000,
+  "cases": [
+    {
+      "id": "vit",
+      "native_logit_max_error": 0.0,
+      "clean_selection_call_count": 1,
+      "executed_steps": 10,
+      "groups": 10,
+      "views_per_group": 2,
+      "max_pixel_change": 0.0627451241016388,
+      "total_drop_ratio": 0.102040816326,
+      "selected": [
+        {
+          "sample_index": 0,
+          "checkpoint": "block10",
+          "peak_layer": "block11",
+          "peak_variance": 0.02488710069128443,
+          "peak_direction_variance_ratio": 52.87092482596443,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 20,
+          "actual_drop_ratio": 0.10204081632653061
+        },
+        {
+          "sample_index": 1,
+          "checkpoint": "block10",
+          "peak_layer": "block11",
+          "peak_variance": 0.031636995033501765,
+          "peak_direction_variance_ratio": 45.762250730321064,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 20,
+          "actual_drop_ratio": 0.10204081632653061
+        }
+      ]
+    },
+    {
+      "id": "cait",
+      "native_logit_max_error": 0.0,
+      "clean_selection_call_count": 1,
+      "executed_steps": 10,
+      "groups": 10,
+      "views_per_group": 2,
+      "max_pixel_change": 0.0627451241016388,
+      "total_drop_ratio": 0.15306122449,
+      "selected": [
+        {
+          "sample_index": 0,
+          "checkpoint": "block23",
+          "peak_layer": "block24",
+          "peak_variance": 0.0017135825031634863,
+          "peak_direction_variance_ratio": 1.0839309590597421,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 30,
+          "actual_drop_ratio": 0.15306122448979592
+        },
+        {
+          "sample_index": 1,
+          "checkpoint": "block17",
+          "peak_layer": "block18",
+          "peak_variance": 0.0035865596951027735,
+          "peak_direction_variance_ratio": 1.77944967561634,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 30,
+          "actual_drop_ratio": 0.15306122448979592
+        }
+      ]
+    },
+    {
+      "id": "pit_t",
+      "native_logit_max_error": 0.0,
+      "clean_selection_call_count": 1,
+      "executed_steps": 10,
+      "groups": 10,
+      "views_per_group": 2,
+      "max_pixel_change": 0.0627451241016388,
+      "total_drop_ratio": 0.15306122449,
+      "selected": [
+        {
+          "sample_index": 0,
+          "checkpoint": "stage3_block3",
+          "peak_layer": "stage3_block4",
+          "peak_variance": 0.01864129861498279,
+          "peak_direction_variance_ratio": 9.280873506112725,
+          "grid_size": [
+            7,
+            7
+          ],
+          "drop_count": 8,
+          "actual_drop_ratio": 0.16326530612244897
+        },
+        {
+          "sample_index": 1,
+          "checkpoint": "stage3_block2",
+          "peak_layer": "stage3_block3",
+          "peak_variance": 0.03061192131966231,
+          "peak_direction_variance_ratio": 13.64842939878819,
+          "grid_size": [
+            7,
+            7
+          ],
+          "drop_count": 8,
+          "actual_drop_ratio": 0.16326530612244897
+        }
+      ]
+    },
+    {
+      "id": "deit_b",
+      "native_logit_max_error": 0.0,
+      "clean_selection_call_count": 1,
+      "executed_steps": 10,
+      "groups": 10,
+      "views_per_group": 2,
+      "max_pixel_change": 0.0627451241016388,
+      "total_drop_ratio": 0.102040816326,
+      "selected": [
+        {
+          "sample_index": 0,
+          "checkpoint": "block11",
+          "peak_layer": "block12",
+          "peak_variance": 0.002291739108972209,
+          "peak_direction_variance_ratio": 2.9152769746270346,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 20,
+          "actual_drop_ratio": 0.10204081632653061
+        },
+        {
+          "sample_index": 1,
+          "checkpoint": "block9",
+          "peak_layer": "block10",
+          "peak_variance": 0.0041050180004745945,
+          "peak_direction_variance_ratio": 4.757060600465186,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 20,
+          "actual_drop_ratio": 0.10204081632653061
+        }
+      ]
+    }
+  ],
+  "fpr13_targets": [
+    "vit_base_patch16_224",
+    "cait_s24_224",
+    "pit_b_224",
+    "visformer_small",
+    "swin_tiny_patch4_window7_224",
+    "deit_tiny_patch16_224",
+    "coat_tiny",
+    "resnet18",
+    "vgg16",
+    "densenet121",
+    "efficientnet_b0",
+    "mobilenet_v3_small",
+    "resnext50_32x4d"
+  ]
+}

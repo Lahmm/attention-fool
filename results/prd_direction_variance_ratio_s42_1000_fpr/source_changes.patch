@@ -1,0 +1,113 @@
+--- a/progressive_attack.py
++++ b/progressive_attack.py
+@@ -453,6 +453,7 @@
+                     self.checkpoint_selections.append({
+                         "sample_index": offset + index, "checkpoint": choice.checkpoint,
+                         "peak_layer": choice.peak_layer, "peak_variance": choice.variance,
++                        "peak_direction_variance_ratio": choice.direction_variance_ratio,
+                         "grid_size": list(choice.grid_size), "drop_count": count,
+                         "actual_drop_ratio": count / math.prod(choice.grid_size),
+                     })
+@@ -502,7 +503,11 @@
+         if self._dynamic_checkpoint_policy:
+             params.update({
+                 "checkpoint_selection_enabled": self.dynamic_checkpoint,
+-                "checkpoint_selection": "per-sample maximum clean raw patch-score population variance; drop before peak block",
++                "checkpoint_selection": "per-image maximum global-direction population variance divided by average variance across feature directions; normalized local features and reference; native feature dimension; earliest native block on ties; drop at selected block input; select once before attack",
++                "checkpoint_selection_metric": "global_direction_variance_over_average_direction_variance",
++                "experiment_only": True,
++                "checkpoint_score_normalization": {'local_features': 'per-token L2 normalization', 'reference': 'L2 normalization', 'denominator': 'total local population variance / native feature dimension', 'precision': 'float64 normalized geometry from float32 features', 'zero_total_variance_score': 0.0},
++                "checkpoint_depth_weighting": False,
+                 "checkpoint_tie_break": "earliest block in native forward order",
+                 "total_drop_ratio": self.progressive_drop_ratios[0],
+                 "drop_count_rounding": "total ratio rounded to 12 decimals; max(1, round(native token count * ratio))",
+--- a/nets/base.py
++++ b/nets/base.py
+@@ -21,37 +21,67 @@
+     checkpoint: str
+     peak_layer: str
+     variance: float
++    direction_variance_ratio: float
+     grid_size: tuple[int, int]
++
++
++def feature_statistics(local, reference):
++    if local.ndim != 3 or reference.shape != (local.size(0), local.size(2)):
++        raise ValueError('expected local [B,N,D] and reference [B,D]')
++    if min(local.shape) == 0:
++        raise ValueError('empty local feature tensor')
++    local, reference = local.float(), reference.float()
++    if not bool(torch.isfinite(local).all() & torch.isfinite(reference).all()):
++        raise ValueError('non-finite features')
++    local64, reference64 = local.double(), reference.double()
++    local_norm = local64.norm(dim=-1, keepdim=True)
++    reference_norm = reference64.norm(dim=-1, keepdim=True)
++    if bool((local_norm == 0).any() | (reference_norm == 0).any()):
++        raise ValueError('nonzero local features and reference required')
++    unit = local64 / local_norm
++    direction = reference64 / reference_norm
++    center = unit.mean(dim=1, keepdim=True)
++    centered = unit - center
++    identical = (unit == unit[:, :1]).all(dim=2).all(dim=1)
++    centered = torch.where(identical[:, None, None], 0.0, centered)
++    total_variance = centered.square().sum(dim=2).mean(dim=1)
++    average_direction_variance = total_variance / local.size(2)
++    projected_variance = (centered * direction[:, None]).sum(dim=2).square().mean(dim=1)
++    denominator = torch.where(average_direction_variance > 0, average_direction_variance, 1.0)
++    ratio = torch.where(average_direction_variance > 0, projected_variance / denominator, 0.0)
++    raw = F.cosine_similarity(local, reference[:, None], dim=-1, eps=1e-8).clamp(-1, 1).double()
++    output = {
++        'score_mean_float64': (unit * direction[:, None]).sum(dim=2).mean(dim=1),
++        'global_direction_population_variance': projected_variance,
++        'total_local_population_variance': total_variance,
++        'average_direction_population_variance': average_direction_variance,
++        'direction_variance_ratio': ratio,
++        'mainline_score_mean': raw.mean(dim=1),
++        'mainline_score_population_variance': raw.var(dim=1, unbiased=False),
++        'degenerate_local_variance': total_variance == 0,
++    }
++    if not all(bool(torch.isfinite(value).all()) for value in output.values()):
++        raise ValueError('non-finite statistics')
++    return output
+ 
+ 
+ def select_variance_peaks(observations):
+     if not observations:
+         raise ValueError("at least one block observation is required")
+-    variances = []
+-    finite = []
+-    nonzero = []
++    variances, ratios = [], []
+     for layer, checkpoint, grid, local, reference in observations:
+-        local, reference = local.float(), reference.float()
+-        if local.ndim != 3 or reference.shape != (local.size(0), local.size(2)):
+-            raise ValueError("expected local [B,N,D] and CLS [B,D]")
+         if local.size(1) != grid[0] * grid[1]:
+-            raise ValueError("observation grid does not match the local tokens")
+-        finite.append(torch.isfinite(local).all() & torch.isfinite(reference).all())
+-        nonzero.append((local.norm(dim=-1) > 0).all() & (reference.norm(dim=-1) > 0).all())
+-        scores = F.cosine_similarity(local, reference[:, None], dim=-1, eps=1e-8).clamp(-1, 1)
+-        variances.append(scores.double().var(dim=1, unbiased=False))
+-    values = torch.stack(variances)
+-    checks = torch.stack((torch.stack(finite).all(), torch.stack(nonzero).all()))
+-    packed = torch.cat((values.flatten(), checks.to(values))).cpu()
+-    if not bool(packed[-2]):
+-        raise ValueError("non-finite checkpoint observation")
+-    if not bool(packed[-1]):
+-        raise ValueError("cosine similarity requires nonzero representations")
+-    values = packed[:-2].reshape(values.shape)
++            raise ValueError("observation grid does not match local tokens")
++        stats = feature_statistics(local, reference)
++        variances.append(stats['mainline_score_population_variance'].cpu())
++        ratios.append(stats['direction_variance_ratio'].cpu())
++    values = torch.stack(ratios)
++    variance_values = torch.stack(variances)
+     peaks = values.argmax(dim=0)
+     return tuple(
+         SampleCheckpoint(observations[index][1], observations[index][0],
+-                         float(values[index, sample]), observations[index][2])
++                         float(variance_values[index, sample]), float(values[index, sample]),
++                         observations[index][2])
+         for sample, index in enumerate(peaks.tolist())
+     )
+ 
