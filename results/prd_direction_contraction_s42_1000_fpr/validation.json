@@ -1,0 +1,66 @@
+{
+  "passed": true,
+  "seed": 42,
+  "geometry_tests_passed": 7,
+  "toy_attack_once_only_selection_and_budget": "passed",
+  "full_4000_clean_choice_validation": {
+    "vit": {
+      "matches": 1000,
+      "histogram": {
+        "block10": 848,
+        "block11": 152
+      },
+      "max_score_absolute_error": 0.0004863607474590026,
+      "batch_size": 48
+    },
+    "cait": {
+      "matches": 1000,
+      "histogram": {
+        "block23": 843,
+        "block10": 61,
+        "block21": 21,
+        "block22": 23,
+        "block15": 9,
+        "block6": 4,
+        "block2": 18,
+        "block20": 8,
+        "block19": 12,
+        "block9": 1
+      },
+      "max_score_absolute_error": 3.5574028515172884e-06,
+      "batch_size": 16
+    },
+    "pit_t": {
+      "matches": 1000,
+      "histogram": {
+        "stage3_block3": 277,
+        "stage2_block5": 331,
+        "stage3_block1": 234,
+        "stage3_block2": 70,
+        "stage1_block0": 61,
+        "stage2_block4": 11,
+        "stage2_block2": 3,
+        "stage2_block3": 7,
+        "stage1_block1": 5,
+        "stage3_block0": 1
+      },
+      "max_score_absolute_error": 6.236609067622467e-06,
+      "batch_size": 32
+    },
+    "deit_b": {
+      "matches": 1000,
+      "histogram": {
+        "block9": 686,
+        "block10": 184,
+        "block11": 48,
+        "block0": 68,
+        "block8": 10,
+        "block7": 4
+      },
+      "max_score_absolute_error": 2.7241233009345223e-06,
+      "batch_size": 48
+    }
+  },
+  "full_attack_started": false,
+  "new_asr_measured": false
+}

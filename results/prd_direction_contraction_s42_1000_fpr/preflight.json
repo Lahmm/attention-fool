@@ -1,0 +1,206 @@
+{
+  "completed_utc": "2026-11-04T04:45:15.727388+00:00",
+  "passed": true,
+  "sample_count": 1000,
+  "cases": [
+    {
+      "id": "vit",
+      "native_logit_max_error": 0.0,
+      "clean_selection_call_count": 1,
+      "executed_steps": 10,
+      "groups": 10,
+      "views_per_group": 2,
+      "max_pixel_change": 0.0627451241016388,
+      "total_drop_ratio": 0.102040816326,
+      "selected": [
+        {
+          "sample_index": 0,
+          "checkpoint": "block10",
+          "peak_layer": "block11",
+          "peak_variance": 0.02488710069128443,
+          "peak_direction_variance_ratio": 52.87092482596443,
+          "peak_contraction_score": 23.436315744622036,
+          "contraction_fraction": 0.4432741780433671,
+          "input_total_variance": 0.6493475923951015,
+          "output_total_variance": 0.36150857211172355,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 20,
+          "actual_drop_ratio": 0.10204081632653061
+        },
+        {
+          "sample_index": 1,
+          "checkpoint": "block10",
+          "peak_layer": "block11",
+          "peak_variance": 0.031636995033501765,
+          "peak_direction_variance_ratio": 45.762250730321064,
+          "peak_contraction_score": 9.757387057040663,
+          "contraction_fraction": 0.21321912496265472,
+          "input_total_variance": 0.6748313957027654,
+          "output_total_variance": 0.5309444360136948,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 20,
+          "actual_drop_ratio": 0.10204081632653061
+        }
+      ]
+    },
+    {
+      "id": "cait",
+      "native_logit_max_error": 0.0,
+      "clean_selection_call_count": 1,
+      "executed_steps": 10,
+      "groups": 10,
+      "views_per_group": 2,
+      "max_pixel_change": 0.0627451241016388,
+      "total_drop_ratio": 0.15306122449,
+      "selected": [
+        {
+          "sample_index": 0,
+          "checkpoint": "block23",
+          "peak_layer": "block24",
+          "peak_variance": 0.0017135825031634863,
+          "peak_direction_variance_ratio": 1.0839309590597421,
+          "peak_contraction_score": 0.17478067334916875,
+          "contraction_fraction": 0.16124705350309632,
+          "input_total_variance": 0.7237699425524899,
+          "output_total_variance": 0.6070641719017956,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 30,
+          "actual_drop_ratio": 0.15306122448979592
+        },
+        {
+          "sample_index": 1,
+          "checkpoint": "block23",
+          "peak_layer": "block24",
+          "peak_variance": 0.0009826913504146235,
+          "peak_direction_variance_ratio": 0.5760915833709672,
+          "peak_contraction_score": 0.059274091579182016,
+          "contraction_fraction": 0.10289004958611447,
+          "input_total_variance": 0.7301483746585425,
+          "output_total_variance": 0.6550233721847042,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 30,
+          "actual_drop_ratio": 0.15306122448979592
+        }
+      ]
+    },
+    {
+      "id": "pit_t",
+      "native_logit_max_error": 0.0,
+      "clean_selection_call_count": 1,
+      "executed_steps": 10,
+      "groups": 10,
+      "views_per_group": 2,
+      "max_pixel_change": 0.0627451241016388,
+      "total_drop_ratio": 0.15306122449,
+      "selected": [
+        {
+          "sample_index": 0,
+          "checkpoint": "stage3_block3",
+          "peak_layer": "stage3_block4",
+          "peak_variance": 0.01864129861498279,
+          "peak_direction_variance_ratio": 9.280873506112725,
+          "peak_contraction_score": 0.801436942422537,
+          "contraction_fraction": 0.08635361120854423,
+          "input_total_variance": 0.5627935712639449,
+          "output_total_variance": 0.5141943140203501,
+          "grid_size": [
+            7,
+            7
+          ],
+          "drop_count": 8,
+          "actual_drop_ratio": 0.16326530612244897
+        },
+        {
+          "sample_index": 1,
+          "checkpoint": "stage2_block5",
+          "peak_layer": "stage2_block6",
+          "peak_variance": 0.0027399570358495992,
+          "peak_direction_variance_ratio": 0.6792621492138223,
+          "peak_contraction_score": 0.0740875927099843,
+          "contraction_fraction": 0.10907069206746356,
+          "input_total_variance": 0.5795262230028305,
+          "output_total_variance": 0.5163168967886685,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 30,
+          "actual_drop_ratio": 0.15306122448979592
+        }
+      ]
+    },
+    {
+      "id": "deit_b",
+      "native_logit_max_error": 0.0,
+      "clean_selection_call_count": 1,
+      "executed_steps": 10,
+      "groups": 10,
+      "views_per_group": 2,
+      "max_pixel_change": 0.0627451241016388,
+      "total_drop_ratio": 0.102040816326,
+      "selected": [
+        {
+          "sample_index": 0,
+          "checkpoint": "block9",
+          "peak_layer": "block10",
+          "peak_variance": 0.0020664086866358533,
+          "peak_direction_variance_ratio": 2.637393325970104,
+          "peak_contraction_score": 0.44224501428465457,
+          "contraction_fraction": 0.16768261674507157,
+          "input_total_variance": 0.7229588276004398,
+          "output_total_variance": 0.601731199589449,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 20,
+          "actual_drop_ratio": 0.10204081632653061
+        },
+        {
+          "sample_index": 1,
+          "checkpoint": "block9",
+          "peak_layer": "block10",
+          "peak_variance": 0.0041050180004745945,
+          "peak_direction_variance_ratio": 4.757060600465186,
+          "peak_contraction_score": 0.35812204609990045,
+          "contraction_fraction": 0.07528221231087118,
+          "input_total_variance": 0.7166851423595316,
+          "output_total_variance": 0.6627314993123744,
+          "grid_size": [
+            14,
+            14
+          ],
+          "drop_count": 20,
+          "actual_drop_ratio": 0.10204081632653061
+        }
+      ]
+    }
+  ],
+  "fpr13_targets": [
+    "vit_base_patch16_224",
+    "cait_s24_224",
+    "pit_b_224",
+    "visformer_small",
+    "swin_tiny_patch4_window7_224",
+    "deit_tiny_patch16_224",
+    "coat_tiny",
+    "resnet18",
+    "vgg16",
+    "densenet121",
+    "efficientnet_b0",
+    "mobilenet_v3_small",
+    "resnext50_32x4d"
+  ]
+}

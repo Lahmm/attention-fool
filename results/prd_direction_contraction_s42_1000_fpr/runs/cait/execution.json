@@ -1,0 +1,30 @@
+{
+  "config": {
+    "id": "cait",
+    "model": "cait_s24_224",
+    "attack_batch_size": 16,
+    "opponent_noise_strength": 0.2,
+    "expected_total_drop_ratio": 0.15306122449,
+    "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_direction_contraction_s42_20261104T044138Z_cait",
+    "variance_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_cait_preln_variance_s42_20261029T070204Z",
+    "second_raw_moment_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_cait",
+    "unnormalized_std_abs_mean_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_cait",
+    "original_direction_ratio_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_direction_variance_ratio_s42_20261103T090754Z_cait"
+  },
+  "actual_attack_batch_size": 16,
+  "completed_utc": "2026-11-04T05:28:34.974497+00:00",
+  "source_commit": "4a0235fcf0565b32981f47a80b9146e9c3c60881",
+  "source_sha256": {
+    "main.py": "feaef6d32bd7b7a0af990edcbedd4b28ee95532198dae9a23ba98c43a6512343",
+    "progressive_attack.py": "1d99a85e63ec7dbd40065a9761113dfd349bec0ef1303455c5190199c83fade3",
+    "utils.py": "c1b94da3b250ca5263d6bc8b0e065aaea342c0e7b1f12fbf6efbfc21301b776a",
+    "transfer_eval.py": "aab43978a01cb90a722af1732835b5955c3b1fa491c19b2c3b9d3d7ff1618e85",
+    "nets/__init__.py": "8d74ef265778c6046e5f2cc00bbfbe0355507beae50d3fcc845399ce37e66df9",
+    "nets/base.py": "cdbc41c187087797ea7efcf1c3504027194344a2ffd603f36c886ce46a6a984a",
+    "nets/cait.py": "9b60a910d5a4b6428caa828960530a25b175c85ad340c06d933165fa58faa73b",
+    "nets/pit.py": "1f26e1fed101cc2e2b27ad32a08c91349540e6c36d83c6f6bced5d720d3e9c96",
+    "nets/vit.py": "5779f3ffa201513e985629dfbee19a1047cfcd85ef6c7dae1e11e961ec45eae9"
+  },
+  "samples_manifest": "/root/autodl-tmp/prd_jobs/direction_contraction_s42_20261104T044138Z/samples.json",
+  "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_direction_contraction_s42_20261104T044138Z_cait"
+}
