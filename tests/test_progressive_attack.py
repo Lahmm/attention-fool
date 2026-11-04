@@ -3,10 +3,11 @@ from unittest.mock import patch
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from nets.base import SampleCheckpoint
 from nets.vit import ViTAdapter
-from progressive_attack import ProgressiveMaskSchedule, ProgressiveMaskSelection, ProgressiveRouteDisruptionAttacker
+from progressive_attack import ProgressiveMaskSelection, ProgressiveRouteDisruptionAttacker
 from utils import SEED
 
 
@@ -64,6 +65,28 @@ def make_attacker(**overrides):
     return attacker
 
 
+def reflect_shift_reference(tensor, dx, dy):
+    if dx == 0 and dy == 0:
+        return tensor
+    padded = F.pad(tensor, (max(0, dx), max(0, -dx), max(0, dy), max(0, -dy)), mode="reflect")
+    return padded[..., max(0, -dy):max(0, -dy) + tensor.size(-2),
+                  max(0, -dx):max(0, -dx) + tensor.size(-1)]
+
+
+def validate_schedule(schedule, batch_size):
+    assert schedule
+    coverage = torch.zeros(batch_size, dtype=torch.long)
+    for item in schedule:
+        assert item.mask.shape == (batch_size, item.grid_size[0] * item.grid_size[1])
+        assert item.mask.dtype == torch.bool
+        expected = torch.full((batch_size,), item.count, device=item.mask.device, dtype=torch.long)
+        if item.active_samples is not None:
+            expected.masked_fill_(~item.active_samples, 0)
+        torch.testing.assert_close(item.mask.sum(1), expected, rtol=0, atol=0)
+        coverage += (expected > 0).cpu()
+    torch.testing.assert_close(coverage, torch.ones_like(coverage), rtol=0, atol=0)
+
+
 class ProgressiveAttackTests(unittest.TestCase):
     def setUp(self):
         self.pixels = torch.linspace(0.1, 0.9, 3 * 28 * 28).view(1, 3, 28, 28)
@@ -75,11 +98,11 @@ class ProgressiveAttackTests(unittest.TestCase):
              patch.object(torch, 'equal', side_effect=AssertionError('mask synchronization')):
             first = attacker._build_mask_schedule(self.pixels)
             second = attacker._build_mask_schedule(self.pixels)
-        self.assertEqual(first.checkpoints, ('block10',))
-        self.assertEqual(first.counts, (20,))
-        self.assertEqual(first.grid_sizes, ((14, 14),))
-        first.validate(batch_size=1)
-        self.assertFalse(torch.equal(first.masks[0], second.masks[0]))
+        self.assertEqual(tuple(item.checkpoint for item in first), ('block10',))
+        self.assertEqual(tuple(item.count for item in first), (20,))
+        self.assertEqual(tuple(item.grid_size for item in first), ((14, 14),))
+        validate_schedule(first, batch_size=1)
+        self.assertFalse(torch.equal(first[0].mask, second[0].mask))
 
 
     def test_phase_preserves_each_native_grid_budget(self):
@@ -88,15 +111,15 @@ class ProgressiveAttackTests(unittest.TestCase):
             with self.subTest(grid=grid):
                 mask = torch.zeros(1, grid[0] * grid[1], dtype=torch.bool)
                 mask[:, :count] = True
-                schedule = ProgressiveMaskSchedule((ProgressiveMaskSelection('selected', mask, count, grid),))
+                schedule = (ProgressiveMaskSelection('selected', mask, count, grid),)
                 shifted = attacker._phase_mask_schedule(schedule, [(8, 8)], height=224, width=224)
-                self.assertEqual(shifted.counts, (count,))
-                self.assertEqual(shifted.grid_sizes, (grid,))
-                shifted.validate(batch_size=1)
+                self.assertEqual(tuple(item.count for item in shifted), (count,))
+                self.assertEqual(tuple(item.grid_size for item in shifted), (grid,))
+                validate_schedule(shifted, batch_size=1)
 
     def test_reflect_translation_moves_interior_by_requested_pixels(self):
         original = torch.arange(28 * 28).view(1, 1, 28, 28).float()
-        shifted = make_attacker()._apply_phase_shift(original, 8, 8)
+        shifted = make_attacker()._apply_samplewise_phase_shifts(original, [(8, 8)])
         torch.testing.assert_close(shifted[..., 8:, 8:], original[..., :-8, :-8])
         self.assertEqual(float(shifted[0, 0, 0, 0]), float(original[0, 0, 8, 8]))
 
@@ -104,7 +127,7 @@ class ProgressiveAttackTests(unittest.TestCase):
         attacker = make_attacker()
         phases = [(0, 0), (8, 12), (-8, 4), (12, -12)]
         pixels = self.pixels.repeat(4, 1, 1, 1).requires_grad_(True)
-        expected = torch.cat([attacker._apply_phase_shift(pixels[i:i+1], *phase)
+        expected = torch.cat([reflect_shift_reference(pixels[i:i+1], *phase)
                               for i, phase in enumerate(phases)])
         actual = attacker._apply_samplewise_phase_shifts(pixels, phases)
         torch.testing.assert_close(actual, expected, rtol=0, atol=0)
@@ -128,7 +151,7 @@ class ProgressiveAttackTests(unittest.TestCase):
         attacker = ProgressiveRouteDisruptionAttacker(model, steps=1, input_diversity_groups=1, device=torch.device('cpu'))
         attacker._prepare_dynamic_mask_layout((make_checkpoint('block2', 'block3', .1, (14, 14)),), 1)
         schedule = attacker._build_mask_schedule(self.pixels)
-        self.assertEqual(schedule.checkpoints, ('block2',))
+        self.assertEqual(tuple(item.checkpoint for item in schedule), ('block2',))
         initial = model.begin_progressive_forward(attacker._normalize(self.pixels))
         with patch.object(attacker, '_strict_opponent_feature_noise', return_value=torch.ones_like(initial.local_tokens)) as noise, \
              patch.object(model, 'begin_progressive_forward', wraps=model.begin_progressive_forward) as begin:
@@ -138,24 +161,24 @@ class ProgressiveAttackTests(unittest.TestCase):
         first = model.model.blocks[0].last_input
         torch.testing.assert_close(first[:, :2], initial.context['prefix_tokens'])
         torch.testing.assert_close(first[:, 2:], initial.local_tokens + 1)
-        for mask, index in zip(schedule.masks, (2,)):
+        for selection, index in zip(schedule, (2,)):
             after_drop = model.model.blocks[index].last_input[:, 2:]
-            self.assertEqual(int(torch.count_nonzero(after_drop[mask])), 0)
+            self.assertEqual(int(torch.count_nonzero(after_drop[selection.mask])), 0)
 
     def test_original_only_keeps_fresh_schedules_without_phase(self):
         attacker = make_attacker(input_diversity_groups=2, input_diversity_views_per_group=1,
                                  input_diversity_phase_shift_set=())
         with patch.object(attacker, '_pick_input_diversity_phases', side_effect=AssertionError('phase called')), \
-             patch.object(attacker, '_build_mask_schedule', wraps=attacker._build_mask_schedule) as schedules:
+             patch.object(attacker, '_build_mask_schedule', wraps=attacker._build_mask_schedule) as schedules, \
+             patch.object(attacker, '_forward_with_schedule', wraps=attacker._forward_with_schedule) as forwards:
             attacker.attack_batch(self.pixels * 2 - 1, self.labels)
         self.assertEqual(schedules.call_count, 4)
-        self.assertEqual(attacker._actual_forward_view_count, 2)
+        self.assertEqual(forwards.call_count, 4)
 
     def test_mean_pixel_gradient_is_used_directly(self):
         attacker = make_attacker(input_diversity_groups=2)
         def initialize():
             torch.manual_seed(SEED)
-            attacker._actual_forward_view_count = 0
         initialize()
         pixels = self.pixels.clone().requires_grad_(True)
         expected = torch.stack([torch.autograd.grad(loss, pixels)[0]
@@ -166,11 +189,19 @@ class ProgressiveAttackTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(actual).all())
         self.assertGreater(float(actual.norm()), 0)
 
+    def test_gradient_aggregation_rejects_missing_or_extra_views(self):
+        attacker = make_attacker()
+        pixels = self.pixels.clone().requires_grad_(True)
+        for count in (0, 1, 3):
+            with self.subTest(count=count), \
+                 patch.object(attacker, '_iter_attack_losses', return_value=(pixels.sum() for _ in range(count))), \
+                 self.assertRaisesRegex(RuntimeError, 'view count mismatch'):
+                attacker._attack_gradients(pixels, self.labels)
+
     def test_update_uses_momentum_and_projects_relative_to_clean_pixels(self):
         attacker = make_attacker(steps=2)
         gradients = [torch.full_like(self.pixels, 2), torch.full_like(self.pixels, -1)]
         def gradient(*args):
-            attacker._actual_forward_view_count = 2
             return gradients.pop(0)
         images = self.pixels * 2 - 1
         with patch.object(attacker, '_attack_gradients', side_effect=gradient):
@@ -198,8 +229,8 @@ class ProgressiveAttackTests(unittest.TestCase):
         shifted = attacker._phase_mask_schedule(
             schedule, [(0, 0)], height=self.pixels.size(-2), width=self.pixels.size(-1)
         )
-        for original, transformed in zip(schedule.masks, shifted.masks):
-            self.assertTrue(torch.equal(original, transformed))
+        for original, transformed in zip(schedule, shifted):
+            self.assertTrue(torch.equal(original.mask, transformed.mask))
         shifted_pixels = attacker._apply_samplewise_phase_shifts(self.pixels, [(0, 0)])
         self.assertTrue(torch.equal(shifted_pixels, self.pixels))
 
@@ -215,7 +246,6 @@ class ProgressiveAttackTests(unittest.TestCase):
             gradient = attacker._attack_gradients(pixels, self.labels)
         self.assertEqual(schedules.call_count, 2)
         self.assertEqual(noise.call_count, 4)
-        self.assertEqual(attacker._actual_forward_view_count, 4)
         self.assertTrue(torch.isfinite(gradient).all())
 
     def test_isotropic_rgb_noise_changes_directions_but_keeps_rms(self):
@@ -246,7 +276,6 @@ class ProgressiveAttackTests(unittest.TestCase):
         with patch.object(attacker, '_build_mask_schedule',
                           side_effect=AssertionError('schedule must not be built')):
             gradient = attacker._attack_gradients(pixels, self.labels)
-        self.assertEqual(attacker._actual_forward_view_count, 1)
         self.assertTrue(torch.isfinite(gradient).all())
         self.assertGreater(float(gradient.norm()), 0)
         params = attacker.parameters()

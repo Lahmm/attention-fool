@@ -9,6 +9,7 @@ from nets.pit import PiTAdapter
 from nets.vit import ViTAdapter
 from progressive_attack import ProgressiveRouteDisruptionAttacker
 from utils import SEED
+from tests.test_progressive_attack import validate_schedule
 
 
 class AdapterTests(unittest.TestCase):
@@ -50,12 +51,14 @@ class AdapterTests(unittest.TestCase):
                     boundary = model.advance_progressive_state(model.begin_progressive_forward(pixels), choice.checkpoint)
                     torch.testing.assert_close(model.finish_progressive_forward(boundary), native, rtol=0, atol=0)
                 schedule = attacker._build_mask_schedule(pixels)
-                schedule.validate(batch_size=1)
-                self.assertEqual((schedule.grid_sizes, schedule.counts), (expected_grid, expected_counts))
-                for item in schedule.selections:
+                validate_schedule(schedule, batch_size=1)
+                grids = tuple(item.grid_size for item in schedule)
+                counts = tuple(item.count for item in schedule)
+                self.assertEqual((grids, counts), (expected_grid, expected_counts))
+                for item in schedule:
                     self.assertEqual(model.checkpoint_grid_size(item.checkpoint), item.grid_size)
                 state = model.begin_progressive_forward(pixels)
-                for selection in schedule.selections:
+                for selection in schedule:
                     state = model.advance_progressive_state(state, selection.checkpoint)
                     prefix_key = next((key for key in ('prefix_tokens', 'cls_token') if key in state.context), None)
                     prefix = state.context[prefix_key].clone() if prefix_key else None
@@ -70,5 +73,5 @@ class AdapterTests(unittest.TestCase):
                 gradient = torch.autograd.grad(loss, probe)[0]
                 self.assertTrue(torch.isfinite(gradient).all())
                 self.assertGreater(float(gradient.norm()), 0)
-                print(f'{name}: grids={schedule.grid_sizes}, counts={schedule.counts}, finite gradients', flush=True)
+                print(f'{name}: grids={grids}, counts={counts}, finite gradients', flush=True)
                 del model, attacker, probe, gradient, loss, pixels, schedule

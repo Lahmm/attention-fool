@@ -6,8 +6,8 @@ import torch.nn.functional as F
 
 from nets import build_whitebox_model
 from nets.base import select_contraction_peaks, contraction_statistics
-from progressive_attack import ProgressiveMaskSchedule, ProgressiveMaskSelection, ProgressiveRouteDisruptionAttacker
-from tests.test_progressive_attack import make_model, make_checkpoint
+from progressive_attack import ProgressiveMaskSelection, ProgressiveRouteDisruptionAttacker
+from tests.test_progressive_attack import make_model, make_checkpoint, reflect_shift_reference, validate_schedule
 
 
 class DynamicCheckpointTests(unittest.TestCase):
@@ -173,14 +173,14 @@ class DynamicCheckpointTests(unittest.TestCase):
         self.assertEqual(begin.call_count, 8)
         self.assertTrue(all(call.args[0].size(0) == 3 for call in begin.call_args_list))
         self.assertEqual(len(schedules), 4)
-        self.assertEqual({item.checkpoints for item in schedules}, {('block0', 'block10')})
+        self.assertEqual({tuple(selection.checkpoint for selection in item) for item in schedules}, {('block0', 'block10')})
         for schedule in schedules:
-            self.assertEqual(schedule.counts, (20, 20))
-            schedule.validate(batch_size=3)
-            self.assertEqual(schedule.masks[0].sum(dim=1).tolist(), [0, 20, 0])
-            self.assertEqual(schedule.masks[1].sum(dim=1).tolist(), [20, 0, 20])
+            self.assertEqual(tuple(item.count for item in schedule), (20, 20))
+            validate_schedule(schedule, batch_size=3)
+            self.assertEqual(schedule[0].mask.sum(dim=1).tolist(), [0, 20, 0])
+            self.assertEqual(schedule[1].mask.sum(dim=1).tolist(), [20, 0, 20])
         for boundary in (0, 1):
-            masks = [schedule.masks[boundary] for schedule in schedules]
+            masks = [schedule[boundary].mask for schedule in schedules]
             self.assertFalse(torch.equal(masks[0], masks[1]))
         self.assertIsNone(attacker._dynamic_mask_layout)
         self.assertLessEqual(float((attacker._denormalize(output) - pixels).abs().max()), attacker.epsilon + 1e-6)
@@ -203,8 +203,8 @@ class DynamicCheckpointTests(unittest.TestCase):
             schedule = attacker._build_mask_schedule(pixels)
         phases = [(4, 4), (-8, 8), (12, -12)]
         shifted = attacker._phase_mask_schedule(schedule, phases, height=28, width=28)
-        shifted.validate(batch_size=3)
-        for original, paired in zip(schedule.selections, shifted.selections):
+        validate_schedule(shifted, batch_size=3)
+        for original, paired in zip(schedule, shifted):
             torch.testing.assert_close(paired.mask.sum(dim=1), original.mask.sum(dim=1))
         with patch.object(attacker, '_strict_opponent_feature_noise',
                           side_effect=lambda state: .01 * state.local_tokens.detach().sin()):
@@ -215,12 +215,12 @@ class DynamicCheckpointTests(unittest.TestCase):
                 actual = torch.zeros_like(pixels)
                 losses = []
                 for index, choice in enumerate(choices):
-                    selected = next(item for item in combined.selections if item.checkpoint == choice.checkpoint)
-                    individual = ProgressiveMaskSchedule((ProgressiveMaskSelection(
+                    selected = next(item for item in combined if item.checkpoint == choice.checkpoint)
+                    individual = (ProgressiveMaskSelection(
                         selected.checkpoint, selected.mask[index:index+1], selected.count, selected.grid_size,
-                    ),))
+                    ),)
                     part = pixels[index:index+1].detach().requires_grad_(True)
-                    part_view = attacker._apply_phase_shift(part, *phases[index]) if is_phase else part
+                    part_view = reflect_shift_reference(part, *phases[index]) if is_phase else part
                     loss = attacker._forward_with_schedule(part_view, labels[index:index+1], individual) / 3
                     actual[index:index+1] = torch.autograd.grad(loss, part)[0]
                     losses.append(loss.detach())
@@ -269,7 +269,7 @@ class DynamicCheckpointTests(unittest.TestCase):
                 torch.testing.assert_close(captured[0][:, :1], cls, rtol=0, atol=0)
         attacker = ProgressiveRouteDisruptionAttacker(model, device=torch.device('cpu'))
         attacker._prepare_dynamic_mask_layout((make_checkpoint('stage3_block3', 'stage3_block4', .1, (7, 7)),), 1)
-        self.assertEqual(attacker._build_mask_schedule(pixels).counts, (8,))
+        self.assertEqual(tuple(item.count for item in attacker._build_mask_schedule(pixels)), (8,))
 
 
 if __name__ == '__main__':

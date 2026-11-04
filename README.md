@@ -74,3 +74,5 @@ python figure1.py
 `figure1.py` 保留真实样本跨层原始分数和热图导出；完整方向比／收缩曲线及当前方法 Fig. 2 待准备。旧 Fig. 2 脚本和独立 token 实验 runner 已移除；token 实验 [历史证据](experiments/prd_token_selection_evidence.md) 与原始记录仍保留。
 
 论文规划见 [story](experiments/prd_paper_story.md)、[blueprint](experiments/cvpr2027_writing_blueprint.md)，文件和服务器原件见 [handoff](experiments/server_handoff_inventory.md)。历史选层数据仅作证据，仓库没有其他可执行选层策略或固定 checkpoint 攻击。
+
+动态攻击内部结构精简及等价验证见 [维护记录](experiments/prd_internal_simplification.md)。
