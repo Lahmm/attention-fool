@@ -84,9 +84,8 @@ class ProgressiveMaskSchedule:
 class _CheckpointMaskLayout:
     checkpoint: str
     grid_size: tuple[int, int]
-    ratio: float
-    sample_indices: torch.Tensor | None = None
-    active_samples: torch.Tensor | None = None
+    sample_indices: torch.Tensor
+    active_samples: torch.Tensor
 
 
 class ProgressiveRouteDisruptionAttacker:
@@ -192,18 +191,14 @@ class ProgressiveRouteDisruptionAttacker:
         selections = []
         for item in layout:
             token_count = math.prod(item.grid_size)
-            sample_count = pixels.size(0) if item.sample_indices is None else item.sample_indices.numel()
             sampled = self._sample_random_mask(
-                batch_size=sample_count, token_count=token_count,
-                ratio=item.ratio, device=pixels.device,
+                batch_size=item.sample_indices.numel(), token_count=token_count,
+                ratio=self.drop_ratio, device=pixels.device,
             )
-            if item.sample_indices is None:
-                mask = sampled
-            else:
-                mask = torch.zeros(pixels.size(0), token_count, dtype=torch.bool, device=pixels.device)
-                mask.index_copy_(0, item.sample_indices, sampled)
+            mask = torch.zeros(pixels.size(0), token_count, dtype=torch.bool, device=pixels.device)
+            mask.index_copy_(0, item.sample_indices, sampled)
             selections.append(ProgressiveMaskSelection(
-                item.checkpoint, mask, max(1, round(token_count * item.ratio)),
+                item.checkpoint, mask, max(1, round(token_count * self.drop_ratio)),
                 item.grid_size, item.active_samples,
             ))
         schedule = ProgressiveMaskSchedule(tuple(selections))
@@ -227,7 +222,7 @@ class ProgressiveRouteDisruptionAttacker:
             active = torch.zeros(batch_size, device=self.device, dtype=torch.bool)
             active.index_fill_(0, indices, True)
             layout.append(_CheckpointMaskLayout(
-                checkpoint, grids[checkpoint], self.drop_ratio, indices, active,
+                checkpoint, grids[checkpoint], indices, active,
             ))
         self._dynamic_mask_layout = tuple(layout)
 

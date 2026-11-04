@@ -1,59 +1,43 @@
-# 论文写作交接与材料清单
+# 当前动态 PRD 的文件与服务器材料
 
-更新日期：2026-11-04。本地分支为 `prd`。相对路径均以仓库根目录为起点。论文主线为方向方差比 × 正收缩比例选层与随机 token drop，i.i.d. RGB 投影噪声归入共同增强，正式方法名待定。
+更新日期：2026-11-04，分支 `prd`。可执行攻击只有方向方差比 × 正收缩比例逐图选层与单边界随机 token drop；旧固定 checkpoint 攻击及相关结果已清理。
 
-## 主线与实验状态
+## 受 Git 管理
 
-一次干净前向采集各 block 局部输入／输出，以输出方向方差比乘正收缩比例确定最高分 block，在其输入处实施随机 token drop；边界固定，位置按 step/group 重采样。方法见 [执行契约](prd_method_contract.md)，叙事、章节和图表见 [故事](prd_paper_story.md) 与 [蓝图](cvpr2027_writing_blueprint.md)。
-
-当前唯一方法的四源 opponent 结果已归档 `results/prd_direction_contraction_s42_1000_fpr/`，Overall 89.1673%、strict 88.7234%，原始目录 `outputs/attack/prd_direction_contraction_s42_20261104T044138Z_{vit,cait,pit_t,deit_b}/`。该独立实验于 2026-11-04 迁入主线，原归档标签保持实际执行状态。
-
-历史最大方差动态选层四源各 1000 图像、13 目标评估，仍为 opponent 增强。当前 CaiT 定义对应后续 preln 运行。最终 i.i.d. 配置与匹配选层矩阵需要实际记录支持。代码默认 opponent 未在此次文档任务中修改。
-
-已归档固定多 checkpoint/opponent 配置的 Overall 89.72%、strict 89.29% 和完整 2×2 消融保留原含义。新增动态记录不从旧表改标签生成，所有 ASR 使用全部对抗样本。
-
-## 随 Git 提交的材料
-
-| 文件或目录 | 用途 |
+| 内容 | 路径 |
 | --- | --- |
-| `AGENTS.md`、`README.md` | 方法主线、操作约定与结果入口 |
-| `progressive_attack.py`、`main.py`、`nets/` | 当前攻击实现与架构遍历 |
-| `transfer_eval.py`、`experiments/fpr_target_protocol.md` | FPR13 目标模型、权重及预处理 |
-| `results/prd_s42_1000_fpr_ablation.md` | 历史固定配置主表、逐目标矩阵、2×2 消融及直接差值 |
-| `results/prd_s42_1000_fpr_summary.csv` | 各源、各单元及四源宏平均 |
-| `results/prd_s42_1000_fpr_per_target.csv` | 208 项 source/cell/target ASR |
-| `results/prd_s42_1000_fpr_effects.csv` | 消融 ASR 效应点估计 |
-| `results/prd_s42_1000_fpr_provenance.json` | 参数、来源路径、代码版本与哈希 |
-| `results/prd_s42_fpr_run_artifacts/` | 16 个单元的原始参数和迁移表 |
-| `experiments/prd_paper_story.md`、`experiments/cvpr2027_writing_blueprint.md` | 论文故事与写作顺序 |
+| 攻击入口与优化 | `main.py`、`progressive_attack.py`、`utils.py` |
+| 四源适配与几何统计 | `nets/__init__.py`、`base.py`、`vit.py`、`cait.py`、`pit.py` |
+| FPR13 与权重下载 | `transfer_eval.py`、`experiments/download_fpr_models.py` |
+| 验证 | `tests/test_{dynamic_checkpoints,progressive_attack,progressive_adapters,main,transfer_eval}.py` |
+| 观察素材 | `figure1.py`、`tests/test_figure1.py` |
+| 方法、协议、写作 | `prd_method_contract.md`、`fpr_target_protocol.md`、`prd_paper_story.md`、`cvpr2027_writing_blueprint.md` |
+| 当前 ASR 与历史选层证据 | `results/README.md` 索引的五个归档 |
+| 输入与标注 | `data/clean_resized_images/` 的 1000 张 PNG、`data/image_name_to_class_id_and_name.json` |
 
-当前 `results/` 只保留 FPR13 实验数值与来源材料。旧协议及已清理的观察统计可从 Git 历史查询；动机可视化从实际样本与层输出另行准备。
+虽然 `.gitignore` 包含 `data/*`，上述输入图与标签实际上已经被 Git 跟踪。权重缓存及 `outputs/` 未跟踪。
 
-## 历史最大方差动态与 token 选择原件
+## 当前测量原件
 
-下列目录均含参数与评估记录，位于 `outputs/attack/`，不随 Git 提交。各动态目录含 1000 条选层记录和 13 目标迁移 CSV/JSON。
+四个 `outputs/attack/prd_direction_contraction_s42_20261104T044138Z_{vit,cait,pit_t,deit_b}/` 各保留 1000 张对抗图、`attack_params.json`、`transfer.csv/json` 与 `predictions.json`。对应 Overall 89.1673%、strict 88.7234%，实际增强是 opponent。攻击 batch 分别为 48、16、32、48；评估 batch 32、关闭 TF32、无 AMP。
 
-| 目录 | 内容 |
-| --- | --- |
-| `prd_dynamic_variance_s42_20261029T031203Z_vit/` | 历史 ViT 最大方差选层＋opponent |
-| `prd_dynamic_variance_s42_20261029T031203Z_pit_t/` | PiT-T 动态选层＋opponent |
-| `prd_dynamic_variance_s42_20261029T031203Z_deit_b/` | distilled DeiT-B 动态选层＋opponent |
-| `prd_cait_preln_variance_s42_20261029T070204Z/` | 当前 CaiT 参照定义的动态选层＋opponent |
-| `prd_dynamic_variance_s42_20261029T031203Z_cait/` | 早期 CaiT 参照运行，另行保留，不替代后续 preln 记录 |
-| `vit_drop_selection_s42_20261029T125456Z/` | 固定 block10 六组 token 策略，10 groups×2 views，含 asr_comparison.csv |
-| `vit_drop_selection_g1v2_s42_20261101T131251Z/` | 固定 block10 六组 token 策略，1 group×2 views，含 asr_comparison.csv |
+原始来源为 `/root/autodl-tmp/prd_jobs/direction_contraction_s42_20261104T044138Z/`，保留样本 manifest、执行源码快照、验证、日志及来源。仓库中的 `source_changes.patch`、执行 commit 和源码哈希描述测量当时状态，不是额外执行入口。
 
-最终 i.i.d. 主表确定后另行归档必要的轻量 FPR13 参数与原始迁移记录。`figure1.py` 已支持 ViT 原始分数导出，完整方差曲线与新版 Fig. 2 尚需准备；`figure2.py` 当前仍生成旧固定双 checkpoint 素材。
+## 历史选层原件
 
-## 历史固定配置与通用服务器原件
+`outputs/attack/` 保留：
 
-| 路径 | 用途 |
-| --- | --- |
-| `outputs/reruns/prd_s42_adjusted_20261023T120255Z/` | 四个更新单元的日志、迁移结果与原始预测 |
-| `outputs/attack/prd_s42_adjusted_20261023T120255Z_{drop,full}_{pit_t,deit_b}/` | 更新单元的攻击图像与参数 |
-| `outputs/fpr_eval/prd_s42_{base,drop,noise,full}_{vit,cait,pit_t,deit_b}/` | 早期 FPR13 评估原件；哪些单元继续使用以 provenance 为准 |
-| `outputs/predictions_fpr/` | 保留单元的逐图像预测 |
-| `data/clean_resized_images/`、标签 JSON | 攻击输入与标注 |
-| `data/huggingface/`、`data/torch/` | 权重缓存 |
+- `prd_dynamic_variance_s42_20261029T031203Z_{vit,cait,pit_t,deit_b}/`；CaiT 主对照使用后续 `prd_cait_preln_variance_s42_20261029T070204Z/`。
+- `prd_second_raw_moment_s42_20261101T151302Z_{vit,cait,pit_t,deit_b}/`。
+- `prd_std_abs_mean_s42_20261102T081807Z_{vit,cait,pit_t,deit_b}/`。
+- `prd_normalized_std_abs_mean_s42_20261102T142706Z_{vit,cait,pit_t,deit_b}/`。
+- `prd_direction_variance_ratio_s42_20261103T090754Z_{vit,cait,pit_t,deit_b}/`。
+- 两组 `vit_drop_selection_*` 的 token 策略记录，见 [证据说明](prd_token_selection_evidence.md)。
 
-更新单元环境为 PyTorch 2.10.0+cu128、timm 1.0.24、RTX 3080。FPR13 评估关闭 TF32，batch size 32。`outputs/` 与 `data/` 不随 Git 提交；已归档的轻量数值足够在其他机器重算 ASR 和 ASR 差值。
+这些都是已执行配置的证据，不恢复历史攻击选项。
+
+## 权重、环境与待准备内容
+
+`data/huggingface/` 与 `data/torch/` 全部保留，包括旧目标权重；PiT-B 与 Visformer 是 FPR13 目标。当前环境为 Python 3.10.19、torch 2.10.0、torchvision 0.25.0、timm 1.0.24，服务器解释器 `/root/miniconda3/envs/att-atk/bin/python`。
+
+最终动态 i.i.d. 主表、匹配无 drop／随机层／历史方差／当前选择器的对照仍需实际配置支持。`figure1.py` 保留跨层原始分数导出；完整方向比／收缩曲线与当前方法 Fig. 2 待准备。旧固定双边界 Fig. 2 代码已删除。

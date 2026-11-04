@@ -286,8 +286,7 @@
   "all_4000_selections_match_clean_forward_predictions": true,
   "all_52_asrs_recomputed_from_saved_predictions": true,
   "archive_sha256": {
-    "README.md": "abf33cd9fd9458555e8a37be413e8aa660802a5e70eb92ab72f73ef86022a4ee",
-    "fixed_reference_results.json": "779d33b4f1ebe52e451ce996d7d432278e055bdf803978c43399b7e9ed9c45c6",
+    "README.md": "2df43d31795dd66be04f8ad1a1e11e72f08466c2c8bc5748efbe63810c3b824e",
     "per_target.csv": "f79a694ca9414fdd1ee9ca0404b2c2c7bd44c34f2fed81cc38b18d43a72ec46d",
     "preflight.json": "bab0d584d43dc0642a7091e473cf6de025a41044a277faf1081ba583817d5ef0",
     "runs/cait/attack_params.json": "643c03ad6e8dc2fc2e4e810daa0adbf6cf4ae91eb5567b6bb6737fb7709cc31c",
@@ -320,7 +319,7 @@
     "second_raw_moment_references/vit/transfer.json": "95c6adec2724a109838a3efd366794db12b7609fef32a41b911622c07804b9c7",
     "selection_counts.csv": "07583bb6ed9a8fbf5b0f3a112fcc351ec7d4b977f46c5c0895326734a065f1db",
     "source_changes.patch": "7d05393f2f3fc40677aa06898d7ca0713a2ae300a831b97ded4ac55493d1975a",
-    "summary.csv": "73191577a61f28888c7ecc46458e991170f3f423cc2e89de32b9c9dfc974940e",
+    "summary.csv": "b99cda0ff407fab3e499c0803e91278da3e47cfe12c27584d59e248dba63771a",
     "unnormalized_std_abs_mean_references/cait/attack_params.json": "ffe71f78a5e26b351b596432489ecbcd75dcb310b2c30ff85b22839274fe4db1",
     "unnormalized_std_abs_mean_references/cait/transfer.csv": "fd7e79571130b8847ae749c9911df96671e47a49a9e06fe2ec0f839b14509352",
     "unnormalized_std_abs_mean_references/cait/transfer.json": "33150d6e882cb5dd007c076f6247f9815d0184e139cf51cfb8b908aced8fc62e",
@@ -346,5 +345,14 @@
     "variance_references/vit/attack_params.json": "b3b1fcd7b090d056d7379d0766e0cb31b72f64b49d55da09dde353e91f322710",
     "variance_references/vit/transfer.csv": "a64796e52adc486d2180040c7a6721c919fcfb8fbd8ee47d52d6ae7eae5a0f4b",
     "variance_references/vit/transfer.json": "75e160c92a01daac8f57420ff632affa5252fa8dd1a5c8483a680c74f52b32ce"
+  },
+  "archive_maintenance": {
+    "date": "2026-11-04",
+    "reason": "User retired fixed-layer baselines; remove their reference file and summary columns. Dynamic measurements and execution provenance remain unchanged.",
+    "previous_provenance_sha256": "e211293e5f9597130559a508e3df2205d1371e3251aafac049161f3686471410",
+    "previous_file_sha256": {
+      "summary.csv": "73191577a61f28888c7ecc46458e991170f3f423cc2e89de32b9c9dfc974940e",
+      "README.md": "abf33cd9fd9458555e8a37be413e8aa660802a5e70eb92ab72f73ef86022a4ee"
+    }
   }
 }

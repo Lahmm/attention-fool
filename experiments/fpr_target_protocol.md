@@ -1,19 +1,17 @@
-# PRD 的 FPR 目标评估协议
+# PRD 的 FPR13 评估协议
 
-这是当前 PRD 迁移测试的主协议。新结果默认按以下 13 个 FPR 目标报告；`results/` 仅保留 FPR13 的数值与实验记录；旧协议数据保存在 Git 历史中。
+FPR13 是唯一保留的评估协议，`transfer_eval.py` 默认使用它，仍可显式指定 `--protocol fpr`。旧 project 协议及其模型加载分支已移除，全部模型权重缓存保留。
 
-使用 `transfer_eval.py --protocol fpr` 评估 13 个目标：ViT-B/16、CaiT-S24、PiT-B、Visformer-S、Swin-T、DeiT-T、CoaT-T，以及 ResNet-18、VGG-16、DenseNet-121、EfficientNet-B0、MobileNet-V3-Small、ResNeXt-50-32x4d。
+七个 Transformer 目标为 ViT-B/16、CaiT-S24、PiT-B、Visformer-S、Swin-T、DeiT-T、CoaT-T，使用 timm 预训练权重；六个 CNN 为 ResNet-18、VGG-16、DenseNet-121、EfficientNet-B0、MobileNet-V3-Small、ResNeXt-50-32x4d，使用 torchvision DEFAULT 权重。
 
-七个 Transformer 使用 timm 预训练权重，六个 CNN 使用 torchvision DEFAULT 权重；图像直接 bicubic resize 到 224×224，转换到 [0,1] 后按各模型配置归一化。本目录中的 FPR13 ASR 均采用这一预处理。
+全部图像直接 bicubic resize 到 224×224，转为 [0,1] 并按各模型配置归一化。权重准备工具 `download_fpr_models.py` 同时准备 PiT-T、distilled DeiT-B 两个源的额外权重，缓存到 `data/huggingface` 与 `data/torch`。PiT-B 是目标，旧固定三边界源入口已经移除。
 
-权重准备工具 `experiments/download_fpr_models.py` 保留，并准备额外的 PiT-T／DeiT-B distilled 源权重，下载到 `data/huggingface` 与 `data/torch`。攻击和评估直接通过 `main.py`、`transfer_eval.py` 调用，不再提供实验编排脚本。
+四个攻击源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled，新攻击执行固定 seed 42。ASR 使用所有对抗样本的 `1 - adversarial accuracy`，不做 target-clean-correct 筛选。strict 仅排除完全相同源目标：ViT/CaiT 各 12 个，PiT-T/distilled DeiT-B 各 13 个。四源等权汇总。
 
-当前论文源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled；PiT-B 额外保留。所有新攻击执行固定 seed 42。PiT-T 和 distilled DeiT-B 不在此目标集中，严格黑盒平均保留全部 13 个目标；其他源只排除与其完全同名的目标。
+```bash
+python transfer_eval.py --image-dir outputs/attack/prd_vit_new --no-tf32
+```
 
-ASR 使用所有输入的对抗样本，不做 clean-correct 筛选。使用 `--no-tf32` 可关闭 TF32，默认不启用 AMP。评估自动保存逐目标 CSV、配置与汇总 JSON；`--predictions-output` 可额外保存逐样本预测。
+归档测量使用 batch 32、关闭 TF32、不启用 AMP。自动保存逐目标 CSV 和配置／汇总 JSON；`--predictions-output` 可保存逐图预测。当前千图 opponent 结果见 [结果索引](../results/README.md)。最终动态 i.i.d. 主表须使用对应实际运行，已有结果不改标签。
 
-相关依据：[FPR 论文](https://arxiv.org/html/2503.15404v1)、[官方模型加载](https://github.com/RYC-98/FPR/blob/main/transferattack/utils.py)。当前目标架构与预处理对齐，并不据此声称本地 Transformer 权重与官方二进制文件逐字节相同。
-
-历史固定多 checkpoint/opponent 配置的 seed-42、1000 图像四源结果和 2×2 消融见 [FPR 完整实验记录](../results/prd_s42_1000_fpr_ablation.md)；Overall ASR 为 89.72%，严格黑盒 ASR 为 89.29%。全部单元的轻量参数／迁移原始记录保存在受 Git 管理的 `results/prd_s42_fpr_run_artifacts/`。
-
-当前动态选层四源的本地 opponent 记录及当前 CaiT 参照运行见 [故事与证据索引](prd_paper_story.md)。论文采用共同 i.i.d. 增强，最终表需对应实际配置；固定配置的 89.29% strict ASR 保留历史标签。
+协议依据为 [FPR 论文](https://arxiv.org/html/2503.15404v1) 与 [官方模型加载](https://github.com/RYC-98/FPR/blob/main/transferattack/utils.py)。本地架构和预处理对齐，不据此声称 Transformer 权重与官方二进制文件逐字节相同。
