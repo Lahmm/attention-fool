@@ -16,31 +16,11 @@ import torch
 import torchvision.models as torchvision_models
 from torchvision import transforms
 from PIL import Image
-from timm.data import resolve_data_config, create_transform
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from utils import DEVICE
 
-DEFAULT_VIT_BLACK_BOX_MODELS = [
-    "vit_base_patch16_224",
-    "levit_256",
-    "pit_b_224",
-    "deit_base_patch16_224",
-    "tnt_s_patch16_224",
-    "convit_base",
-    "visformer_small",
-    "cait_s24_224",
-]
-DEFAULT_CNN_BLACK_BOX_MODELS = [
-    "inception_v3",
-    "inception_v4",
-    "inception_resnet_v2",
-    "resnet101",
-    "inception_v3_adv",
-    "inception_resnet_v2_adv",
-]
-DEFAULT_BLACK_BOX_MODELS = DEFAULT_VIT_BLACK_BOX_MODELS + DEFAULT_CNN_BLACK_BOX_MODELS
 ASR_DEFINITION = "1 - adversarial accuracy"
 
 # Table 2 and transferattack/utils.py in the official RYC-98/FPR release.
@@ -54,36 +34,27 @@ FPR_CNN_MODELS = [
 ]
 FPR_MODELS = FPR_VIT_MODELS + FPR_CNN_MODELS
 
-HF_ADVERSARIAL_MODELS = {
-    "inception_v3_adv": "inception_v3.tf_adv_in1k",
-    "inception_resnet_v2_adv": "inception_resnet_v2.tf_ens_adv_in1k",
-}
-
 def adversarial_accuracy_to_asr(correct, total):
     if total < 0 or correct < 0 or correct > total:
         raise ValueError("counts must satisfy 0 <= correct <= total.")
     return 1 - correct / total if total else 0.0
 
 
-def build_black_box_model(model_name, protocol="project"):
-    targets = FPR_MODELS if protocol == "fpr" else DEFAULT_BLACK_BOX_MODELS
-    if model_name not in targets:
-        raise ValueError(f"unsupported target for {protocol}: {model_name}.")
-    if protocol == "fpr" and model_name in FPR_CNN_MODELS:
+def build_black_box_model(model_name):
+    if model_name not in FPR_MODELS:
+        raise ValueError(f"unsupported FPR13 target: {model_name}.")
+    if model_name in FPR_CNN_MODELS:
         model = torchvision_models.get_model(model_name, weights="DEFAULT")
     else:
-        model = timm.create_model(HF_ADVERSARIAL_MODELS.get(model_name, model_name), pretrained=True)
+        model = timm.create_model(model_name, pretrained=True)
     model.to(DEVICE).eval()
-    if protocol == "fpr":
-        config = getattr(model, "default_cfg", {})
-        transform = transforms.Compose([
-            transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BICUBIC),
-            transforms.ToTensor(),
-            transforms.Normalize(config.get("mean", (0.485, 0.456, 0.406)),
-                                 config.get("std", (0.229, 0.224, 0.225))),
-        ])
-    else:
-        transform = create_transform(**resolve_data_config({}, model=model))
+    config = getattr(model, "default_cfg", {})
+    transform = transforms.Compose([
+        transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.ToTensor(),
+        transforms.Normalize(config.get("mean", (0.485, 0.456, 0.406)),
+                             config.get("std", (0.229, 0.224, 0.225))),
+    ])
     return model, transform
 
 
@@ -114,8 +85,8 @@ class TransferImageDataset(Dataset):
             return self.transform(image.convert("RGB")), label
 
 
-def evaluate(samples, model_name, *, protocol="project", batch_size=32, num_workers=0, use_amp=False):
-    model, transform = build_black_box_model(model_name, protocol)
+def evaluate(samples, model_name, *, batch_size=32, num_workers=0, use_amp=False):
+    model, transform = build_black_box_model(model_name)
     loader = DataLoader(TransferImageDataset(samples, transform), batch_size=batch_size,
                         shuffle=False, num_workers=num_workers, pin_memory=DEVICE.type == "cuda")
     predictions = []
@@ -137,7 +108,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image-dir", type=Path, required=True)
     parser.add_argument("--annotations-path", type=Path, default=ROOT / "data/image_name_to_class_id_and_name.json")
-    parser.add_argument("--protocol", choices=("project", "fpr"), default="project")
+    parser.add_argument("--protocol", choices=("fpr",), default="fpr")
     parser.add_argument("--model-name", help="Comma-separated subset of the protocol targets.")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=0)
@@ -154,7 +125,7 @@ def main(args):
         torch.backends.cudnn.allow_tf32 = not args.no_tf32
     annotations = json.loads(args.annotations_path.read_text())
     samples = build_transfer_samples(args.image_dir, annotations)
-    targets = FPR_MODELS if args.protocol == "fpr" else DEFAULT_BLACK_BOX_MODELS
+    targets = FPR_MODELS
     if args.model_name:
         requested = [item.strip() for item in args.model_name.split(",") if item.strip()]
         if not requested or any(item not in targets for item in requested):
@@ -162,15 +133,14 @@ def main(args):
         targets = requested
     rows, predictions = [], {}
     for target in targets:
-        metrics, prediction = evaluate(samples, target, protocol=args.protocol,
-                                      batch_size=args.batch_size, num_workers=args.num_workers, use_amp=args.amp)
+        metrics, prediction = evaluate(samples, target, batch_size=args.batch_size, num_workers=args.num_workers, use_amp=args.amp)
         rows.append(metrics)
         predictions[target] = prediction
         print(metrics)
     params_path = args.image_dir / "attack_params.json"
     params = json.loads(params_path.read_text()) if params_path.exists() else {}
     source = params.get("whitebox_model")
-    transformer_targets = FPR_VIT_MODELS if args.protocol == "fpr" else DEFAULT_VIT_BLACK_BOX_MODELS
+    transformer_targets = FPR_VIT_MODELS
     def average(selected):
         values = [row["asr"] for row in rows if selected(row)]
         return sum(values) / len(values) if values else None

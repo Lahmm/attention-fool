@@ -19,26 +19,27 @@ class TransferTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             evaluation.adversarial_accuracy_to_asr(11, 10)
 
-    def test_retained_target_protocols_and_exact_adversarial_weights(self):
-        self.assertEqual(len(evaluation.DEFAULT_BLACK_BOX_MODELS), 14)
+
+    def test_fpr_targets_and_transformer_weights(self):
         self.assertEqual(len(evaluation.FPR_MODELS), 13)
-        for name, weight_name in evaluation.HF_ADVERSARIAL_MODELS.items():
-            model = MagicMock()
-            model.to.return_value = model
-            with self.subTest(name=name), \
-                 patch.object(evaluation.timm, 'create_model', return_value=model) as create, \
-                 patch.object(evaluation, 'resolve_data_config', return_value={}), \
-                 patch.object(evaluation, 'create_transform'):
-                evaluation.build_black_box_model(name)
-                create.assert_called_once_with(weight_name, pretrained=True)
+        self.assertEqual(len(set(evaluation.FPR_MODELS)), 13)
+        model = MagicMock()
+        model.to.return_value = model
+        model.default_cfg = {'mean': (.5, .5, .5), 'std': (.5, .5, .5)}
+        with patch.object(evaluation.timm, 'create_model', return_value=model) as create:
+            _, transform = evaluation.build_black_box_model('vit_base_patch16_224')
+        create.assert_called_once_with('vit_base_patch16_224', pretrained=True)
+        red = transform(Image.new('RGB', (300, 200), (255, 0, 0)))
+        self.assertEqual(tuple(red.shape), (3, 224, 224))
+        torch.testing.assert_close(red[:, 0, 0], torch.tensor([1., -1., -1.]))
         with self.assertRaises(ValueError):
-            evaluation.build_black_box_model('inception_v3_adv_3')
+            evaluation.build_black_box_model('resnet101')
 
     def test_fpr_cnn_preserves_full_image_and_normalization(self):
         model = MagicMock(spec=torch.nn.Module)
         model.to.return_value = model
         with patch.object(evaluation.torchvision_models, 'get_model', return_value=model) as create:
-            _, transform = evaluation.build_black_box_model('resnet18', protocol='fpr')
+            _, transform = evaluation.build_black_box_model('resnet18')
         create.assert_called_once_with('resnet18', weights='DEFAULT')
         result = transform(Image.new('RGB', (300, 200), (255, 0, 0)))
         self.assertEqual(tuple(result.shape), (3, 224, 224))
@@ -63,8 +64,8 @@ class TransferTests(unittest.TestCase):
                 self.assertEqual(predictions, [0, 0])
                 self.assertEqual(metrics['total'], 2)
                 self.assertEqual(metrics['asr'], 0.5)
-                args = type('Args', (), dict(image_dir=root, annotations_path=path, protocol='project',
-                    model_name='vit_base_patch16_224,resnet101', batch_size=2, num_workers=0,
+                args = type('Args', (), dict(image_dir=root, annotations_path=path, protocol='fpr',
+                    model_name='vit_base_patch16_224,resnet18', batch_size=2, num_workers=0,
                     amp=False, no_tf32=True, output=None, predictions_output=root / 'predictions.json'))()
                 evaluation.main(args)
             with (root / 'transfer.csv').open() as handle:

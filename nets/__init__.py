@@ -9,7 +9,6 @@ SOURCE_ADAPTERS = {
     "cait_s24_224": CaiTAdapter,
     "pit_ti_224": PiTAdapter,
     "deit_base_distilled_patch16_224": ViTAdapter,
-    "pit_b_224": PiTAdapter,
 }
 WHITEBOX_MODEL_CHOICES = tuple(SOURCE_ADAPTERS)
 

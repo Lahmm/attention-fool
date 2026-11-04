@@ -15,14 +15,11 @@ class AdapterTests(unittest.TestCase):
     def test_sources_and_checkpoint_profiles(self):
         self.assertEqual(set(WHITEBOX_MODEL_CHOICES), {
             'vit_base_patch16_224', 'cait_s24_224', 'pit_ti_224',
-            'deit_base_distilled_patch16_224', 'pit_b_224',
+            'deit_base_distilled_patch16_224',
         })
-        self.assertEqual(ViTAdapter.checkpoints, ('block3', 'block10'))
-        self.assertEqual(CaiTAdapter.checkpoints, ('block17', 'block23'))
-        self.assertEqual(PiTAdapter.checkpoints, ('stage2_block1', 'stage3_block2', 'stage3_block3'))
-        self.assertTrue(ViTAdapter.dynamic_checkpoint)
-        self.assertTrue(CaiTAdapter.dynamic_checkpoint)
-        self.assertTrue(PiTAdapter.dynamic_checkpoint)
+        self.assertEqual(ViTAdapter.drop_ratio, 0.102040816326)
+        self.assertEqual(CaiTAdapter.drop_ratio, 0.15306122449)
+        self.assertEqual(PiTAdapter.drop_ratio, 0.15306122449)
         with self.assertRaises(ValueError):
             build_whitebox_model('visformer_small')
 
@@ -30,13 +27,6 @@ class AdapterTests(unittest.TestCase):
                          'set RUN_REAL_PRD_ADAPTERS=1 for real-model CPU validation')
     def test_all_real_sources_preserve_forward_masks_and_input_gradients(self):
         torch.set_num_threads(2)
-        expected = {
-            'vit_base_patch16_224': (((14, 14), (14, 14)), (10, 10)),
-            'deit_base_distilled_patch16_224': (((14, 14), (14, 14)), (10, 10)),
-            'cait_s24_224': (((14, 14), (14, 14)), (2, 28)),
-            'pit_ti_224': (((14, 14), (7, 7), (7, 7)), (14, 2, 2)),
-            'pit_b_224': (((16, 16), (8, 8), (8, 8)), (5, 2, 6)),
-        }
         for name in WHITEBOX_MODEL_CHOICES:
             with self.subTest(source=name):
                 torch.manual_seed(SEED)
@@ -49,23 +39,16 @@ class AdapterTests(unittest.TestCase):
                     torch.testing.assert_close(resumed, native, rtol=0, atol=0)
                     if name == 'deit_base_distilled_patch16_224':
                         self.assertEqual(initial.context['prefix_tokens'].size(1), 2)
-                        self.assertEqual(model.checkpoints, ('block2', 'block9'))
-                    elif name == 'vit_base_patch16_224':
-                        self.assertEqual(model.checkpoints, ('block3', 'block10'))
                 attacker = ProgressiveRouteDisruptionAttacker(model, steps=1, input_diversity_groups=1,
                                                               device=torch.device('cpu'))
-                if model.dynamic_checkpoint:
-                    choice = model.select_contraction_checkpoints(pixels)[0]
-                    attacker._prepare_dynamic_mask_layout((choice,), 1)
-                    expected_grid = (choice.grid_size,)
-                    count = max(1, int(round(choice.grid_size[0] * choice.grid_size[1] * attacker.progressive_drop_ratios[0])))
-                    expected_counts = (count,)
-                    with torch.no_grad():
-                        boundary = model.advance_progressive_state(model.begin_progressive_forward(pixels), choice.checkpoint)
-                        torch.testing.assert_close(model.finish_progressive_forward(boundary), native, rtol=0, atol=0)
-                else:
-                    self.assertEqual(name, 'pit_b_224')
-                    expected_grid, expected_counts = expected[name]
+                choice = model.select_contraction_checkpoints(pixels)[0]
+                attacker._prepare_dynamic_mask_layout((choice,), 1)
+                expected_grid = (choice.grid_size,)
+                count = max(1, int(round(choice.grid_size[0] * choice.grid_size[1] * attacker.drop_ratio)))
+                expected_counts = (count,)
+                with torch.no_grad():
+                    boundary = model.advance_progressive_state(model.begin_progressive_forward(pixels), choice.checkpoint)
+                    torch.testing.assert_close(model.finish_progressive_forward(boundary), native, rtol=0, atol=0)
                 schedule = attacker._build_mask_schedule(pixels)
                 schedule.validate(batch_size=1)
                 self.assertEqual((schedule.grid_sizes, schedule.counts), (expected_grid, expected_counts))

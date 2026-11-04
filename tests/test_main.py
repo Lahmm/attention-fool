@@ -1,4 +1,3 @@
-import argparse
 from contextlib import redirect_stderr
 from io import StringIO
 import json
@@ -40,32 +39,17 @@ class MainTests(unittest.TestCase):
         self.assertTrue(args.no_progressive_drop)
         self.assertEqual(args.opponent_noise_strength, 0.0)
 
-    def test_analysis_cli_parses_checkpoints_and_noise_structure(self):
-        with patch.object(sys, 'argv', ['main.py', '--vit-analysis-checkpoints',
-                                       'block5,block8', '--drop-ratios', '0.05,0.05',
-                                       '--noise-structure', 'isotropic_rgb']):
-            args = main.parse_args()
-        self.assertEqual(args.vit_analysis_checkpoints, ('block5', 'block8'))
-        self.assertEqual(args.noise_structure, 'isotropic_rgb')
-        self.assertEqual(main.parse_checkpoint_list('block01,block4'), ('block1', 'block4'))
-        for value in ('', 'block3,block3', 'block5,block3', 'layer3,block4', 'block0,block4'):
-            with self.subTest(value=value), self.assertRaises(argparse.ArgumentTypeError):
-                main.parse_checkpoint_list(value)
 
-    def test_analysis_checkpoint_override_validates_model_boundaries_and_ratios(self):
-        model = make_model()
-        main.apply_vit_analysis_checkpoints(model, ('block5', 'block8'), (0.05, 0.05))
-        self.assertEqual(model.checkpoints, ('block5', 'block8'))
-        with self.assertRaises(ValueError):
-            main.apply_vit_analysis_checkpoints(model, ('block13',), (0.05,))
-        with self.assertRaises(ValueError):
-            main.apply_vit_analysis_checkpoints(model, ('block3',), None)
-        with self.assertRaises(ValueError):
-            main.apply_vit_analysis_checkpoints(make_model(prefixes=2), ('block3',), (0.05,))
+    def test_cli_uses_one_drop_ratio_and_records_augmentation(self):
+        with patch.object(sys, 'argv', ['main.py', '--drop-ratio', '0.15', '--noise-structure', 'isotropic_rgb']):
+            args = main.parse_args()
+        self.assertEqual(args.drop_ratio, .15)
+        self.assertEqual(args.noise_structure, 'isotropic_rgb')
 
     def test_removed_parameters_are_rejected(self):
         for option in ('--seed', '--attack-method', '--mi', '--no-mi', '--mi-decay',
-                       '--opponent-noise-grad', '--checkpoints', '--gaussian-alpha'):
+                       '--opponent-noise-grad', '--checkpoints', '--gaussian-alpha',
+                       '--vit-analysis-checkpoints', '--drop-ratios'):
             with self.subTest(option=option), redirect_stderr(StringIO()), \
                  patch.object(sys, 'argv', ['main.py', option]), self.assertRaises(SystemExit):
                 main.parse_args()
@@ -79,12 +63,15 @@ class MainTests(unittest.TestCase):
             with patch.object(main, 'validate_output_dir', return_value=output), \
                  patch.object(main, 'load_data', return_value=loader), \
                  patch.object(main, 'DEVICE', torch.device('cpu')), \
-                 patch.object(main, 'build_whitebox_model', return_value=make_model()):
+                 patch.object(main, 'build_whitebox_model', return_value=make_model()) as build:
+                choices = tuple(make_checkpoint('block0', 'block1', .1, (14, 14)) for _ in range(2))
+                build.return_value.select_contraction_checkpoints = lambda inputs: choices
                 main.main(main.parse_args())
             params = json.loads((output / 'attack_params.json').read_text())
             self.assertEqual(params['seed'], 42)
             self.assertEqual(params['input_diversity_total_views'], 1)
-            self.assertEqual(params['checkpoints'], ['block3', 'block10'])
+            self.assertEqual(params['checkpoint_histogram'], {'block0': 2})
+            self.assertNotIn('checkpoints', params)
             self.assertEqual(params['noise_structure'], 'opponent')
             self.assertEqual(params['noise_direction_variances'], [0.5, 1.25, 1.25])
             self.assertNotIn('opponent_noise_grad', params)
@@ -98,7 +85,6 @@ class MainTests(unittest.TestCase):
 
     def test_dynamic_metadata_tracks_each_image_across_batches(self):
         model = make_model()
-        model.dynamic_checkpoint = True
         choices = [(make_checkpoint('block0', 'block1', .1, (14, 14)),
                     make_checkpoint('block10', 'block11', .2, (14, 14))),
                    (make_checkpoint('block2', 'block3', .3, (14, 14)),)]

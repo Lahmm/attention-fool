@@ -90,15 +90,14 @@ class _CheckpointMaskLayout:
 
 
 class ProgressiveRouteDisruptionAttacker:
-    """Randomly disrupt evolving token routes at sequential checkpoints."""
+    """Select one native input boundary per clean image and resample token masks."""
 
     def __init__(
         self,
         model,
         *,
         progressive_drop: bool = True,
-        dynamic_checkpoint: bool | None = None,
-        drop_ratios: tuple[float, ...] | None = None,
+        drop_ratio: float | None = None,
         opponent_noise_strength: float | None = None,
         noise_structure: str = "opponent",
         epsilon: float = 16.0 / 255.0,
@@ -129,25 +128,18 @@ class ProgressiveRouteDisruptionAttacker:
             opponent_noise_strength = model.opponent_noise_strength
         if opponent_noise_strength < 0:
             raise ValueError("opponent noise strength must be non-negative.")
-        ratios = tuple(model.drop_ratios if drop_ratios is None else drop_ratios)
-        dynamic = bool(model.dynamic_checkpoint if dynamic_checkpoint is None else dynamic_checkpoint)
-        if dynamic:
-            ratios = (round(math.fsum(ratios), 12),)
-        elif len(ratios) != len(model.checkpoints):
-            raise ValueError("checkpoint/drop-ratio count mismatch.")
-        if progressive_drop and (
-            not ratios or any(not math.isfinite(ratio) or ratio <= 0 or ratio > 0.5 for ratio in ratios)
-        ):
-            raise ValueError("each drop ratio must satisfy 0 < ratio <= 0.5.")
+        ratio = float(model.drop_ratio if drop_ratio is None else drop_ratio)
+        if not math.isfinite(ratio) or not 0 < ratio <= 0.5:
+            raise ValueError("drop ratio must satisfy 0 < ratio <= 0.5.")
+        ratio = round(ratio, 12)
+        if ratio <= 0:
+            raise ValueError("drop ratio must remain positive after rounding to 12 decimals.")
 
         self.model = model
         self.model.eval()
         self.progressive_drop = bool(progressive_drop)
-        self._dynamic_checkpoint_policy = dynamic
-        self.dynamic_checkpoint = bool(dynamic and progressive_drop)
         self.device = device if device is not None else DEVICE
-        self.progressive_checkpoints = model.checkpoints
-        self.progressive_drop_ratios = tuple(float(value) for value in ratios)
+        self.drop_ratio = ratio
         self.opponent_noise_strength = float(opponent_noise_strength)
         self.noise_structure = noise_structure
         self.noise_direction_variances = NOISE_DIRECTION_VARIANCES[noise_structure]
@@ -166,13 +158,7 @@ class ProgressiveRouteDisruptionAttacker:
         self.model_mean = torch.tensor(model_mean, device=self.device).view(1, 3, 1, 1)
         self.model_std = torch.tensor(model_std, device=self.device).view(1, 3, 1, 1)
         self._actual_forward_view_count = 0
-        self._progressive_mask_counts: tuple[int, ...] = ()
-        self._progressive_mask_grids: tuple[tuple[int, int], ...] = ()
         self._dynamic_mask_layout = None
-        self._fixed_mask_layout = tuple(
-            _CheckpointMaskLayout(checkpoint, model.checkpoint_grid_size(checkpoint), ratio)
-            for checkpoint, ratio in zip(self.progressive_checkpoints, self.progressive_drop_ratios)
-        ) if self.progressive_drop and not self.dynamic_checkpoint else ()
         self.checkpoint_selections = []
 
     def _denormalize(self, images: torch.Tensor) -> torch.Tensor:
@@ -200,7 +186,7 @@ class ProgressiveRouteDisruptionAttacker:
         return mask.detach()
 
     def _build_mask_schedule(self, pixels: torch.Tensor) -> ProgressiveMaskSchedule:
-        layout = self._dynamic_mask_layout if self.dynamic_checkpoint else self._fixed_mask_layout
+        layout = self._dynamic_mask_layout
         if layout is None:
             raise ValueError("select clean-image checkpoints before building attack schedules")
         selections = []
@@ -222,8 +208,6 @@ class ProgressiveRouteDisruptionAttacker:
             ))
         schedule = ProgressiveMaskSchedule(tuple(selections))
         schedule.validate(batch_size=pixels.size(0), check_counts=False)
-        self._progressive_mask_counts = schedule.counts
-        self._progressive_mask_grids = schedule.grid_sizes
         return schedule
 
     def _prepare_dynamic_mask_layout(self, choices, batch_size: int) -> None:
@@ -243,7 +227,7 @@ class ProgressiveRouteDisruptionAttacker:
             active = torch.zeros(batch_size, device=self.device, dtype=torch.bool)
             active.index_fill_(0, indices, True)
             layout.append(_CheckpointMaskLayout(
-                checkpoint, grids[checkpoint], self.progressive_drop_ratios[0], indices, active,
+                checkpoint, grids[checkpoint], self.drop_ratio, indices, active,
             ))
         self._dynamic_mask_layout = tuple(layout)
 
@@ -443,13 +427,13 @@ class ProgressiveRouteDisruptionAttacker:
         adversarial = clean.clone()
         momentum = torch.zeros_like(adversarial)
         try:
-            if self.dynamic_checkpoint:
+            if self.progressive_drop:
                 with torch.no_grad():
                     choices = self.model.select_contraction_checkpoints(self._normalize(clean))
                 self._prepare_dynamic_mask_layout(choices, clean.size(0))
                 offset = len(self.checkpoint_selections)
                 for index, choice in enumerate(choices):
-                    count = max(1, round(math.prod(choice.grid_size) * self.progressive_drop_ratios[0]))
+                    count = max(1, round(math.prod(choice.grid_size) * self.drop_ratio))
                     self.checkpoint_selections.append({
                         "sample_index": offset + index, "checkpoint": choice.checkpoint,
                         "peak_layer": choice.peak_layer, "peak_variance": choice.variance,
@@ -476,7 +460,6 @@ class ProgressiveRouteDisruptionAttacker:
 
     def parameters(self):
         schedules = self.steps * self.input_diversity_groups if self.progressive_drop else 0
-        checkpoints_per_schedule = 1 if self.dynamic_checkpoint else len(self.progressive_checkpoints)
         params = {
             "attack_method": "progressive_route_disruption",
             "seed": SEED,
@@ -500,39 +483,31 @@ class ProgressiveRouteDisruptionAttacker:
             ),
             "input_diversity_total_views": self.input_diversity_groups * self.input_diversity_views_per_group,
             "mask_schedule_count_per_image": schedules,
-            "checkpoint_mask_selection_count_per_image": schedules * checkpoints_per_schedule,
+            "checkpoint_mask_selection_count_per_image": schedules,
             "model_mean": self.model_mean.flatten().tolist(),
             "model_std": self.model_std.flatten().tolist(),
         }
-        if self._dynamic_checkpoint_policy:
-            params.update({
-                "checkpoint_selection_enabled": self.dynamic_checkpoint,
-                "checkpoint_selection": "per-image maximum output global-direction variance ratio times max(0, 1 - normalized-local output dispersion / input dispersion); native block input/output; select once; earliest native tie; drop at selected block input",
-                "checkpoint_selection_metric": "global_direction_variance_ratio_times_positive_fractional_contraction",
-                "checkpoint_score_normalization": {
-                    "local_features": "per-token L2 normalization",
-                    "reference": "L2 normalization",
-                    "denominator": "total local population variance / native feature dimension",
-                    "precision": "float64 normalized geometry from float32 features",
-                    "zero_total_variance_score": 0.0,
-                    "contraction": "max(0, 1 - output total normalized-local population variance / input total normalized-local population variance)",
-                    "zero_input_variance_score": 0.0,
-                },
-                "checkpoint_depth_weighting": False,
-                "checkpoint_tie_break": "earliest block in native forward order",
-                "total_drop_ratio": self.progressive_drop_ratios[0],
-                "drop_count_rounding": "total ratio rounded to 12 decimals; max(1, round(native token count * ratio))",
-                "checkpoint_histogram": dict(Counter(item["checkpoint"] for item in self.checkpoint_selections)),
-                "sample_checkpoints": list(self.checkpoint_selections),
-            })
-            reference = getattr(self.model, "checkpoint_score_reference", None)
-            if reference is not None:
-                params["patch_score_reference"] = reference
-        else:
-            params.update({
-                "checkpoints": list(self.progressive_checkpoints),
-                "drop_ratios": list(self.progressive_drop_ratios),
-                "drop_counts": list(self._progressive_mask_counts),
-                "grids": [list(grid) for grid in self._progressive_mask_grids],
-            })
+        params.update({
+            "checkpoint_selection_enabled": self.progressive_drop,
+            "checkpoint_selection": "per-image maximum output global-direction variance ratio times max(0, 1 - normalized-local output dispersion / input dispersion); native block input/output; select once; earliest native tie; drop at selected block input",
+            "checkpoint_selection_metric": "global_direction_variance_ratio_times_positive_fractional_contraction",
+            "checkpoint_score_normalization": {
+                "local_features": "per-token L2 normalization",
+                "reference": "L2 normalization",
+                "denominator": "total local population variance / native feature dimension",
+                "precision": "float64 normalized geometry from float32 features",
+                "zero_total_variance_score": 0.0,
+                "contraction": "max(0, 1 - output total normalized-local population variance / input total normalized-local population variance)",
+                "zero_input_variance_score": 0.0,
+            },
+            "checkpoint_depth_weighting": False,
+            "checkpoint_tie_break": "earliest block in native forward order",
+            "total_drop_ratio": self.drop_ratio,
+            "drop_count_rounding": "total ratio rounded to 12 decimals; max(1, round(native token count * ratio))",
+            "checkpoint_histogram": dict(Counter(item["checkpoint"] for item in self.checkpoint_selections)),
+            "sample_checkpoints": list(self.checkpoint_selections),
+        })
+        reference = getattr(self.model, "checkpoint_score_reference", None)
+        if reference is not None:
+            params["patch_score_reference"] = reference
         return params

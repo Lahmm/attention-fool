@@ -6,19 +6,12 @@ from .base import ProgressiveAdapter, ProgressiveState, select_contraction_peaks
 
 
 class PiTAdapter(ProgressiveAdapter):
-    """Native hierarchical traversal shared by PiT-T and PiT-B."""
+    """Native hierarchical traversal for the PiT-T source."""
 
     default_model_name = "pit_ti_224"
-    checkpoints = ("stage2_block1", "stage3_block2", "stage3_block3")
-    drop_ratios = (0.07142857142857142, 0.04081632653061224, 0.04081632653061224)
+    drop_ratio = 0.15306122449
     opponent_noise_strength = 0.4
-    dynamic_checkpoint = True
 
-    def __init__(self, model_name=None, *, pretrained=True, device=None):
-        super().__init__(model_name, pretrained=pretrained, device=device)
-        if self.model_name == "pit_b_224":
-            self.drop_ratios = (0.02081165, 0.03125, 0.09375)
-            self.dynamic_checkpoint = False
 
     def begin_progressive_forward(self, x):
         base = self.model

@@ -7,9 +7,7 @@ from .base import ProgressiveAdapter, ProgressiveState, select_contraction_peaks
 
 class CaiTAdapter(ProgressiveAdapter):
     default_model_name = "cait_s24_224"
-    checkpoints = ("block17", "block23")
-    drop_ratios = (0.010204081633, 0.142857142857)
-    dynamic_checkpoint = True
+    drop_ratio = 0.15306122449
     checkpoint_score_reference = "final CLS after class-attention, before final LayerNorm; raw local block outputs"
 
     def begin_progressive_forward(self, x):

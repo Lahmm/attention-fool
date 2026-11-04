@@ -130,10 +130,8 @@ class ProgressiveState:
 
 class ProgressiveAdapter(nn.Module):
     default_model_name = ""
-    checkpoints: tuple[str, ...] = ()
-    drop_ratios: tuple[float, ...] = ()
+    drop_ratio: float
     opponent_noise_strength = 0.2
-    dynamic_checkpoint = False
 
     def __init__(self, model_name=None, *, pretrained=True, device=None):
         super().__init__()

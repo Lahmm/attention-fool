@@ -49,7 +49,6 @@ def make_model(prefixes=1):
     model_name = 'vit_base_patch16_224' if prefixes == 1 else 'deit_base_distilled_patch16_224'
     with patch('timm.create_model', return_value=TinyViT(prefixes)):
         model = ViTAdapter(model_name, pretrained=False, device=torch.device('cpu'))
-    model.dynamic_checkpoint = False
     return model
 
 
@@ -60,7 +59,9 @@ def make_checkpoint(checkpoint, layer, variance, grid):
 def make_attacker(**overrides):
     options = dict(steps=2, input_diversity_groups=1, device=torch.device('cpu'))
     options.update(overrides)
-    return ProgressiveRouteDisruptionAttacker(make_model(), **options)
+    attacker = ProgressiveRouteDisruptionAttacker(make_model(), **options)
+    attacker._prepare_dynamic_mask_layout((make_checkpoint('block10', 'block11', .1, (14, 14)),), 1)
+    return attacker
 
 
 class ProgressiveAttackTests(unittest.TestCase):
@@ -74,44 +75,24 @@ class ProgressiveAttackTests(unittest.TestCase):
              patch.object(torch, 'equal', side_effect=AssertionError('mask synchronization')):
             first = attacker._build_mask_schedule(self.pixels)
             second = attacker._build_mask_schedule(self.pixels)
-        self.assertEqual(first.checkpoints, ('block3', 'block10'))
-        self.assertEqual(first.counts, (10, 10))
-        self.assertEqual(first.grid_sizes, ((14, 14), (14, 14)))
+        self.assertEqual(first.checkpoints, ('block10',))
+        self.assertEqual(first.counts, (20,))
+        self.assertEqual(first.grid_sizes, ((14, 14),))
         first.validate(batch_size=1)
         self.assertFalse(torch.equal(first.masks[0], second.masks[0]))
-        self.assertFalse(torch.equal(first.masks[0], first.masks[1]))
 
-    def test_checkpoint_masks_can_repeat_and_change_later_trajectory(self):
-        attacker = make_attacker()
-        mask = torch.zeros(1, 196, dtype=torch.bool)
-        mask[:, :10] = True
-        with patch.object(attacker, '_sample_random_mask', return_value=mask):
-            schedule = attacker._build_mask_schedule(self.pixels)
-        self.assertTrue(torch.equal(*schedule.masks))
-        initial = attacker.model.begin_progressive_forward(self.pixels)
-        early = attacker.model.advance_progressive_state(initial, 'block3')
-        dropped = attacker.model.apply_progressive_mask(early, mask)
-        self.assertEqual(int(torch.count_nonzero(dropped.local_tokens[:, :10])), 0)
-        interrupted = attacker.model.advance_progressive_state(dropped, 'block10')
-        uninterrupted = attacker.model.advance_progressive_state(early, 'block10')
-        self.assertFalse(torch.allclose(interrupted.local_tokens, uninterrupted.local_tokens))
-        self.assertGreater(int(torch.count_nonzero(interrupted.local_tokens[:, :10])), 0)
 
     def test_phase_preserves_each_native_grid_budget(self):
         attacker = make_attacker()
-        first = torch.zeros(1, 196, dtype=torch.bool)
-        first[:, 20:30] = True
-        late = torch.zeros(1, 64, dtype=torch.bool)
-        late[:, 20:26] = True
-        schedule = ProgressiveMaskSchedule((
-            ProgressiveMaskSelection('early', first, 10, (14, 14)),
-            ProgressiveMaskSelection('late', late, 6, (8, 8)),
-        ))
-        shifted = attacker._phase_mask_schedule(schedule, [(8, 8)], height=224, width=224)
-        self.assertEqual(shifted.counts, (10, 6))
-        self.assertEqual(shifted.grid_sizes, ((14, 14), (8, 8)))
-        shifted.validate(batch_size=1)
-        self.assertFalse(torch.equal(shifted.masks[0], first))
+        for grid, count in (((14, 14), 30), ((7, 7), 8), ((27, 27), 112)):
+            with self.subTest(grid=grid):
+                mask = torch.zeros(1, grid[0] * grid[1], dtype=torch.bool)
+                mask[:, :count] = True
+                schedule = ProgressiveMaskSchedule((ProgressiveMaskSelection('selected', mask, count, grid),))
+                shifted = attacker._phase_mask_schedule(schedule, [(8, 8)], height=224, width=224)
+                self.assertEqual(shifted.counts, (count,))
+                self.assertEqual(shifted.grid_sizes, (grid,))
+                shifted.validate(batch_size=1)
 
     def test_reflect_translation_moves_interior_by_requested_pixels(self):
         original = torch.arange(28 * 28).view(1, 1, 28, 28).float()
@@ -145,8 +126,9 @@ class ProgressiveAttackTests(unittest.TestCase):
     def test_noise_reaches_all_locals_once_and_preserves_both_prefixes(self):
         model = make_model(prefixes=2)
         attacker = ProgressiveRouteDisruptionAttacker(model, steps=1, input_diversity_groups=1, device=torch.device('cpu'))
+        attacker._prepare_dynamic_mask_layout((make_checkpoint('block2', 'block3', .1, (14, 14)),), 1)
         schedule = attacker._build_mask_schedule(self.pixels)
-        self.assertEqual(schedule.checkpoints, ('block2', 'block9'))
+        self.assertEqual(schedule.checkpoints, ('block2',))
         initial = model.begin_progressive_forward(attacker._normalize(self.pixels))
         with patch.object(attacker, '_strict_opponent_feature_noise', return_value=torch.ones_like(initial.local_tokens)) as noise, \
              patch.object(model, 'begin_progressive_forward', wraps=model.begin_progressive_forward) as begin:
@@ -156,7 +138,7 @@ class ProgressiveAttackTests(unittest.TestCase):
         first = model.model.blocks[0].last_input
         torch.testing.assert_close(first[:, :2], initial.context['prefix_tokens'])
         torch.testing.assert_close(first[:, 2:], initial.local_tokens + 1)
-        for mask, index in zip(schedule.masks, (2, 9)):
+        for mask, index in zip(schedule.masks, (2,)):
             after_drop = model.model.blocks[index].last_input[:, 2:]
             self.assertEqual(int(torch.count_nonzero(after_drop[mask])), 0)
 
@@ -209,35 +191,6 @@ class ProgressiveAttackTests(unittest.TestCase):
         repeated = attacker.attack_batch(images, labels)
         torch.testing.assert_close(first, repeated, rtol=0, atol=0)
 
-    def test_analysis_checkpoint_override_controls_traversal_depth(self):
-        model = make_model()
-        model.checkpoints = ('block1', 'block4')
-        attacker = ProgressiveRouteDisruptionAttacker(
-            model, steps=1, input_diversity_groups=1,
-            drop_ratios=(10 / 196, 10 / 196), device=torch.device('cpu'),
-        )
-        schedule = attacker._build_mask_schedule(self.pixels)
-        self.assertEqual(schedule.checkpoints, ('block1', 'block4'))
-        self.assertEqual(schedule.counts, (10, 10))
-
-    def test_analysis_drop_budgets_record_actual_integer_counts(self):
-        settings = (
-            (('block3', 'block10'), (5 / 196, 5 / 196), (5, 5)),
-            (('block3', 'block10'), (20 / 196, 20 / 196), (20, 20)),
-            (('block3', 'block6', 'block10'), (7 / 196, 6 / 196, 7 / 196), (7, 6, 7)),
-        )
-        for checkpoints, ratios, counts in settings:
-            with self.subTest(checkpoints=checkpoints, counts=counts):
-                model = make_model()
-                model.checkpoints = checkpoints
-                attacker = ProgressiveRouteDisruptionAttacker(
-                    model, steps=1, input_diversity_groups=1,
-                    drop_ratios=ratios, device=torch.device('cpu'),
-                )
-                schedule = attacker._build_mask_schedule(self.pixels)
-                self.assertEqual(schedule.checkpoints, checkpoints)
-                self.assertEqual(schedule.counts, counts)
-                self.assertEqual(sum(schedule.counts), sum(counts))
 
     def test_zero_phase_shift_preserves_pixels_and_masks(self):
         attacker = make_attacker(input_diversity_phase_shift_set=((0, 0),))
@@ -299,10 +252,10 @@ class ProgressiveAttackTests(unittest.TestCase):
         params = attacker.parameters()
         self.assertFalse(params['progressive_drop_enabled'])
         self.assertFalse(params['opponent_noise_enabled'])
-        self.assertEqual(params['drop_counts'], [])
+        self.assertEqual(params['sample_checkpoints'], [])
 
     def test_invalid_budgets_are_rejected(self):
-        for settings in (dict(drop_ratios=(0.1,)), dict(input_diversity_views_per_group=3),
+        for settings in (dict(drop_ratio=0), dict(drop_ratio=.6), dict(drop_ratio=float('nan')), dict(input_diversity_views_per_group=3),
                          dict(input_diversity_groups=11), dict(input_diversity_phase_shift_set=())):
             with self.subTest(settings=settings), self.assertRaises(ValueError):
                 make_attacker(**settings)

@@ -7,8 +7,6 @@ import shutil
 from pathlib import Path
 
 LOCAL_HF_CACHE = Path(__file__).resolve().parent / "data" / "huggingface"
-# Keep model provenance repository-local even when the invoking shell exports
-# a different global Hugging Face cache.
 os.environ["HF_HOME"] = str(LOCAL_HF_CACHE)
 os.environ["HF_HUB_CACHE"] = str(LOCAL_HF_CACHE / "hub")
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -36,51 +34,6 @@ def parse_phase_shift_set(value: str) -> tuple[tuple[int, int], ...]:
     if not shifts:
         raise argparse.ArgumentTypeError("phase shift set cannot be empty")
     return shifts
-
-
-def parse_float_list(value: str) -> tuple[float, ...]:
-    try:
-        values = tuple(float(item.strip()) for item in value.split(",") if item.strip())
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("expected comma-separated floats") from exc
-    if not values:
-        raise argparse.ArgumentTypeError("float list cannot be empty")
-    return values
-
-
-def parse_checkpoint_list(value: str) -> tuple[str, ...]:
-    items = tuple(item.strip() for item in value.split(",") if item.strip())
-    if not items:
-        raise argparse.ArgumentTypeError("checkpoint list cannot be empty")
-    indices = []
-    for item in items:
-        suffix = item.removeprefix("block")
-        if not item.startswith("block") or not suffix.isdigit():
-            raise argparse.ArgumentTypeError("checkpoints must use the form block<k>")
-        indices.append(int(suffix))
-    if any(index < 1 for index in indices):
-        raise argparse.ArgumentTypeError("checkpoints must use positive block indices")
-    if len(set(indices)) != len(indices):
-        raise argparse.ArgumentTypeError("checkpoints must not repeat")
-    if any(left >= right for left, right in zip(indices, indices[1:])):
-        raise argparse.ArgumentTypeError("checkpoints must be strictly increasing")
-    return tuple(f"block{index}" for index in indices)
-
-
-def apply_vit_analysis_checkpoints(model, checkpoints, drop_ratios) -> None:
-    if checkpoints is None:
-        return
-    if model.model_name != "vit_base_patch16_224":
-        raise ValueError("--vit-analysis-checkpoints is restricted to vit_base_patch16_224.")
-    indices = tuple(int(item.removeprefix("block")) for item in checkpoints)
-    block_count = len(model.model.blocks)
-    if any(index < 1 or index > block_count for index in indices):
-        raise ValueError(f"analysis checkpoints must lie in block1..block{block_count}.")
-    ratios = model.drop_ratios if drop_ratios is None else drop_ratios
-    if len(ratios) != len(checkpoints):
-        raise ValueError("analysis checkpoints and drop ratios must have the same length.")
-    model.checkpoints = tuple(checkpoints)
-    model.dynamic_checkpoint = False
 
 
 def validate_output_dir(output_dir: str) -> Path:
@@ -147,7 +100,7 @@ def attack_all_samples(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Progressive Route Disruption attack")
+    parser = argparse.ArgumentParser(description="PRD dynamic single-boundary attack")
     parser.add_argument("--whitebox-model", choices=WHITEBOX_MODEL_CHOICES, default=DEFAULT_MODEL_NAME)
     parser.add_argument("--max-attacked-samples", type=int, default=1000)
     parser.add_argument("--epsilon", type=float, default=16.0 / 255.0)
@@ -165,16 +118,10 @@ def parse_args() -> argparse.Namespace:
         help="Disable checkpoint token drops for mechanism ablations.",
     )
     parser.add_argument(
-        "--drop-ratios",
-        type=parse_float_list,
+        "--drop-ratio",
+        type=float,
         default=None,
-        help="Dynamic sources use the sum as their per-image drop ratio; PiT-B uses one ratio per fixed checkpoint.",
-    )
-    parser.add_argument(
-        "--vit-analysis-checkpoints",
-        type=parse_checkpoint_list,
-        default=None,
-        help="ViT-B analysis-only checkpoint override, e.g. block5,block8.",
+        help="Per-image local-token drop ratio at the dynamically selected native boundary.",
     )
     parser.add_argument(
         "--noise-structure",
@@ -212,13 +159,10 @@ def main(args: argparse.Namespace) -> None:
         prefetch_factor=args.prefetch_factor,
     )
     model = build_whitebox_model(model_name=args.whitebox_model)
-    apply_vit_analysis_checkpoints(
-        model, args.vit_analysis_checkpoints, args.drop_ratios
-    )
     attacker = ProgressiveRouteDisruptionAttacker(
         model=model,
         progressive_drop=not args.no_progressive_drop,
-        drop_ratios=args.drop_ratios,
+        drop_ratio=args.drop_ratio,
         opponent_noise_strength=args.opponent_noise_strength,
         noise_structure=args.noise_structure,
         epsilon=args.epsilon,

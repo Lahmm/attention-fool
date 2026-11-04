@@ -151,7 +151,6 @@ class DynamicCheckpointTests(unittest.TestCase):
 
     def test_mixed_batch_selects_once_and_keeps_boundaries_across_steps_and_phase_views(self):
         model = make_model()
-        model.dynamic_checkpoint = True
         pixels = torch.linspace(.1, .9, 3 * 3 * 28 * 28).reshape(3, 3, 28, 28)
         labels = torch.tensor([0, 1, 0])
         choices = (make_checkpoint('block10', 'block11', .3, (14, 14)),
@@ -183,7 +182,6 @@ class DynamicCheckpointTests(unittest.TestCase):
         for boundary in (0, 1):
             masks = [schedule.masks[boundary] for schedule in schedules]
             self.assertFalse(torch.equal(masks[0], masks[1]))
-        self.assertEqual(model.checkpoints, ('block3', 'block10'))
         self.assertIsNone(attacker._dynamic_mask_layout)
         self.assertLessEqual(float((attacker._denormalize(output) - pixels).abs().max()), attacker.epsilon + 1e-6)
         params = attacker.parameters()
@@ -194,7 +192,6 @@ class DynamicCheckpointTests(unittest.TestCase):
 
     def test_heterogeneous_batch_matches_individual_losses_gradients_noise_and_phase_masks(self):
         model = make_model()
-        model.dynamic_checkpoint = True
         attacker = ProgressiveRouteDisruptionAttacker(model, device=torch.device('cpu'))
         pixels = torch.linspace(.1, .9, 3 * 3 * 28 * 28).reshape(3, 3, 28, 28).requires_grad_(True)
         labels = torch.tensor([0, 1, 0])
@@ -232,9 +229,8 @@ class DynamicCheckpointTests(unittest.TestCase):
 
     def test_drop_off_skips_clean_selection_and_exception_clears_active_boundary(self):
         model = make_model()
-        model.dynamic_checkpoint = True
         pixels = torch.linspace(.1, .9, 3 * 28 * 28).reshape(1, 3, 28, 28)
-        attacker = ProgressiveRouteDisruptionAttacker(model, progressive_drop=False, drop_ratios=(.1,),
+        attacker = ProgressiveRouteDisruptionAttacker(model, progressive_drop=False, drop_ratio=.1,
                                                       steps=1, input_diversity_groups=1, device=torch.device('cpu'))
         with patch.object(model, 'select_contraction_checkpoints', side_effect=AssertionError('selection called')):
             attacker.attack_batch(attacker._normalize_output(pixels), torch.tensor([0]))
