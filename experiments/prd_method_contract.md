@@ -1,6 +1,6 @@
 # PRD 方法与执行契约
 
-2026-11-01 更新叙事与增强定位。四个主要源模型在攻击前，按每张干净图像自身的原始 patch-score 层内方差定位一个 checkpoint，然后在峰值 block 输入处随机 token drop。论文核心为统计选层与随机干预；i.i.d. RGB 投影噪声作为共同随机特征增强，详细构造放入补充材料。代码默认仍为 opponent，需显式 `--noise-structure isotropic_rgb` 采用 i.i.d. 采样。本次文档更新不改变代码默认和已有测量。
+2026-11-04：用户确认方向方差比 × 正收缩比例为唯一主线。每张干净图像观察各原生 block 的局部输入／输出，以输出方向方差比乘正收缩比例定位最高分 block，在其输入处随机 token drop。论文核心为统计选层与随机干预；共同增强的构造放入补充设置。代码仍默认 opponent，显式 `--noise-structure isotropic_rgb` 使用 i.i.d. RGB 采样。已完成千图结果保持实际 opponent 配置标签。
 
 ## 源与随机设置
 
@@ -16,10 +16,10 @@
 
 ## 逐样本定位
 
-1. 每张干净图像只在完整攻击开始前做一次无 drop、无特征噪声的完整前向。逐个保存完整 block 输出的局部 token，不额外应用最终 `model.norm`。
-2. ViT 和 distilled DeiT 使用最终 `model.norm` 后的分类 CLS 作为所有层共享的参照。DeiT 排除 CLS 和 distillation 两个 prefix。CaiT 按 2026-10-29 用户确认，使用全部局部 block 和 class-attention 之后、最终 `model.norm` 之前的 CLS；分类前向仍正常执行最终归一化。PiT 使用各 stage 末端的原始 CLS 作为该 stage 的固定参照，最后一个 stage 使用最终归一化后的 CLS。
-3. 对每张图、每个 block，以 float32 计算局部 token 与参照的余弦相似度，eps=1e-8，限制数值到 [-1,1]；以 float64 计算原始分数的总体方差，分母为该层原生局部 token 数。局部表示与评分保留在模型设备上，最终将各层方差和有效性标记一次性传回 CPU 后选层。定位不使用 min–max，不跨图平均。非有限值或零范数表征会报错。
-4. 每张图选择方差最大的 block；并列选择前向顺序最早者。drop 放在峰值 block 的输入处，即前一 block 输出后。该选择在所有攻击步和视图中固定。
+1. 唯一主线为方向方差比 × 正收缩比例。每张干净图像在攻击前做一次无 drop、无特征增强的完整前向，采集每个原生 block 的局部输入和完整输出。输入位于该 block 前，不额外应用最终 LayerNorm。
+2. ViT/DeiT 使用最终 `model.norm` 后的分类 CLS，DeiT 排除两个 prefix；CaiT 使用全部 class-attention 后、最终 LayerNorm 前 CLS；PiT 使用各 stage 末端原始 CLS，最后 stage 使用最终归一化 CLS。PiT 的 block 输入在原生 pooling 和 stage norm 之后，收缩不包含 pooling。
+3. 对 float32 模型特征转 float64 后逐局部向量与全局参考分别 L2 归一化。输入、输出各自围绕本层局部中心的平均平方距离为输入、输出分散度。输出沿全局方向投影的总体方差，除以输出分散度／原生特征维数，得到方向比；再乘 `max(0, 1 - 输出分散度 / 输入分散度)`。正的小分母不截断。输入或输出分散度为零时分数为零；非有限值与零范数特征报错。仅使用当前图像，不跨图校准、不使用固定层标签、拟合系数或深度权重。
+4. 选择乘积最大者，并列和全零分数均选择原生顺序最早者。drop 在得分最高 block 的输入处实施。每图只定位一次，全部步与视图保持该边界。原始 float32 cosine（eps1e-8、clamp[-1,1]）的 float64 总体方差作为所选层诊断量记录，不作为另一选层策略。
 5. `block0` 是第一个 block 的输入；PiT 的 `stageN_block0` 是该 stage pooling 和 stage norm 之后、第一个 block 的输入。跨 stage 的边界不挪到 pooling 之前。
 6. 同批样本可以使用不同边界。每个视图保持完整 batch，按模型原生顺序遍历本批选择的边界；每个边界只清零选择它的样本，其余样本的 mask 为零。所有样本共同经过 pooling、归一化和后续 block，token 数与网格保持原生结构。损失为完整 batch 的均值。
 
@@ -33,7 +33,7 @@
 4. 默认原始／平移两个视图。平移通过整批索引实现反射填充裁剪的相同映射，mask 同步映射到图像空间、平移后按原生网格 occupancy top-k 保持 drop 数量。未选择当前边界的样本在两个视图中都保持全零 mask。同组两视图使用相同模型边界。相位在 CPU 上通过 PyTorch 全局随机函数采样，避免 GPU 标量回读。
 5. 默认 10 groups×2 views。像素梯度直接平均，以系数 1 累积动量，再做 sign 更新、相对干净输入的 L∞ 投影和 [0,1] 截断。默认 10 steps、epsilon=16/255、步长 epsilon/steps。动态四源每图产生 100 条 schedule、100 次 checkpoint mask selection。
 
-`--input-diversity-views-per-group` 保留 1、2 两种消融设置。单视图不采样平移；默认平移集合为 (4,4)/(8,8)/(12,12)，每步每图视图不超过 20。关闭 progressive drop 时跳过方差定位。显式 ViT 固定边界分析参数和 Figure 2 固定版本素材入口用于复现原配置，普通四源入口默认动态定位。
+`--input-diversity-views-per-group` 保留 1、2 两种消融设置。单视图不采样平移；默认平移集合为 (4,4)/(8,8)/(12,12)，每步每图视图不超过 20。关闭 progressive drop 时跳过选层定位。显式 ViT 固定边界分析参数和 Figure 2 固定版本素材入口用于复现原配置，普通四源入口默认动态定位。
 
 ## 共同随机特征增强（补充材料设置）
 
@@ -47,6 +47,6 @@ RMS 在单样本全部初始局部位置和通道上计算。特征 RMS 与投�
 
 ## 记录与评估
 
-动态 `attack_params.json` 保存定位定义、总比例、并列规则，以及逐样本图像名、峰值层、checkpoint、峰值方差、网格、实际 drop 数和实际比例。CaiT 额外保存 `patch_score_reference`，标明 class-attention 后、最终 LayerNorm 前的 CLS 参照。保存跨 batch 的 checkpoint 频次；不把最后一个子组的固定参数当作整批结果。
+动态 `attack_params.json` 保存定位定义、总比例、并列规则，以及逐样本图像名、峰值层、checkpoint、原始余弦方差、方向比、最终乘积分数、收缩比例、输入和输出分散度、网格、实际 drop 数和实际比例。CaiT 额外保存 `patch_score_reference`，标明 class-attention 后、最终 LayerNorm 前的 CLS 参照。保存跨 batch 的 checkpoint 频次；不把最后一个子组的固定参数当作整批结果。
 
-迁移评估仍以 FPR13 为主。ASR 为全部对抗样本上的 `1 - adversarial accuracy`。`results/` 仅保存 FPR13 数值和参数；已有固定 checkpoint/opponent 结果保持原标签；动态四源 opponent 评估已完成，索引见 [故事记录](prd_paper_story.md)。最终动态 i.i.d. 结果需对应实际配置，不从旧表重标。
+迁移评估仍以 FPR13 为主。ASR 为全部对抗样本上的 `1 - adversarial accuracy`。`results/` 仅保存 FPR13 数值和参数；已有固定 checkpoint/opponent 结果保持原标签；当前乘积选层四源 opponent 评估已完成，归档为 `results/prd_direction_contraction_s42_1000_fpr/`；历史最大方差评估也保留实际配置，索引见 [故事记录](prd_paper_story.md)。最终动态 i.i.d. 结果需对应实际配置，不从旧表重标。

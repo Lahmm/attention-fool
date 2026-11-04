@@ -1,77 +1,63 @@
-# PRD：方差指导选层与随机 token drop
+# PRD：方向方差比 × 正收缩比例选层与随机 token drop
 
-更新日期：2026-11-01。PRD 暂为仓库工作名称，论文方法名待定。论文聚焦局部—全局关联的层内方差定位与选定边界的随机 token 干预。
+更新日期：2026-11-04。PRD 为仓库工作名称，正式论文方法名待定。用户确认方向方差比乘正收缩比例为唯一主线选层规则。
 
-## 方法主线
+## 唯一主线选层
 
-同一位置的局部 token 与全局表示的关联沿深度变化，各层具有不同的局部关联分布。方法在每张干净图像上完成一次无 drop、无增强噪声的前向，计算原始 patch-score 的层内总体方差，选择方差最大的 block，并在该 block 的输入处均匀随机 hard-zero 局部 token。
+每张干净图像在攻击前只做一次无 drop、无特征增强的完整前向，保存各原生 block 的局部输入和输出。将每个局部向量及对应全局参考分别在 float64 中做 L2 归一化（模型特征为 float32）。输入和输出分别减去各自的局部 token 中心，平均平方距离分别记为输入、输出分散度。
 
-每张图只选层一次，全部攻击步与视图保持该边界固定；每个 step/group 重新抽取位置。同批样本可以选不同边界。原始／平移视图使用空间对应 mask。默认 10 steps×10 groups×2 views，每张图有 100 次原始 mask 抽样。
+输出特征沿全局单位参考的投影总体方差，除以“输出分散度／原生特征维数”，得到方向方差比。正收缩比例为 `max(0, 1 - 输出分散度 / 输入分散度)`。两者乘积是唯一主线选层分数。输入或输出分散度为零时分数为零；不人为截断正的小分母。非有限值或零范数特征报错。全图没有正分数时也按原生顺序选择最早的 block。
 
-```text
-clean image → raw patch scores → within-layer variance → selected block input
-current adversarial pixels
-→ fresh uniform mask at that fixed per-image boundary
-→ original / translated views with corresponding masks
-→ single-boundary local-token hard zeroing and continued forward
-→ mean pixel gradient → momentum and projected update
-```
+每图选择最高分 block，并列选择原生前向顺序最早者；在该 block 的输入处 drop。该边界在全部攻击步与视图中固定。统计量仅依赖当前图像，无固定层标签、跨图校准、拟合系数或深度权重。原 float32 余弦分数的总体方差只作为所选层的记录字段，不再直接决定选层。
 
-论文将 i.i.d. RGB 投影噪声作为普通随机特征增强，构造和参数放入补充材料，不单列为贡献。代码当前默认仍为 opponent，显式 `--noise-structure isotropic_rgb` 使用 i.i.d. RGB 采样；此次写作调整未修改代码默认或已有结果。采样经真实初始 RGB 投影并 RMS 匹配，覆盖全部初始局部位置，prefix 不变；投影后特征可以相关。
+ViT/DeiT 使用最终 `model.norm` 后的分类 CLS；DeiT 排除 CLS 和 distillation 两个 prefix。CaiT 使用 class-attention 后、最终 LayerNorm 前 CLS。PiT 使用各 stage 末端的原始 CLS，最后 stage 使用最终归一化 CLS。各 block 的输入和输出都不额外施加最终 LayerNorm。PiT 的输入位于原生 pooling 和 stage norm 之后，收缩不包含 pooling。
 
-## 当前配置
+`block0` 是第一个 block 输入；`stageN_block0` 是该 stage pooling 和 stage norm 后的第一个 block 输入。架构约定见 [执行契约](experiments/prd_method_contract.md)。
 
-论文当前四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled；PiT-B 额外保留源支持。Visformer 仅作为评估目标和历史结果中的模型保留。
+## 随机干预与优化
 
-| Source | Checkpoint 选择 | 总 drop 比例 | 特征增强强度 β |
+每个 step/group 在所选输入边界的全部局部 token 中均匀、无放回抽样，清零全部通道，保留 prefix、网格和 token 数。分数只决定层，不决定被丢弃的位置。同组原始／反射平移视图使用空间对应的 mask，drop 数保持一致。同批样本可以选择不同边界，沿原生顺序遍历边界并集时只干预对应样本。
+
+默认 seed 42、10 steps、10 groups × 2 views、epsilon 16/255、步长 epsilon/10、动量系数 1；每图 100 次原始 mask 抽样。像素梯度平均后执行动量和投影更新。关闭 progressive drop 时跳过选层。保留 `--input-diversity-views-per-group 1/2` 消融。
+
+| Source | 候选 block | 总 drop 比例 | 增强强度 β |
 | --- | --- | ---: | ---: |
-| ViT-B/16 | 12 个 block 中逐图选取方差峰前边界 | 20/196 ≈ 10.2041% | 0.2 |
-| CaiT-S24 | 24 个局部 block 中逐图选取方差峰前边界 | 30/196 ≈ 15.3061% | 0.2 |
-| PiT-T | 全部 stage 的 2+6+4 个 block 中逐图选择 | 30/196 ≈ 15.3061% | 0.4 |
-| DeiT-B distilled | 12 个 block 中逐图选取方差峰前边界 | 20/196 ≈ 10.2041% | 0.2 |
-| PiT-B（额外保留） | 固定 `stage2_block1,stage3_block2,stage3_block3` | 按原固定比例与原生网格计算 | 0.4 |
+| ViT-B/16 | 12 | 20/196 | 0.2 |
+| CaiT-S24 | 24 | 30/196 | 0.2 |
+| PiT-T | 全部 2+6+4 | 30/196 | 0.4 |
+| DeiT-B distilled | 12 | 20/196 | 0.2 |
+| PiT-B（额外源） | 单独保留固定 stage2_block1、stage3_block2、stage3_block3 | 原固定比例 | 0.4 |
 
-ViT、DeiT 使用最终 `model.norm` 后的分类 CLS；DeiT 的 distillation token 不作为参照或局部 token。CaiT 使用全部 class-attention 模块之后、最终 `model.norm` 之前的 CLS。PiT 每个 stage 使用该 stage 末端的原始 CLS，最后一个 stage 使用最终归一化后的 CLS。局部 token 均取完整 block 输出，不额外应用最终 `model.norm`。先用 float32 计算原始余弦分数，再用 float64 计算层内总体方差；不做 min–max，不跨样本平均。方差并列时选择前向顺序最早的 block。CaiT 的参照定义记录在 `attack_params.json` 的 `patch_score_reference` 中。
+动态四源的 `--drop-ratios` 各值求和为单图比例，保留 12 位小数，数量为 `max(1, round(N*r))`。PiT-T 原生网格为 27×27、14×14、7×7。PiT-B 按各固定边界比例执行。显式 `--vit-analysis-checkpoints` 保留为固定边界分析入口。
 
-`block0` 表示第一个 block 的输入。PiT 的 `stageN_block0` 表示该 stage 完成 pooling 和 stage norm 后、第一个 block 之前的输入。PiT-T 的局部网格为 27×27、14×14、7×7；按所选网格乘总比例取整。总比例统一保留 12 位小数，drop 数为 `max(1, round(N*r))`，实际比例随整数化记录。不同 checkpoint 的样本保持在同一 batch 中，沿原生层序共同前进；到达一个边界时，仅清零选择该边界的样本，其他样本的 mask 全为零。损失使用完整 batch 的均值。
-
-生成 mask 直接使用选层时记录的网格和原生模型几何，不额外前向。干净选层的局部表示与分数计算留在模型设备上，仅将各层方差和有效性检查结果批量传回 CPU。相位选择使用 PyTorch 的 CPU 随机函数，反射平移按 batch 执行；固定 seed、batch 和执行流程时可复现。
-
-所有新执行统一使用 seed **42**。`--drop-ratios` 对四个动态源表示各值之和，即单图总比例；省略时使用上表预算。PiT-B 仍按每个固定 checkpoint 分别设置。显式 `--vit-analysis-checkpoints` 仅用于固定边界的 ViT 对照，并关闭逐样本定位。
+每个可微视图在全部初始局部位置注入一次经真实 RGB 投影并 RMS 匹配的随机特征增强，prefix 不变。代码默认 `opponent`；`--noise-structure isotropic_rgb` 显式启用投影前 i.i.d. RGB 采样。当前已完成的新方法测量使用 opponent。论文的 i.i.d. 共同增强规划放在补充设置，须用实际配置对应的结果，不将 opponent 表改标签。噪声不单列为贡献。
 
 ```bash
-python main.py --whitebox-model vit_base_patch16_224 --noise-structure isotropic_rgb --output-dir outputs/attack/prd_vit
-python main.py --whitebox-model pit_ti_224 --noise-structure isotropic_rgb --output-dir outputs/attack/prd_pit_t
-python main.py --whitebox-model deit_base_distilled_patch16_224 --noise-structure isotropic_rgb --output-dir outputs/attack/prd_deit_b
+python main.py --whitebox-model vit_base_patch16_224 --output-dir outputs/attack/prd_vit
+python main.py --whitebox-model cait_s24_224 --output-dir outputs/attack/prd_cait
+python main.py --whitebox-model pit_ti_224 --output-dir outputs/attack/prd_pit_t
+python main.py --whitebox-model deit_base_distilled_patch16_224 --output-dir outputs/attack/prd_deit_b
 ```
 
-`--input-diversity-views-per-group 1` 使用原始视图，`2` 使用原始／平移配对（默认）；`--input-diversity-groups` 控制每步组数，每步总视图不超过 20。初始特征增强的特征 RMS 和投影权重固定停止梯度。像素梯度平均后直接进行系数为 1 的动量累积与投影更新。
+`attack_params.json` 记录唯一选层公式与归一化、逐图最高分层和输入 checkpoint、原始余弦方差 `peak_variance`、方向比、`peak_contraction_score`、正收缩比例、输入／输出分散度、原生网格和实际 drop 数。`peak_variance` 是所选层的诊断量，并非选层分数。模型 API 为 `select_contraction_checkpoints`，统计内核为 `select_contraction_peaks`；无旧最大方差策略或兼容别名。
 
-`main.py` 在运行开始时统一设置 PyTorch seed 42，mask、噪声和 phase 直接使用 PyTorch 随机函数；固定 batch 和执行流程时可重复采样。入口保存对抗 PNG 与 `attack_params.json`。动态执行记录每张图的图像名、方差峰值层、峰前 checkpoint、峰值方差、原生网格、实际 drop 数和比例，以及所有样本的 checkpoint 频次。现存实验运行脚本已移除，使用上述入口执行方法。
+## 已完成的 1000 图 FPR13 结果
 
-## 1000-image transfer records
+下表对应 seed 42、10 steps、10 groups × 2 views、opponent 增强。新方法最初在仓库外独立快照执行，2026-11-04 被确认为唯一主线；原始归档的实验标签、参数、源码差异及哈希保持真实执行状态。
 
-当前评估协议为 **FPR13**。下表是已完成的固定 checkpoint 版本：seed 42、1000 张图像，2026-10-23 更新 PiT-T 和 distilled DeiT-B 的 drop/full 消融单元。下表数值属于固定多 checkpoint＋opponent 配置。动态选层的四源同规模评估已完成，仍使用 opponent；本地原始目录和 ASR 见 [故事与证据索引](experiments/prd_paper_story.md)。最终 i.i.d. 配置的主表须对应实际运行记录。
+| Source | Overall ASR | Strict ASR | 固定单层 Strict ASR | 差值（pp） |
+| --- | ---: | ---: | ---: | ---: |
+| vit | 87.95% | 86.95% | 87.53% | -0.58 |
+| cait | 89.14% | 88.37% | 89.05% | -0.68 |
+| pit_t | 84.28% | 84.28% | 85.08% | -0.81 |
+| deit_b | 95.30% | 95.30% | 94.78% | +0.52 |
+| macro | 89.17% | 88.72% | 89.11% | -0.39 |
 
-| Source | Overall ASR | Strict black-box |
-| --- | ---: | ---: |
-| ViT-B/16 | 88.02% | 87.06% |
-| CaiT-S24 | 90.24% | 89.50% |
-| PiT-T（14/2/2） | 85.81% | 85.81% |
-| DeiT-B distilled（block2/block9） | 94.80% | 94.80% |
-| **Four-source mean** | **89.72%** | **89.29%** |
+结果、全部候选 counts、逐目标 ASR、固定单层和历史动态方法的直接差值见 [当前方法结果](results/prd_direction_contraction_s42_1000_fpr/README.md) 和 [汇总 CSV](results/prd_direction_contraction_s42_1000_fpr/summary.csv)。固定层命中数依次为 848、843、277、184。
 
-上述历史固定配置的完整逐目标矩阵、2×2 消融和 ASR 差值见 [FPR13 实验记录](results/prd_s42_1000_fpr_ablation.md)。[results 索引](results/README.md) 和 [轻量原始参数／迁移记录](results/prd_s42_fpr_run_artifacts/) 随 Git 提交，可在其他机器查看。历史 randomness.py seed 42 与当前 PyTorch seed 42 按用户约定作为统一报告标准。
-
-当前论文围绕选层对照、token 选择对照和迁移 ASR 组织，旧双机制消融保留原配置含义。方法执行顺序见 [PRD 方法记录](experiments/prd_method_contract.md)。论文叙事、主实验记录与建议写作结构见 [PRD 论文叙事文档](experiments/prd_paper_story.md)。
-
-异地写作所需的当前主实验参数、原始记录和服务器材料位置见 [写作交接与文件清单](experiments/server_handoff_inventory.md)。
-
-论文以 ASR 呈现迁移效果。写作结构、图表计划和表达约定见 [CVPR 2027 写作蓝图](experiments/cvpr2027_writing_blueprint.md)。
+旧最大方差与二阶矩、标准差加均值等是历史对照。固定多 checkpoint/opponent 的 89.72% Overall、89.29% strict 及 2×2 消融仍是原配置证据，见 [历史记录](results/prd_s42_1000_fpr_ablation.md)。[故事](experiments/prd_paper_story.md)、[蓝图](experiments/cvpr2027_writing_blueprint.md) 和 [交接](experiments/server_handoff_inventory.md) 按当前选层定义维护。
 
 ## 评估与验证
-
-图像位于 `data/clean_resized_images`，标签为 `data/image_name_to_class_id_and_name.json`，源与 Transformer 目标从 `data/huggingface` 离线缓存读取。
 
 ```bash
 python transfer_eval.py --image-dir outputs/attack/prd_vit --protocol fpr --no-tf32
@@ -79,9 +65,9 @@ python -m unittest discover -s tests
 RUN_REAL_PRD_ADAPTERS=1 python -m unittest tests.test_progressive_adapters
 ```
 
-当前迁移测试以 FPR 的 13 目标协议为主，使用 FPR 对齐的模型加载和预处理；`results/` 仅保留 FPR13 的结果与实验记录。目标集的选择独立于源支持。结果默认写入图像目录的 `transfer.csv` 与 `transfer.json`，可用 `--predictions-output` 保存逐样本预测。ASR 使用全部输入样本；严格黑盒排除与源模型完全相同的目标。协议定义见 [FPR 目标评估协议](experiments/fpr_target_protocol.md)。
+输入为 `data/clean_resized_images` 和标签 JSON，离线权重位于 `data/huggingface`。FPR13 使用全部对抗样本上的 `1 - adversarial accuracy`；strict 排除完全相同的源目标。协议见 [FPR13 定义](experiments/fpr_target_protocol.md)。`results/` 仅保存 FPR13 证据和来源；历史 seed-42 随机实现与 PyTorch 全局 seed 42 按用户约定统一报告。
 
-权重准备工具 `experiments/download_fpr_models.py` 保留，负责缓存 FPR 目标和额外的 PiT-T／DeiT-B distilled 源权重，不执行攻击或评估。
+保留 `experiments/download_fpr_models.py` 下载工具，不在仓库恢复已完成的实验运行脚本。Figure 1 是跨层原始分数观察素材，Figure 2 是历史固定双 checkpoint 素材，均不冒充当前选层可视化。
 
 ## Figure 2 固定 checkpoint 版本的首次迭代素材
 

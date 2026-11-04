@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from .base import ProgressiveAdapter, ProgressiveState, select_variance_peaks
+from .base import ProgressiveAdapter, ProgressiveState, select_contraction_peaks
 
 DEFAULT_MODEL_NAME = "vit_base_patch16_224"
 
@@ -67,17 +67,18 @@ class ViTAdapter(ProgressiveAdapter):
         return tuple(self.model.patch_embed.grid_size)
 
     @torch.no_grad()
-    def select_variance_checkpoints(self, normalized_inputs):
+    def select_contraction_checkpoints(self, normalized_inputs):
         self.eval()
         state = self.begin_progressive_forward(normalized_inputs.to(self.device))
         prefix = state.context["prefix_tokens"]
         tokens = torch.cat((prefix, state.local_tokens), dim=1)
         snapshots = []
         for block in self.model.blocks:
+            block_input = tokens[:, prefix.size(1):].clone()
             tokens = block(tokens)
-            snapshots.append(tokens[:, prefix.size(1):].clone())
+            snapshots.append((block_input, tokens[:, prefix.size(1):].clone()))
         reference = self.model.norm(tokens)[:, 0]
-        return select_variance_peaks([
-            (f"block{index + 1}", f"block{index}", state.grid_size, local, reference)
-            for index, local in enumerate(snapshots)
+        return select_contraction_peaks([
+            (f"block{index + 1}", f"block{index}", state.grid_size, local, reference, block_input)
+            for index, (block_input, local) in enumerate(snapshots)
         ])

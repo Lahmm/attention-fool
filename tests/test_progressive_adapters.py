@@ -55,7 +55,7 @@ class AdapterTests(unittest.TestCase):
                 attacker = ProgressiveRouteDisruptionAttacker(model, steps=1, input_diversity_groups=1,
                                                               device=torch.device('cpu'))
                 if model.dynamic_checkpoint:
-                    choice = model.select_variance_checkpoints(pixels)[0]
+                    choice = model.select_contraction_checkpoints(pixels)[0]
                     attacker._prepare_dynamic_mask_layout((choice,), 1)
                     expected_grid = (choice.grid_size,)
                     count = max(1, int(round(choice.grid_size[0] * choice.grid_size[1] * attacker.progressive_drop_ratios[0])))

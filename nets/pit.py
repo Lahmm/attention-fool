@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from .base import ProgressiveAdapter, ProgressiveState, select_variance_peaks
+from .base import ProgressiveAdapter, ProgressiveState, select_contraction_peaks
 
 
 class PiTAdapter(ProgressiveAdapter):
@@ -151,7 +151,7 @@ class PiTAdapter(ProgressiveAdapter):
         return self.model.forward_head(self.model.norm(cls))
 
     @torch.no_grad()
-    def select_variance_checkpoints(self, normalized_inputs):
+    def select_contraction_checkpoints(self, normalized_inputs):
         self.eval()
         state = self.begin_progressive_forward(normalized_inputs.to(self.device))
         spatial = self._pit_spatial(state)
@@ -161,12 +161,13 @@ class PiTAdapter(ProgressiveAdapter):
             tokens, grid = self._prepare_pit_stage(stage_index, spatial, cls)
             snapshots = []
             for block in stage.blocks:
+                block_input = tokens[:, cls.size(1):].clone()
                 tokens = block(tokens)
-                snapshots.append(tokens[:, cls.size(1):].clone())
+                snapshots.append((block_input, tokens[:, cls.size(1):].clone()))
             spatial, cls = self._split_pit_tokens(tokens, cls.size(1), grid)
             reference = (self.model.norm(cls) if stage_index == len(self.model.transformers) - 1
                          else cls)[:, 0]
-            for index, local in enumerate(snapshots):
+            for index, (block_input, local) in enumerate(snapshots):
                 observations.append((f"stage{stage_index + 1}_block{index + 1}",
-                                     f"stage{stage_index + 1}_block{index}", grid, local, reference))
-        return select_variance_peaks(observations)
+                                     f"stage{stage_index + 1}_block{index}", grid, local, reference, block_input))
+        return select_contraction_peaks(observations)

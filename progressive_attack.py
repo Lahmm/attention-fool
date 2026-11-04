@@ -228,7 +228,7 @@ class ProgressiveRouteDisruptionAttacker:
 
     def _prepare_dynamic_mask_layout(self, choices, batch_size: int) -> None:
         if len(choices) != batch_size:
-            raise ValueError("one variance checkpoint is required for each clean sample")
+            raise ValueError("one selected checkpoint is required for each clean sample")
         groups = {}
         grids = {}
         for index, choice in enumerate(choices):
@@ -445,7 +445,7 @@ class ProgressiveRouteDisruptionAttacker:
         try:
             if self.dynamic_checkpoint:
                 with torch.no_grad():
-                    choices = self.model.select_variance_checkpoints(self._normalize(clean))
+                    choices = self.model.select_contraction_checkpoints(self._normalize(clean))
                 self._prepare_dynamic_mask_layout(choices, clean.size(0))
                 offset = len(self.checkpoint_selections)
                 for index, choice in enumerate(choices):
@@ -453,6 +453,11 @@ class ProgressiveRouteDisruptionAttacker:
                     self.checkpoint_selections.append({
                         "sample_index": offset + index, "checkpoint": choice.checkpoint,
                         "peak_layer": choice.peak_layer, "peak_variance": choice.variance,
+                        "peak_direction_variance_ratio": choice.direction_variance_ratio,
+                        "peak_contraction_score": choice.contraction_score,
+                        "contraction_fraction": choice.contraction_fraction,
+                        "input_total_variance": choice.input_total_variance,
+                        "output_total_variance": choice.output_total_variance,
                         "grid_size": list(choice.grid_size), "drop_count": count,
                         "actual_drop_ratio": count / math.prod(choice.grid_size),
                     })
@@ -502,7 +507,18 @@ class ProgressiveRouteDisruptionAttacker:
         if self._dynamic_checkpoint_policy:
             params.update({
                 "checkpoint_selection_enabled": self.dynamic_checkpoint,
-                "checkpoint_selection": "per-sample maximum clean raw patch-score population variance; drop before peak block",
+                "checkpoint_selection": "per-image maximum output global-direction variance ratio times max(0, 1 - normalized-local output dispersion / input dispersion); native block input/output; select once; earliest native tie; drop at selected block input",
+                "checkpoint_selection_metric": "global_direction_variance_ratio_times_positive_fractional_contraction",
+                "checkpoint_score_normalization": {
+                    "local_features": "per-token L2 normalization",
+                    "reference": "L2 normalization",
+                    "denominator": "total local population variance / native feature dimension",
+                    "precision": "float64 normalized geometry from float32 features",
+                    "zero_total_variance_score": 0.0,
+                    "contraction": "max(0, 1 - output total normalized-local population variance / input total normalized-local population variance)",
+                    "zero_input_variance_score": 0.0,
+                },
+                "checkpoint_depth_weighting": False,
                 "checkpoint_tie_break": "earliest block in native forward order",
                 "total_drop_ratio": self.progressive_drop_ratios[0],
                 "drop_count_rounding": "total ratio rounded to 12 decimals; max(1, round(native token count * ratio))",

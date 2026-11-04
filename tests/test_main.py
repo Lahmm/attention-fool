@@ -12,8 +12,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 import main
-from tests.test_progressive_attack import make_model
-from nets.base import SampleCheckpoint
+from tests.test_progressive_attack import make_model, make_checkpoint
 from utils import SEED
 
 
@@ -100,9 +99,9 @@ class MainTests(unittest.TestCase):
     def test_dynamic_metadata_tracks_each_image_across_batches(self):
         model = make_model()
         model.dynamic_checkpoint = True
-        choices = [(SampleCheckpoint('block0', 'block1', .1, (14, 14)),
-                    SampleCheckpoint('block10', 'block11', .2, (14, 14))),
-                   (SampleCheckpoint('block2', 'block3', .3, (14, 14)),)]
+        choices = [(make_checkpoint('block0', 'block1', .1, (14, 14)),
+                    make_checkpoint('block10', 'block11', .2, (14, 14))),
+                   (make_checkpoint('block2', 'block3', .3, (14, 14)),)]
         with tempfile.TemporaryDirectory() as directory, \
              patch.object(sys, 'argv', ['main.py', '--steps', '1', '--input-diversity-groups', '1',
                                       '--input-diversity-views-per-group', '1', '--max-attacked-samples', '3']):
@@ -110,7 +109,7 @@ class MainTests(unittest.TestCase):
                  patch.object(main, 'load_data', return_value=DataLoader(IndexedDataset(), batch_size=2)), \
                  patch.object(main, 'DEVICE', torch.device('cpu')), \
                  patch.object(main, 'build_whitebox_model', return_value=model), \
-                 patch.object(model, 'select_variance_checkpoints', side_effect=choices) as select:
+                 patch.object(model, 'select_contraction_checkpoints', side_effect=choices) as select:
                 main.main(main.parse_args())
             self.assertEqual(select.call_count, 2)
             params = json.loads((Path(directory) / 'attack_params.json').read_text())
@@ -120,3 +119,11 @@ class MainTests(unittest.TestCase):
             self.assertEqual([item['checkpoint'] for item in params['sample_checkpoints']],
                              ['block0', 'block10', 'block2'])
             self.assertEqual(params['checkpoint_mask_selection_count_per_image'], 1)
+            self.assertEqual(params['checkpoint_selection_metric'],
+                             'global_direction_variance_ratio_times_positive_fractional_contraction')
+            self.assertNotIn('experiment_only', params)
+            for row in params['sample_checkpoints']:
+                self.assertEqual(row['peak_contraction_score'],
+                                 row['peak_direction_variance_ratio'] * row['contraction_fraction'])
+                self.assertEqual(row['contraction_fraction'],
+                                 1 - row['output_total_variance'] / row['input_total_variance'])

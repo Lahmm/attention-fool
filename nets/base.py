@@ -21,37 +21,87 @@ class SampleCheckpoint:
     checkpoint: str
     peak_layer: str
     variance: float
+    direction_variance_ratio: float
+    contraction_score: float
+    contraction_fraction: float
+    input_total_variance: float
+    output_total_variance: float
     grid_size: tuple[int, int]
 
 
-def select_variance_peaks(observations):
+def feature_statistics(local, reference):
+    if local.ndim != 3 or reference.shape != (local.size(0), local.size(2)):
+        raise ValueError('expected local [B,N,D] and reference [B,D]')
+    if min(local.shape) == 0:
+        raise ValueError('empty local feature tensor')
+    local, reference = local.float(), reference.float()
+    if not bool(torch.isfinite(local).all() & torch.isfinite(reference).all()):
+        raise ValueError('non-finite features')
+    local64, reference64 = local.double(), reference.double()
+    local_norm = local64.norm(dim=-1, keepdim=True)
+    reference_norm = reference64.norm(dim=-1, keepdim=True)
+    if bool((local_norm == 0).any() | (reference_norm == 0).any()):
+        raise ValueError('nonzero local features and reference required')
+    unit = local64 / local_norm
+    direction = reference64 / reference_norm
+    center = unit.mean(dim=1, keepdim=True)
+    centered = unit - center
+    identical = (unit == unit[:, :1]).all(dim=2).all(dim=1)
+    centered = torch.where(identical[:, None, None], 0.0, centered)
+    total_variance = centered.square().sum(dim=2).mean(dim=1)
+    average_direction_variance = total_variance / local.size(2)
+    projected_variance = (centered * direction[:, None]).sum(dim=2).square().mean(dim=1)
+    denominator = torch.where(average_direction_variance > 0, average_direction_variance, 1.0)
+    ratio = torch.where(average_direction_variance > 0, projected_variance / denominator, 0.0)
+    raw = F.cosine_similarity(local, reference[:, None], dim=-1, eps=1e-8).clamp(-1, 1).double()
+    output = {
+        'score_mean_float64': (unit * direction[:, None]).sum(dim=2).mean(dim=1),
+        'global_direction_population_variance': projected_variance,
+        'total_local_population_variance': total_variance,
+        'average_direction_population_variance': average_direction_variance,
+        'direction_variance_ratio': ratio,
+        'mainline_score_mean': raw.mean(dim=1),
+        'mainline_score_population_variance': raw.var(dim=1, unbiased=False),
+        'degenerate_local_variance': total_variance == 0,
+    }
+    if not all(bool(torch.isfinite(value).all()) for value in output.values()):
+        raise ValueError('non-finite statistics')
+    return output
+
+
+def contraction_statistics(local, reference, block_input):
+    if block_input.shape != local.shape:
+        raise ValueError("block input/output local shapes must match")
+    stats = feature_statistics(local, reference)
+    before = feature_statistics(block_input, reference)['total_local_population_variance']
+    after = stats['total_local_population_variance']
+    denominator = torch.where(before > 0, before, 1.0)
+    fraction = torch.where(before > 0, (1 - after / denominator).clamp_min(0), 0.0)
+    stats.update(input_total_variance=before, output_total_variance=after,
+                 contraction_fraction=fraction,
+                 contraction_score=stats['direction_variance_ratio'] * fraction)
+    return stats
+
+
+def select_contraction_peaks(observations):
     if not observations:
         raise ValueError("at least one block observation is required")
-    variances = []
-    finite = []
-    nonzero = []
-    for layer, checkpoint, grid, local, reference in observations:
-        local, reference = local.float(), reference.float()
-        if local.ndim != 3 or reference.shape != (local.size(0), local.size(2)):
-            raise ValueError("expected local [B,N,D] and CLS [B,D]")
+    all_stats = []
+    for layer, checkpoint, grid, local, reference, block_input in observations:
         if local.size(1) != grid[0] * grid[1]:
-            raise ValueError("observation grid does not match the local tokens")
-        finite.append(torch.isfinite(local).all() & torch.isfinite(reference).all())
-        nonzero.append((local.norm(dim=-1) > 0).all() & (reference.norm(dim=-1) > 0).all())
-        scores = F.cosine_similarity(local, reference[:, None], dim=-1, eps=1e-8).clamp(-1, 1)
-        variances.append(scores.double().var(dim=1, unbiased=False))
-    values = torch.stack(variances)
-    checks = torch.stack((torch.stack(finite).all(), torch.stack(nonzero).all()))
-    packed = torch.cat((values.flatten(), checks.to(values))).cpu()
-    if not bool(packed[-2]):
-        raise ValueError("non-finite checkpoint observation")
-    if not bool(packed[-1]):
-        raise ValueError("cosine similarity requires nonzero representations")
-    values = packed[:-2].reshape(values.shape)
+            raise ValueError("observation grid does not match local tokens")
+        all_stats.append({key: value.cpu() for key, value in contraction_statistics(local, reference, block_input).items()})
+    values = torch.stack([s['contraction_score'] for s in all_stats])
     peaks = values.argmax(dim=0)
     return tuple(
         SampleCheckpoint(observations[index][1], observations[index][0],
-                         float(values[index, sample]), observations[index][2])
+                         float(all_stats[index]['mainline_score_population_variance'][sample]),
+                         float(all_stats[index]['direction_variance_ratio'][sample]),
+                         float(all_stats[index]['contraction_score'][sample]),
+                         float(all_stats[index]['contraction_fraction'][sample]),
+                         float(all_stats[index]['input_total_variance'][sample]),
+                         float(all_stats[index]['output_total_variance'][sample]),
+                         observations[index][2])
         for sample, index in enumerate(peaks.tolist())
     )
 
@@ -110,7 +160,7 @@ class ProgressiveAdapter(nn.Module):
     def finish_progressive_forward(self, state):
         raise NotImplementedError
 
-    def select_variance_checkpoints(self, normalized_inputs):
+    def select_contraction_checkpoints(self, normalized_inputs):
         raise NotImplementedError
 
     def checkpoint_order(self, checkpoint_id):

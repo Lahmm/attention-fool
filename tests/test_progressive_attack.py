@@ -4,6 +4,7 @@ from unittest.mock import patch
 import torch
 from torch import nn
 
+from nets.base import SampleCheckpoint
 from nets.vit import ViTAdapter
 from progressive_attack import ProgressiveMaskSchedule, ProgressiveMaskSelection, ProgressiveRouteDisruptionAttacker
 from utils import SEED
@@ -50,6 +51,10 @@ def make_model(prefixes=1):
         model = ViTAdapter(model_name, pretrained=False, device=torch.device('cpu'))
     model.dynamic_checkpoint = False
     return model
+
+
+def make_checkpoint(checkpoint, layer, variance, grid):
+    return SampleCheckpoint(checkpoint, layer, variance, 2., 1., .5, 1., .5, grid)
 
 
 def make_attacker(**overrides):

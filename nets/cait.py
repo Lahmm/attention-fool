@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from .base import ProgressiveAdapter, ProgressiveState, select_variance_peaks
+from .base import ProgressiveAdapter, ProgressiveState, select_contraction_peaks
 
 
 class CaiTAdapter(ProgressiveAdapter):
@@ -55,19 +55,20 @@ class CaiTAdapter(ProgressiveAdapter):
         return tuple(self.model.patch_embed.grid_size)
 
     @torch.no_grad()
-    def select_variance_checkpoints(self, normalized_inputs):
+    def select_contraction_checkpoints(self, normalized_inputs):
         self.eval()
         state = self.begin_progressive_forward(normalized_inputs.to(self.device))
         local = state.local_tokens
         snapshots = []
         for block in self.model.blocks:
+            block_input = local.clone()
             local = block(local)
-            snapshots.append(local.clone())
+            snapshots.append((block_input, local.clone()))
         cls = self.model.cls_token.expand(local.size(0), -1, -1)
         for block in self.model.blocks_token_only:
             cls = block(local, cls)
         reference = cls[:, 0]
-        return select_variance_peaks([
-            (f"block{index + 1}", f"block{index}", state.grid_size, values, reference)
-            for index, values in enumerate(snapshots)
+        return select_contraction_peaks([
+            (f"block{index + 1}", f"block{index}", state.grid_size, values, reference, block_input)
+            for index, (block_input, values) in enumerate(snapshots)
         ])

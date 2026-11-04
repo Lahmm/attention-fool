@@ -1,12 +1,14 @@
 # 四源 FPR13：当前论文主线与历史结果入口
 
-更新日期：2026-11-01。论文聚焦逐图最大原始 patch-score 层内方差选层与峰值 block 输入处的随机 token drop；采用 i.i.d. RGB 投影随机特征增强作为共同设置。PRD 暂为仓库工作名称。
+更新日期：2026-11-04。论文聚焦逐图方向方差比 × 正收缩比例选层与最高分 block 输入处的随机 token drop；采用 i.i.d. RGB 投影随机特征增强作为共同设置。PRD 暂为仓库工作名称。
 
 ## 当前方法与证据
 
 四源为 ViT-B/16、CaiT-S24、PiT-T 和 distilled DeiT-B；每图只在干净前向选层一次，所有攻击步保持边界固定，位置按 step/group 均匀重采样。方法事实见 [执行契约](prd_method_contract.md)，论文结构见 [蓝图](cvpr2027_writing_blueprint.md)。
 
-四源动态选层的 seed-42、1000 图像、13 目标评估已在本地完成，仍使用 opponent 增强；包括当前 CaiT 归一化前 CLS 参照的后续运行。原始目录及 ASR 见 [故事与证据记录](prd_paper_story.md)。最终 i.i.d. 配置的主表和匹配选层对照须对应实际运行记录。
+当前方法的 opponent 四源 FPR13 结果已归档 [结果](../results/prd_direction_contraction_s42_1000_fpr/README.md)：Overall 89.1673%、strict 88.7234%。独立实验于 2026-11-04 被确认为唯一主线。
+
+历史最大方差动态选层的 seed-42、1000 图像、13 目标评估已在本地完成，仍使用 opponent 增强；包括当前 CaiT 归一化前 CLS 参照的后续运行。原始目录及 ASR 见 [故事与证据记录](prd_paper_story.md)。最终 i.i.d. 配置的主表和匹配选层对照须对应实际运行记录。
 
 ## 已归档的固定配置
 
