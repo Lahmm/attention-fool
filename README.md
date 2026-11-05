@@ -39,15 +39,17 @@ python transfer_eval.py --image-dir outputs/attack/prd_vit_new --no-tf32
 | `--input-diversity-groups` | 默认 10；每步总视图数不超过 20 |
 | `--input-diversity-views-per-group` | 保留 1/2 视图消融，默认 2 |
 | `--input-diversity-phase-shift-set` | 默认 `4,4;8,8;12,12` |
-| `--noise-structure` | 默认 `opponent`；显式 `isotropic_rgb` 为投影前 i.i.d. RGB 采样 |
+| `--noise-structure` | 默认 `isotropic_rgb`：投影前 i.i.d. RGB 标准高斯采样；`opponent` 仅显式比较时使用 |
 | `--opponent-noise-strength` | 两种增强模式的 β，0 关闭增强 |
 | `--no-progressive-drop` | 无 drop 消融，跳过干净选层 |
 | `--epsilon`、`--step-size`、`--steps` | 扰动预算与更新设置 |
 | `--image-dir`、`--annotations-path`、`--max-attacked-samples` | 数据与样本数 |
 
-每个可微视图在全部初始局部位置注入一次经真实 RGB 初始投影和 RMS 匹配的随机特征增强，prefix 不变。论文规划使用显式 i.i.d. 配置；已完成主结果仍为 opponent，保留实际标签。增强构造放入补充实现设置。
+每个可微视图在全部初始局部位置注入一次经真实 RGB 初始投影和 RMS 匹配的随机特征增强，prefix 不变。命令行和攻击类均默认使用 i.i.d. 高斯采样。历史 opponent 结果保留实际标签；已完成的四源 i.i.d. 配对运行见交接记录。增强构造放入补充实现设置。
 
 ## 结果与评估
+
+下表为历史 opponent 配置，不能重标为当前默认 i.i.d.；对应 i.i.d. 四源运行见 [交接记录](experiments/server_handoff_inventory.md)。
 
 | Source | Overall ASR | Strict ASR |
 | --- | ---: | ---: |

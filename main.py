@@ -126,8 +126,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--noise-structure",
         choices=tuple(NOISE_DIRECTION_VARIANCES),
-        default="opponent",
-        help="RGB noise direction variances: opponent (default) or isotropic_rgb.",
+        default="isotropic_rgb",
+        help="RGB noise direction variances: isotropic_rgb (i.i.d. Gaussian, default) or opponent.",
     )
     parser.add_argument(
         "--opponent-noise-strength",

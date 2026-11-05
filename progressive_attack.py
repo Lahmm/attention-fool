@@ -52,7 +52,7 @@ class ProgressiveRouteDisruptionAttacker:
         progressive_drop: bool = True,
         drop_ratio: float | None = None,
         opponent_noise_strength: float | None = None,
-        noise_structure: str = "opponent",
+        noise_structure: str = "isotropic_rgb",
         epsilon: float = 16.0 / 255.0,
         step_size: float | None = None,
         steps: int = 10,

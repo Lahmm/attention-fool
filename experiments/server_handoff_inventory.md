@@ -40,4 +40,4 @@
 
 `data/huggingface/` 与 `data/torch/` 全部保留，包括旧目标权重；PiT-B 与 Visformer 是 FPR13 目标。当前环境为 Python 3.10.19、torch 2.10.0、torchvision 0.25.0、timm 1.0.24，服务器解释器 `/root/miniconda3/envs/att-atk/bin/python`。
 
-最终动态 i.i.d. 主表、匹配无 drop／随机层／历史方差／当前选择器的对照仍需实际配置支持。`figure1.py` 保留跨层原始分数导出；完整方向比／收缩曲线与当前方法 Fig. 2 待准备。旧固定双边界 Fig. 2 代码已删除。
+四源动态配对 i.i.d. 测量已完成：`outputs/attack/prd_iid_paired_four_sources_s42_1000_20261105T105028Z_{vit,cait,pit_t,deit_b}/`，每源 1000 图、13 目标；参数和队列来源见 `outputs/logs/prd_iid_paired_four_sources_s42_1000_20261105T105028Z/`。四源 Overall 89.3423%、strict 88.8893%。命令行和攻击类现默认 i.i.d. 高斯采样；β 和投影/RMS 匹配保持。匹配无 drop／随机层／历史方差／当前选择器的对照仍需实际配置支持。`figure1.py` 保留跨层原始分数导出；完整方向比／收缩曲线与当前方法 Fig. 2 待准备。旧固定双边界 Fig. 2 代码已删除。

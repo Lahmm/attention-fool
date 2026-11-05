@@ -39,11 +39,11 @@
 
 ## 共同特征增强（补充设置）
 
-代码默认 `opponent`，三个 RGB 正交方向方差为 0.5、1.25、1.25。显式 `--noise-structure isotropic_rgb` 将三个方向方差设为 1，等价于投影前 RGB 空间的 i.i.d. 标准高斯采样。用真实初始投影权重 W 映射，再逐样本 RMS 匹配：
+命令行与攻击类均默认 `isotropic_rgb`，三个 RGB 正交方向方差均为 1，等价于投影前 RGB 空间的 i.i.d. 标准高斯采样。显式 `opponent` 仅保留为历史对比选项，方向方差为 0.5、1.25、1.25。用真实初始投影权重 W 映射，再逐样本 RMS 匹配：
 
 `η = W ξ_RGB`，`η_hat = β RMS(H0)/RMS(η) · η`，`H0_aug = H0 + η_hat`。
 
-RMS 覆盖全部初始局部位置和通道，特征 RMS 与投影权重 detach，prefix 不变。投影后的特征可以相关。`--opponent-noise-strength` 控制两种模式的 β，0 关闭增强。论文规划采用显式 i.i.d. 设置，构造与参数放补充材料，已完成 opponent 记录保持实际标签。
+RMS 覆盖全部初始局部位置和通道，特征 RMS 与投影权重 detach，prefix 不变。投影后的特征可以相关。`--opponent-noise-strength` 控制两种模式的 β，0 关闭增强。当前默认采用 i.i.d. 设置，构造与参数放补充材料，已完成 opponent 记录保持实际标签。
 
 ## 参数与评估
 

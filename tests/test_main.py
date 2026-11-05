@@ -29,7 +29,9 @@ class MainTests(unittest.TestCase):
     def test_cli_preserves_view_count_ablation(self):
         for views in (1, 2):
             with patch.object(sys, 'argv', ['main.py', '--input-diversity-views-per-group', str(views)]):
-                self.assertEqual(main.parse_args().input_diversity_views_per_group, views)
+                args = main.parse_args()
+                self.assertEqual(args.input_diversity_views_per_group, views)
+                self.assertEqual(args.noise_structure, 'isotropic_rgb')
         self.assertEqual(SEED, 42)
 
     def test_mechanism_ablation_switches_are_available(self):
@@ -72,8 +74,8 @@ class MainTests(unittest.TestCase):
             self.assertEqual(params['input_diversity_total_views'], 1)
             self.assertEqual(params['checkpoint_histogram'], {'block0': 2})
             self.assertNotIn('checkpoints', params)
-            self.assertEqual(params['noise_structure'], 'opponent')
-            self.assertEqual(params['noise_direction_variances'], [0.5, 1.25, 1.25])
+            self.assertEqual(params['noise_structure'], 'isotropic_rgb')
+            self.assertEqual(params['noise_direction_variances'], [1.0, 1.0, 1.0])
             self.assertNotIn('opponent_noise_grad', params)
             self.assertEqual({p.name for p in output.iterdir()},
                              {'adv_image_0.png', 'adv_image_1.png', 'attack_params.json'})

@@ -249,8 +249,9 @@ class ProgressiveAttackTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(gradient).all())
 
     def test_isotropic_rgb_noise_changes_directions_but_keeps_rms(self):
-        opponent = make_attacker()
-        isotropic = make_attacker(noise_structure='isotropic_rgb')
+        opponent = make_attacker(noise_structure='opponent')
+        isotropic = make_attacker()
+        self.assertEqual(isotropic.noise_structure, 'isotropic_rgb')
         self.assertEqual(opponent.noise_direction_variances, (0.5, 1.25, 1.25))
         self.assertEqual(isotropic.noise_direction_variances, (1.0, 1.0, 1.0))
         state = opponent.model.begin_progressive_forward(self.pixels.repeat(2, 1, 1, 1))
