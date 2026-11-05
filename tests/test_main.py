@@ -31,6 +31,9 @@ class MainTests(unittest.TestCase):
             with patch.object(sys, 'argv', ['main.py', '--input-diversity-views-per-group', str(views)]):
                 self.assertEqual(main.parse_args().input_diversity_views_per_group, views)
         self.assertEqual(SEED, 42)
+        with patch.object(sys, 'argv', ['main.py']):
+            defaults = main.parse_args()
+        self.assertEqual(defaults.input_diversity_groups * defaults.input_diversity_views_per_group, 20)
 
     def test_mechanism_ablation_switches_are_available(self):
         with patch.object(sys, 'argv', ['main.py', '--no-progressive-drop',
@@ -70,6 +73,8 @@ class MainTests(unittest.TestCase):
             params = json.loads((output / 'attack_params.json').read_text())
             self.assertEqual(params['seed'], 42)
             self.assertEqual(params['input_diversity_total_views'], 1)
+            self.assertEqual(params['input_diversity_sampling'], 'independent_identity_or_phase_views')
+            self.assertEqual(params['input_diversity_phase_probability'], 0.0)
             self.assertEqual(params['checkpoint_histogram'], {'block0': 2})
             self.assertNotIn('checkpoints', params)
             self.assertEqual(params['noise_structure'], 'opponent')

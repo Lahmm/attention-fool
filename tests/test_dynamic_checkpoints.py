@@ -172,7 +172,7 @@ class DynamicCheckpointTests(unittest.TestCase):
         torch.testing.assert_close(select.call_args.args[0], attacker._normalize(pixels))
         self.assertEqual(begin.call_count, 8)
         self.assertTrue(all(call.args[0].size(0) == 3 for call in begin.call_args_list))
-        self.assertEqual(len(schedules), 4)
+        self.assertEqual(len(schedules), 8)
         self.assertEqual({tuple(selection.checkpoint for selection in item) for item in schedules}, {('block0', 'block10')})
         for schedule in schedules:
             self.assertEqual(tuple(item.count for item in schedule), (20, 20))
@@ -187,10 +187,10 @@ class DynamicCheckpointTests(unittest.TestCase):
         params = attacker.parameters()
         self.assertEqual(params['checkpoint_histogram'], {'block10': 2, 'block0': 1})
         self.assertEqual([item['sample_index'] for item in params['sample_checkpoints']], [0, 1, 2])
-        self.assertEqual(params['checkpoint_mask_selection_count_per_image'], 4)
+        self.assertEqual(params['checkpoint_mask_selection_count_per_image'], 8)
         self.assertNotIn('checkpoints', params)
 
-    def test_heterogeneous_batch_matches_individual_losses_gradients_noise_and_phase_masks(self):
+    def test_heterogeneous_independent_views_match_individual_losses_gradients_and_noise(self):
         model = make_model()
         attacker = ProgressiveRouteDisruptionAttacker(model, device=torch.device('cpu'))
         pixels = torch.linspace(.1, .9, 3 * 3 * 28 * 28).reshape(3, 3, 28, 28).requires_grad_(True)
@@ -202,13 +202,11 @@ class DynamicCheckpointTests(unittest.TestCase):
         with patch.object(model, 'begin_progressive_forward', side_effect=AssertionError('mask forward')):
             schedule = attacker._build_mask_schedule(pixels)
         phases = [(4, 4), (-8, 8), (12, -12)]
-        shifted = attacker._phase_mask_schedule(schedule, phases, height=28, width=28)
-        validate_schedule(shifted, batch_size=3)
-        for original, paired in zip(schedule, shifted):
-            torch.testing.assert_close(paired.mask.sum(dim=1), original.mask.sum(dim=1))
+        shifted_view_schedule = attacker._build_mask_schedule(pixels)
+        validate_schedule(shifted_view_schedule, batch_size=3)
         with patch.object(attacker, '_strict_opponent_feature_noise',
                           side_effect=lambda state: .01 * state.local_tokens.detach().sin()):
-            for is_phase, combined in ((False, schedule), (True, shifted)):
+            for is_phase, combined in ((False, schedule), (True, shifted_view_schedule)):
                 view = attacker._apply_samplewise_phase_shifts(pixels, phases) if is_phase else pixels
                 full = attacker._forward_with_schedule(view, labels, combined)
                 expected = torch.autograd.grad(full, pixels)[0]

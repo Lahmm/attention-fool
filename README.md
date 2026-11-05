@@ -1,12 +1,12 @@
 # PRD：动态单边界选层与随机 token drop
 
-更新日期：2026-11-04。仓库只提供一种攻击：每张干净图像按方向方差比 × 正收缩比例选择一个原生 block，在该 block 输入处随机 hard-zero 局部 token。PRD 为工作名称。旧固定双／多 checkpoint 攻击、固定层覆盖入口及其结果和消融已经移除。
+更新日期：2026-11-05。仓库只提供一种攻击：每张干净图像按方向方差比 × 正收缩比例选择一个原生 block，在该 block 输入处随机 hard-zero 局部 token。PRD 为工作名称。旧固定双／多 checkpoint 攻击、固定层覆盖入口及其结果和消融已经移除。
 
 ## 方法
 
 每图在攻击前进行一次无 drop、无特征增强的前向，采集各 block 的局部输入、输出与架构对应的全局参考。从 float32 特征转为 float64，逐 token 与参考分别 L2 归一化。用输出沿全局方向的总体方差除以输出局部分散度／原生维数，乘 `max(0, 1 - 输出分散度 / 输入分散度)`。选择最高分 block，并列或全零时选原生顺序最早者，在其输入处干预；输入或输出分散度为零时分数为零，非有限或零范数特征报错。
 
-选定边界在全部步与视图中保持。每个 step/group 从该边界全部局部位置均匀、无放回抽样，清零全部通道，保留 prefix、token 数和原生网格。原始／反射平移视图使用空间对应且数量一致的 mask。同批不同边界是不同图像选择的并集，每图仍只有一个边界。
+选定边界在全部步与视图中保持。每个 step/view 从该视图的原生边界全部局部位置均匀、无放回抽样，清零全部通道，保留 prefix、token 数和原生网格。每个视图、每张图以 50% 概率保持原图、50% 概率均匀选择一个反射平移。视图间独立抽 mask 与噪声，不再构造配对或映射 mask。同批不同边界是不同图像选择的并集，每图仍只有一个边界。
 
 | 源模型 | CLI 名称 | 候选 block | 总 drop 比例 | β | 已归档攻击 batch |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -31,13 +31,13 @@ python transfer_eval.py --image-dir outputs/attack/prd_vit_new --no-tf32
 
 输出必须是 `outputs/attack/` 下的子目录；入口在生成前清空该子目录，请为新运行指定新目录。输入默认为 `data/clean_resized_images` 与 `data/image_name_to_class_id_and_name.json`。1000 张输入图与标签 JSON 实际受 Git 管理；模型缓存和 `outputs/` 被忽略。
 
-默认固定 seed 42、1000 图、10 steps、10 groups × 2 views、epsilon=16/255、步长 epsilon/steps、动量 1。攻击 batch 默认 96；上表为已有测量的实际 batch。各视图像素梯度直接平均，再进行动量、sign 更新和投影。
+默认固定 seed 42、1000 图、10 steps、每步 20 个独立视图、epsilon=16/255、步长 epsilon/steps、动量 1。默认每图共 200 次独立 mask 抽样。现有 groups=10、views-per-group=2 仅用于计算总视图预算，运行时没有分组或配对。攻击 batch 默认 96；上表为已有测量的实际 batch。各视图像素梯度直接平均，再进行动量、sign 更新和投影。
 
 | 参数 | 作用 |
 | --- | --- |
 | `--drop-ratio` | 单图单边界比例；默认有效值 ViT/DeiT 为 0.102040816326，CaiT/PiT-T 为 0.15306122449，沿用已执行设置 |
-| `--input-diversity-groups` | 默认 10；每步总视图数不超过 20 |
-| `--input-diversity-views-per-group` | 保留 1/2 视图消融，默认 2 |
+| `--input-diversity-groups` | 视图预算因子，默认 10；与下项相乘得到每步总视图数，上限 20 |
+| `--input-diversity-views-per-group` | 默认 2：独立视图以 0.5 概率选择 phase；1：保留无 phase 消融 |
 | `--input-diversity-phase-shift-set` | 默认 `4,4;8,8;12,12` |
 | `--noise-structure` | 默认 `opponent`；显式 `isotropic_rgb` 为投影前 i.i.d. RGB 采样 |
 | `--opponent-noise-strength` | 两种增强模式的 β，0 关闭增强 |
@@ -49,6 +49,8 @@ python transfer_eval.py --image-dir outputs/attack/prd_vit_new --no-tf32
 
 ## 结果与评估
 
+以下主表是替换前的配对视图/opponent 测量。新的独立随机视图配置尚无千图 ASR，不将旧数值重标为新结果。
+
 | Source | Overall ASR | Strict ASR |
 | --- | ---: | ---: |
 | ViT-B/16 | 87.95% | 86.95% |
@@ -57,11 +59,11 @@ python transfer_eval.py --image-dir outputs/attack/prd_vit_new --no-tf32
 | DeiT-B distilled | 95.30% | 95.30% |
 | 四源等权平均 | **89.1673%** | **88.7234%** |
 
-这是 seed 42、每源 1000 图、opponent、10 steps、10 groups × 2 views 的实际 FPR13 测量。相对历史最大方差选层，Overall 和 strict 分别高 1.8346、1.8543 个百分点。完整 [结果索引](results/README.md)、[当前归档](results/prd_direction_contraction_s42_1000_fpr/README.md) 保留逐目标 ASR、逐图选层、实际参数、来源和哈希。
+这是 seed 42、每源 1000 图、opponent、10 steps、10 groups × 2 views 的实际 FPR13 测量。相对历史最大方差选层，Overall 和 strict 分别高 1.8346、1.8543 个百分点。完整 [结果索引](results/README.md)、[配对配置归档](results/prd_direction_contraction_s42_1000_fpr/README.md) 保留逐目标 ASR、逐图选层、实际参数、来源和哈希。
 
 FPR13 是唯一评估协议，`--protocol fpr` 可显式指定。ASR 为全部对抗样本上的 `1 - adversarial accuracy`，不做 target-clean-correct 筛选。strict 排除完全相同源目标，四源等权平均。评估保存 `transfer.csv/json`；`--predictions-output` 可保存逐样本预测。协议见 [FPR13](experiments/fpr_target_protocol.md)。
 
-`attack_params.json` 记录总比例、唯一选层公式、逐图边界、方向比、正收缩比例、乘积分数、原始余弦方差诊断、网格和实际 drop 数。PiT-T 在 27×27、14×14、7×7 网格分别丢弃 112、30、8 个位置。`peak_variance` 是诊断量，选层 API 为 `select_contraction_checkpoints` / `select_contraction_peaks`。
+`attack_params.json` 用 `input_diversity_sampling=independent_identity_or_phase_views` 和 `input_diversity_phase_probability` 标明新采样方式，并记录总比例、唯一选层公式、逐图边界、方向比、正收缩比例、乘积分数、原始余弦方差诊断、网格和实际 drop 数。PiT-T 在 27×27、14×14、7×7 网格分别丢弃 112、30、8 个位置。`peak_variance` 是诊断量，选层 API 为 `select_contraction_checkpoints` / `select_contraction_peaks`。
 
 ## 验证与论文材料
 

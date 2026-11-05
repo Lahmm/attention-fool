@@ -1,6 +1,6 @@
 # PRD 方法与执行契约
 
-更新日期：2026-11-04。唯一可执行攻击为方向方差比 × 正收缩比例选层与单边界随机 token hard-zero。固定单层、固定双／多 checkpoint 路径和覆盖入口已移除。四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled；PiT-B 与 Visformer 保留为评估目标。全部模型权重保留。
+更新日期：2026-11-05。唯一可执行攻击为方向方差比 × 正收缩比例选层与单边界随机 token hard-zero。固定单层、固定双／多 checkpoint 路径和覆盖入口已移除。四源为 ViT-B/16、CaiT-S24、PiT-T、DeiT-B distilled；PiT-B 与 Visformer 保留为评估目标。全部模型权重保留。
 
 ## 源与随机设置
 
@@ -29,13 +29,15 @@
 
 ## 攻击执行
 
-每个 step/group 根据已知原生网格从全部局部位置均匀、无放回抽取 k 个位置。mask 不依赖 token 分数，不为抽样额外前向。清零所选 token 全部通道，prefix、token 数和原生网格保持。
+每步使用一个扁平的独立视图序列。默认 K=20；每个视图、每张图独立以 1/2 概率取零平移，以 1/2 概率均匀选择默认集合 (4,4)/(8,8)/(12,12) 中的一个反射平移。零平移代表原始图像。一个 batch 内的不同样本也独立采样，不要求每步恰好各有十个原始／平移视图。相位通过 CPU PyTorch 全局随机函数采样；若候选集合包含 (0,0)，实际非零平移概率相应下降。
 
-每个可微视图构建一次初始状态，在全部初始局部位置注入一次该视图独立采样的投影特征增强，包括后续会被清零的位置。原始视图与反射平移视图共享空间对应的 mask；将 mask 映射到像素空间，反射平移后以原生网格 occupancy top-k 保持实际数量。相位在 CPU 用 PyTorch 全局随机函数采样。
+每个 step/view 根据所选边界原生网格，从该视图全部局部位置均匀、无放回抽取 k 个位置。各视图独立抽 mask，mask 不依赖 token 分数，不额外执行抽样前向。直接在当前视图的原生网格 hard-zero，不再跨视图共享、平移或用 occupancy top-k 映射 mask。所选边界、实际 drop 数与比例保持；prefix、token 数与网格不变。
 
-默认 seed 42、10 steps、10 groups × 2 views、epsilon=16/255、步长 epsilon/steps。每图 100 次原始 mask 抽样。直接平均视图像素梯度，以系数 1 累积动量，再 sign 更新、相对干净输入的 L∞ 投影和 [0,1] 截断。
+每个可微视图构建一次初始状态，在全部初始局部位置注入一次独立采样的投影特征增强，包括后续会被清零的位置。平均所有视图关于当前像素的梯度，以系数 1 累积动量，再 sign 更新、相对干净图像的 L∞ 投影与 [0,1] 截断。选层仍只在攻击前的干净图像上执行一次。
 
-`--input-diversity-views-per-group` 保留 1/2 消融，单视图不采样相位。默认平移为 (4,4)/(8,8)/(12,12)，每步最多 20 视图。无 drop 消融跳过干净选层，保留增强与优化。
+默认 seed 42、10 steps、epsilon=16/255、步长 epsilon/steps，每图 200 次独立 mask 抽样。CLI 的 `input-diversity-groups × input-diversity-views-per-group` 只计算总预算，上限 20；默认 10×2 在内部展开为 20 个独立视图。保留 `--input-diversity-views-per-group 1` 作为原始视图消融，此时不抽相位，总预算仍为上述乘积；20×1 对应每步 20 个无 phase 视图。无 drop 消融跳过选层与 mask，但仍保留相同的视图采样、增强和优化。
+
+2026-11-05 前的配对视图配置每步只有十个独立 mask，另十个是空间对应版本。新流程改变了视图与 mask 分布，已有配对结果和无 phase 测量保持其实际配置标签；本次代码替换不产生新的千图 ASR。
 
 ## 共同特征增强（补充设置）
 
@@ -47,6 +49,6 @@ RMS 覆盖全部初始局部位置和通道，特征 RMS 与投影权重 detach�
 
 ## 参数与评估
 
-`attack_params.json` 保存公式、精度、总比例、并列规则、逐图图像名、峰值 block、输入 checkpoint、原始余弦方差、方向比、收缩比例、乘积分数、输入／输出分散度、网格、实际 drop 数和比例及边界频次。CaiT 保存 `patch_score_reference`。
+`attack_params.json` 保存 `input_diversity_sampling=independent_identity_or_phase_views`、phase 候选分支概率、公式、精度、总比例、并列规则、逐图图像名、峰值 block、输入 checkpoint、原始余弦方差、方向比、收缩比例、乘积分数、输入／输出分散度、网格、实际 drop 数和比例及边界频次。CaiT 保存 `patch_score_reference`。
 
-唯一评估协议为 FPR13，ASR 使用全部对抗样本的 `1 - adversarial accuracy`；strict 排除完全相同源目标，四源等权平均。当前 opponent 千图证据为 `results/prd_direction_contraction_s42_1000_fpr/`。其他历史选层与 token 分析只保留证据，不恢复执行入口。`results/` 仅保存 FPR13 ASR、参数、直接差值与来源。
+唯一评估协议为 FPR13，ASR 使用全部对抗样本的 `1 - adversarial accuracy`；strict 排除完全相同源目标，四源等权平均。同一选择器的历史配对视图/opponent 千图证据为 `results/prd_direction_contraction_s42_1000_fpr/`。其他历史选层与 token 分析只保留证据，不恢复执行入口。`results/` 仅保存 FPR13 ASR、参数、直接差值与来源。
