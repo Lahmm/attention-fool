@@ -39,7 +39,7 @@
 
 摘要、引言、贡献、结论、核心流程图不突出噪声；方法章不设置独立噪声小节。主文围绕选层与随机 drop 组织，补充材料如实记录共同增强。增强的实际标签保留在参数和来源记录中。
 
-共同增强的论文规划与选层迁移分别记录。命令行和攻击类默认 `isotropic_rgb`，使用投影前 i.i.d. RGB 标准高斯采样。已有 opponent 测量保留原标签；四源 i.i.d. 配对测量已完成，原件见交接记录。
+共同增强的论文规划与选层迁移分别记录。命令行和攻击类仅支持直接 i.i.d. RGB 标准高斯采样；opponent 已退出执行与消融。已有 opponent 测量保留原标签；四源 i.i.d. 配对测量已完成，原件见交接记录。
 
 贡献建议为两点：
 
@@ -61,7 +61,7 @@
 
 ## 6. 现有证据与待准备内容
 
-当前唯一方法在独立快照中完成的 opponent/1000 图 FPR13 结果如下，2026-11-04 迁入主线；不重标为 i.i.d.。参数与源码来源保留原执行状态，见 [归档](../results/prd_direction_contraction_s42_1000_fpr/README.md)。完整选层频次保留在 selection_counts.csv。
+同一选择器在历史独立快照中完成的 opponent/1000 图 FPR13 结果如下，2026-11-04 迁入主线；不重标为 i.i.d.。参数与源码来源保留原执行状态，见 [归档](../results/prd_direction_contraction_s42_1000_fpr/README.md)。完整选层频次保留在 selection_counts.csv。
 
 | Source | Overall ASR | Strict ASR |
 | --- | ---: | ---: |

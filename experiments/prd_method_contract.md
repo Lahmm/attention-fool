@@ -39,14 +39,16 @@
 
 ## 共同特征增强（补充设置）
 
-命令行与攻击类均默认 `isotropic_rgb`，三个 RGB 正交方向方差均为 1，等价于投影前 RGB 空间的 i.i.d. 标准高斯采样。显式 `opponent` 仅保留为历史对比选项，方向方差为 0.5、1.25、1.25。用真实初始投影权重 W 映射，再逐样本 RMS 匹配：
+命令行与攻击类仅支持直接 RGB 空间的 i.i.d. 标准高斯采样。结构选择参数、颜色方向基变换和旧专属参数名已删除。用真实初始投影权重 W 映射，再逐样本 RMS 匹配：
 
 `η = W ξ_RGB`，`η_hat = β RMS(H0)/RMS(η) · η`，`H0_aug = H0 + η_hat`。
 
-RMS 覆盖全部初始局部位置和通道，特征 RMS 与投影权重 detach，prefix 不变。投影后的特征可以相关。`--opponent-noise-strength` 控制两种模式的 β，0 关闭增强。当前默认采用 i.i.d. 设置，构造与参数放补充材料，已完成 opponent 记录保持实际标签。
+RMS 覆盖全部初始局部位置和通道，特征 RMS 与投影权重 detach，prefix 不变。投影后的特征可以相关。`--noise-strength` 控制 β，0 关闭增强。当前默认采用 i.i.d. 设置，构造与参数放补充材料，已完成 opponent 记录保持实际标签。
 
 ## 参数与评估
 
 `attack_params.json` 保存公式、精度、总比例、并列规则、逐图图像名、峰值 block、输入 checkpoint、原始余弦方差、方向比、收缩比例、乘积分数、输入／输出分散度、网格、实际 drop 数和比例及边界频次。CaiT 保存 `patch_score_reference`。
 
-唯一评估协议为 FPR13，ASR 使用全部对抗样本的 `1 - adversarial accuracy`；strict 排除完全相同源目标，四源等权平均。当前 opponent 千图证据为 `results/prd_direction_contraction_s42_1000_fpr/`。其他历史选层与 token 分析只保留证据，不恢复执行入口。`results/` 仅保存 FPR13 ASR、参数、直接差值与来源。
+唯一评估协议为 FPR13，ASR 使用全部对抗样本的 `1 - adversarial accuracy`；strict 排除完全相同源目标，四源等权平均。历史 opponent 千图证据为 `results/prd_direction_contraction_s42_1000_fpr/`。其他历史选层与 token 分析只保留证据，不恢复执行入口。`results/` 仅保存 FPR13 ASR、参数、直接差值与来源。
+
+清理颜色基变换后，直接 RGB 高斯采样与原 i.i.d. 模式的采样分布和抽样形状相同，但相同 seed 的具体噪声值发生变化。旧测量保留原源码哈希；按项目约定，不因这一随机实现差异重跑既有结果。新增记录使用 `noise_enabled`、`noise_strength`，并保留实际 `noise_structure=isotropic_rgb` 标签，关闭增强时为 `none`。

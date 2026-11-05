@@ -14,7 +14,7 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 from tqdm import tqdm
 
 from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, build_whitebox_model
-from progressive_attack import NOISE_DIRECTION_VARIANCES, ProgressiveRouteDisruptionAttacker
+from progressive_attack import ProgressiveRouteDisruptionAttacker
 from utils import DEVICE, SEED, load_data, save_adversarial_images
 
 
@@ -124,16 +124,10 @@ def parse_args() -> argparse.Namespace:
         help="Per-image local-token drop ratio at the dynamically selected native boundary.",
     )
     parser.add_argument(
-        "--noise-structure",
-        choices=tuple(NOISE_DIRECTION_VARIANCES),
-        default="isotropic_rgb",
-        help="RGB noise direction variances: isotropic_rgb (i.i.d. Gaussian, default) or opponent.",
-    )
-    parser.add_argument(
-        "--opponent-noise-strength",
+        "--noise-strength",
         type=float,
         default=None,
-        help="Opponent-channel noise strength; omitted values use the source adapter default.",
+        help="Projected i.i.d. RGB Gaussian strength; omitted values use the source adapter default.",
     )
     parser.add_argument("--image-dir", default=IMAGE_DIR)
     parser.add_argument("--annotations-path", default=ANNOTATIONS_PATH)
@@ -163,8 +157,7 @@ def main(args: argparse.Namespace) -> None:
         model=model,
         progressive_drop=not args.no_progressive_drop,
         drop_ratio=args.drop_ratio,
-        opponent_noise_strength=args.opponent_noise_strength,
-        noise_structure=args.noise_structure,
+        noise_strength=args.noise_strength,
         epsilon=args.epsilon,
         step_size=args.step_size,
         steps=args.steps,

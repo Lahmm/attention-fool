@@ -10,7 +10,7 @@ class PiTAdapter(ProgressiveAdapter):
 
     default_model_name = "pit_ti_224"
     drop_ratio = 0.15306122449
-    opponent_noise_strength = 0.4
+    noise_strength = 0.4
 
 
     def begin_progressive_forward(self, x):

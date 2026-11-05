@@ -11,12 +11,6 @@ import torch.nn.functional as F
 from utils import DEVICE, SEED, IMAGENET_MEAN, IMAGENET_STD
 
 
-NOISE_DIRECTION_VARIANCES = {
-    "opponent": (0.5, 1.25, 1.25),
-    "isotropic_rgb": (1.0, 1.0, 1.0),
-}
-
-
 @dataclass(frozen=True)
 class ProgressiveMaskSelection:
     checkpoint: str
@@ -51,8 +45,7 @@ class ProgressiveRouteDisruptionAttacker:
         *,
         progressive_drop: bool = True,
         drop_ratio: float | None = None,
-        opponent_noise_strength: float | None = None,
-        noise_structure: str = "isotropic_rgb",
+        noise_strength: float | None = None,
         epsilon: float = 16.0 / 255.0,
         step_size: float | None = None,
         steps: int = 10,
@@ -75,12 +68,10 @@ class ProgressiveRouteDisruptionAttacker:
             raise ValueError("actual progressive views must be <= 20.")
         if input_diversity_views_per_group == 2 and not input_diversity_phase_shift_set:
             raise ValueError("phase shift set cannot be empty.")
-        if noise_structure not in NOISE_DIRECTION_VARIANCES:
-            raise ValueError(f"unsupported noise structure: {noise_structure!r}.")
-        if opponent_noise_strength is None:
-            opponent_noise_strength = model.opponent_noise_strength
-        if opponent_noise_strength < 0:
-            raise ValueError("opponent noise strength must be non-negative.")
+        if noise_strength is None:
+            noise_strength = model.noise_strength
+        if noise_strength < 0:
+            raise ValueError("noise strength must be non-negative.")
         ratio = float(model.drop_ratio if drop_ratio is None else drop_ratio)
         if not math.isfinite(ratio) or not 0 < ratio <= 0.5:
             raise ValueError("drop ratio must satisfy 0 < ratio <= 0.5.")
@@ -93,9 +84,7 @@ class ProgressiveRouteDisruptionAttacker:
         self.progressive_drop = bool(progressive_drop)
         self.device = device if device is not None else DEVICE
         self.drop_ratio = ratio
-        self.opponent_noise_strength = float(opponent_noise_strength)
-        self.noise_structure = noise_structure
-        self.noise_direction_variances = NOISE_DIRECTION_VARIANCES[noise_structure]
+        self.noise_strength = float(noise_strength)
         self.epsilon = float(epsilon)
         self.steps = int(steps)
         self.step_size = float(step_size) if step_size is not None else self.epsilon / self.steps
@@ -230,34 +219,23 @@ class ProgressiveRouteDisruptionAttacker:
             )
         return tuple(selections)
 
-    def _strict_opponent_feature_noise(self, state) -> torch.Tensor:
+    def _projected_gaussian_noise(self, state) -> torch.Tensor:
         state.validate()
         local = state.local_tokens
         weight = state.rgb_projection_weight
         kernel_h, kernel_w = weight.shape[-2:]
         batch, count, dimension = local.shape
-        coefficients = torch.randn(
+        rgb_noise = torch.randn(
             batch, count, 3, kernel_h, kernel_w, device=local.device, dtype=local.dtype
         )
-        luma_variance, red_green_variance, yellow_blue_variance = self.noise_direction_variances
-        luma = luma_variance**0.5 * coefficients[:, :, 0:1]
-        red_green = red_green_variance**0.5 * coefficients[:, :, 1:2]
-        yellow_blue = yellow_blue_variance**0.5 * coefficients[:, :, 2:3]
-        pixel_noise = torch.cat(
-            (
-                3**-0.5 * luma + 2**-0.5 * red_green + 6**-0.5 * yellow_blue,
-                3**-0.5 * luma - 2**-0.5 * red_green + 6**-0.5 * yellow_blue,
-                3**-0.5 * luma - 2 * 6**-0.5 * yellow_blue,
-            ),
-            dim=2,
-        ).flatten(2)
+        pixel_noise = rgb_noise.flatten(2)
         projection = weight.detach().to(local).reshape(dimension, -1)
         if projection.size(1) != pixel_noise.size(2):
-            raise ValueError("opponent noise and RGB projection dimensions do not match.")
+            raise ValueError("Gaussian noise and RGB projection dimensions do not match.")
         feature_noise = pixel_noise.matmul(projection.t())
         token_rms = local.detach().square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
         noise_rms = feature_noise.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
-        return self.opponent_noise_strength * feature_noise * (token_rms / noise_rms)
+        return self.noise_strength * feature_noise * (token_rms / noise_rms)
 
     def _forward_with_schedule(
         self,
@@ -269,9 +247,9 @@ class ProgressiveRouteDisruptionAttacker:
         state = self.model.begin_progressive_forward(normalized)
         state.validate()
         local = state.local_tokens
-        if self.opponent_noise_strength > 0:
+        if self.noise_strength > 0:
             # Noise reaches every initial local position before checkpoint drops.
-            local = local + self._strict_opponent_feature_noise(state)
+            local = local + self._projected_gaussian_noise(state)
         state = replace(state, local_tokens=local)
         if schedule is not None:
             for item in schedule:
@@ -368,12 +346,9 @@ class ProgressiveRouteDisruptionAttacker:
             "steps": self.steps,
             "momentum_decay": 1.0,
             "progressive_drop_enabled": self.progressive_drop,
-            "opponent_noise_enabled": self.opponent_noise_strength > 0,
-            "opponent_noise_strength": self.opponent_noise_strength,
-            "noise_structure": self.noise_structure if self.opponent_noise_strength > 0 else "none",
-            "noise_direction_variances": (
-                list(self.noise_direction_variances) if self.opponent_noise_strength > 0 else []
-            ),
+            "noise_enabled": self.noise_strength > 0,
+            "noise_strength": self.noise_strength,
+            "noise_structure": "isotropic_rgb" if self.noise_strength > 0 else "none",
             "input_diversity_groups": self.input_diversity_groups,
             "input_diversity_views_per_group": self.input_diversity_views_per_group,
             "input_diversity_phase_shift_set": (

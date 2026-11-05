@@ -206,7 +206,7 @@ class DynamicCheckpointTests(unittest.TestCase):
         validate_schedule(shifted, batch_size=3)
         for original, paired in zip(schedule, shifted):
             torch.testing.assert_close(paired.mask.sum(dim=1), original.mask.sum(dim=1))
-        with patch.object(attacker, '_strict_opponent_feature_noise',
+        with patch.object(attacker, '_projected_gaussian_noise',
                           side_effect=lambda state: .01 * state.local_tokens.detach().sin()):
             for is_phase, combined in ((False, schedule), (True, shifted)):
                 view = attacker._apply_samplewise_phase_shifts(pixels, phases) if is_phase else pixels

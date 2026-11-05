@@ -39,27 +39,26 @@ python transfer_eval.py --image-dir outputs/attack/prd_vit_new --no-tf32
 | `--input-diversity-groups` | 默认 10；每步总视图数不超过 20 |
 | `--input-diversity-views-per-group` | 保留 1/2 视图消融，默认 2 |
 | `--input-diversity-phase-shift-set` | 默认 `4,4;8,8;12,12` |
-| `--noise-structure` | 默认 `isotropic_rgb`：投影前 i.i.d. RGB 标准高斯采样；`opponent` 仅显式比较时使用 |
-| `--opponent-noise-strength` | 两种增强模式的 β，0 关闭增强 |
+| `--noise-strength` | i.i.d. RGB 高斯增强的 β，默认取适配器，0 关闭增强 |
 | `--no-progressive-drop` | 无 drop 消融，跳过干净选层 |
 | `--epsilon`、`--step-size`、`--steps` | 扰动预算与更新设置 |
 | `--image-dir`、`--annotations-path`、`--max-attacked-samples` | 数据与样本数 |
 
-每个可微视图在全部初始局部位置注入一次经真实 RGB 初始投影和 RMS 匹配的随机特征增强，prefix 不变。命令行和攻击类均默认使用 i.i.d. 高斯采样。历史 opponent 结果保留实际标签；已完成的四源 i.i.d. 配对运行见交接记录。增强构造放入补充实现设置。
+每个可微视图在全部初始局部位置注入一次经真实 RGB 初始投影和 RMS 匹配的随机特征增强，prefix 不变。命令行和攻击类仅支持直接 i.i.d. RGB 标准高斯采样。已删除噪声结构选择参数及颜色方向变换；β 使用 `--noise-strength`。历史 opponent 结果保留实际标签；已完成的四源 i.i.d. 配对运行见交接记录。增强构造放入补充实现设置。
 
 ## 结果与评估
 
-下表为历史 opponent 配置，不能重标为当前默认 i.i.d.；对应 i.i.d. 四源运行见 [交接记录](experiments/server_handoff_inventory.md)。
+下表为已完成的 i.i.d. 配对四源测量，原始参数和执行源码来源见 [交接记录](experiments/server_handoff_inventory.md)。历史 opponent 数据仅作为原始归档保留，不再提供执行或消融入口。
 
 | Source | Overall ASR | Strict ASR |
 | --- | ---: | ---: |
-| ViT-B/16 | 87.95% | 86.95% |
-| CaiT-S24 | 89.14% | 88.37% |
-| PiT-T | 84.28% | 84.28% |
-| DeiT-B distilled | 95.30% | 95.30% |
-| 四源等权平均 | **89.1673%** | **88.7234%** |
+| ViT-B/16 | 87.41% | 86.36% |
+| CaiT-S24 | 89.75% | 88.98% |
+| PiT-T | 84.85% | 84.85% |
+| DeiT-B distilled | 95.37% | 95.37% |
+| 四源等权平均 | **89.3423%** | **88.8893%** |
 
-这是 seed 42、每源 1000 图、opponent、10 steps、10 groups × 2 views 的实际 FPR13 测量。相对历史最大方差选层，Overall 和 strict 分别高 1.8346、1.8543 个百分点。完整 [结果索引](results/README.md)、[当前归档](results/prd_direction_contraction_s42_1000_fpr/README.md) 保留逐目标 ASR、逐图选层、实际参数、来源和哈希。
+这是 seed 42、每源 1000 图、i.i.d. RGB 高斯增强、10 steps、10 groups × 2 views 的实际 FPR13 测量。原件位于 `outputs/attack/prd_iid_paired_four_sources_s42_1000_20261105T105028Z_{vit,cait,pit_t,deit_b}/`。历史记录的参数、标签及哈希保留在 [结果索引](results/README.md) 所列归档中。
 
 FPR13 是唯一评估协议，`--protocol fpr` 可显式指定。ASR 为全部对抗样本上的 `1 - adversarial accuracy`，不做 target-clean-correct 筛选。strict 排除完全相同源目标，四源等权平均。评估保存 `transfer.csv/json`；`--predictions-output` 可保存逐样本预测。协议见 [FPR13](experiments/fpr_target_protocol.md)。
 

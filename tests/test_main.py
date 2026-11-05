@@ -31,27 +31,26 @@ class MainTests(unittest.TestCase):
             with patch.object(sys, 'argv', ['main.py', '--input-diversity-views-per-group', str(views)]):
                 args = main.parse_args()
                 self.assertEqual(args.input_diversity_views_per_group, views)
-                self.assertEqual(args.noise_structure, 'isotropic_rgb')
         self.assertEqual(SEED, 42)
 
     def test_mechanism_ablation_switches_are_available(self):
         with patch.object(sys, 'argv', ['main.py', '--no-progressive-drop',
-                                       '--opponent-noise-strength', '0']):
+                                       '--noise-strength', '0']):
             args = main.parse_args()
         self.assertTrue(args.no_progressive_drop)
-        self.assertEqual(args.opponent_noise_strength, 0.0)
+        self.assertEqual(args.noise_strength, 0.0)
 
 
     def test_cli_uses_one_drop_ratio_and_records_augmentation(self):
-        with patch.object(sys, 'argv', ['main.py', '--drop-ratio', '0.15', '--noise-structure', 'isotropic_rgb']):
+        with patch.object(sys, 'argv', ['main.py', '--drop-ratio', '0.15', '--noise-strength', '0.3']):
             args = main.parse_args()
         self.assertEqual(args.drop_ratio, .15)
-        self.assertEqual(args.noise_structure, 'isotropic_rgb')
+        self.assertEqual(args.noise_strength, 0.3)
 
     def test_removed_parameters_are_rejected(self):
         for option in ('--seed', '--attack-method', '--mi', '--no-mi', '--mi-decay',
-                       '--opponent-noise-grad', '--checkpoints', '--gaussian-alpha',
-                       '--vit-analysis-checkpoints', '--drop-ratios'):
+                       '--checkpoints', '--gaussian-alpha',
+                       '--vit-analysis-checkpoints', '--drop-ratios', '--noise-structure'):
             with self.subTest(option=option), redirect_stderr(StringIO()), \
                  patch.object(sys, 'argv', ['main.py', option]), self.assertRaises(SystemExit):
                 main.parse_args()
@@ -75,8 +74,7 @@ class MainTests(unittest.TestCase):
             self.assertEqual(params['checkpoint_histogram'], {'block0': 2})
             self.assertNotIn('checkpoints', params)
             self.assertEqual(params['noise_structure'], 'isotropic_rgb')
-            self.assertEqual(params['noise_direction_variances'], [1.0, 1.0, 1.0])
-            self.assertNotIn('opponent_noise_grad', params)
+            self.assertEqual(params['noise_strength'], 0.2)
             self.assertEqual({p.name for p in output.iterdir()},
                              {'adv_image_0.png', 'adv_image_1.png', 'attack_params.json'})
 

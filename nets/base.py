@@ -123,7 +123,7 @@ class ProgressiveState:
         if self.rgb_projection_weight is not None:
             weight = self.rgb_projection_weight
             if weight.ndim != 4 or weight.size(1) != 3:
-                raise ValueError("opponent noise requires an RGB Conv2d projection.")
+                raise ValueError("Gaussian augmentation requires an RGB Conv2d projection.")
             if weight.size(0) != self.local_tokens.size(2):
                 raise ValueError("RGB projection and local feature dimensions differ.")
 
@@ -131,7 +131,7 @@ class ProgressiveState:
 class ProgressiveAdapter(nn.Module):
     default_model_name = ""
     drop_ratio: float
-    opponent_noise_strength = 0.2
+    noise_strength = 0.2
 
     def __init__(self, model_name=None, *, pretrained=True, device=None):
         super().__init__()

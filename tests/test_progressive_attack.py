@@ -139,7 +139,7 @@ class ProgressiveAttackTests(unittest.TestCase):
     def test_noise_is_rms_matched_per_image_with_stopped_scale(self):
         attacker = make_attacker()
         state = attacker.model.begin_progressive_forward(self.pixels.repeat(2, 1, 1, 1).requires_grad_(True))
-        noise = attacker._strict_opponent_feature_noise(state)
+        noise = attacker._projected_gaussian_noise(state)
         self.assertFalse(noise.requires_grad)
         actual = noise.square().mean((1, 2)).sqrt()
         expected = 0.2 * state.local_tokens.detach().square().mean((1, 2)).sqrt()
@@ -153,7 +153,7 @@ class ProgressiveAttackTests(unittest.TestCase):
         schedule = attacker._build_mask_schedule(self.pixels)
         self.assertEqual(tuple(item.checkpoint for item in schedule), ('block2',))
         initial = model.begin_progressive_forward(attacker._normalize(self.pixels))
-        with patch.object(attacker, '_strict_opponent_feature_noise', return_value=torch.ones_like(initial.local_tokens)) as noise, \
+        with patch.object(attacker, '_projected_gaussian_noise', return_value=torch.ones_like(initial.local_tokens)) as noise, \
              patch.object(model, 'begin_progressive_forward', wraps=model.begin_progressive_forward) as begin:
             attacker._forward_with_schedule(self.pixels, self.labels, schedule)
         self.assertEqual(noise.call_count, 1)
@@ -241,36 +241,33 @@ class ProgressiveAttackTests(unittest.TestCase):
         pixels = self.pixels.clone().requires_grad_(True)
         with patch.object(attacker, '_build_mask_schedule',
                           wraps=attacker._build_mask_schedule) as schedules, \
-             patch.object(attacker, '_strict_opponent_feature_noise',
-                          wraps=attacker._strict_opponent_feature_noise) as noise:
+             patch.object(attacker, '_projected_gaussian_noise',
+                          wraps=attacker._projected_gaussian_noise) as noise:
             gradient = attacker._attack_gradients(pixels, self.labels)
         self.assertEqual(schedules.call_count, 2)
         self.assertEqual(noise.call_count, 4)
         self.assertTrue(torch.isfinite(gradient).all())
 
-    def test_isotropic_rgb_noise_changes_directions_but_keeps_rms(self):
-        opponent = make_attacker(noise_structure='opponent')
-        isotropic = make_attacker()
-        self.assertEqual(isotropic.noise_structure, 'isotropic_rgb')
-        self.assertEqual(opponent.noise_direction_variances, (0.5, 1.25, 1.25))
-        self.assertEqual(isotropic.noise_direction_variances, (1.0, 1.0, 1.0))
-        state = opponent.model.begin_progressive_forward(self.pixels.repeat(2, 1, 1, 1))
+    def test_gaussian_noise_uses_iid_rgb_sampling_and_native_projection(self):
+        attacker = make_attacker()
+        state = attacker.model.begin_progressive_forward(self.pixels.repeat(2, 1, 1, 1))
+        weight = state.rgb_projection_weight.detach()
+        batch, count, dimension = state.local_tokens.shape
         torch.manual_seed(SEED)
-        opponent_noise = opponent._strict_opponent_feature_noise(state)
+        rgb = torch.randn(batch, count, 3, *weight.shape[-2:])
+        projected = rgb.flatten(2) @ weight.reshape(dimension, -1).t()
+        scale = state.local_tokens.detach().square().mean((1, 2), keepdim=True).sqrt().clamp_min(1e-6)
+        expected = .2 * projected * (scale / projected.square().mean((1, 2), keepdim=True).sqrt().clamp_min(1e-6))
         torch.manual_seed(SEED)
-        isotropic_noise = isotropic._strict_opponent_feature_noise(state)
-        self.assertFalse(torch.equal(opponent_noise, isotropic_noise))
-        expected_rms = 0.2 * state.local_tokens.detach().square().mean((1, 2)).sqrt()
-        for noise in (opponent_noise, isotropic_noise):
-            actual_rms = noise.square().mean((1, 2)).sqrt()
-            torch.testing.assert_close(actual_rms, expected_rms)
-        params = isotropic.parameters()
-        self.assertEqual(params['noise_structure'], 'isotropic_rgb')
-        self.assertEqual(params['noise_direction_variances'], [1.0, 1.0, 1.0])
+        actual = attacker._projected_gaussian_noise(state)
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+        self.assertEqual(attacker.parameters()['noise_structure'], 'isotropic_rgb')
+        self.assertEqual(attacker.parameters()['noise_strength'], .2)
+
 
     def test_disabling_progressive_drop_skips_schedules_and_keeps_optimization(self):
         attacker = make_attacker(
-            progressive_drop=False, opponent_noise_strength=0.0,
+            progressive_drop=False, noise_strength=0.0,
             input_diversity_groups=1, input_diversity_views_per_group=1,
         )
         pixels = self.pixels.clone().requires_grad_(True)
@@ -281,7 +278,7 @@ class ProgressiveAttackTests(unittest.TestCase):
         self.assertGreater(float(gradient.norm()), 0)
         params = attacker.parameters()
         self.assertFalse(params['progressive_drop_enabled'])
-        self.assertFalse(params['opponent_noise_enabled'])
+        self.assertFalse(params['noise_enabled'])
         self.assertEqual(params['sample_checkpoints'], [])
 
     def test_invalid_budgets_are_rejected(self):
