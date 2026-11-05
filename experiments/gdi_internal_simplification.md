@@ -1,4 +1,6 @@
-# 动态攻击内部精简验证（2026-11-04）
+# GDI 内部精简的历史验证记录（2026-11-04）
+
+当前核心文件为 `attack.py`，接口采用 GDI 命名。下文文件名、命令和哈希描述 2026-11-04 的执行快照。
 
 本记录用于代码维护，描述当时的实现。后续已移除 opponent 执行路径，并改为直接 RGB 高斯采样；该次清理保持分布，但不沿用本记录的逐元素等价结论。当前攻击、默认配置和历史测量的含义保持不变。
 
@@ -15,10 +17,10 @@
 
 ## 验证范围
 
-启用实际架构适配检查的完整测试共 43 项，全部通过：
+当时启用实际架构适配检查的完整测试共 43 项，全部通过。当前 GDI 对应验证命令为：
 
 ```bash
-OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 RUN_REAL_PRD_ADAPTERS=1 python -B -m unittest discover -s tests
+OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 RUN_REAL_GDI_ADAPTERS=1 python -B -m unittest discover -s tests
 ```
 
 临时对照程序从修改前快照和当前实现分别运行，统一 seed 42、输入、batch 与参数。27 组对照逐元素相等，核对逐图选层、原始和相位 mask、相位抽样、投影增强、视图损失、逐步像素梯度、最终对抗输出、完整参数及 CPU/CUDA RNG 状态。

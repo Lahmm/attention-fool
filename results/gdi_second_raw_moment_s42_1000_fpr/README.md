@@ -1,6 +1,6 @@
-# Second raw moment layer selection: isolated FPR13 test
+# GDI layer-selection evidence: second raw moment
 
-This is an isolated experiment. The repository attack mainline continues to select the maximum raw-score population variance. Only an external source snapshot changes the selection statistic to the second raw moment: M2 = mean_i(s_i^2). The execution-only source changes are recorded in `source_changes.patch`; no experiment runner is added to the repository.
+This historical comparison selects the largest second raw moment of local–global cosine scores, M2 = mean_i(s_i^2). It was executed in the external snapshot recorded in provenance, alongside the historical maximum-variance reference. The current GDI localization rule combines direction variance ratio and positive fractional contraction.
 
 Each source attacks the same 1000 clean images with seed 42, epsilon 16/255, 10 steps, step size epsilon/10, momentum 1, and 10 groups × 2 views. Retain the baseline opponent augmentation: strength 0.2 for ViT/CaiT/DeiT and 0.4 for PiT-T. Total drop ratios are 20/196 for ViT/DeiT and 30/196 for CaiT/PiT-T, rounded on the selected native grid. CaiT uses the final CLS before final LayerNorm. All architecture references, random token masking, view pairing, gradient averaging, momentum, and projected updates are retained.
 
@@ -24,3 +24,7 @@ FPR13 evaluation uses all 1000 adversarial samples, batch 32, no AMP, and TF32 d
 - `provenance.json`, `preflight.json`, `source_changes.patch`: configuration, hashes, validation, external execution paths, and isolated source changes.
 
 Preflight checks distinguish M2 from variance, verify earliest-block tie handling, reproduce native logits, execute 10 steps × 10 groups × 2 views, check one clean selection call per batch, and check the perturbation bound. Full runs verify 1000 image names, native drop counts, and every selected checkpoint against the previously calculated M2 choices. Every FPR13 ASR is independently recomputed from saved predictions.
+
+## GDI archive maintenance (2026-11-05)
+
+Archive directory names and report titles now use GDI. The executed JSON/CSV records, source patch, original run identifiers and source hashes retain their original bytes. The current iid main results are indexed in [the GDI iid archive](../gdi_iid_paired_s42_1000_fpr/README.md). Provenance records the directory migration, prior report hashes and refreshed complete retained-file manifest.

@@ -1,43 +1,53 @@
-# 当前动态 PRD 的文件与服务器材料
+# GDI 文件与实验材料交接
 
-更新日期：2026-11-04，分支 `prd`。可执行攻击只有方向方差比 × 正收缩比例逐图选层与单边界随机 token drop；旧固定 checkpoint 攻击及相关结果已清理。
+更新日期：2026-11-05。方法为 GDI（Geometry-Guided Depth Intervention），当前执行采用方向方差比 × 正收缩比例逐图定位，在所选 block 输入处随机清零局部 token。
 
-## 受 Git 管理
+## 当前文件
 
 | 内容 | 路径 |
 | --- | --- |
-| 攻击入口与优化 | `main.py`、`progressive_attack.py`、`utils.py` |
+| 攻击入口、优化与数据 | `main.py`、`attack.py`、`utils.py` |
 | 四源适配与几何统计 | `nets/__init__.py`、`base.py`、`vit.py`、`cait.py`、`pit.py` |
 | FPR13 与权重下载 | `transfer_eval.py`、`experiments/download_fpr_models.py` |
-| 验证 | `tests/test_{dynamic_checkpoints,progressive_attack,progressive_adapters,main,transfer_eval}.py` |
-| 观察素材 | `figure1.py`、`tests/test_figure1.py` |
-| 方法、协议、写作 | `prd_method_contract.md`、`fpr_target_protocol.md`、`prd_paper_story.md`、`cvpr2027_writing_blueprint.md` |
-| 当前 ASR 与历史选层证据 | `results/README.md` 索引的五个归档 |
+| 验证 | `tests/test_dynamic_checkpoints.py`、`test_attack.py`、`test_gdi_adapters.py`、`test_main.py`、`test_transfer_eval.py` |
+| 真实样本观察 | `figure1.py`、`tests/test_figure1.py` |
+| 方法与协议 | [方法契约](gdi_method_contract.md)、[FPR13](fpr_target_protocol.md) |
+| 论文规划 | [故事](gdi_paper_story.md)、[blueprint](cvpr2027_writing_blueprint.md) |
+| 结果及来源 | [结果索引](../results/README.md) |
 | 输入与标注 | `data/clean_resized_images/` 的 1000 张 PNG、`data/image_name_to_class_id_and_name.json` |
 
-虽然 `.gitignore` 包含 `data/*`，上述输入图与标签实际上已经被 Git 跟踪。权重缓存及 `outputs/` 未跟踪。
+输入图与标签受 Git 管理。模型缓存及 `outputs/` 由服务器保存。当前环境为 Python 3.10.19、torch 2.10.0、torchvision 0.25.0、timm 1.0.24，解释器为 `/root/miniconda3/envs/att-atk/bin/python`。
 
-## 当前测量原件
+## 当前 i.i.d. 四源主结果
 
-四个 `outputs/attack/prd_direction_contraction_s42_20261104T044138Z_{vit,cait,pit_t,deit_b}/` 各保留 1000 张对抗图、`attack_params.json`、`transfer.csv/json` 与 `predictions.json`。对应 Overall 89.1673%、strict 88.7234%，实际增强是 opponent。攻击 batch 分别为 48、16、32、48；评估 batch 32、关闭 TF32、无 AMP。
+[GDI i.i.d. 归档](../results/gdi_iid_paired_s42_1000_fpr/README.md) 保存逐源参数、原始迁移表、52 项逐目标结果、选层频次和四源汇总。设置为 seed 42、每源 1000 图、10 steps、10 groups × 2 views、i.i.d. RGB 增强、原始／phase 空间配对 mask。Overall 为 89.3423%、strict 为 88.8893%。
 
-原始来源为 `/root/autodl-tmp/prd_jobs/direction_contraction_s42_20261104T044138Z/`，保留样本 manifest、执行源码快照、验证、日志及来源。仓库中的 `source_changes.patch`、执行 commit 和源码哈希描述测量当时状态，不是额外执行入口。
+攻击 batch 按 vit/cait/pit_t/deit_b 为 48/16/32/48；评估 batch 32、关闭 TF32、无 AMP。每源的 1000 张对抗图、逐样本预测和日志保留于原始服务器目录，精确位置由归档 `provenance.json` 的 `source_runs` 与 `execution_manifest.json` 提供。
 
-## 历史选层原件
+本次归档从已经完成的运行提取测量文件；来源 manifest 保存测量时的命令、commit、源码哈希及参数名称。当前命令和接口见 README 与方法契约。
 
-`outputs/attack/` 保留：
+## 历史结果
 
-- `prd_dynamic_variance_s42_20261029T031203Z_{vit,cait,pit_t,deit_b}/`；CaiT 主对照使用后续 `prd_cait_preln_variance_s42_20261029T070204Z/`。
-- `prd_second_raw_moment_s42_20261101T151302Z_{vit,cait,pit_t,deit_b}/`。
-- `prd_std_abs_mean_s42_20261102T081807Z_{vit,cait,pit_t,deit_b}/`。
-- `prd_normalized_std_abs_mean_s42_20261102T142706Z_{vit,cait,pit_t,deit_b}/`。
-- `prd_direction_variance_ratio_s42_20261103T090754Z_{vit,cait,pit_t,deit_b}/`。
-- 两组 `vit_drop_selection_*` 的 token 策略记录，见 [证据说明](prd_token_selection_evidence.md)。
+| GDI 归档 | 实际配置与用途 |
+| --- | --- |
+| [direction_contraction](../results/gdi_direction_contraction_s42_1000_fpr/README.md) | 当前乘积选择器，历史 opponent 设置；Overall 89.1673%、strict 88.7234%，用于同配置选层比较 |
+| [direction_variance_ratio](../results/gdi_direction_variance_ratio_s42_1000_fpr/README.md) | 仅方向方差比的历史对照 |
+| [second_raw_moment](../results/gdi_second_raw_moment_s42_1000_fpr/README.md) | 二阶原点矩的历史对照 |
+| [std_abs_mean](../results/gdi_std_abs_mean_s42_1000_fpr/README.md) | 标准差加绝对均值的历史对照 |
+| [normalized_std_abs_mean](../results/gdi_normalized_std_abs_mean_s42_1000_fpr/README.md) | 按图层间最大值归一化后相加的历史对照 |
 
-这些都是已执行配置的证据，不恢复历史攻击选项。
+各归档的 `runs/`、`variance_references/` 及其他 reference 子目录保留真实参数与迁移表；`execution.json`、`provenance.json` 保存原始运行路径和源码身份。CaiT 最大方差主对照采用 class-attention 后、最终 LayerNorm 前 CLS 的后续测量。
 
-## 权重、环境与待准备内容
+固定 block10 的两组 token 策略实验见 [证据说明](gdi_token_selection_evidence.md)。原始图像、预测及 selection traces 仍在相应服务器目录。历史频次、比例、增强和视图预算按原记录解释。
 
-`data/huggingface/` 与 `data/torch/` 全部保留，包括旧目标权重；PiT-B 与 Visformer 是 FPR13 目标。当前环境为 Python 3.10.19、torch 2.10.0、torchvision 0.25.0、timm 1.0.24，服务器解释器 `/root/miniconda3/envs/att-atk/bin/python`。
+## 命名与归档维护
 
-四源动态配对 i.i.d. 测量已完成：`outputs/attack/prd_iid_paired_four_sources_s42_1000_20261105T105028Z_{vit,cait,pit_t,deit_b}/`，每源 1000 图、13 目标；参数和队列来源见 `outputs/logs/prd_iid_paired_four_sources_s42_1000_20261105T105028Z/`。四源 Overall 89.3423%、strict 88.8893%。命令行和攻击类仅支持直接 RGB i.i.d. 高斯采样，β 使用 `--noise-strength`；投影/RMS 匹配保持。opponent 已退出执行与消融，历史结果及标签保留。匹配无 drop／随机层／历史方差／当前选择器的对照仍需实际配置支持。`figure1.py` 保留跨层原始分数导出；完整方向比／收缩曲线与当前方法 Fig. 2 待准备。旧固定双边界 Fig. 2 代码已删除。
+当前文档、结果目录、报告标题和内部链接统一使用 GDI。原始测量 JSON、CSV、来源 manifest 及源码差异按原字节保存，其执行标识可用于定位服务器原件。归档目录迁移与 README 更新记录在各归档的 `provenance.json`，包含维护前文件哈希和刷新后的完整文件清单。
+
+当前代码接口为 `GDIAttacker`、`GDIAdapter`、`GDIState` 与 `begin_gdi_forward` / `advance_gdi_state` / `finish_gdi_forward`；关闭 drop 使用 `--no-gdi-drop`。
+
+## 论文证据准备
+
+按原有章节结构推进，以有效干预层的迁移收益和逐样本定位能力为中心。优先准备 Fig. 1 的几何曲线及对应干预 ASR、最终 i.i.d. 设置的选层对照矩阵、GDI 方法图和同协议外部比较。具体任务及材料状态见 blueprint。
+
+`data/huggingface/`、`data/torch/` 全部权重保留，包含 PiT-B、Visformer 等 FPR13 目标。历史强固定层基线、固定双／多边界路径及完成的实验 runner 按已有维护决定保留清理状态。

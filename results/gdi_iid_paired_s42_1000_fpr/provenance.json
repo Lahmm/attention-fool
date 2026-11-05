@@ -1,0 +1,103 @@
+{
+  "archived_utc_date": "2026-11-05",
+  "method_display_name": "GDI",
+  "asr_definition": "1 - adversarial accuracy over all adversarial samples",
+  "strict_definition": "exclude exactly matching source target; equal-weight source mean",
+  "source_manifest": "/root/autodl-tmp/attention-fool/outputs/logs/prd_iid_paired_four_sources_s42_1000_20261105T105028Z/manifest.json",
+  "source_manifest_sha256": "cb7c4f798981548c46d36b18a0815eaa56d5c6a2e0613611830a98d535149e94",
+  "source_commit": "8cb7a9d0150f7e5e182e468ff6dbe8dc9b9b9e49",
+  "source_sha256": {
+    "main.py": "0665bcfd82f1d97fabb7cee12775b742e02ce015e1129942f7687cce03cc7445",
+    "progressive_attack.py": "a4a2bdaae3d5b2255ef11ae03528c89980e52b1bfb5fb6bbb38a58caf6c62451",
+    "utils.py": "c1b94da3b250ca5263d6bc8b0e065aaea342c0e7b1f12fbf6efbfc21301b776a",
+    "transfer_eval.py": "a09a4411e0a9df038dd0513f42af66d1a83e8cd888fe32bf89ff1edbe9d4a3ac",
+    "nets/__init__.py": "8223a6bd2a9ef83815f67fd85308fab26535b2e9d3c20dd8a52309975316caac",
+    "nets/base.py": "1d12f6b1752f0b433f301631150109faa4d3aca23d1f5ee5f69178b1d1cf4321",
+    "nets/cait.py": "fe5c10a0747917c0e543866e03d3a938ba2c7d17239461d96d2b4a1b464a709f",
+    "nets/pit.py": "5c7a0c584b60fa41e020773199005d9baee9ada70b1ce2f6027a3950693072d2",
+    "nets/vit.py": "c5b9542f32838f4aec3ad57644e4051a1fffa0ca38e462f315c909522c28d2d4"
+  },
+  "source_runs": {
+    "vit": {
+      "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_iid_paired_four_sources_s42_1000_20261105T105028Z_vit",
+      "log_dir": "/root/autodl-tmp/attention-fool/outputs/logs/prd_iid_paired_four_sources_s42_1000_20261105T105028Z/vit",
+      "attack_batch_size": 48,
+      "noise_structure": "isotropic_rgb",
+      "noise_strength": 0.2,
+      "source_file_sha256": {
+        "attack_params.json": "933ad95071f02d6cbe19cd0dd0c5e0839e8292585a28cbe16ce5859c23eccd39",
+        "transfer.csv": "dce11bf71157e1284408dff55c1de61ed8a3e910660f8d1368060d3f012de9e7",
+        "transfer.json": "010aeb3775232c637e60e7ad81afafc83bda0dcd1bca18e52baafa2dbb7baa07",
+        "predictions.json": "556a87072e5981007b55acc81f78183773fbd6a5b3da0cc8ca6ac081e717c4a4"
+      }
+    },
+    "cait": {
+      "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_iid_paired_four_sources_s42_1000_20261105T105028Z_cait",
+      "log_dir": "/root/autodl-tmp/attention-fool/outputs/logs/prd_iid_paired_four_sources_s42_1000_20261105T105028Z/cait",
+      "attack_batch_size": 16,
+      "noise_structure": "isotropic_rgb",
+      "noise_strength": 0.2,
+      "source_file_sha256": {
+        "attack_params.json": "550de297ac238aa155f97b36b9d163b8f368ba07e933aeeec9c785f68362fb4d",
+        "transfer.csv": "755590e12318d72dc911e9e8aef8d423438a9d12a7f98d1e37c09b62d4e0455c",
+        "transfer.json": "46acdfc874f506f1518e9476f0c2d4d95f1910ccda3927c06d7166a70ebacf22",
+        "predictions.json": "3be6e604de01c723ad8855e7d477faf2cb709370bf8e267f1191847ab395c65d"
+      }
+    },
+    "pit_t": {
+      "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_iid_paired_four_sources_s42_1000_20261105T105028Z_pit_t",
+      "log_dir": "/root/autodl-tmp/attention-fool/outputs/logs/prd_iid_paired_four_sources_s42_1000_20261105T105028Z/pit_t",
+      "attack_batch_size": 32,
+      "noise_structure": "isotropic_rgb",
+      "noise_strength": 0.4,
+      "source_file_sha256": {
+        "attack_params.json": "01d1e3fe79bdafc8f417a57e629a9aae9a42843ca86b47ed290122a468a25190",
+        "transfer.csv": "cb562715848fc433a06ee46024f246b1a4031183e138ba9a218d177d0cbb92ad",
+        "transfer.json": "78d776a7f717be3c9e5c08721e7f8524c18abf2255684d8c89eaba1a55514d35",
+        "predictions.json": "9c20c64d4d41242333b7ea5ffce21c5f344e78f54185448ae26d1becf51d3cbc"
+      }
+    },
+    "deit_b": {
+      "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_iid_paired_four_sources_s42_1000_20261105T105028Z_deit_b",
+      "log_dir": "/root/autodl-tmp/attention-fool/outputs/logs/prd_iid_paired_four_sources_s42_1000_20261105T105028Z/deit_b",
+      "attack_batch_size": 48,
+      "noise_structure": "isotropic_rgb",
+      "noise_strength": 0.2,
+      "source_file_sha256": {
+        "attack_params.json": "5a4664f2ebb376c3b0c40a46783beae55e6a0a6171e6335a4a1ebba0ab7a7ac3",
+        "transfer.csv": "1e72df51dc1782709ab81c7bcaaf989ffc2665564ccc4389235c3903e2695dc2",
+        "transfer.json": "71079806f446b63347752ddf47897cce9b725388d6c77813881aef679fd1b5c0",
+        "predictions.json": "61ae3737e8e495fde8b0ecc9a2d2d44b0dc33b5a2f0e1cd463b12bdf7173774d"
+      }
+    }
+  },
+  "all_52_asrs_match_saved_predictions": true,
+  "archive_operation": "Copy completed measurement records byte-for-byte; generate ASR indexes and observed selection counts under GDI names.",
+  "archive_path_migrations": {
+    "prd_direction_contraction_s42_1000_fpr": "gdi_direction_contraction_s42_1000_fpr",
+    "prd_direction_variance_ratio_s42_1000_fpr": "gdi_direction_variance_ratio_s42_1000_fpr",
+    "prd_normalized_std_abs_mean_s42_1000_fpr": "gdi_normalized_std_abs_mean_s42_1000_fpr",
+    "prd_second_raw_moment_s42_1000_fpr": "gdi_second_raw_moment_s42_1000_fpr",
+    "prd_std_abs_mean_s42_1000_fpr": "gdi_std_abs_mean_s42_1000_fpr"
+  },
+  "archive_sha256": {
+    "README.md": "0110c7407acb94fd040c97898f2e51a9365b424783222b17549cb613c58ca1c3",
+    "execution_manifest.json": "cb7c4f798981548c46d36b18a0815eaa56d5c6a2e0613611830a98d535149e94",
+    "execution_source.sha256": "4e76dea0a0c3f088f84dec50d85441c52acad758d824d084e01d9ac5424d4660",
+    "per_target.csv": "6e38ddded3c7f165cfc322259b6500c9230fb20a4e36e74c2362b90ed634ebda",
+    "runs/cait/attack_params.json": "550de297ac238aa155f97b36b9d163b8f368ba07e933aeeec9c785f68362fb4d",
+    "runs/cait/transfer.csv": "755590e12318d72dc911e9e8aef8d423438a9d12a7f98d1e37c09b62d4e0455c",
+    "runs/cait/transfer.json": "46acdfc874f506f1518e9476f0c2d4d95f1910ccda3927c06d7166a70ebacf22",
+    "runs/deit_b/attack_params.json": "5a4664f2ebb376c3b0c40a46783beae55e6a0a6171e6335a4a1ebba0ab7a7ac3",
+    "runs/deit_b/transfer.csv": "1e72df51dc1782709ab81c7bcaaf989ffc2665564ccc4389235c3903e2695dc2",
+    "runs/deit_b/transfer.json": "71079806f446b63347752ddf47897cce9b725388d6c77813881aef679fd1b5c0",
+    "runs/pit_t/attack_params.json": "01d1e3fe79bdafc8f417a57e629a9aae9a42843ca86b47ed290122a468a25190",
+    "runs/pit_t/transfer.csv": "cb562715848fc433a06ee46024f246b1a4031183e138ba9a218d177d0cbb92ad",
+    "runs/pit_t/transfer.json": "78d776a7f717be3c9e5c08721e7f8524c18abf2255684d8c89eaba1a55514d35",
+    "runs/vit/attack_params.json": "933ad95071f02d6cbe19cd0dd0c5e0839e8292585a28cbe16ce5859c23eccd39",
+    "runs/vit/transfer.csv": "dce11bf71157e1284408dff55c1de61ed8a3e910660f8d1368060d3f012de9e7",
+    "runs/vit/transfer.json": "010aeb3775232c637e60e7ad81afafc83bda0dcd1bca18e52baafa2dbb7baa07",
+    "selection_counts.csv": "f2f8e5823adc717154c5e5314ab6dd325b42fcba7c3926d8f200229a7893e2d3",
+    "summary.csv": "f6972714772bac0a52812dd7e5ee4757c965054a5a2d577017473c04b0ee2f26"
+  }
+}

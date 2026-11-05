@@ -1,35 +1,39 @@
-# PRD FPR13 结果
+# GDI FPR13 结果索引
 
-本目录保存 FPR13 ASR、参数、直接 ASR 差值及来源。ASR 为全部对抗样本的 `1 - adversarial accuracy`。当前唯一可执行方法是方向方差比 × 正收缩比例逐图选层与单边界随机 token drop。
+更新日期：2026-11-05。本目录保存 FPR13 ASR、参数、直接 ASR 差值和 provenance。ASR 为全部对抗样本的 `1 - adversarial accuracy`；strict 排除完全相同源目标，四源等权汇总。
 
-## 当前方法
+## 当前 i.i.d. 主结果
 
-[方向方差比 × 正收缩比例](prd_direction_contraction_s42_1000_fpr/README.md) 已完成 seed 42、四源各 1000 图、10 steps、10 groups × 2 views、opponent/FPR13 测量。Overall **89.1673%**、strict **88.7234%**。相对历史最大方差选层，分别高 1.8346、1.8543 个百分点。
+[GDI i.i.d. 配对四源归档](gdi_iid_paired_s42_1000_fpr/README.md) 对应 seed 42、每源 1000 图、10 steps、10 groups × 2 views。GDI 逐图以方向方差比 × 正收缩比例定位，在所选 block 输入处均匀随机清零局部 token。
 
 | Source | Overall ASR | Strict ASR |
 | --- | ---: | ---: |
-| vit | 87.95% | 86.95% |
-| cait | 89.14% | 88.37% |
-| pit_t | 84.28% | 84.28% |
-| deit_b | 95.30% | 95.30% |
+| ViT-B/16 | 87.41% | 86.36% |
+| CaiT-S24 | 89.75% | 88.98% |
+| PiT-T | 84.85% | 84.85% |
+| DeiT-B distilled | 95.37% | 95.37% |
+| 四源等权平均 | **89.3423%** | **88.8893%** |
 
-当前归档含 `summary.csv`、52 项逐目标 `per_target.csv`、全部候选频次 `selection_counts.csv`、四源 `runs/` 参数与迁移表、对照原件、源码差异及 provenance。当前方法最初在外部快照执行，2026-11-04 晋升主线，保留实际 `experiment_only` 标签和执行来源，不重标为 i.i.d.。
+归档保存原始参数和迁移表、52 项逐目标结果、选层频次、执行 manifest 与文件哈希。论文整体迁移效果以该实际 i.i.d. 配置组织，匹配选层对照按 blueprint 继续准备。
 
-## 保留的历史选层证据
+## 历史选层比较
+
+以下均为各自实际执行配置的历史证据。
 
 | 目录 | 配置身份 |
 | --- | --- |
-| [direction_variance_ratio](prd_direction_variance_ratio_s42_1000_fpr/README.md) | 仅方向方差比，无正收缩因子 |
-| [second_raw_moment](prd_second_raw_moment_s42_1000_fpr/README.md) | 最大二阶原点矩 |
-| [std_abs_mean](prd_std_abs_mean_s42_1000_fpr/README.md) | 标准差加绝对均值 |
-| [normalized_std_abs_mean](prd_normalized_std_abs_mean_s42_1000_fpr/README.md) | 按图层间最大值分别归一化后相加 |
+| [direction_contraction](gdi_direction_contraction_s42_1000_fpr/README.md) | GDI 乘积定位准则，历史 opponent 设置；Overall 89.1673%、strict 88.7234% |
+| [direction_variance_ratio](gdi_direction_variance_ratio_s42_1000_fpr/README.md) | 仅方向方差比 |
+| [second_raw_moment](gdi_second_raw_moment_s42_1000_fpr/README.md) | 最大二阶原点矩 |
+| [std_abs_mean](gdi_std_abs_mean_s42_1000_fpr/README.md) | 标准差加绝对均值 |
+| [normalized_std_abs_mean](gdi_normalized_std_abs_mean_s42_1000_fpr/README.md) | 按图层间最大值分别归一化后相加 |
 
-历史最大方差对照的原始参数和迁移表保留在上述归档的 `variance_references/`，以及当前方法归档中。原始报告中的 mainline 指测量当时状态；这些记录和 `.patch` 仅用于来源核验，不提供可执行的历史策略。
+历史乘积准则相对同配置最大方差选择器，Overall、strict 的直接差值为 +1.8346、+1.8543 个百分点。最大方差原始参数与迁移表保存在各归档的 `variance_references/`。完整频次按 `selection_counts.csv` 展示。
 
-## 清理与归档完整性
+固定 block10 的 token 选择与固定／重采样分析见 [历史 token 证据](../experiments/gdi_token_selection_evidence.md)，对应原记录的增强和视图预算。
 
-2026-11-04 按用户要求移除强固定单层基线、其引用与汇总差值，以及旧固定双／多 checkpoint 方法的主表、消融和专属分析。涉及删除固定层引用的两个动态归档更新了 `archive_sha256`，在 `archive_maintenance` 保存之前 provenance、summary 和 README 的哈希。保留的原始攻击参数、迁移数据及源码快照哈希不变。
+## 命名与来源
 
-固定 block10 的 token 选择分析作为历史证据单独保留，见 [token 证据](../experiments/prd_token_selection_evidence.md)，不等同于固定单层基线或当前动态消融。原始预测、图像与日志位于服务器 `outputs/`，来源见 [handoff](../experiments/server_handoff_inventory.md)。
+文档、报告标题及归档目录统一采用 GDI。原始测量参数、迁移数据、执行标识和源码差异按原字节保留，原始服务器位置由相应 `provenance.json` 与 `execution.json` 提供。每个历史归档记录此次目录迁移和说明更新的维护前哈希，`archive_sha256` 覆盖全部保留文件。
 
-评估口径见 [FPR13 协议](../experiments/fpr_target_protocol.md)。最终 i.i.d. 四源主表和匹配设置的选层对照仍需对应实际运行记录。
+2026-11-04 清理强固定单层基线及旧固定双／多 checkpoint 结果的维护历史继续保留。权重、原始对抗图像、预测和日志由服务器保存，见 [交接记录](../experiments/server_handoff_inventory.md)。

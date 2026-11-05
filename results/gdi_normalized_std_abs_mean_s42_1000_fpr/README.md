@@ -1,6 +1,6 @@
-# Layer-max-normalized standard deviation plus absolute mean: isolated FPR13 test
+# GDI layer-selection evidence: layer-normalized standard deviation plus absolute mean
 
-This experiment selects the largest sum of normalized population standard deviation and normalized absolute signed mean of clean raw cosine scores. Divide each term by its own maximum across all candidate blocks for that image. A zero maximum contributes zero. No depth weighting is applied. Select once per image, break ties by earliest native block, and drop at that block input. All score moments use float64 after raw float32 cosine. The repository mainline continues to use maximum population variance; code changes run only in the external snapshot recorded in provenance.
+This historical comparison selects the largest sum of normalized population standard deviation and normalized absolute signed mean of clean local–global cosine scores. Each term is divided by its maximum across candidate blocks for that image; a zero maximum contributes zero. Select once per image, break ties by earliest native block and intervene at its input. Moments use float64 after raw float32 cosine. The current GDI localization rule combines direction variance ratio and positive fractional contraction.
 
 Every source uses 1000 images, seed 42, epsilon 16/255, 10 steps, step size epsilon/10, momentum 1, 10 groups × 2 views, and the same phase shifts and opponent augmentation as its references. Strengths are 0.2 for ViT/CaiT/DeiT and 0.4 for PiT-T. Drop ratios are 20/196 for ViT/DeiT and 30/196 for CaiT/PiT-T, rounded on native grids. CaiT uses final pre-LayerNorm CLS.
 
@@ -29,3 +29,7 @@ FPR13 evaluates all adversarial samples with batch 32, no AMP, and TF32 disabled
 ## Records
 
 `summary.csv` contains source-level ASRs and direct differences; `per_target.csv` contains all 52 target comparisons; `selection_counts.csv` contains every candidate checkpoint including zero counts. `runs/` stores the executed configuration and raw FPR13 results; all three reference directories preserve the actual prior configurations. Provenance, source changes, CPU validation, and full preflight are retained. Adversarial images, predictions, and logs remain in the recorded server output directories.
+
+## GDI archive maintenance (2026-11-05)
+
+Archive directory names and report titles now use GDI. The executed JSON/CSV records, source patch, original run identifiers and source hashes retain their original bytes. The current iid main results are indexed in [the GDI iid archive](../gdi_iid_paired_s42_1000_fpr/README.md). Provenance records the directory migration, prior report hashes and refreshed complete retained-file manifest.

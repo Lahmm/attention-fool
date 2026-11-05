@@ -1,18 +1,18 @@
 {
-  "created_utc": "2026-11-02T15:42:24.773624+00:00",
+  "created_utc": "2026-11-03T10:19:25.894914+00:00",
   "experiment_only": true,
-  "job_dir": "/root/autodl-tmp/prd_jobs/normalized_std_abs_mean_s42_20261102T142706Z",
+  "job_dir": "/root/autodl-tmp/prd_jobs/direction_variance_ratio_s42_20261103T090754Z",
   "manifest": {
-    "created_utc": "2026-11-02T14:27:06.733343+00:00",
+    "created_utc": "2026-11-03T09:07:54.383603+00:00",
     "repository": "/root/autodl-tmp/attention-fool",
-    "source_commit": "0d2e28df886d52fc7f48e44a2d0ea1f5e495d389",
+    "source_commit": "90743133d02bc6260b2c83684cfd7533868354f2",
     "source_sha256": {
       "main.py": "feaef6d32bd7b7a0af990edcbedd4b28ee95532198dae9a23ba98c43a6512343",
-      "progressive_attack.py": "034557046426690d9b268735fa78e93d89a64ac9d9d0865185c5a06b90979226",
+      "progressive_attack.py": "715531846032bf8828eca62f596f5d828db575dc2eed39418c62dcd064dbd606",
       "utils.py": "c1b94da3b250ca5263d6bc8b0e065aaea342c0e7b1f12fbf6efbfc21301b776a",
       "transfer_eval.py": "aab43978a01cb90a722af1732835b5955c3b1fa491c19b2c3b9d3d7ff1618e85",
       "nets/__init__.py": "8d74ef265778c6046e5f2cc00bbfbe0355507beae50d3fcc845399ce37e66df9",
-      "nets/base.py": "19b5cc25f2f1fb7b39afca18c8eadf12e0c2a8e89064ef97c1da472302f9289f",
+      "nets/base.py": "56cda7e542fd955aab98a4b5de4553f812f02861d319c9932b92533cf8eea94f",
       "nets/cait.py": "53afeedf6dccf0b159572e0e4259032eb13782584da4ffef3d045ef55bb5e568",
       "nets/pit.py": "586da201c5e38aa7e1ec5abc81565a14aa9936554ffd5f2cc3d66a4215ee1f4c",
       "nets/vit.py": "df515a1e1f1ee6a0944e7d500356e3f578453d7594c54ed8c392923d46817297"
@@ -40,7 +40,7 @@
       ]
     ],
     "noise_structure": "opponent",
-    "checkpoint_policy": "per-image maximum sum of layer-max-normalized raw-score population standard deviation and absolute signed mean; no depth weight; earliest native block on ties; drop at selected block input; select once before attack",
+    "checkpoint_policy": "per-image maximum global-direction population variance divided by average variance across feature directions; normalized local features and reference; native feature dimension; earliest native block on ties; drop at selected block input; select once before attack",
     "evaluation_protocol": "fpr",
     "evaluation_batch_size": 32,
     "evaluation_tf32": false,
@@ -51,7 +51,7 @@
         "attack_batch_size": 48,
         "opponent_noise_strength": 0.2,
         "expected_total_drop_ratio": 0.102040816326,
-        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_vit",
+        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_direction_variance_ratio_s42_20261103T090754Z_vit",
         "variance_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_vit",
         "second_raw_moment_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_vit",
         "unnormalized_std_abs_mean_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_vit"
@@ -62,7 +62,7 @@
         "attack_batch_size": 16,
         "opponent_noise_strength": 0.2,
         "expected_total_drop_ratio": 0.15306122449,
-        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_cait",
+        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_direction_variance_ratio_s42_20261103T090754Z_cait",
         "variance_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_cait_preln_variance_s42_20261029T070204Z",
         "second_raw_moment_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_cait",
         "unnormalized_std_abs_mean_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_cait"
@@ -73,7 +73,7 @@
         "attack_batch_size": 32,
         "opponent_noise_strength": 0.4,
         "expected_total_drop_ratio": 0.15306122449,
-        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_pit_t",
+        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_direction_variance_ratio_s42_20261103T090754Z_pit_t",
         "variance_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_pit_t",
         "second_raw_moment_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_pit_t",
         "unnormalized_std_abs_mean_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_pit_t"
@@ -84,7 +84,7 @@
         "attack_batch_size": 48,
         "opponent_noise_strength": 0.2,
         "expected_total_drop_ratio": 0.102040816326,
-        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_deit_b",
+        "output_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_direction_variance_ratio_s42_20261103T090754Z_deit_b",
         "variance_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_dynamic_variance_s42_20261029T031203Z_deit_b",
         "second_raw_moment_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_second_raw_moment_s42_20261101T151302Z_deit_b",
         "unnormalized_std_abs_mean_reference_dir": "/root/autodl-tmp/attention-fool/outputs/attack/prd_std_abs_mean_s42_20261102T081807Z_deit_b"
@@ -102,37 +102,39 @@
       "nets/vit.py": "df515a1e1f1ee6a0944e7d500356e3f578453d7594c54ed8c392923d46817297"
     },
     "experiment_only": true,
-    "source_changes_sha256": "af2e886f6dcb725582d54a5f2840874848af9d0becb09d67e56e33b4255afffb",
-    "worker_sha256": "6702bd50e4878c1fabbd1219653360bf59134c45396144ba0640b555de2a9e8f",
+    "source_changes_sha256": "7d05393f2f3fc40677aa06898d7ca0713a2ae300a831b97ded4ac55493d1975a",
+    "worker_sha256": "6df3a94549cba54515c81e9620afb1781675d4bd8f9eb9006519f1a5d7d7fe3f",
     "expected_checkpoint_validation": "exact match for every image",
-    "parent_job": "/root/autodl-tmp/prd_jobs/std_abs_mean_s42_20261102T081807Z",
-    "checkpoint_selection_metric": "layer_max_normalized_std_plus_abs_mean_raw_cosine",
-    "expected_score_absolute_tolerance": 1e-05,
+    "parent_job": "/root/autodl-tmp/prd_jobs/normalized_std_abs_mean_s42_20261102T142706Z",
+    "checkpoint_selection_metric": "global_direction_variance_over_average_direction_variance",
+    "expected_score_absolute_tolerance": 0.001,
     "statistics_reference": {
-      "path": "/root/autodl-tmp/prd_jobs/patchscore_s42_1000_moments_20261029T075611Z/per_image_layer.csv",
-      "sha256": "ed226516cf4af85698bbdf6ceb2983d065d2eb69620a6822c315cbf01186dc49"
+      "path": "/root/autodl-tmp/prd_jobs/global_direction_variance_ratio_s42/full_1000/per_image_layer.csv",
+      "sha256": "86be2dd3e537128f988a0f84d38a823d9436381eb197254b79ee796703a0ce24"
     },
-    "expected_selections_sha256": "b0536fa503fcceef7ea868010b59b8c10d20874dbc6cbfd2d5bc13f93be9843b",
+    "expected_selections_sha256": "d66575806b5fcc7653066db7992b53d1942a67bb807dde903d2eb7eee8a68399",
     "samples_sha256": "966e9dee4e019c2f0fc9c3d2ae963ac6f8eacc454cd8b810f9f12fc5a0136dd0",
-    "archive_sha256": "77d2b3fca0eedc5505793627b953dd8c65959f3f769c7ff97408960cb8dd122e",
-    "verify_sha256": "a3f2b3390d745b9fb060e65c9093cd6620fccda162a3afe5e3dba819dfba1fe3",
+    "archive_sha256": "680b02657772ed7d9d8ced0fdb44b59df0e5c82dfd523e9555c4b0e814fa446e",
     "checkpoint_score_normalization": {
-      "scope": "per clean image across all candidate blocks",
-      "standard_deviation": "divide by maximum candidate population standard deviation",
-      "absolute_mean": "divide by maximum candidate absolute signed mean",
-      "zero_maximum_contribution": "zero"
+      "local_features": "per-token L2 normalization",
+      "reference": "L2 normalization",
+      "denominator": "total local population variance / native feature dimension",
+      "precision": "float64 normalized geometry from float32 features",
+      "zero_total_variance_score": 0.0
     },
-    "checkpoint_depth_weighting": false
+    "checkpoint_depth_weighting": false,
+    "verify_sha256": "588f6fc1301fa284d4c71433000409e6fc2ce9deff3af6d98d877cb63d264f37",
+    "expected_score_relative_tolerance": 0.0001
   },
   "evidence": {
     "vit": {
-      "normalized_std_abs_mean": {
-        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_vit",
+      "direction_variance_ratio": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_direction_variance_ratio_s42_20261103T090754Z_vit",
         "sha256": {
-          "attack_params.json": "44c72c7409a2520112d4194c9a60ebb630222acb2c357fe0de3d99a316a712e0",
-          "transfer.csv": "23ae6c0b49a67dd78d6ef3ddb81fac07a5cfaa8179dee086fcc5b5782cd42a99",
-          "transfer.json": "85de50a4d6be3c0710fd9c2243ca685a86cad93cde2eb1124510570b6e72d66f",
-          "predictions.json": "9930ba175af0dcd1a3c801d3e7498c3f7067dfa96a3f237bc2b156b88b9386c7"
+          "attack_params.json": "2ac5299aae2d75d9fadc8d4e5c21e78e3578df2cdfc74b5ec8a3626775391910",
+          "transfer.csv": "9a012bf310f0bad553f5ed2efba5be220265761b157ee1c2bad371be2e056c62",
+          "transfer.json": "6e490bc8029ed42cd47b12c15ab229bbd571024115765e3169a84d29ecd6f67e",
+          "predictions.json": "eb612361549c59b417ce077f11a3abe308801c01dbc83bb84cbc3ee36f922ae2"
         }
       },
       "variance": {
@@ -164,13 +166,13 @@
       }
     },
     "cait": {
-      "normalized_std_abs_mean": {
-        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_cait",
+      "direction_variance_ratio": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_direction_variance_ratio_s42_20261103T090754Z_cait",
         "sha256": {
-          "attack_params.json": "c82ceb3a4a6f19a735ea4f4b2aae5850a4fbb25a171ada6f1c56d273352457d5",
-          "transfer.csv": "4fa80a08626efaf3157f4e268381c5843764c3a792942bdfab3b9d813dd5ec64",
-          "transfer.json": "3daa99e69f14433e4cf2bb999b317cdcd4765e76253283c62523b0200959adb4",
-          "predictions.json": "965a0509e1e7f245519d5f8f94bdf544b81e37fb1bd3649b126e767107cab164"
+          "attack_params.json": "643c03ad6e8dc2fc2e4e810daa0adbf6cf4ae91eb5567b6bb6737fb7709cc31c",
+          "transfer.csv": "47f0f3f18415b964a812f643ec067743ec483698b34bf289bc1136adb3738031",
+          "transfer.json": "8c184817e947ff5d09d95ab11ebbd35a46e7a210ecbb73450de2244cd4802ea2",
+          "predictions.json": "aa0d89e0e5051203b68a634c813383b0bf6193d887dfa702c9032eb46a896d23"
         }
       },
       "variance": {
@@ -202,13 +204,13 @@
       }
     },
     "pit_t": {
-      "normalized_std_abs_mean": {
-        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_pit_t",
+      "direction_variance_ratio": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_direction_variance_ratio_s42_20261103T090754Z_pit_t",
         "sha256": {
-          "attack_params.json": "7721894e71caf30c58e0d79a88ce4ae4c9f64aa25d1fc829f66ea424023d73a3",
-          "transfer.csv": "191f10808c772a6fd92f46e527e3e8814cc4f33a6c40298cea26ebf105d17e4a",
-          "transfer.json": "326031b59fca4fe3cafed23484015a0a18b5aaedc15ee1f61cff7f7c27a047fe",
-          "predictions.json": "6bea2450c62e4e79d7c85be5fca3d0ec87093d48e722c4d2a32c035c67c37b0b"
+          "attack_params.json": "751a56120eb14b9e10dde0cd182f851334c0b29d3c8ef35afa0de3b0ab0cbc89",
+          "transfer.csv": "6130d97a20fd1410d509824cfe9476eaae1c37ebb1c616e6dded7864f1ba42be",
+          "transfer.json": "35032fdfd24ff38f49f7d9facec6442c93509bd333ea927ecfdc430b7ca2adb4",
+          "predictions.json": "ee46aeed0e6cfa3e06824f3eb06411e24e3203f568fe0a77e639a8c4dab5d6a8"
         }
       },
       "variance": {
@@ -240,13 +242,13 @@
       }
     },
     "deit_b": {
-      "normalized_std_abs_mean": {
-        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_normalized_std_abs_mean_s42_20261102T142706Z_deit_b",
+      "direction_variance_ratio": {
+        "path": "/root/autodl-tmp/attention-fool/outputs/attack/prd_direction_variance_ratio_s42_20261103T090754Z_deit_b",
         "sha256": {
-          "attack_params.json": "b8847b59794e93092bf07aab49dc2df0e5a9865dad1ffc817a3d7fe6e818c780",
-          "transfer.csv": "b91303110fb33b2915f2d72c6a5608c19be3be5c6ccb667cd821db3bcec260b5",
-          "transfer.json": "6f089c6166591ebca6f78f34d4824e75e77378c53e66b828e0548030dd80da5a",
-          "predictions.json": "4582beb94e0ab07032c6b678919260fe03dcfa2ea13c02f3a26311c10b49c63e"
+          "attack_params.json": "7891aea25baac28420e5f90be34e68ed6ef29be54faca563e87bddf0fab37420",
+          "transfer.csv": "4fda311feff817ab9ed1fcec2d18dcf2b2774e4629d71db7a4885e77eb471730",
+          "transfer.json": "307562e21ab21561c17bb0b186a51671304e94e74229889344a56e9f1afce111",
+          "predictions.json": "99649d452d9b81e6d153de6fed4bf89cf47c99f081ccfd38a93bf8fac24278e5"
         }
       },
       "variance": {
@@ -278,31 +280,31 @@
       }
     }
   },
-  "source_changes_sha256": "af2e886f6dcb725582d54a5f2840874848af9d0becb09d67e56e33b4255afffb",
-  "expected_selections_sha256": "b0536fa503fcceef7ea868010b59b8c10d20874dbc6cbfd2d5bc13f93be9843b",
+  "source_changes_sha256": "7d05393f2f3fc40677aa06898d7ca0713a2ae300a831b97ded4ac55493d1975a",
+  "expected_selections_sha256": "d66575806b5fcc7653066db7992b53d1942a67bb807dde903d2eb7eee8a68399",
   "clean_samples_manifest_sha256": "966e9dee4e019c2f0fc9c3d2ae963ac6f8eacc454cd8b810f9f12fc5a0136dd0",
-  "all_4000_selections_match_saved_moment_predictions": true,
+  "all_4000_selections_match_clean_forward_predictions": true,
   "all_52_asrs_recomputed_from_saved_predictions": true,
   "archive_sha256": {
-    "README.md": "4c9a4ac77265d1b52f16016a3e668a3c412134af008e4301c4208e7695c3056f",
-    "per_target.csv": "306d53f27562fb0139b42525c3400e9e61a62bf543e3aca095ad2a07297647ae",
-    "preflight.json": "0be09b49eecadd8da3fd293abfb3d17e89b2373eaec5d1fd438485c37759f72e",
-    "runs/cait/attack_params.json": "c82ceb3a4a6f19a735ea4f4b2aae5850a4fbb25a171ada6f1c56d273352457d5",
-    "runs/cait/execution.json": "23a7296eaa1c68dc2fbb597eb3650f96a5cfd1b74d1592688539cc5bdd087803",
-    "runs/cait/transfer.csv": "4fa80a08626efaf3157f4e268381c5843764c3a792942bdfab3b9d813dd5ec64",
-    "runs/cait/transfer.json": "3daa99e69f14433e4cf2bb999b317cdcd4765e76253283c62523b0200959adb4",
-    "runs/deit_b/attack_params.json": "b8847b59794e93092bf07aab49dc2df0e5a9865dad1ffc817a3d7fe6e818c780",
-    "runs/deit_b/execution.json": "06176ac3a63d959d09804896342ca9a2d3d9517cb70c6db8c84bb754305d6c14",
-    "runs/deit_b/transfer.csv": "b91303110fb33b2915f2d72c6a5608c19be3be5c6ccb667cd821db3bcec260b5",
-    "runs/deit_b/transfer.json": "6f089c6166591ebca6f78f34d4824e75e77378c53e66b828e0548030dd80da5a",
-    "runs/pit_t/attack_params.json": "7721894e71caf30c58e0d79a88ce4ae4c9f64aa25d1fc829f66ea424023d73a3",
-    "runs/pit_t/execution.json": "49a5b261d6c9f39bb6fb07c23d7f9593fc452a3cc66c4e61e1044b5d644117bd",
-    "runs/pit_t/transfer.csv": "191f10808c772a6fd92f46e527e3e8814cc4f33a6c40298cea26ebf105d17e4a",
-    "runs/pit_t/transfer.json": "326031b59fca4fe3cafed23484015a0a18b5aaedc15ee1f61cff7f7c27a047fe",
-    "runs/vit/attack_params.json": "44c72c7409a2520112d4194c9a60ebb630222acb2c357fe0de3d99a316a712e0",
-    "runs/vit/execution.json": "aab65e7d1f3e69d70e26035e836f8ab98196aa027ca974de47575db8045521b3",
-    "runs/vit/transfer.csv": "23ae6c0b49a67dd78d6ef3ddb81fac07a5cfaa8179dee086fcc5b5782cd42a99",
-    "runs/vit/transfer.json": "85de50a4d6be3c0710fd9c2243ca685a86cad93cde2eb1124510570b6e72d66f",
+    "README.md": "fca2f5a617b265eda30865d5381ab2738f549e1e54806562dc7763a2273d5ec8",
+    "per_target.csv": "f79a694ca9414fdd1ee9ca0404b2c2c7bd44c34f2fed81cc38b18d43a72ec46d",
+    "preflight.json": "bab0d584d43dc0642a7091e473cf6de025a41044a277faf1081ba583817d5ef0",
+    "runs/cait/attack_params.json": "643c03ad6e8dc2fc2e4e810daa0adbf6cf4ae91eb5567b6bb6737fb7709cc31c",
+    "runs/cait/execution.json": "425662e6f15b9ac5baba02949722ead4a4c5d034c95ac9e618f26e19f7b1b415",
+    "runs/cait/transfer.csv": "47f0f3f18415b964a812f643ec067743ec483698b34bf289bc1136adb3738031",
+    "runs/cait/transfer.json": "8c184817e947ff5d09d95ab11ebbd35a46e7a210ecbb73450de2244cd4802ea2",
+    "runs/deit_b/attack_params.json": "7891aea25baac28420e5f90be34e68ed6ef29be54faca563e87bddf0fab37420",
+    "runs/deit_b/execution.json": "270f6050eccfd73844f68fba6ac97a57e9f20eb3730ada36feb2e8a70d1cb8f5",
+    "runs/deit_b/transfer.csv": "4fda311feff817ab9ed1fcec2d18dcf2b2774e4629d71db7a4885e77eb471730",
+    "runs/deit_b/transfer.json": "307562e21ab21561c17bb0b186a51671304e94e74229889344a56e9f1afce111",
+    "runs/pit_t/attack_params.json": "751a56120eb14b9e10dde0cd182f851334c0b29d3c8ef35afa0de3b0ab0cbc89",
+    "runs/pit_t/execution.json": "39a0e2404f8de68870635da0790ee7eb729f4aa36452184620e5d40aaadc350b",
+    "runs/pit_t/transfer.csv": "6130d97a20fd1410d509824cfe9476eaae1c37ebb1c616e6dded7864f1ba42be",
+    "runs/pit_t/transfer.json": "35032fdfd24ff38f49f7d9facec6442c93509bd333ea927ecfdc430b7ca2adb4",
+    "runs/vit/attack_params.json": "2ac5299aae2d75d9fadc8d4e5c21e78e3578df2cdfc74b5ec8a3626775391910",
+    "runs/vit/execution.json": "0ace543c9ad1ddf967459be7f88853378252920f8acce3de07748a3530ee3e08",
+    "runs/vit/transfer.csv": "9a012bf310f0bad553f5ed2efba5be220265761b157ee1c2bad371be2e056c62",
+    "runs/vit/transfer.json": "6e490bc8029ed42cd47b12c15ab229bbd571024115765e3169a84d29ecd6f67e",
     "second_raw_moment_references/cait/attack_params.json": "cae7d339aac94ebf7850e1280aad8f558d77a590669bb379eb2f8d7dc909fd09",
     "second_raw_moment_references/cait/transfer.csv": "7fdc8a35515150213acf25ba86fb10a795429c9c195be7f89937b2d2b37fcf01",
     "second_raw_moment_references/cait/transfer.json": "7c948a80a21652dbeefbbcd4f4b748ac8d2e7df644e562b5d66e865978dcd066",
@@ -315,9 +317,9 @@
     "second_raw_moment_references/vit/attack_params.json": "407089103ad9d74af9cfa26eeb857bc652e6a4e101dab95a67fbda819bf3c4ea",
     "second_raw_moment_references/vit/transfer.csv": "2acf191d9369f1c16ecf86a1be0004a1d4958cc2985afe10119c83a1cbf168b1",
     "second_raw_moment_references/vit/transfer.json": "95c6adec2724a109838a3efd366794db12b7609fef32a41b911622c07804b9c7",
-    "selection_counts.csv": "20cd917ecd2bcf2d07cc45e9238e4df0365f82f96128f30745dc7a83073af6ab",
-    "source_changes.patch": "af2e886f6dcb725582d54a5f2840874848af9d0becb09d67e56e33b4255afffb",
-    "summary.csv": "08f852edcce6c2c11a50dc58e847c09d1aeca749184703e70dcda87f6867c02f",
+    "selection_counts.csv": "07583bb6ed9a8fbf5b0f3a112fcc351ec7d4b977f46c5c0895326734a065f1db",
+    "source_changes.patch": "7d05393f2f3fc40677aa06898d7ca0713a2ae300a831b97ded4ac55493d1975a",
+    "summary.csv": "b99cda0ff407fab3e499c0803e91278da3e47cfe12c27584d59e248dba63771a",
     "unnormalized_std_abs_mean_references/cait/attack_params.json": "ffe71f78a5e26b351b596432489ecbcd75dcb310b2c30ff85b22839274fe4db1",
     "unnormalized_std_abs_mean_references/cait/transfer.csv": "fd7e79571130b8847ae749c9911df96671e47a49a9e06fe2ec0f839b14509352",
     "unnormalized_std_abs_mean_references/cait/transfer.json": "33150d6e882cb5dd007c076f6247f9815d0184e139cf51cfb8b908aced8fc62e",
@@ -330,7 +332,7 @@
     "unnormalized_std_abs_mean_references/vit/attack_params.json": "b2d32b9c731977215cd6c3b638abd0a503e9cdd2e2dc6ff7edd00d5e442955b6",
     "unnormalized_std_abs_mean_references/vit/transfer.csv": "9d458783cfa89f86194dc5463e69cbcf5c418b97c8420519a157d412ddb8b059",
     "unnormalized_std_abs_mean_references/vit/transfer.json": "d3f4dbf9809b0515e1a1a9dae4787d63589d8b92bbdb8618cbc37c73cb7f23b9",
-    "validation.json": "c14e13a5f568da76f634e5912c4a178e8bf8cd2d0128e1b230e82f936fc35ab9",
+    "validation.json": "118ee765e72cf0b15c38d2b90878a648177aa59e980bc0d77424e32e56f1df9a",
     "variance_references/cait/attack_params.json": "67c488fa9b09416adc2aca1a8b5e59d102ab1070a0e99bcd1bcbf63459add0eb",
     "variance_references/cait/transfer.csv": "236ee9ec1b38704559b440df46fa28d47bb6c14fd11892811915788cebb7cb0a",
     "variance_references/cait/transfer.json": "b6faf47dad638bc05dc32a39b49b3534591f634c77b4d6fd835d54c71e81e6ce",
@@ -343,5 +345,87 @@
     "variance_references/vit/attack_params.json": "b3b1fcd7b090d056d7379d0766e0cb31b72f64b49d55da09dde353e91f322710",
     "variance_references/vit/transfer.csv": "a64796e52adc486d2180040c7a6721c919fcfb8fbd8ee47d52d6ae7eae5a0f4b",
     "variance_references/vit/transfer.json": "75e160c92a01daac8f57420ff632affa5252fa8dd1a5c8483a680c74f52b32ce"
-  }
+  },
+  "archive_maintenance": {
+    "date": "2026-11-04",
+    "reason": "User retired fixed-layer baselines; remove their reference file and summary columns. Dynamic measurements and execution provenance remain unchanged.",
+    "previous_provenance_sha256": "e211293e5f9597130559a508e3df2205d1371e3251aafac049161f3686471410",
+    "previous_file_sha256": {
+      "summary.csv": "73191577a61f28888c7ecc46458e991170f3f423cc2e89de32b9c9dfc974940e",
+      "README.md": "abf33cd9fd9458555e8a37be413e8aa660802a5e70eb92ab72f73ef86022a4ee"
+    }
+  },
+  "documentation_maintenance": [
+    {
+      "date": "2026-11-05",
+      "reason": "User-authorized non-code restructuring: GDI archive directory and report naming; update historical report descriptions and link completed iid main results.",
+      "previous_archive_name": "prd_direction_variance_ratio_s42_1000_fpr",
+      "current_archive_name": "gdi_direction_variance_ratio_s42_1000_fpr",
+      "previous_repository_commit": "3c831daab10fad495589a371de4e4ae7a02e9f8e",
+      "previous_provenance_sha256": "8e66112d4ea84729dca43cb7ab4cccc4ad5a33e00863c58af85c61d9cb9d7da0",
+      "previous_file_sha256": {
+        "summary.csv": "b99cda0ff407fab3e499c0803e91278da3e47cfe12c27584d59e248dba63771a",
+        "per_target.csv": "f79a694ca9414fdd1ee9ca0404b2c2c7bd44c34f2fed81cc38b18d43a72ec46d",
+        "selection_counts.csv": "07583bb6ed9a8fbf5b0f3a112fcc351ec7d4b977f46c5c0895326734a065f1db",
+        "source_changes.patch": "7d05393f2f3fc40677aa06898d7ca0713a2ae300a831b97ded4ac55493d1975a",
+        "preflight.json": "bab0d584d43dc0642a7091e473cf6de025a41044a277faf1081ba583817d5ef0",
+        "validation.json": "118ee765e72cf0b15c38d2b90878a648177aa59e980bc0d77424e32e56f1df9a",
+        "README.md": "2df43d31795dd66be04f8ad1a1e11e72f08466c2c8bc5748efbe63810c3b824e",
+        "runs/vit/attack_params.json": "2ac5299aae2d75d9fadc8d4e5c21e78e3578df2cdfc74b5ec8a3626775391910",
+        "runs/vit/transfer.csv": "9a012bf310f0bad553f5ed2efba5be220265761b157ee1c2bad371be2e056c62",
+        "runs/vit/transfer.json": "6e490bc8029ed42cd47b12c15ab229bbd571024115765e3169a84d29ecd6f67e",
+        "runs/vit/execution.json": "0ace543c9ad1ddf967459be7f88853378252920f8acce3de07748a3530ee3e08",
+        "runs/cait/attack_params.json": "643c03ad6e8dc2fc2e4e810daa0adbf6cf4ae91eb5567b6bb6737fb7709cc31c",
+        "runs/cait/transfer.csv": "47f0f3f18415b964a812f643ec067743ec483698b34bf289bc1136adb3738031",
+        "runs/cait/transfer.json": "8c184817e947ff5d09d95ab11ebbd35a46e7a210ecbb73450de2244cd4802ea2",
+        "runs/cait/execution.json": "425662e6f15b9ac5baba02949722ead4a4c5d034c95ac9e618f26e19f7b1b415",
+        "runs/pit_t/attack_params.json": "751a56120eb14b9e10dde0cd182f851334c0b29d3c8ef35afa0de3b0ab0cbc89",
+        "runs/pit_t/transfer.csv": "6130d97a20fd1410d509824cfe9476eaae1c37ebb1c616e6dded7864f1ba42be",
+        "runs/pit_t/transfer.json": "35032fdfd24ff38f49f7d9facec6442c93509bd333ea927ecfdc430b7ca2adb4",
+        "runs/pit_t/execution.json": "39a0e2404f8de68870635da0790ee7eb729f4aa36452184620e5d40aaadc350b",
+        "runs/deit_b/attack_params.json": "7891aea25baac28420e5f90be34e68ed6ef29be54faca563e87bddf0fab37420",
+        "runs/deit_b/transfer.csv": "4fda311feff817ab9ed1fcec2d18dcf2b2774e4629d71db7a4885e77eb471730",
+        "runs/deit_b/transfer.json": "307562e21ab21561c17bb0b186a51671304e94e74229889344a56e9f1afce111",
+        "runs/deit_b/execution.json": "270f6050eccfd73844f68fba6ac97a57e9f20eb3730ada36feb2e8a70d1cb8f5",
+        "variance_references/vit/attack_params.json": "b3b1fcd7b090d056d7379d0766e0cb31b72f64b49d55da09dde353e91f322710",
+        "variance_references/vit/transfer.csv": "a64796e52adc486d2180040c7a6721c919fcfb8fbd8ee47d52d6ae7eae5a0f4b",
+        "variance_references/vit/transfer.json": "75e160c92a01daac8f57420ff632affa5252fa8dd1a5c8483a680c74f52b32ce",
+        "variance_references/cait/attack_params.json": "67c488fa9b09416adc2aca1a8b5e59d102ab1070a0e99bcd1bcbf63459add0eb",
+        "variance_references/cait/transfer.csv": "236ee9ec1b38704559b440df46fa28d47bb6c14fd11892811915788cebb7cb0a",
+        "variance_references/cait/transfer.json": "b6faf47dad638bc05dc32a39b49b3534591f634c77b4d6fd835d54c71e81e6ce",
+        "variance_references/pit_t/attack_params.json": "2cc3f44ee9a93c9244501d2999f5e0206b71d3b114129cff39a3d2cbe40ac792",
+        "variance_references/pit_t/transfer.csv": "703530fab2be2dd38d01993c66bd3f282c8dab5c46d793e0ac3e0713cb9ba0b0",
+        "variance_references/pit_t/transfer.json": "da48839c32a8f5659185b763ce465ad94a8af8eb395312b58b9deb835374cc44",
+        "variance_references/deit_b/attack_params.json": "0a5683a35a624d0432d87ba726cb097917312c94cccfe56352364e41590dbc73",
+        "variance_references/deit_b/transfer.csv": "6339092d173665a0cdbb5d806356ae4f13444558fb480980aac1bcabb4b2902f",
+        "variance_references/deit_b/transfer.json": "72ecd090ee94d5f8db3c462483c20b6f4c1bf2cc7f49228010e572368eaf6f1e",
+        "second_raw_moment_references/vit/attack_params.json": "407089103ad9d74af9cfa26eeb857bc652e6a4e101dab95a67fbda819bf3c4ea",
+        "second_raw_moment_references/vit/transfer.csv": "2acf191d9369f1c16ecf86a1be0004a1d4958cc2985afe10119c83a1cbf168b1",
+        "second_raw_moment_references/vit/transfer.json": "95c6adec2724a109838a3efd366794db12b7609fef32a41b911622c07804b9c7",
+        "second_raw_moment_references/cait/attack_params.json": "cae7d339aac94ebf7850e1280aad8f558d77a590669bb379eb2f8d7dc909fd09",
+        "second_raw_moment_references/cait/transfer.csv": "7fdc8a35515150213acf25ba86fb10a795429c9c195be7f89937b2d2b37fcf01",
+        "second_raw_moment_references/cait/transfer.json": "7c948a80a21652dbeefbbcd4f4b748ac8d2e7df644e562b5d66e865978dcd066",
+        "second_raw_moment_references/pit_t/attack_params.json": "ae1dcbe3e600807bfd4ef6cd6fe7928faab9ab21cc83b3fc8ead49fb8ab74ca0",
+        "second_raw_moment_references/pit_t/transfer.csv": "c058bc20df2dfe7e8a8a45c6dbcc81c834abc744b8352507a068b4a2bfcad547",
+        "second_raw_moment_references/pit_t/transfer.json": "ef4250899cc28678a8e1aee134763b11e0532cde31c89b9f459350250f7de129",
+        "second_raw_moment_references/deit_b/attack_params.json": "2d3cdb5c4659346b82b41f72cc2fe6480ec717731f540ecaa7d6921ca6b522ad",
+        "second_raw_moment_references/deit_b/transfer.csv": "6e0b06da544e37498d9e62b4a0bcb1fb7eac6cea4c239e25f023543f3cb3115c",
+        "second_raw_moment_references/deit_b/transfer.json": "9f23226efa378fcc96b918809ebf6224a6162180a49fc4e58cab8b56b3dc5095",
+        "unnormalized_std_abs_mean_references/vit/attack_params.json": "b2d32b9c731977215cd6c3b638abd0a503e9cdd2e2dc6ff7edd00d5e442955b6",
+        "unnormalized_std_abs_mean_references/vit/transfer.csv": "9d458783cfa89f86194dc5463e69cbcf5c418b97c8420519a157d412ddb8b059",
+        "unnormalized_std_abs_mean_references/vit/transfer.json": "d3f4dbf9809b0515e1a1a9dae4787d63589d8b92bbdb8618cbc37c73cb7f23b9",
+        "unnormalized_std_abs_mean_references/cait/attack_params.json": "ffe71f78a5e26b351b596432489ecbcd75dcb310b2c30ff85b22839274fe4db1",
+        "unnormalized_std_abs_mean_references/cait/transfer.csv": "fd7e79571130b8847ae749c9911df96671e47a49a9e06fe2ec0f839b14509352",
+        "unnormalized_std_abs_mean_references/cait/transfer.json": "33150d6e882cb5dd007c076f6247f9815d0184e139cf51cfb8b908aced8fc62e",
+        "unnormalized_std_abs_mean_references/pit_t/attack_params.json": "54a5c50764a6ec80d7f6a7ba9cbe78b1491d1bf2d552e7f570e13ab9cb9680ed",
+        "unnormalized_std_abs_mean_references/pit_t/transfer.csv": "004db13bdbe466a74a59bad7f794310cd04892891047137f5841aee7d3ef24ef",
+        "unnormalized_std_abs_mean_references/pit_t/transfer.json": "bfbbd437a0ceabeff82e2a47b06faa2086bd67ca659fce5bbb46500b4ec727e5",
+        "unnormalized_std_abs_mean_references/deit_b/attack_params.json": "71d973cdb3c109c76b11059172f14c68ae63f6488f3191831dacc6530e07dac7",
+        "unnormalized_std_abs_mean_references/deit_b/transfer.csv": "6021bccd76c31bf094b2d3bace1e7a46b7ec37d79270ca9f2380c3f18f7c5e68",
+        "unnormalized_std_abs_mean_references/deit_b/transfer.json": "2d6ea2873f466b3b04a5809d3cd29aa6c27650721d6cf5249194e5f0e1536ea2"
+      },
+      "original_measurement_records_and_source_patch_preserved": true
+    }
+  ],
+  "method_display_name": "GDI"
 }

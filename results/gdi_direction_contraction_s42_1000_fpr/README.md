@@ -1,6 +1,6 @@
-# Direction ratio times positive fractional contraction: isolated FPR13 test
+# GDI direction variance ratio × positive contraction: historical FPR13 results
 
-This experiment maximizes the population variance of normalized local features projected onto the unit global reference, divided by total local population variance per feature dimension. Each local vector and reference is L2 normalized separately in float64 from float32 model outputs. Multiply the direction ratio by max(0, 1 - output dispersion / input dispersion), using each native block input and output after separate per-token normalization. PiT stage pooling is excluded. Zero input or output dispersion gives score zero. No fitted weights, fixed checkpoint labels, cross-image calibration or depth weighting enter selection. Select once per clean image, use earliest native block on ties and drop at that block input. Original raw float32 cosine variance is recorded separately. At measurement time these changes ran in an external snapshot. The retained executable now uses direction variance ratio times positive fractional contraction only; the original experiment labels and executed parameters remain historical provenance.
+This archive records GDI layer localization under the historical opponent augmentation setting. The score is the output global-direction population variance divided by total output local population variance per native feature dimension, multiplied by max(0, 1 - output dispersion / input dispersion). Local vectors and global references are separately L2 normalized in float64 from float32 features. Selection uses native block input/output pairs; PiT pooling lies outside the measured block. Select once per clean image, break ties by earliest native block and intervene at that block input. Zero input or output dispersion receives score zero. Raw cosine variance is retained as diagnostic metadata.
 
 Every source uses 1000 images, seed 42, epsilon 16/255, 10 steps, step size epsilon/10, momentum 1, 10 groups × 2 views, and the same phase shifts and opponent augmentation as its references. Strengths are 0.2 for ViT/CaiT/DeiT and 0.4 for PiT-T. Drop ratios are 20/196 for ViT/DeiT and 30/196 for CaiT/PiT-T, rounded on native grids. CaiT uses final pre-LayerNorm CLS.
 
@@ -33,3 +33,7 @@ FPR13 evaluates all adversarial samples with batch 32, no AMP, and TF32 disabled
 ## Archive maintenance (2026-11-04)
 
 The user retired fixed-layer baselines. Their reference file and summary columns were removed. Retained dynamic measurements, executed parameters, source patches, and their original hashes are unchanged. The archive manifest covers the retained files; provenance records the previous summary and README hashes.
+
+## GDI archive maintenance (2026-11-05)
+
+Archive directory names and report titles now use GDI. The executed JSON/CSV records, source patch, original run identifiers and source hashes retain their original bytes. The current iid main results are indexed in [the GDI iid archive](../gdi_iid_paired_s42_1000_fpr/README.md). Provenance records the directory migration, prior report hashes and refreshed complete retained-file manifest.

@@ -169,6 +169,7 @@
   "clean_samples_manifest_sha256": "966e9dee4e019c2f0fc9c3d2ae963ac6f8eacc454cd8b810f9f12fc5a0136dd0",
   "all_4000_selected_checkpoints_match_precomputed_second_raw_moment_choices": true,
   "archive_sha256": {
+    "README.md": "b2d9494d06310b02c5b4a08dd0408883d820ead9ffb7f2025469f4ab8f5a28d7",
     "per_target.csv": "6b38858ed5d211d7e9477e429f545889c5344f4ac906fc865a824c0de7955982",
     "preflight.json": "4d9265cb41f91037dab801a56f37e927a149a43e5b1093077516f0781c8adc68",
     "runs/cait/attack_params.json": "cae7d339aac94ebf7850e1280aad8f558d77a590669bb379eb2f8d7dc909fd09",
@@ -201,12 +202,59 @@
     "variance_references/pit_t/transfer.json": "da48839c32a8f5659185b763ce465ad94a8af8eb395312b58b9deb835374cc44",
     "variance_references/vit/attack_params.json": "b3b1fcd7b090d056d7379d0766e0cb31b72f64b49d55da09dde353e91f322710",
     "variance_references/vit/transfer.csv": "a64796e52adc486d2180040c7a6721c919fcfb8fbd8ee47d52d6ae7eae5a0f4b",
-    "variance_references/vit/transfer.json": "75e160c92a01daac8f57420ff632affa5252fa8dd1a5c8483a680c74f52b32ce",
-    "README.md": "0ee81cd4e341e9af55a12e8653db50d53dd42eb001873452197b88c7278b41bf"
+    "variance_references/vit/transfer.json": "75e160c92a01daac8f57420ff632affa5252fa8dd1a5c8483a680c74f52b32ce"
   },
   "precomputed_statistics": {
     "path": "/root/autodl-tmp/prd_jobs/patchscore_s42_1000_moments_20261029T075611Z/per_image_layer.csv",
     "sha256": "ed226516cf4af85698bbdf6ceb2983d065d2eb69620a6822c315cbf01186dc49",
     "expected_selections_sha256": "103eb201a5002df5bd3ba6ce54369cee0a5ac1c5a06b0cf6a24fb4b47b8b8cec"
-  }
+  },
+  "documentation_maintenance": [
+    {
+      "date": "2026-11-05",
+      "reason": "User-authorized non-code restructuring: GDI archive directory and report naming; update historical report descriptions and link completed iid main results.",
+      "previous_archive_name": "prd_second_raw_moment_s42_1000_fpr",
+      "current_archive_name": "gdi_second_raw_moment_s42_1000_fpr",
+      "previous_repository_commit": "3c831daab10fad495589a371de4e4ae7a02e9f8e",
+      "previous_provenance_sha256": "f6ddcdbda419abd071eeac9610ad25e787fe4e1424dda848cd6f39b0707325d5",
+      "previous_file_sha256": {
+        "summary.csv": "5ede7b3b06bd6cf9c75c65a2d4475f2be089b674f11d0302d97b8244ff9df25a",
+        "per_target.csv": "6b38858ed5d211d7e9477e429f545889c5344f4ac906fc865a824c0de7955982",
+        "selection_counts.csv": "a642ace136edc8efbc7c2d02cdcf1214d04fc30de78aa628b6561d71b9917b04",
+        "source_changes.patch": "463390a7da2100ce76579ac2e9f7631a151ad11bf62fbdc3a4822000e23bef4b",
+        "preflight.json": "4d9265cb41f91037dab801a56f37e927a149a43e5b1093077516f0781c8adc68",
+        "README.md": "0ee81cd4e341e9af55a12e8653db50d53dd42eb001873452197b88c7278b41bf",
+        "runs/vit/attack_params.json": "407089103ad9d74af9cfa26eeb857bc652e6a4e101dab95a67fbda819bf3c4ea",
+        "runs/vit/transfer.csv": "2acf191d9369f1c16ecf86a1be0004a1d4958cc2985afe10119c83a1cbf168b1",
+        "runs/vit/transfer.json": "95c6adec2724a109838a3efd366794db12b7609fef32a41b911622c07804b9c7",
+        "runs/vit/execution.json": "ee81e952c43d1ef3470e6cd91726ac522af7187e6e0d7c0783a12ea02e8cb99f",
+        "runs/cait/attack_params.json": "cae7d339aac94ebf7850e1280aad8f558d77a590669bb379eb2f8d7dc909fd09",
+        "runs/cait/transfer.csv": "7fdc8a35515150213acf25ba86fb10a795429c9c195be7f89937b2d2b37fcf01",
+        "runs/cait/transfer.json": "7c948a80a21652dbeefbbcd4f4b748ac8d2e7df644e562b5d66e865978dcd066",
+        "runs/cait/execution.json": "fd42e9b524ef433c1aa8eefa9d5940c0d42c7aa4e8da764e5fbd13c30546e966",
+        "runs/pit_t/attack_params.json": "ae1dcbe3e600807bfd4ef6cd6fe7928faab9ab21cc83b3fc8ead49fb8ab74ca0",
+        "runs/pit_t/transfer.csv": "c058bc20df2dfe7e8a8a45c6dbcc81c834abc744b8352507a068b4a2bfcad547",
+        "runs/pit_t/transfer.json": "ef4250899cc28678a8e1aee134763b11e0532cde31c89b9f459350250f7de129",
+        "runs/pit_t/execution.json": "ec0674f2efb1765e626af95131c018b4dc1c85a850f987ed4c84593ca08b7a11",
+        "runs/deit_b/attack_params.json": "2d3cdb5c4659346b82b41f72cc2fe6480ec717731f540ecaa7d6921ca6b522ad",
+        "runs/deit_b/transfer.csv": "6e0b06da544e37498d9e62b4a0bcb1fb7eac6cea4c239e25f023543f3cb3115c",
+        "runs/deit_b/transfer.json": "9f23226efa378fcc96b918809ebf6224a6162180a49fc4e58cab8b56b3dc5095",
+        "runs/deit_b/execution.json": "ffe1960d6dfcaab9b875561a086101a7cb902c0f45ac7085bea89bb50fdf3f76",
+        "variance_references/vit/attack_params.json": "b3b1fcd7b090d056d7379d0766e0cb31b72f64b49d55da09dde353e91f322710",
+        "variance_references/vit/transfer.csv": "a64796e52adc486d2180040c7a6721c919fcfb8fbd8ee47d52d6ae7eae5a0f4b",
+        "variance_references/vit/transfer.json": "75e160c92a01daac8f57420ff632affa5252fa8dd1a5c8483a680c74f52b32ce",
+        "variance_references/cait/attack_params.json": "67c488fa9b09416adc2aca1a8b5e59d102ab1070a0e99bcd1bcbf63459add0eb",
+        "variance_references/cait/transfer.csv": "236ee9ec1b38704559b440df46fa28d47bb6c14fd11892811915788cebb7cb0a",
+        "variance_references/cait/transfer.json": "b6faf47dad638bc05dc32a39b49b3534591f634c77b4d6fd835d54c71e81e6ce",
+        "variance_references/pit_t/attack_params.json": "2cc3f44ee9a93c9244501d2999f5e0206b71d3b114129cff39a3d2cbe40ac792",
+        "variance_references/pit_t/transfer.csv": "703530fab2be2dd38d01993c66bd3f282c8dab5c46d793e0ac3e0713cb9ba0b0",
+        "variance_references/pit_t/transfer.json": "da48839c32a8f5659185b763ce465ad94a8af8eb395312b58b9deb835374cc44",
+        "variance_references/deit_b/attack_params.json": "0a5683a35a624d0432d87ba726cb097917312c94cccfe56352364e41590dbc73",
+        "variance_references/deit_b/transfer.csv": "6339092d173665a0cdbb5d806356ae4f13444558fb480980aac1bcabb4b2902f",
+        "variance_references/deit_b/transfer.json": "72ecd090ee94d5f8db3c462483c20b6f4c1bf2cc7f49228010e572368eaf6f1e"
+      },
+      "original_measurement_records_and_source_patch_preserved": true
+    }
+  ],
+  "method_display_name": "GDI"
 }
