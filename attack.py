@@ -12,7 +12,7 @@ from utils import DEVICE, SEED, IMAGENET_MEAN, IMAGENET_STD
 
 
 @dataclass(frozen=True)
-class ProgressiveMaskSelection:
+class GDIMaskSelection:
     checkpoint: str
     mask: torch.Tensor
     count: int
@@ -33,17 +33,17 @@ class ProgressiveMaskSelection:
             raise ValueError("active samples must be a boolean vector on the mask device.")
 
 
-MaskSchedule = tuple[ProgressiveMaskSelection, ...]
+MaskSchedule = tuple[GDIMaskSelection, ...]
 
 
-class ProgressiveRouteDisruptionAttacker:
+class GDIAttacker:
     """Select one native input boundary per clean image and resample token masks."""
 
     def __init__(
         self,
         model,
         *,
-        progressive_drop: bool = True,
+        gdi_drop: bool = True,
         drop_ratio: float | None = None,
         noise_strength: float | None = None,
         epsilon: float = 16.0 / 255.0,
@@ -63,9 +63,9 @@ class ProgressiveRouteDisruptionAttacker:
         if step_size is not None and step_size <= 0:
             raise ValueError("step_size must be positive.")
         if input_diversity_groups <= 0 or input_diversity_views_per_group not in (1, 2):
-            raise ValueError("progressive requires positive groups and one or two views per group.")
+            raise ValueError("gdi requires positive groups and one or two views per group.")
         if input_diversity_groups * input_diversity_views_per_group > 20:
-            raise ValueError("actual progressive views must be <= 20.")
+            raise ValueError("actual gdi views must be <= 20.")
         if input_diversity_views_per_group == 2 and not input_diversity_phase_shift_set:
             raise ValueError("phase shift set cannot be empty.")
         if noise_strength is None:
@@ -81,7 +81,7 @@ class ProgressiveRouteDisruptionAttacker:
 
         self.model = model
         self.model.eval()
-        self.progressive_drop = bool(progressive_drop)
+        self.gdi_drop = bool(gdi_drop)
         self.device = device if device is not None else DEVICE
         self.drop_ratio = ratio
         self.noise_strength = float(noise_strength)
@@ -139,7 +139,7 @@ class ProgressiveRouteDisruptionAttacker:
             )
             mask = torch.zeros(pixels.size(0), token_count, dtype=torch.bool, device=pixels.device)
             mask.index_copy_(0, sample_indices, sampled)
-            selections.append(ProgressiveMaskSelection(
+            selections.append(GDIMaskSelection(
                 checkpoint, mask, max(1, round(token_count * self.drop_ratio)), grid, active,
             ))
         return tuple(selections)
@@ -214,7 +214,7 @@ class ProgressiveRouteDisruptionAttacker:
             if item.active_samples is not None:
                 shifted &= item.active_samples[:, None]
             selections.append(
-                ProgressiveMaskSelection(item.checkpoint, shifted.detach(), item.count, item.grid_size,
+                GDIMaskSelection(item.checkpoint, shifted.detach(), item.count, item.grid_size,
                                          item.active_samples)
             )
         return tuple(selections)
@@ -244,7 +244,7 @@ class ProgressiveRouteDisruptionAttacker:
         schedule: MaskSchedule | None,
     ) -> torch.Tensor:
         normalized = self._normalize(pixels)
-        state = self.model.begin_progressive_forward(normalized)
+        state = self.model.begin_gdi_forward(normalized)
         state.validate()
         local = state.local_tokens
         if self.noise_strength > 0:
@@ -253,13 +253,13 @@ class ProgressiveRouteDisruptionAttacker:
         state = replace(state, local_tokens=local)
         if schedule is not None:
             for item in schedule:
-                state = self.model.advance_progressive_state(state, item.checkpoint)
+                state = self.model.advance_gdi_state(state, item.checkpoint)
                 if state.grid_size != item.grid_size:
                     raise ValueError(
                         f"replay grid mismatch at {item.checkpoint}: {state.grid_size} != {item.grid_size}."
                     )
-                state = self.model.apply_progressive_mask(state, item.mask)
-        logits = self.model.finish_progressive_forward(state)
+                state = self.model.apply_gdi_mask(state, item.mask)
+        logits = self.model.finish_gdi_forward(state)
         return F.cross_entropy(logits, labels)
 
     def _iter_attack_losses(
@@ -268,7 +268,7 @@ class ProgressiveRouteDisruptionAttacker:
         for _ in range(self.input_diversity_groups):
             schedule = (
                 self._build_mask_schedule(pixels.detach())
-                if self.progressive_drop else None
+                if self.gdi_drop else None
             )
             phases = (
                 self._pick_input_diversity_phases(pixels.size(0), pixels.device)
@@ -306,7 +306,7 @@ class ProgressiveRouteDisruptionAttacker:
         adversarial = clean.clone()
         momentum = torch.zeros_like(adversarial)
         try:
-            if self.progressive_drop:
+            if self.gdi_drop:
                 with torch.no_grad():
                     choices = self.model.select_contraction_checkpoints(self._normalize(clean))
                 self._prepare_dynamic_mask_layout(choices, clean.size(0))
@@ -336,16 +336,16 @@ class ProgressiveRouteDisruptionAttacker:
         return self._normalize_output(adversarial)
 
     def parameters(self):
-        schedules = self.steps * self.input_diversity_groups if self.progressive_drop else 0
+        schedules = self.steps * self.input_diversity_groups if self.gdi_drop else 0
         params = {
-            "attack_method": "progressive_route_disruption",
+            "attack_method": "geometry_guided_depth_intervention",
             "seed": SEED,
             "whitebox_model": self.model.model_name,
             "epsilon": self.epsilon,
             "step_size": self.step_size,
             "steps": self.steps,
             "momentum_decay": 1.0,
-            "progressive_drop_enabled": self.progressive_drop,
+            "gdi_drop_enabled": self.gdi_drop,
             "noise_enabled": self.noise_strength > 0,
             "noise_strength": self.noise_strength,
             "noise_structure": "isotropic_rgb" if self.noise_strength > 0 else "none",
@@ -362,7 +362,7 @@ class ProgressiveRouteDisruptionAttacker:
             "model_std": self.model_std.flatten().tolist(),
         }
         params.update({
-            "checkpoint_selection_enabled": self.progressive_drop,
+            "checkpoint_selection_enabled": self.gdi_drop,
             "checkpoint_selection": "per-image maximum output global-direction variance ratio times max(0, 1 - normalized-local output dispersion / input dispersion); native block input/output; select once; earliest native tie; drop at selected block input",
             "checkpoint_selection_metric": "global_direction_variance_ratio_times_positive_fractional_contraction",
             "checkpoint_score_normalization": {

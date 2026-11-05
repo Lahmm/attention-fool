@@ -58,7 +58,7 @@ def compute_patch_scores(local: torch.Tensor, global_repr: torch.Tensor) -> torc
 @torch.inference_mode()
 def extract_layerwise_scores(adapter, normalized_inputs: torch.Tensor) -> LayerwiseObservation:
     adapter.eval()
-    initial = adapter.begin_progressive_forward(normalized_inputs.to(adapter.device))
+    initial = adapter.begin_gdi_forward(normalized_inputs.to(adapter.device))
     initial.validate()
     prefix = initial.context["prefix_tokens"]
     if prefix.size(1) != 1:

@@ -11,7 +11,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 import main
-from tests.test_progressive_attack import make_model, make_checkpoint
+from tests.test_attack import make_model, make_checkpoint
 from utils import SEED
 
 
@@ -31,13 +31,14 @@ class MainTests(unittest.TestCase):
             with patch.object(sys, 'argv', ['main.py', '--input-diversity-views-per-group', str(views)]):
                 args = main.parse_args()
                 self.assertEqual(args.input_diversity_views_per_group, views)
+                self.assertEqual(args.output_dir, 'outputs/attack/gdi')
         self.assertEqual(SEED, 42)
 
     def test_mechanism_ablation_switches_are_available(self):
-        with patch.object(sys, 'argv', ['main.py', '--no-progressive-drop',
+        with patch.object(sys, 'argv', ['main.py', '--no-gdi-drop',
                                        '--noise-strength', '0']):
             args = main.parse_args()
-        self.assertTrue(args.no_progressive_drop)
+        self.assertTrue(args.no_gdi_drop)
         self.assertEqual(args.noise_strength, 0.0)
 
 
@@ -69,6 +70,8 @@ class MainTests(unittest.TestCase):
                 build.return_value.select_contraction_checkpoints = lambda inputs: choices
                 main.main(main.parse_args())
             params = json.loads((output / 'attack_params.json').read_text())
+            self.assertEqual(params['attack_method'], 'geometry_guided_depth_intervention')
+            self.assertTrue(params['gdi_drop_enabled'])
             self.assertEqual(params['seed'], 42)
             self.assertEqual(params['input_diversity_total_views'], 1)
             self.assertEqual(params['checkpoint_histogram'], {'block0': 2})

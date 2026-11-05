@@ -107,7 +107,7 @@ def select_contraction_peaks(observations):
 
 
 @dataclass
-class ProgressiveState:
+class GDIState:
     """Local features and architecture context at a forward boundary."""
 
     local_tokens: torch.Tensor
@@ -128,7 +128,7 @@ class ProgressiveState:
                 raise ValueError("RGB projection and local feature dimensions differ.")
 
 
-class ProgressiveAdapter(nn.Module):
+class GDIAdapter(nn.Module):
     default_model_name = ""
     drop_ratio: float
     noise_strength = 0.2
@@ -149,13 +149,13 @@ class ProgressiveAdapter(nn.Module):
     def forward(self, x):
         return self.model(x.to(self.device))
 
-    def begin_progressive_forward(self, x) -> ProgressiveState:
+    def begin_gdi_forward(self, x) -> GDIState:
         raise NotImplementedError
 
-    def advance_progressive_state(self, state, checkpoint_id) -> ProgressiveState:
+    def advance_gdi_state(self, state, checkpoint_id) -> GDIState:
         raise NotImplementedError
 
-    def finish_progressive_forward(self, state):
+    def finish_gdi_forward(self, state):
         raise NotImplementedError
 
     def select_contraction_checkpoints(self, normalized_inputs):
@@ -168,8 +168,8 @@ class ProgressiveAdapter(nn.Module):
         raise NotImplementedError
 
     @staticmethod
-    def apply_progressive_mask(state, mask) -> ProgressiveState:
+    def apply_gdi_mask(state, mask) -> GDIState:
         if mask.shape != state.local_tokens.shape[:2] or mask.dtype != torch.bool:
-            raise ValueError("progressive mask must be boolean and match local tokens.")
+            raise ValueError("gdi mask must be boolean and match local tokens.")
         local = state.local_tokens.masked_fill(mask.unsqueeze(-1), 0)
         return replace(state, local_tokens=local)

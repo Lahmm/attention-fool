@@ -2,25 +2,25 @@ from __future__ import annotations
 
 import torch
 
-from .base import ProgressiveAdapter, ProgressiveState, select_contraction_peaks
+from .base import GDIAdapter, GDIState, select_contraction_peaks
 
 
-class CaiTAdapter(ProgressiveAdapter):
+class CaiTAdapter(GDIAdapter):
     default_model_name = "cait_s24_224"
     drop_ratio = 0.15306122449
     checkpoint_score_reference = "final CLS after class-attention, before final LayerNorm; raw local block outputs"
 
-    def begin_progressive_forward(self, x):
+    def begin_gdi_forward(self, x):
         base = self.model
         local = base.pos_drop(base.patch_embed(x) + base.pos_embed)
-        state = ProgressiveState(
+        state = GDIState(
             local, tuple(base.patch_embed.grid_size), {"block_index": 0},
             base.patch_embed.proj.weight,
         )
         state.validate()
         return state
 
-    def advance_progressive_state(self, state, checkpoint_id):
+    def advance_gdi_state(self, state, checkpoint_id):
         target = self.checkpoint_order(checkpoint_id)
         start = state.context["block_index"]
         if target < start:
@@ -30,9 +30,9 @@ class CaiTAdapter(ProgressiveAdapter):
         local = state.local_tokens
         for block in self.model.blocks[start:target]:
             local = block(local)
-        return ProgressiveState(local, state.grid_size, {"block_index": target})
+        return GDIState(local, state.grid_size, {"block_index": target})
 
-    def finish_progressive_forward(self, state):
+    def finish_gdi_forward(self, state):
         local = state.local_tokens
         for block in self.model.blocks[state.context["block_index"]:]:
             local = block(local)
@@ -55,7 +55,7 @@ class CaiTAdapter(ProgressiveAdapter):
     @torch.no_grad()
     def select_contraction_checkpoints(self, normalized_inputs):
         self.eval()
-        state = self.begin_progressive_forward(normalized_inputs.to(self.device))
+        state = self.begin_gdi_forward(normalized_inputs.to(self.device))
         local = state.local_tokens
         snapshots = []
         for block in self.model.blocks:

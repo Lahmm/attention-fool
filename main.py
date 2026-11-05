@@ -14,7 +14,7 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 from tqdm import tqdm
 
 from nets import DEFAULT_MODEL_NAME, WHITEBOX_MODEL_CHOICES, build_whitebox_model
-from progressive_attack import ProgressiveRouteDisruptionAttacker
+from attack import GDIAttacker
 from utils import DEVICE, SEED, load_data, save_adversarial_images
 
 
@@ -100,7 +100,7 @@ def attack_all_samples(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="PRD dynamic single-boundary attack")
+    parser = argparse.ArgumentParser(description="GDI dynamic single-boundary attack")
     parser.add_argument("--whitebox-model", choices=WHITEBOX_MODEL_CHOICES, default=DEFAULT_MODEL_NAME)
     parser.add_argument("--max-attacked-samples", type=int, default=1000)
     parser.add_argument("--epsilon", type=float, default=16.0 / 255.0)
@@ -113,7 +113,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--input-diversity-phase-shift-set", type=parse_phase_shift_set, default=((4, 4), (8, 8), (12, 12)))
     parser.add_argument(
-        "--no-progressive-drop",
+        "--no-gdi-drop",
         action="store_true",
         help="Disable checkpoint token drops for mechanism ablations.",
     )
@@ -134,7 +134,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=96)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--prefetch-factor", type=int, default=4)
-    parser.add_argument("--output-dir", default="outputs/attack/progressive_route_disruption")
+    parser.add_argument("--output-dir", default="outputs/attack/gdi")
     return parser.parse_args()
 
 
@@ -153,9 +153,9 @@ def main(args: argparse.Namespace) -> None:
         prefetch_factor=args.prefetch_factor,
     )
     model = build_whitebox_model(model_name=args.whitebox_model)
-    attacker = ProgressiveRouteDisruptionAttacker(
+    attacker = GDIAttacker(
         model=model,
-        progressive_drop=not args.no_progressive_drop,
+        gdi_drop=not args.no_gdi_drop,
         drop_ratio=args.drop_ratio,
         noise_strength=args.noise_strength,
         epsilon=args.epsilon,

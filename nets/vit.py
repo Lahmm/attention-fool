@@ -2,23 +2,23 @@ from __future__ import annotations
 
 import torch
 
-from .base import ProgressiveAdapter, ProgressiveState, select_contraction_peaks
+from .base import GDIAdapter, GDIState, select_contraction_peaks
 
 DEFAULT_MODEL_NAME = "vit_base_patch16_224"
 
 
-class ViTAdapter(ProgressiveAdapter):
-    """PRD traversal for ViT-B/16 and distilled DeiT-B, preserving all prefixes."""
+class ViTAdapter(GDIAdapter):
+    """GDI traversal for ViT-B/16 and distilled DeiT-B, preserving all prefixes."""
 
     default_model_name = DEFAULT_MODEL_NAME
     drop_ratio = 0.102040816326
 
 
-    def begin_progressive_forward(self, x):
+    def begin_gdi_forward(self, x):
         base = self.model
         tokens = base.norm_pre(base.patch_drop(base._pos_embed(base.patch_embed(x))))
         prefix_count = base.num_prefix_tokens
-        state = ProgressiveState(
+        state = GDIState(
             local_tokens=tokens[:, prefix_count:],
             grid_size=tuple(base.patch_embed.grid_size),
             context={"prefix_tokens": tokens[:, :prefix_count], "block_index": 0},
@@ -27,7 +27,7 @@ class ViTAdapter(ProgressiveAdapter):
         state.validate()
         return state
 
-    def advance_progressive_state(self, state, checkpoint_id):
+    def advance_gdi_state(self, state, checkpoint_id):
         target = self.checkpoint_order(checkpoint_id)
         start = state.context["block_index"]
         if target < start:
@@ -38,12 +38,12 @@ class ViTAdapter(ProgressiveAdapter):
         for block in self.model.blocks[start:target]:
             tokens = block(tokens)
         prefix_count = state.context["prefix_tokens"].size(1)
-        return ProgressiveState(
+        return GDIState(
             tokens[:, prefix_count:], state.grid_size,
             {"prefix_tokens": tokens[:, :prefix_count], "block_index": target},
         )
 
-    def finish_progressive_forward(self, state):
+    def finish_gdi_forward(self, state):
         tokens = torch.cat((state.context["prefix_tokens"], state.local_tokens), dim=1)
         for block in self.model.blocks[state.context["block_index"]:]:
             tokens = block(tokens)
@@ -63,7 +63,7 @@ class ViTAdapter(ProgressiveAdapter):
     @torch.no_grad()
     def select_contraction_checkpoints(self, normalized_inputs):
         self.eval()
-        state = self.begin_progressive_forward(normalized_inputs.to(self.device))
+        state = self.begin_gdi_forward(normalized_inputs.to(self.device))
         prefix = state.context["prefix_tokens"]
         tokens = torch.cat((prefix, state.local_tokens), dim=1)
         snapshots = []

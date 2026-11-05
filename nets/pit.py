@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import torch
 
-from .base import ProgressiveAdapter, ProgressiveState, select_contraction_peaks
+from .base import GDIAdapter, GDIState, select_contraction_peaks
 
 
-class PiTAdapter(ProgressiveAdapter):
+class PiTAdapter(GDIAdapter):
     """Native hierarchical traversal for the PiT-T source."""
 
     default_model_name = "pit_ti_224"
@@ -13,10 +13,10 @@ class PiTAdapter(ProgressiveAdapter):
     noise_strength = 0.4
 
 
-    def begin_progressive_forward(self, x):
+    def begin_gdi_forward(self, x):
         base = self.model
         spatial = base.pos_drop(base.patch_embed(x) + base.pos_embed)
-        state = ProgressiveState(
+        state = GDIState(
             spatial.flatten(2).transpose(1, 2),
             (int(spatial.size(-2)), int(spatial.size(-1))),
             {"cls_token": base.cls_token.expand(spatial.size(0), -1, -1),
@@ -27,13 +27,13 @@ class PiTAdapter(ProgressiveAdapter):
         return state
 
     @staticmethod
-    def _parse_progressive_checkpoint(checkpoint_id: str) -> tuple[int, int]:
+    def _parse_gdi_checkpoint(checkpoint_id: str) -> tuple[int, int]:
         stage_text, block_text = checkpoint_id.split("_")
         return int(stage_text.removeprefix("stage")) - 1, int(block_text.removeprefix("block"))
 
     def checkpoint_order(self, checkpoint_id):
         try:
-            stage, block = self._parse_progressive_checkpoint(checkpoint_id)
+            stage, block = self._parse_gdi_checkpoint(checkpoint_id)
         except (ValueError, TypeError):
             raise ValueError(f"unsupported PiT checkpoint: {checkpoint_id!r}.") from None
         if (not 0 <= stage < len(self.model.transformers)
@@ -54,7 +54,7 @@ class PiTAdapter(ProgressiveAdapter):
         return grid
 
     @staticmethod
-    def _pit_spatial(state: ProgressiveState) -> torch.Tensor:
+    def _pit_spatial(state: GDIState) -> torch.Tensor:
         batch, _, channels = state.local_tokens.shape
         height, width = state.grid_size
         return state.local_tokens.transpose(1, 2).reshape(batch, channels, height, width)
@@ -80,9 +80,9 @@ class PiTAdapter(ProgressiveAdapter):
         tokens = torch.cat((cls, spatial.flatten(2).transpose(1, 2)), dim=1)
         return stage.norm(tokens), grid
 
-    def advance_progressive_state(
-        self, state: ProgressiveState, checkpoint_id: str
-    ) -> ProgressiveState:
+    def advance_gdi_state(
+        self, state: GDIState, checkpoint_id: str
+    ) -> GDIState:
         target_stage, target_block = self.checkpoint_order(checkpoint_id)
         stage_index = int(state.context["stage_index"])
         block_index = int(state.context["block_index"])
@@ -106,7 +106,7 @@ class PiTAdapter(ProgressiveAdapter):
             spatial, cls = self._split_pit_tokens(tokens, prefix_count, grid)
             block_index = end
             if stage_index == target_stage:
-                return ProgressiveState(
+                return GDIState(
                     spatial.flatten(2).transpose(1, 2),
                     grid,
                     {
@@ -119,9 +119,9 @@ class PiTAdapter(ProgressiveAdapter):
             stage_index += 1
             block_index = 0
             prepared = False
-        raise RuntimeError("PiT progressive checkpoint was not reached.")
+        raise RuntimeError("PiT gdi checkpoint was not reached.")
 
-    def finish_progressive_forward(self, state: ProgressiveState) -> torch.Tensor:
+    def finish_gdi_forward(self, state: GDIState) -> torch.Tensor:
         spatial = self._pit_spatial(state)
         cls = state.context["cls_token"]
         stage_index = int(state.context["stage_index"])
@@ -146,7 +146,7 @@ class PiTAdapter(ProgressiveAdapter):
     @torch.no_grad()
     def select_contraction_checkpoints(self, normalized_inputs):
         self.eval()
-        state = self.begin_progressive_forward(normalized_inputs.to(self.device))
+        state = self.begin_gdi_forward(normalized_inputs.to(self.device))
         spatial = self._pit_spatial(state)
         cls = state.context["cls_token"]
         observations = []

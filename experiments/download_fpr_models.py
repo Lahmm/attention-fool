@@ -1,4 +1,4 @@
-"""Cache FPR target weights and the additional retained PRD source weights."""
+"""Cache FPR target weights and the additional retained GDI source weights."""
 import os
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor

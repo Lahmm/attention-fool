@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from nets.base import SampleCheckpoint
 from nets.vit import ViTAdapter
-from progressive_attack import ProgressiveMaskSelection, ProgressiveRouteDisruptionAttacker
+from attack import GDIMaskSelection, GDIAttacker
 from utils import SEED
 
 
@@ -60,7 +60,7 @@ def make_checkpoint(checkpoint, layer, variance, grid):
 def make_attacker(**overrides):
     options = dict(steps=2, input_diversity_groups=1, device=torch.device('cpu'))
     options.update(overrides)
-    attacker = ProgressiveRouteDisruptionAttacker(make_model(), **options)
+    attacker = GDIAttacker(make_model(), **options)
     attacker._prepare_dynamic_mask_layout((make_checkpoint('block10', 'block11', .1, (14, 14)),), 1)
     return attacker
 
@@ -87,14 +87,14 @@ def validate_schedule(schedule, batch_size):
     torch.testing.assert_close(coverage, torch.ones_like(coverage), rtol=0, atol=0)
 
 
-class ProgressiveAttackTests(unittest.TestCase):
+class GDIAttackTests(unittest.TestCase):
     def setUp(self):
         self.pixels = torch.linspace(0.1, 0.9, 3 * 28 * 28).view(1, 3, 28, 28)
         self.labels = torch.tensor([1])
 
     def test_schedule_uses_current_vit_budget_and_fresh_masks(self):
         attacker = make_attacker()
-        with patch.object(attacker.model, 'begin_progressive_forward', side_effect=AssertionError('mask forward')), \
+        with patch.object(attacker.model, 'begin_gdi_forward', side_effect=AssertionError('mask forward')), \
              patch.object(torch, 'equal', side_effect=AssertionError('mask synchronization')):
             first = attacker._build_mask_schedule(self.pixels)
             second = attacker._build_mask_schedule(self.pixels)
@@ -111,7 +111,7 @@ class ProgressiveAttackTests(unittest.TestCase):
             with self.subTest(grid=grid):
                 mask = torch.zeros(1, grid[0] * grid[1], dtype=torch.bool)
                 mask[:, :count] = True
-                schedule = (ProgressiveMaskSelection('selected', mask, count, grid),)
+                schedule = (GDIMaskSelection('selected', mask, count, grid),)
                 shifted = attacker._phase_mask_schedule(schedule, [(8, 8)], height=224, width=224)
                 self.assertEqual(tuple(item.count for item in shifted), (count,))
                 self.assertEqual(tuple(item.grid_size for item in shifted), (grid,))
@@ -138,7 +138,7 @@ class ProgressiveAttackTests(unittest.TestCase):
 
     def test_noise_is_rms_matched_per_image_with_stopped_scale(self):
         attacker = make_attacker()
-        state = attacker.model.begin_progressive_forward(self.pixels.repeat(2, 1, 1, 1).requires_grad_(True))
+        state = attacker.model.begin_gdi_forward(self.pixels.repeat(2, 1, 1, 1).requires_grad_(True))
         noise = attacker._projected_gaussian_noise(state)
         self.assertFalse(noise.requires_grad)
         actual = noise.square().mean((1, 2)).sqrt()
@@ -148,13 +148,13 @@ class ProgressiveAttackTests(unittest.TestCase):
 
     def test_noise_reaches_all_locals_once_and_preserves_both_prefixes(self):
         model = make_model(prefixes=2)
-        attacker = ProgressiveRouteDisruptionAttacker(model, steps=1, input_diversity_groups=1, device=torch.device('cpu'))
+        attacker = GDIAttacker(model, steps=1, input_diversity_groups=1, device=torch.device('cpu'))
         attacker._prepare_dynamic_mask_layout((make_checkpoint('block2', 'block3', .1, (14, 14)),), 1)
         schedule = attacker._build_mask_schedule(self.pixels)
         self.assertEqual(tuple(item.checkpoint for item in schedule), ('block2',))
-        initial = model.begin_progressive_forward(attacker._normalize(self.pixels))
+        initial = model.begin_gdi_forward(attacker._normalize(self.pixels))
         with patch.object(attacker, '_projected_gaussian_noise', return_value=torch.ones_like(initial.local_tokens)) as noise, \
-             patch.object(model, 'begin_progressive_forward', wraps=model.begin_progressive_forward) as begin:
+             patch.object(model, 'begin_gdi_forward', wraps=model.begin_gdi_forward) as begin:
             attacker._forward_with_schedule(self.pixels, self.labels, schedule)
         self.assertEqual(noise.call_count, 1)
         self.assertEqual(begin.call_count, 1)
@@ -250,7 +250,7 @@ class ProgressiveAttackTests(unittest.TestCase):
 
     def test_gaussian_noise_uses_iid_rgb_sampling_and_native_projection(self):
         attacker = make_attacker()
-        state = attacker.model.begin_progressive_forward(self.pixels.repeat(2, 1, 1, 1))
+        state = attacker.model.begin_gdi_forward(self.pixels.repeat(2, 1, 1, 1))
         weight = state.rgb_projection_weight.detach()
         batch, count, dimension = state.local_tokens.shape
         torch.manual_seed(SEED)
@@ -265,9 +265,9 @@ class ProgressiveAttackTests(unittest.TestCase):
         self.assertEqual(attacker.parameters()['noise_strength'], .2)
 
 
-    def test_disabling_progressive_drop_skips_schedules_and_keeps_optimization(self):
+    def test_disabling_gdi_drop_skips_schedules_and_keeps_optimization(self):
         attacker = make_attacker(
-            progressive_drop=False, noise_strength=0.0,
+            gdi_drop=False, noise_strength=0.0,
             input_diversity_groups=1, input_diversity_views_per_group=1,
         )
         pixels = self.pixels.clone().requires_grad_(True)
@@ -277,7 +277,7 @@ class ProgressiveAttackTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(gradient).all())
         self.assertGreater(float(gradient.norm()), 0)
         params = attacker.parameters()
-        self.assertFalse(params['progressive_drop_enabled'])
+        self.assertFalse(params['gdi_drop_enabled'])
         self.assertFalse(params['noise_enabled'])
         self.assertEqual(params['sample_checkpoints'], [])
 

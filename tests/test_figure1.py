@@ -18,7 +18,7 @@ from figure1 import (
     extract_layerwise_scores,
     render_heatmap,
 )
-from nets.base import ProgressiveState
+from nets.base import GDIState
 from utils import ImageDataset
 
 
@@ -60,10 +60,10 @@ class ObservationAdapter(nn.Module):
         self.model = ObservationModel()
         self.seen_inputs = []
 
-    def begin_progressive_forward(self, x):
+    def begin_gdi_forward(self, x):
         self.seen_inputs.append(x.clone())
         tokens = self.model.initial_tokens(x)
-        return ProgressiveState(tokens[:, 1:], (14, 14), {"prefix_tokens": tokens[:, :1]})
+        return GDIState(tokens[:, 1:], (14, 14), {"prefix_tokens": tokens[:, :1]})
 
     def forward(self, x):
         return self.model(x)
