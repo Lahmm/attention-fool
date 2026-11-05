@@ -105,52 +105,17 @@ class ProgressiveAttackTests(unittest.TestCase):
         self.assertFalse(torch.equal(first[0].mask, second[0].mask))
 
 
-    def test_independent_views_preserve_each_native_grid_budget(self):
-        attacker = make_attacker(drop_ratio=0.15306122449)
-        for grid, count in (((14, 14), 30), ((7, 7), 8), ((27, 27), 112)):
-            with self.subTest(grid=grid), \
-                 patch.object(attacker.model, 'checkpoint_grid_size', return_value=grid):
-                choice = make_checkpoint('block10', 'block11', .1, grid)
-                attacker._prepare_dynamic_mask_layout((choice,), 1)
-                first = attacker._build_mask_schedule(self.pixels)
-                second = attacker._build_mask_schedule(self.pixels)
-                for schedule in (first, second):
-                    validate_schedule(schedule, batch_size=1)
-                    self.assertEqual((schedule[0].grid_size, schedule[0].count), (grid, count))
-                self.assertFalse(torch.equal(first[0].mask, second[0].mask))
-
-    def test_phase_sampler_assigns_half_the_mass_to_identity(self):
+    def test_phase_preserves_each_native_grid_budget(self):
         attacker = make_attacker()
-        with patch('torch.randint', return_value=torch.arange(6)) as sample:
-            phases = attacker._pick_input_diversity_phases(6)
-        sample.assert_called_once_with(6, (6,), device='cpu')
-        self.assertEqual(phases, [(0, 0), (0, 0), (0, 0), (4, 4), (8, 8), (12, 12)])
-
-    def test_each_view_independently_selects_phase_and_uses_its_own_native_mask(self):
-        attacker = make_attacker(input_diversity_groups=2)
-        phases = [[(0, 0)], [(8, 8)], [(4, 4)], [(0, 0)]]
-        schedules = []
-        build = attacker._build_mask_schedule
-        def capture(values):
-            schedule = build(values)
-            schedules.append(schedule)
-            return schedule
-        with patch.object(attacker, '_pick_input_diversity_phases', side_effect=phases) as sample, \
-             patch.object(attacker, '_build_mask_schedule', side_effect=capture), \
-             patch.object(attacker, '_forward_with_schedule', return_value=torch.tensor(0.)) as forward:
-            losses = list(attacker._iter_attack_losses(self.pixels, self.labels))
-        self.assertEqual(len(losses), 4)
-        self.assertEqual(sample.call_count, 4)
-        for index, call in enumerate(forward.call_args_list):
-            expected = reflect_shift_reference(self.pixels, *phases[index][0])
-            torch.testing.assert_close(call.args[0], expected, rtol=0, atol=0)
-            self.assertIs(call.args[2], schedules[index])
-            validate_schedule(schedules[index], batch_size=1)
-        self.assertFalse(torch.equal(schedules[0][0].mask, schedules[1][0].mask))
-        params = attacker.parameters()
-        self.assertEqual(params['input_diversity_sampling'], 'independent_identity_or_phase_views')
-        self.assertEqual(params['input_diversity_phase_probability'], .5)
-        self.assertEqual(params['mask_schedule_count_per_image'], 8)
+        for grid, count in (((14, 14), 30), ((7, 7), 8), ((27, 27), 112)):
+            with self.subTest(grid=grid):
+                mask = torch.zeros(1, grid[0] * grid[1], dtype=torch.bool)
+                mask[:, :count] = True
+                schedule = (ProgressiveMaskSelection('selected', mask, count, grid),)
+                shifted = attacker._phase_mask_schedule(schedule, [(8, 8)], height=224, width=224)
+                self.assertEqual(tuple(item.count for item in shifted), (count,))
+                self.assertEqual(tuple(item.grid_size for item in shifted), (grid,))
+                validate_schedule(shifted, batch_size=1)
 
     def test_reflect_translation_moves_interior_by_requested_pixels(self):
         original = torch.arange(28 * 28).view(1, 1, 28, 28).float()
@@ -258,41 +223,29 @@ class ProgressiveAttackTests(unittest.TestCase):
         torch.testing.assert_close(first, repeated, rtol=0, atol=0)
 
 
-    def test_zero_phase_preserves_loss_and_pixel_gradient(self):
+    def test_zero_phase_shift_preserves_pixels_and_masks(self):
         attacker = make_attacker(input_diversity_phase_shift_set=((0, 0),))
         schedule = attacker._build_mask_schedule(self.pixels)
-        pixels = self.pixels.clone().requires_grad_(True)
-        shifted = attacker._apply_samplewise_phase_shifts(pixels, [(0, 0)])
-        torch.testing.assert_close(shifted, pixels, rtol=0, atol=0)
-        torch.manual_seed(SEED)
-        original_loss = attacker._forward_with_schedule(pixels, self.labels, schedule)
-        original_gradient = torch.autograd.grad(original_loss, pixels)[0]
-        torch.manual_seed(SEED)
-        shifted_loss = attacker._forward_with_schedule(shifted, self.labels, schedule)
-        shifted_gradient = torch.autograd.grad(shifted_loss, pixels)[0]
-        torch.testing.assert_close(shifted_loss, original_loss, rtol=0, atol=0)
-        torch.testing.assert_close(shifted_gradient, original_gradient, rtol=0, atol=0)
+        shifted = attacker._phase_mask_schedule(
+            schedule, [(0, 0)], height=self.pixels.size(-2), width=self.pixels.size(-1)
+        )
+        for original, transformed in zip(schedule, shifted):
+            self.assertTrue(torch.equal(original.mask, transformed.mask))
+        shifted_pixels = attacker._apply_samplewise_phase_shifts(self.pixels, [(0, 0)])
+        self.assertTrue(torch.equal(shifted_pixels, self.pixels))
 
-    def test_zero_phase_views_have_independent_masks_and_noise(self):
-        attacker = make_attacker(input_diversity_groups=2, input_diversity_phase_shift_set=((0, 0),))
+    def test_zero_shift_pair_keeps_two_independent_noisy_views_per_group(self):
+        attacker = make_attacker(
+            input_diversity_groups=2, input_diversity_phase_shift_set=((0, 0),)
+        )
         pixels = self.pixels.clone().requires_grad_(True)
-        schedules, noises = [], []
-        build, sample_noise = attacker._build_mask_schedule, attacker._strict_opponent_feature_noise
-        def capture_schedule(values):
-            value = build(values)
-            schedules.append(value)
-            return value
-        def capture_noise(state):
-            value = sample_noise(state)
-            noises.append(value)
-            return value
-        with patch.object(attacker, '_build_mask_schedule', side_effect=capture_schedule), \
-             patch.object(attacker, '_strict_opponent_feature_noise', side_effect=capture_noise):
+        with patch.object(attacker, '_build_mask_schedule',
+                          wraps=attacker._build_mask_schedule) as schedules, \
+             patch.object(attacker, '_strict_opponent_feature_noise',
+                          wraps=attacker._strict_opponent_feature_noise) as noise:
             gradient = attacker._attack_gradients(pixels, self.labels)
-        self.assertEqual(len(schedules), 4)
-        self.assertEqual(len(noises), 4)
-        self.assertFalse(torch.equal(schedules[0][0].mask, schedules[1][0].mask))
-        self.assertFalse(torch.equal(noises[0], noises[1]))
+        self.assertEqual(schedules.call_count, 2)
+        self.assertEqual(noise.call_count, 4)
         self.assertTrue(torch.isfinite(gradient).all())
 
     def test_isotropic_rgb_noise_changes_directions_but_keeps_rms(self):

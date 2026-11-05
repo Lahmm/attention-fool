@@ -106,13 +106,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epsilon", type=float, default=16.0 / 255.0)
     parser.add_argument("--step-size", type=float, default=None)
     parser.add_argument("--steps", type=int, default=10)
-    parser.add_argument(
-        "--input-diversity-groups", type=int, default=10,
-        help="View-budget factor; total independent views = groups * views-per-group (maximum 20).",
-    )
+    parser.add_argument("--input-diversity-groups", type=int, default=10)
     parser.add_argument(
         "--input-diversity-views-per-group", type=int, choices=(1, 2), default=2,
-        help="1: original-only ablation; 2: each independent view uses phase with probability 0.5 (default).",
+        help="1: original view only; 2: original and phase views (default).",
     )
     parser.add_argument("--input-diversity-phase-shift-set", type=parse_phase_shift_set, default=((4, 4), (8, 8), (12, 12)))
     parser.add_argument(

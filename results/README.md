@@ -2,9 +2,7 @@
 
 本目录保存 FPR13 ASR、参数、直接 ASR 差值及来源。ASR 为全部对抗样本的 `1 - adversarial accuracy`。当前唯一可执行方法是方向方差比 × 正收缩比例逐图选层与单边界随机 token drop。
 
-## 选择器的已完成配对视图结果
-
-2026-11-05 的执行流程已改为独立 identity/phase 视图，各视图独立抽 native mask；新配置尚无千图测量。以下 ASR 保持旧配对配置身份。
+## 当前方法
 
 [方向方差比 × 正收缩比例](prd_direction_contraction_s42_1000_fpr/README.md) 已完成 seed 42、四源各 1000 图、10 steps、10 groups × 2 views、opponent/FPR13 测量。Overall **89.1673%**、strict **88.7234%**。相对历史最大方差选层，分别高 1.8346、1.8543 个百分点。
 
@@ -15,7 +13,7 @@
 | pit_t | 84.28% | 84.28% |
 | deit_b | 95.30% | 95.30% |
 
-该配对配置归档含 `summary.csv`、52 项逐目标 `per_target.csv`、全部候选频次 `selection_counts.csv`、四源 `runs/` 参数与迁移表、对照原件、源码差异及 provenance。当前方法最初在外部快照执行，2026-11-04 晋升主线，保留实际 `experiment_only` 标签和执行来源，不重标为 i.i.d.。
+当前归档含 `summary.csv`、52 项逐目标 `per_target.csv`、全部候选频次 `selection_counts.csv`、四源 `runs/` 参数与迁移表、对照原件、源码差异及 provenance。当前方法最初在外部快照执行，2026-11-04 晋升主线，保留实际 `experiment_only` 标签和执行来源，不重标为 i.i.d.。
 
 ## 保留的历史选层证据
 

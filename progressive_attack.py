@@ -195,13 +195,40 @@ class ProgressiveRouteDisruptionAttacker:
         flat = tensor.flatten(2)
         return flat.gather(2, indices[:, None].expand(-1, flat.size(1), -1)).view_as(tensor)
 
-    def _pick_input_diversity_phases(self, batch_size: int) -> list[tuple[int, int]]:
-        count = len(self.input_diversity_phase_shift_set)
-        indices = torch.randint(2 * count, (batch_size,), device="cpu").tolist()
-        return [
-            (0, 0) if index < count else self.input_diversity_phase_shift_set[index - count]
-            for index in indices
-        ]
+    def _pick_input_diversity_phases(
+        self, batch_size: int, device: torch.device
+    ) -> list[tuple[int, int]]:
+        indices = torch.randint(
+            len(self.input_diversity_phase_shift_set), (batch_size,), device="cpu"
+        ).tolist()
+        return [self.input_diversity_phase_shift_set[index] for index in indices]
+
+    def _phase_mask_schedule(
+        self,
+        schedule: MaskSchedule,
+        phases: list[tuple[int, int]],
+        *,
+        height: int,
+        width: int,
+    ) -> MaskSchedule:
+        selections = []
+        for item in schedule:
+            image_mask = F.interpolate(
+                item.mask[:, None].to(torch.float32).view(item.mask.size(0), 1, *item.grid_size),
+                size=(height, width), mode="nearest",
+            )
+            shifted_image = self._apply_samplewise_phase_shifts(image_mask, phases)
+            occupancy = F.adaptive_avg_pool2d(shifted_image, item.grid_size).flatten(1)
+            indices = torch.argsort(occupancy, dim=1, descending=True, stable=True)[:, : item.count]
+            shifted = torch.zeros_like(item.mask)
+            shifted.scatter_(1, indices, True)
+            if item.active_samples is not None:
+                shifted &= item.active_samples[:, None]
+            selections.append(
+                ProgressiveMaskSelection(item.checkpoint, shifted.detach(), item.count, item.grid_size,
+                                         item.active_samples)
+            )
+        return tuple(selections)
 
     def _strict_opponent_feature_noise(self, state) -> torch.Tensor:
         state.validate()
@@ -260,13 +287,27 @@ class ProgressiveRouteDisruptionAttacker:
     def _iter_attack_losses(
         self, pixels: torch.Tensor, labels: torch.Tensor
     ) -> Iterator[torch.Tensor]:
-        for _ in range(self.input_diversity_groups * self.input_diversity_views_per_group):
-            schedule = self._build_mask_schedule(pixels.detach()) if self.progressive_drop else None
-            view = pixels
-            if self.input_diversity_views_per_group == 2:
-                phases = self._pick_input_diversity_phases(pixels.size(0))
-                view = self._apply_samplewise_phase_shifts(pixels, phases)
-            yield self._forward_with_schedule(view, labels, schedule)
+        for _ in range(self.input_diversity_groups):
+            schedule = (
+                self._build_mask_schedule(pixels.detach())
+                if self.progressive_drop else None
+            )
+            phases = (
+                self._pick_input_diversity_phases(pixels.size(0), pixels.device)
+                if self.input_diversity_views_per_group == 2
+                else None
+            )
+            yield self._forward_with_schedule(pixels, labels, schedule)
+            if self.input_diversity_views_per_group == 1:
+                continue
+            shifted_schedule = (
+                self._phase_mask_schedule(
+                    schedule, phases, height=pixels.size(-2), width=pixels.size(-1)
+                )
+                if schedule is not None else None
+            )
+            shifted_pixels = self._apply_samplewise_phase_shifts(pixels, phases)
+            yield self._forward_with_schedule(shifted_pixels, labels, shifted_schedule)
 
     def _attack_gradients(
         self, pixels: torch.Tensor, labels: torch.Tensor
@@ -317,8 +358,7 @@ class ProgressiveRouteDisruptionAttacker:
         return self._normalize_output(adversarial)
 
     def parameters(self):
-        views = self.input_diversity_groups * self.input_diversity_views_per_group
-        schedules = self.steps * views if self.progressive_drop else 0
+        schedules = self.steps * self.input_diversity_groups if self.progressive_drop else 0
         params = {
             "attack_method": "progressive_route_disruption",
             "seed": SEED,
@@ -334,15 +374,13 @@ class ProgressiveRouteDisruptionAttacker:
             "noise_direction_variances": (
                 list(self.noise_direction_variances) if self.opponent_noise_strength > 0 else []
             ),
-            "input_diversity_sampling": "independent_identity_or_phase_views",
-            "input_diversity_phase_probability": 0.5 if self.input_diversity_views_per_group == 2 else 0.0,
             "input_diversity_groups": self.input_diversity_groups,
             "input_diversity_views_per_group": self.input_diversity_views_per_group,
             "input_diversity_phase_shift_set": (
                 [list(shift) for shift in self.input_diversity_phase_shift_set]
                 if self.input_diversity_views_per_group == 2 else []
             ),
-            "input_diversity_total_views": views,
+            "input_diversity_total_views": self.input_diversity_groups * self.input_diversity_views_per_group,
             "mask_schedule_count_per_image": schedules,
             "checkpoint_mask_selection_count_per_image": schedules,
             "model_mean": self.model_mean.flatten().tolist(),
