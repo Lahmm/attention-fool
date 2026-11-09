@@ -16,14 +16,15 @@
     "A2_block11",
     "A2_block12",
     "B1",
-    "B2"
+    "B2",
+    "B3"
   ],
   "failed": [],
   "total": 20,
-  "current_case": "B2",
+  "current_case": "B3",
   "controller_pid": 320288,
   "started_utc": "2026-11-09T14:54:36.610078+00:00",
   "push_failures": [],
-  "updated_utc": "2026-11-09T20:38:59.388796+00:00",
+  "updated_utc": "2026-11-09T21:00:30.057591+00:00",
   "stage": "archived"
 }
