@@ -18,14 +18,15 @@
     "B1",
     "B2",
     "B3",
-    "C1"
+    "C1",
+    "C2"
   ],
   "failed": [],
   "total": 20,
-  "current_case": "C1",
+  "current_case": "C2",
   "controller_pid": 320288,
   "started_utc": "2026-11-09T14:54:36.610078+00:00",
   "push_failures": [],
-  "updated_utc": "2026-11-09T21:04:26.497532+00:00",
+  "updated_utc": "2026-11-09T21:10:20.109557+00:00",
   "stage": "archived"
 }
