@@ -1,5 +1,5 @@
 {
-  "status": "running",
+  "status": "complete",
   "completed": [
     "A0",
     "A1",
@@ -24,10 +24,11 @@
   ],
   "failed": [],
   "total": 20,
-  "current_case": "C3",
+  "current_case": null,
   "controller_pid": 320288,
   "started_utc": "2026-11-09T14:54:36.610078+00:00",
   "push_failures": [],
-  "updated_utc": "2026-11-09T21:22:08.569592+00:00",
-  "stage": "archived"
+  "updated_utc": "2026-11-09T21:22:14.501480+00:00",
+  "stage": "finished",
+  "finished_utc": "2026-11-09T21:22:14.501475+00:00"
 }
