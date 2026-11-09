@@ -1,0 +1,15 @@
+{
+  "updated_utc": "2026-11-09T14:54:42.236477+00:00",
+  "source_commit": "8a5e5528bf4ba4a67788a2908735d182b3cb71be",
+  "run_id": "gdi_vit_ablation_s42_1000_fpr_20261109T145427Z",
+  "completed": [],
+  "asr_definition": "1 - adversarial accuracy over all adversarial samples",
+  "strict_definition": "arithmetic mean over 12 FPR13 targets excluding vit_base_patch16_224",
+  "archive_sha256": {
+    "README.md": "cae13e48754a5d3ec3846a3380ed48847753f1d96372a8ae3fc7941c408a0341",
+    "execution_manifest.json": "3d37a7ff9a6a14eb6d2e362025185f0df0477a71ad61515c460fdb87812e6415",
+    "run_status.json": "cc45b96ab75bdefe9957585e63cac997413d08afe70c6f826479611286cdbea0",
+    "samples.json": "b63bca582f0ac11ab2fa14db8ea3275d8eeeba6eeac5cfccb762c4d412b40882",
+    "weights.json": "f2c960783c599389c4a25356d4ecb5750274c2f5153a39956165d4ef5771bbc2"
+  }
+}
