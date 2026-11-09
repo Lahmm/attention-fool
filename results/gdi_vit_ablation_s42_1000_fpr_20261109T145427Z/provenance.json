@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-09T19:34:11.055677+00:00",
+  "updated_utc": "2026-11-09T19:55:43.381491+00:00",
   "source_commit": "8a5e5528bf4ba4a67788a2908735d182b3cb71be",
   "run_id": "gdi_vit_ablation_s42_1000_fpr_20261109T145427Z",
   "completed": [
@@ -15,15 +15,16 @@
     "A2_block08",
     "A2_block09",
     "A2_block10",
-    "A2_block11"
+    "A2_block11",
+    "A2_block12"
   ],
   "asr_definition": "1 - adversarial accuracy over all adversarial samples",
   "strict_definition": "arithmetic mean over 12 FPR13 targets excluding vit_base_patch16_224",
   "archive_sha256": {
-    "README.md": "204d7abf8b24c54f986953ac4e357eb0733f03bedf9d54574f2baddc4e313edf",
+    "README.md": "e96e156aeff10fa57ccfe0f0448ecb93df68ef7aed9fecd9bf1acd8647587779",
     "execution_manifest.json": "3d37a7ff9a6a14eb6d2e362025185f0df0477a71ad61515c460fdb87812e6415",
-    "per_target.csv": "c4dd101dbce5d030afd9830dfdbba53c59cf417dcf60a495c98ada93af56d6cc",
-    "run_status.json": "8edbeefe329dafaa12e542f2f286aabc45cbbaac381b9e80b82bbdb92af4afa4",
+    "per_target.csv": "74738cced2c4b46165e564dc70838d9f3379ed87afdf3e7ad51e64fbc4018f54",
+    "run_status.json": "1d3d3a49184e866227f5ec1d40c330d2e92d18c53e6d39bc5d54b5ce721a838a",
     "runs/A0/adversarial_images.sha256": "aa6391db6357a78881f1d696b618b7df618ff78e4b1c099eda19c3939e390b4e",
     "runs/A0/attack.exitcode": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
     "runs/A0/attack.log": "ae731f881225ceb10e0c2f3d271dfa6e7cba90b3c1599bd66df451b078e7943a",
@@ -154,8 +155,18 @@
     "runs/A2_block11/predictions.json": "e2ec1d79ce24f9c1f65da1a8ae58b523ea691d4b2f074d5a5da0c8886a3cdc09",
     "runs/A2_block11/transfer.csv": "529dc2b2d5336b8e4a67c06b811a154addf115a9ef17bcddf51543e7340c0903",
     "runs/A2_block11/transfer.json": "d2380aed191397a67c85a7ae88fe2aece449629efdcde29186701359ec4c5e00",
+    "runs/A2_block12/adversarial_images.sha256": "aefd9d1ee6dcbc964ab5bcf55287ba3aff58836af8881365a6cda51ef0ab6e3d",
+    "runs/A2_block12/attack.exitcode": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "runs/A2_block12/attack.log": "15aa79fc8dc923aec18b6d58a76a20c40ea5f499d34b89de53d02e21d0075f93",
+    "runs/A2_block12/attack_params.json": "36501359ff5f250f885b306400b00df0fe7d1e5ac9ba330ca223d03b66b90b8c",
+    "runs/A2_block12/evaluation.exitcode": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "runs/A2_block12/evaluation.log": "7df85bed9588ad17d07e25e3787dba36b394da232d123b9cbedcda25b2278d3a",
+    "runs/A2_block12/execution.json": "dea4336395f77ebd95e55d2e31bb660a465c1dbf9cc95e4dd31d8c8e0afd6081",
+    "runs/A2_block12/predictions.json": "94b3f967d8c9ff316475b0eb78a54dd19c473355f26952d2d71858801f8d884e",
+    "runs/A2_block12/transfer.csv": "e4e90c0c1cea3f0e70a7c2ec1bc20d3a748d3e47c345db00a8961ba38a527a20",
+    "runs/A2_block12/transfer.json": "5b44da5d0c744a28b04b65e228687677d8e45dc50a623342ec133998835b97aa",
     "samples.json": "b63bca582f0ac11ab2fa14db8ea3275d8eeeba6eeac5cfccb762c4d412b40882",
-    "summary.csv": "6925026f33367c8147c9b78eab2cab792c31d69e937bfecf135b2b76ae6f6414",
+    "summary.csv": "dee951b0c08005d131d052b0a1b940812b396d475aff8a5338bedba8c863a7ac",
     "weights.json": "f2c960783c599389c4a25356d4ecb5750274c2f5153a39956165d4ef5771bbc2"
   }
 }
