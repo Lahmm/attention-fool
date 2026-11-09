@@ -3,14 +3,15 @@
   "completed": [
     "A0",
     "A1",
-    "A2_block01"
+    "A2_block01",
+    "A2_block02"
   ],
   "failed": [],
   "total": 20,
-  "current_case": "A2_block01",
+  "current_case": "A2_block02",
   "controller_pid": 320288,
   "started_utc": "2026-11-09T14:54:36.610078+00:00",
   "push_failures": [],
-  "updated_utc": "2026-11-09T15:58:56.763632+00:00",
+  "updated_utc": "2026-11-09T16:20:19.254846+00:00",
   "stage": "archived"
 }
