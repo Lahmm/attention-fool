@@ -43,10 +43,17 @@ python transfer_eval.py --image-dir outputs/attack/gdi_vit_new --no-tf32
 | `--input-diversity-phase-shift-set` | 默认 `4,4;8,8;12,12` |
 | `--noise-strength` | 基础特征增强强度 β，0 关闭，默认使用适配器设置 |
 | `--no-gdi-drop` | 无 drop 消融，跳过干净选层 |
+| `--fixed-block K` | ViT-B/16 A2 固定选层消融，K=1–12；第 K 个 block 输入对应内部 `block{K-1}`，与 `--no-gdi-drop` 互斥 |
 | `--epsilon`、`--step-size`、`--steps` | 扰动预算、步长和步数 |
 | `--image-dir`、`--annotations-path`、`--max-attacked-samples` | 输入、标签和样本数 |
 
 攻击 batch 默认 96，上表列出已有测量的实际 batch。`attack_params.json` 保存当前参数、逐图选择、几何统计、实际网格与清零数量。
+
+ViT-B/16 的固定选层消融使用 `--fixed-block K`，全部样本在第 K 个 block 输入处干预，跳过干净前向选层；每个 step/group 仍重新抽样 token 位置，并使用空间对应的 phase mask。省略该参数使用逐图 GDI 选层。固定模式记录 `checkpoint_selection_mode=fixed`、`fixed_block`、`fixed_checkpoint`、逐图边界和实际清零数量，不记录几何分数。示例为第 11 个 block（内部 `block10`）：
+
+```bash
+python main.py --whitebox-model vit_base_patch16_224 --fixed-block 11 --batch-size 48 --noise-strength 0.2 --drop-ratio 0.102040816326 --output-dir outputs/attack/gdi_vit_fixed11_new
+```
 
 ## FPR13 结果
 

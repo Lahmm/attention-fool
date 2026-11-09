@@ -100,7 +100,7 @@ def attack_all_samples(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="GDI dynamic single-boundary attack")
+    parser = argparse.ArgumentParser(description="GDI single-boundary attack and ViT fixed-block ablation")
     parser.add_argument("--whitebox-model", choices=WHITEBOX_MODEL_CHOICES, default=DEFAULT_MODEL_NAME)
     parser.add_argument("--max-attacked-samples", type=int, default=1000)
     parser.add_argument("--epsilon", type=float, default=16.0 / 255.0)
@@ -112,16 +112,21 @@ def parse_args() -> argparse.Namespace:
         help="1: original view only; 2: original and phase views (default).",
     )
     parser.add_argument("--input-diversity-phase-shift-set", type=parse_phase_shift_set, default=((4, 4), (8, 8), (12, 12)))
-    parser.add_argument(
+    boundary_options = parser.add_mutually_exclusive_group()
+    boundary_options.add_argument(
         "--no-gdi-drop",
         action="store_true",
         help="Disable checkpoint token drops for mechanism ablations.",
+    )
+    boundary_options.add_argument(
+        "--fixed-block", type=int, choices=range(1, 13), default=None,
+        help="ViT-B/16 ablation: drop at the input of block K (1-12), resampling token positions.",
     )
     parser.add_argument(
         "--drop-ratio",
         type=float,
         default=None,
-        help="Per-image local-token drop ratio at the dynamically selected native boundary.",
+        help="Local-token drop ratio at the selected native boundary.",
     )
     parser.add_argument(
         "--noise-strength",
@@ -135,7 +140,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--prefetch-factor", type=int, default=4)
     parser.add_argument("--output-dir", default="outputs/attack/gdi")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.fixed_block is not None and args.whitebox_model != "vit_base_patch16_224":
+        parser.error("--fixed-block is supported only for the ViT-B/16 ablation")
+    return args
 
 
 def main(args: argparse.Namespace) -> None:
@@ -156,6 +164,7 @@ def main(args: argparse.Namespace) -> None:
     attacker = GDIAttacker(
         model=model,
         gdi_drop=not args.no_gdi_drop,
+        fixed_block=args.fixed_block,
         drop_ratio=args.drop_ratio,
         noise_strength=args.noise_strength,
         epsilon=args.epsilon,
