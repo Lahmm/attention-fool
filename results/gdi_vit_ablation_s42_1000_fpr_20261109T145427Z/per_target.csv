@@ -1,0 +1,14 @@
+case,target,included_in_strict,correct,total,asr,difference_from_A0_pp
+A0,vit_base_patch16_224,False,0,1000,1.0,0.0
+A0,cait_s24_224,True,58,1000,0.942,0.0
+A0,pit_b_224,True,108,1000,0.892,0.0
+A0,visformer_small,True,119,1000,0.881,0.0
+A0,swin_tiny_patch4_window7_224,True,112,1000,0.888,0.0
+A0,deit_tiny_patch16_224,True,70,1000,0.9299999999999999,0.0
+A0,coat_tiny,True,165,1000,0.835,0.0
+A0,resnet18,True,184,1000,0.8160000000000001,0.0
+A0,vgg16,True,169,1000,0.831,0.0
+A0,densenet121,True,152,1000,0.848,0.0
+A0,efficientnet_b0,True,118,1000,0.882,0.0
+A0,mobilenet_v3_small,True,178,1000,0.8220000000000001,0.0
+A0,resnext50_32x4d,True,196,1000,0.804,0.0

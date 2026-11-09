@@ -1,0 +1,2 @@
+case,selection_mode,fixed_block,drop_count,groups,views_per_group,num_images,overall_asr,strict_asr,strict_difference_from_A0_pp
+A0,gdi,,20,10,2,1000,0.8746923076923078,0.8642500000000001,0.0
