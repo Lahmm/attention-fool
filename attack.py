@@ -37,13 +37,14 @@ MaskSchedule = tuple[GDIMaskSelection, ...]
 
 
 class GDIAttacker:
-    """Select one native input boundary per clean image and resample token masks."""
+    """Use one input boundary per image and resample token masks, with a ViT fixed-block ablation."""
 
     def __init__(
         self,
         model,
         *,
         gdi_drop: bool = True,
+        fixed_block: int | None = None,
         drop_ratio: float | None = None,
         noise_strength: float | None = None,
         epsilon: float = 16.0 / 255.0,
@@ -58,6 +59,13 @@ class GDIAttacker:
         ),
         device: torch.device | None = None,
     ) -> None:
+        if fixed_block is not None:
+            if type(fixed_block) is not int or not 1 <= fixed_block <= 12:
+                raise ValueError("fixed block must be an integer from 1 to 12.")
+            if not gdi_drop:
+                raise ValueError("fixed block cannot be combined with disabled GDI drops.")
+            if model.model_name != "vit_base_patch16_224":
+                raise ValueError("fixed block is supported only for the ViT-B/16 ablation.")
         if epsilon < 0 or steps <= 0:
             raise ValueError("epsilon must be non-negative and steps must be positive.")
         if step_size is not None and step_size <= 0:
@@ -82,6 +90,7 @@ class GDIAttacker:
         self.model = model
         self.model.eval()
         self.gdi_drop = bool(gdi_drop)
+        self.fixed_block = fixed_block
         self.device = device if device is not None else DEVICE
         self.drop_ratio = ratio
         self.noise_strength = float(noise_strength)
@@ -162,6 +171,20 @@ class GDIAttacker:
             active.index_fill_(0, indices, True)
             layout.append((checkpoint, grids[checkpoint], indices, active))
         self._dynamic_mask_layout = tuple(layout)
+
+    def _prepare_fixed_mask_layout(self, batch_size: int) -> None:
+        checkpoint = f"block{self.fixed_block - 1}"
+        grid = self.model.checkpoint_grid_size(checkpoint)
+        indices = torch.arange(batch_size, device=self.device)
+        active = torch.ones(batch_size, device=self.device, dtype=torch.bool)
+        self._dynamic_mask_layout = ((checkpoint, grid, indices, active),)
+        count = max(1, round(math.prod(grid) * self.drop_ratio))
+        offset = len(self.checkpoint_selections)
+        self.checkpoint_selections.extend({
+            "sample_index": offset + index, "checkpoint": checkpoint,
+            "grid_size": list(grid), "drop_count": count,
+            "actual_drop_ratio": count / math.prod(grid),
+        } for index in range(batch_size))
 
     def _apply_samplewise_phase_shifts(
         self, tensor: torch.Tensor, phases: list[tuple[int, int]]
@@ -306,7 +329,9 @@ class GDIAttacker:
         adversarial = clean.clone()
         momentum = torch.zeros_like(adversarial)
         try:
-            if self.gdi_drop:
+            if self.fixed_block is not None:
+                self._prepare_fixed_mask_layout(clean.size(0))
+            elif self.gdi_drop:
                 with torch.no_grad():
                     choices = self.model.select_contraction_checkpoints(self._normalize(clean))
                 self._prepare_dynamic_mask_layout(choices, clean.size(0))
@@ -337,6 +362,7 @@ class GDIAttacker:
 
     def parameters(self):
         schedules = self.steps * self.input_diversity_groups if self.gdi_drop else 0
+        mode = "disabled" if not self.gdi_drop else "fixed" if self.fixed_block is not None else "gdi"
         params = {
             "attack_method": "geometry_guided_depth_intervention",
             "seed": SEED,
@@ -346,6 +372,9 @@ class GDIAttacker:
             "steps": self.steps,
             "momentum_decay": 1.0,
             "gdi_drop_enabled": self.gdi_drop,
+            "checkpoint_selection_mode": mode,
+            "fixed_block": self.fixed_block,
+            "fixed_checkpoint": f"block{self.fixed_block - 1}" if self.fixed_block is not None else None,
             "noise_enabled": self.noise_strength > 0,
             "noise_strength": self.noise_strength,
             "noise_structure": "isotropic_rgb" if self.noise_strength > 0 else "none",
@@ -381,6 +410,17 @@ class GDIAttacker:
             "checkpoint_histogram": dict(Counter(item["checkpoint"] for item in self.checkpoint_selections)),
             "sample_checkpoints": list(self.checkpoint_selections),
         })
+        if mode != "gdi":
+            params.update({
+                "checkpoint_selection_enabled": False,
+                "checkpoint_selection": (
+                    "fixed block input; shared by all images; resample token positions per step/group"
+                    if mode == "fixed" else "disabled; no token drops or clean-image layer selection"
+                ),
+                "checkpoint_selection_metric": None,
+                "checkpoint_score_normalization": None,
+                "checkpoint_tie_break": None,
+            })
         reference = getattr(self.model, "checkpoint_score_reference", None)
         if reference is not None:
             params["patch_score_reference"] = reference

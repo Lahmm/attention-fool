@@ -1,0 +1,126 @@
+[
+  {
+    "model": "vit_base_patch16_224",
+    "loader": "timm pretrained",
+    "hf_hub_id": "timm/vit_base_patch16_224.augreg2_in21k_ft_in1k",
+    "revision": "063c6c38a5d8510b2e57df480445e94b231dad2c",
+    "path": "/root/autodl-tmp/attention-fool/data/huggingface/hub/models--timm--vit_base_patch16_224.augreg2_in21k_ft_in1k/snapshots/063c6c38a5d8510b2e57df480445e94b231dad2c/model.safetensors",
+    "resolved_path": "/root/autodl-tmp/attention-fool/data/huggingface/hub/models--timm--vit_base_patch16_224.augreg2_in21k_ft_in1k/blobs/32aa17d6e17b43500f531d5f6dc9bc93e56ed8841b8a75682e1bb295d722405b",
+    "sha256": "32aa17d6e17b43500f531d5f6dc9bc93e56ed8841b8a75682e1bb295d722405b",
+    "bytes": 346284714
+  },
+  {
+    "model": "cait_s24_224",
+    "loader": "timm pretrained",
+    "hf_hub_id": "timm/cait_s24_224.fb_dist_in1k",
+    "revision": "c5a28e40a114b1075123e87f0edeb5fdd7252659",
+    "path": "/root/autodl-tmp/attention-fool/data/huggingface/hub/models--timm--cait_s24_224.fb_dist_in1k/snapshots/c5a28e40a114b1075123e87f0edeb5fdd7252659/model.safetensors",
+    "resolved_path": "/root/autodl-tmp/attention-fool/data/huggingface/hub/models--timm--cait_s24_224.fb_dist_in1k/blobs/ec4c0b0e1851c9b1850709caf5cbbcb0ecf121efb4317eedd99ceb0e0e0f4ddb",
+    "sha256": "ec4c0b0e1851c9b1850709caf5cbbcb0ecf121efb4317eedd99ceb0e0e0f4ddb",
+    "bytes": 187709078
+  },
+  {
+    "model": "pit_b_224",
+    "loader": "timm pretrained",
+    "hf_hub_id": "timm/pit_b_224.in1k",
+    "revision": "f46cba2050d0bb3f6faa0e5fcf5e8edda35f1436",
+    "path": "/root/autodl-tmp/attention-fool/data/huggingface/hub/models--timm--pit_b_224.in1k/snapshots/f46cba2050d0bb3f6faa0e5fcf5e8edda35f1436/model.safetensors",
+    "resolved_path": "/root/autodl-tmp/attention-fool/data/huggingface/hub/models--timm--pit_b_224.in1k/blobs/32e9e5011a0e7785c1c567299599cbfc6ab7de79715dd387e0f1f36b1cfbdc79",
+    "sha256": "32e9e5011a0e7785c1c567299599cbfc6ab7de79715dd387e0f1f36b1cfbdc79",
+    "bytes": 295077538
+  },
+  {
+    "model": "visformer_small",
+    "loader": "timm pretrained",
+    "hf_hub_id": "timm/visformer_small.in1k",
+    "revision": "7c2f2cde5cc711870d60823dbc4d9f70bf6df6b8",
+    "path": "/root/autodl-tmp/attention-fool/data/huggingface/hub/models--timm--visformer_small.in1k/snapshots/7c2f2cde5cc711870d60823dbc4d9f70bf6df6b8/model.safetensors",
+    "resolved_path": "/root/autodl-tmp/attention-fool/data/huggingface/hub/models--timm--visformer_small.in1k/blobs/322de7c0427d7e5d797cebdd23230c82829981e544b0597022464faf963950b8",
+    "sha256": "322de7c0427d7e5d797cebdd23230c82829981e544b0597022464faf963950b8",
+    "bytes": 160999326
+  },
+  {
+    "model": "swin_tiny_patch4_window7_224",
+    "loader": "timm pretrained",
+    "hf_hub_id": "timm/swin_tiny_patch4_window7_224.ms_in1k",
+    "revision": "4cc3a7275b50b53a7bec45f32c236ebe64227cff",
+    "path": "/root/autodl-tmp/attention-fool/data/huggingface/hub/models--timm--swin_tiny_patch4_window7_224.ms_in1k/snapshots/4cc3a7275b50b53a7bec45f32c236ebe64227cff/model.safetensors",
+    "resolved_path": "/root/autodl-tmp/attention-fool/data/huggingface/hub/models--timm--swin_tiny_patch4_window7_224.ms_in1k/blobs/fb01861f793143135fa0d6cd97b1631e4b33eaa3ee162bbea9e62de1c76ebac1",
+    "sha256": "fb01861f793143135fa0d6cd97b1631e4b33eaa3ee162bbea9e62de1c76ebac1",
+    "bytes": 114286722
+  },
+  {
+    "model": "deit_tiny_patch16_224",
+    "loader": "timm pretrained",
+    "hf_hub_id": "timm/deit_tiny_patch16_224.fb_in1k",
+    "revision": "80e968688553f219e4a86f940ed945a23709c16f",
+    "path": "/root/autodl-tmp/attention-fool/data/huggingface/hub/models--timm--deit_tiny_patch16_224.fb_in1k/snapshots/80e968688553f219e4a86f940ed945a23709c16f/model.safetensors",
+    "resolved_path": "/root/autodl-tmp/attention-fool/data/huggingface/hub/models--timm--deit_tiny_patch16_224.fb_in1k/blobs/21d4764d94f6c3ffdb6da3581115a0a1ee2d505537d96883b540e54766407c9e",
+    "sha256": "21d4764d94f6c3ffdb6da3581115a0a1ee2d505537d96883b540e54766407c9e",
+    "bytes": 22883348
+  },
+  {
+    "model": "coat_tiny",
+    "loader": "timm pretrained",
+    "hf_hub_id": "timm/coat_tiny.in1k",
+    "revision": "7889262346082ca23747a1a9ff768e45d22bcb4f",
+    "path": "/root/autodl-tmp/attention-fool/data/huggingface/hub/models--timm--coat_tiny.in1k/snapshots/7889262346082ca23747a1a9ff768e45d22bcb4f/pytorch_model.bin",
+    "resolved_path": "/root/autodl-tmp/attention-fool/data/huggingface/hub/models--timm--coat_tiny.in1k/blobs/b480616d2911f292e14fd04d3806a9c0ab9079767f1d6f706abe111f1dd76c35",
+    "sha256": "b480616d2911f292e14fd04d3806a9c0ab9079767f1d6f706abe111f1dd76c35",
+    "bytes": 22149797
+  },
+  {
+    "model": "resnet18",
+    "loader": "torchvision DEFAULT",
+    "url": "https://download.pytorch.org/models/resnet18-f37072fd.pth",
+    "path": "/root/autodl-tmp/attention-fool/data/torch/hub/checkpoints/resnet18-f37072fd.pth",
+    "resolved_path": "/root/autodl-tmp/attention-fool/data/torch/hub/checkpoints/resnet18-f37072fd.pth",
+    "sha256": "f37072fd47e89c5e827621c5baffa7500819f7896bbacec160b1a16c560e07ec",
+    "bytes": 46830571
+  },
+  {
+    "model": "vgg16",
+    "loader": "torchvision DEFAULT",
+    "url": "https://download.pytorch.org/models/vgg16-397923af.pth",
+    "path": "/root/autodl-tmp/attention-fool/data/torch/hub/checkpoints/vgg16-397923af.pth",
+    "resolved_path": "/root/autodl-tmp/attention-fool/data/torch/hub/checkpoints/vgg16-397923af.pth",
+    "sha256": "397923af8e79cdbb6a7127f12361acd7a2f83e06b05044ddf496e83de57a5bf0",
+    "bytes": 553433881
+  },
+  {
+    "model": "densenet121",
+    "loader": "torchvision DEFAULT",
+    "url": "https://download.pytorch.org/models/densenet121-a639ec97.pth",
+    "path": "/root/autodl-tmp/attention-fool/data/torch/hub/checkpoints/densenet121-a639ec97.pth",
+    "resolved_path": "/root/autodl-tmp/attention-fool/data/torch/hub/checkpoints/densenet121-a639ec97.pth",
+    "sha256": "a639ec97d7c33b07ae66f0b5fb7d0192f95a3b11b7576c66c0126c2a727c4395",
+    "bytes": 32342954
+  },
+  {
+    "model": "efficientnet_b0",
+    "loader": "torchvision DEFAULT",
+    "url": "https://download.pytorch.org/models/efficientnet_b0_rwightman-7f5810bc.pth",
+    "path": "/root/autodl-tmp/attention-fool/data/torch/hub/checkpoints/efficientnet_b0_rwightman-7f5810bc.pth",
+    "resolved_path": "/root/autodl-tmp/attention-fool/data/torch/hub/checkpoints/efficientnet_b0_rwightman-7f5810bc.pth",
+    "sha256": "7f5810bc96def8f7552d5b7e68d53c4786f81167d28291b21c0d90e1fca14934",
+    "bytes": 21444401
+  },
+  {
+    "model": "mobilenet_v3_small",
+    "loader": "torchvision DEFAULT",
+    "url": "https://download.pytorch.org/models/mobilenet_v3_small-047dcff4.pth",
+    "path": "/root/autodl-tmp/attention-fool/data/torch/hub/checkpoints/mobilenet_v3_small-047dcff4.pth",
+    "resolved_path": "/root/autodl-tmp/attention-fool/data/torch/hub/checkpoints/mobilenet_v3_small-047dcff4.pth",
+    "sha256": "047dcff4addef86ea5bc2eff13c9614dc11f47ab1160d0a71a25e7db994f4e1f",
+    "bytes": 10306551
+  },
+  {
+    "model": "resnext50_32x4d",
+    "loader": "torchvision DEFAULT",
+    "url": "https://download.pytorch.org/models/resnext50_32x4d-1a0047aa.pth",
+    "path": "/root/autodl-tmp/attention-fool/data/torch/hub/checkpoints/resnext50_32x4d-1a0047aa.pth",
+    "resolved_path": "/root/autodl-tmp/attention-fool/data/torch/hub/checkpoints/resnext50_32x4d-1a0047aa.pth",
+    "sha256": "1a0047aaa8b5f4685983624fae23f335fb44c300dd448d80ed9ed34ba584546d",
+    "bytes": 100488385
+  }
+]

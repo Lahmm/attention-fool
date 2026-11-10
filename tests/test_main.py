@@ -33,6 +33,19 @@ class MainTests(unittest.TestCase):
                 self.assertEqual(args.input_diversity_views_per_group, views)
                 self.assertEqual(args.output_dir, 'outputs/attack/gdi')
         self.assertEqual(SEED, 42)
+        self.assertIsNone(args.fixed_block)
+
+    def test_fixed_block_cli_accepts_candidates_and_rejects_conflicts(self):
+        for block in range(1, 13):
+            with self.subTest(block=block), patch.object(sys, 'argv', ['main.py', '--fixed-block', str(block)]):
+                self.assertEqual(main.parse_args().fixed_block, block)
+        for options in (['--fixed-block', '0'], ['--fixed-block', '13'],
+                        ['--fixed-block', '1.5'], ['--fixed-block', '1', '--no-gdi-drop'],
+                        *(['--fixed-block', '1', '--whitebox-model', name] for name in
+                          ('cait_s24_224', 'pit_ti_224', 'deit_base_distilled_patch16_224'))):
+            with self.subTest(options=options), redirect_stderr(StringIO()), \
+                 patch.object(sys, 'argv', ['main.py', *options]), self.assertRaises(SystemExit):
+                main.parse_args()
 
     def test_mechanism_ablation_switches_are_available(self):
         with patch.object(sys, 'argv', ['main.py', '--no-gdi-drop',
@@ -85,6 +98,37 @@ class MainTests(unittest.TestCase):
         for directory in ('.', 'outputs/attack', '/private/tmp'):
             with self.subTest(directory=directory), self.assertRaises(ValueError):
                 main.validate_output_dir(directory)
+
+    def test_fixed_block_records_images_across_batches_without_geometry(self):
+        model = make_model()
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(sys, 'argv', ['main.py', '--fixed-block', '11', '--steps', '1',
+                                      '--input-diversity-groups', '1', '--max-attacked-samples', '3']):
+            with patch.object(main, 'validate_output_dir', return_value=Path(directory)), \
+                 patch.object(main, 'load_data', return_value=DataLoader(IndexedDataset(), batch_size=2)), \
+                 patch.object(main, 'DEVICE', torch.device('cpu')), \
+                 patch.object(main, 'build_whitebox_model', return_value=model), \
+                 patch.object(model, 'select_contraction_checkpoints', side_effect=AssertionError('selection called')):
+                main.main(main.parse_args())
+            params = json.loads((Path(directory) / 'attack_params.json').read_text())
+            self.assertEqual(params['num_images'], 3)
+            self.assertEqual(params['checkpoint_selection_mode'], 'fixed')
+            self.assertEqual(params['fixed_block'], 11)
+            self.assertEqual(params['fixed_checkpoint'], 'block10')
+            self.assertTrue(params['gdi_drop_enabled'])
+            self.assertFalse(params['checkpoint_selection_enabled'])
+            self.assertIsNone(params['checkpoint_selection_metric'])
+            self.assertIsNone(params['checkpoint_score_normalization'])
+            self.assertIsNone(params['checkpoint_tie_break'])
+            self.assertEqual(params['checkpoint_histogram'], {'block10': 3})
+            self.assertEqual([row['image_name'] for row in params['sample_checkpoints']],
+                             ['image_0.png', 'image_1.png', 'image_2.png'])
+            for index, row in enumerate(params['sample_checkpoints']):
+                self.assertEqual(row, {
+                    'sample_index': index, 'image_name': f'image_{index}.png',
+                    'checkpoint': 'block10', 'grid_size': [14, 14],
+                    'drop_count': 20, 'actual_drop_ratio': 20 / 196,
+                })
 
     def test_dynamic_metadata_tracks_each_image_across_batches(self):
         model = make_model()

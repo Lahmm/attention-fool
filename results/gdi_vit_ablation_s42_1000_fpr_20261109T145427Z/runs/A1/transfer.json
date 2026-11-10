@@ -1,0 +1,66 @@
+{
+  "protocol": "fpr",
+  "asr_definition": "1 - adversarial accuracy",
+  "attack_params": {
+    "attack_method": "geometry_guided_depth_intervention",
+    "seed": 42,
+    "whitebox_model": "vit_base_patch16_224",
+    "epsilon": 0.06274509803921569,
+    "step_size": 0.006274509803921569,
+    "steps": 10,
+    "momentum_decay": 1.0,
+    "gdi_drop_enabled": false,
+    "checkpoint_selection_mode": "disabled",
+    "fixed_block": null,
+    "fixed_checkpoint": null,
+    "noise_enabled": true,
+    "noise_strength": 0.2,
+    "noise_structure": "isotropic_rgb",
+    "input_diversity_groups": 10,
+    "input_diversity_views_per_group": 2,
+    "input_diversity_phase_shift_set": [
+      [
+        4,
+        4
+      ],
+      [
+        8,
+        8
+      ],
+      [
+        12,
+        12
+      ]
+    ],
+    "input_diversity_total_views": 20,
+    "mask_schedule_count_per_image": 0,
+    "checkpoint_mask_selection_count_per_image": 0,
+    "model_mean": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "model_std": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "checkpoint_selection_enabled": false,
+    "checkpoint_selection": "disabled; no token drops or clean-image layer selection",
+    "checkpoint_selection_metric": null,
+    "checkpoint_score_normalization": null,
+    "checkpoint_depth_weighting": false,
+    "checkpoint_tie_break": null,
+    "total_drop_ratio": 0.102040816327,
+    "drop_count_rounding": "total ratio rounded to 12 decimals; max(1, round(native token count * ratio))",
+    "checkpoint_histogram": {},
+    "sample_checkpoints": [],
+    "num_images": 1000
+  },
+  "summary": {
+    "overall_asr": 0.7923846153846154,
+    "strict_black_box_asr": 0.777,
+    "transformer_asr": 0.8332857142857142,
+    "cnn_asr": 0.7446666666666667
+  }
+}

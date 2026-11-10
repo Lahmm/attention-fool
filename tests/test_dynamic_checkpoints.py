@@ -245,6 +245,78 @@ class DynamicCheckpointTests(unittest.TestCase):
                 attacker.attack_batch(attacker._normalize_output(pixels), torch.tensor([0]))
         self.assertIsNone(attacker._dynamic_mask_layout)
 
+    def test_fixed_blocks_reuse_resampling_phase_noise_and_input_boundaries(self):
+        pixels = torch.linspace(.1, .9, 2 * 3 * 28 * 28).reshape(2, 3, 28, 28)
+        labels = torch.tensor([0, 1])
+        for block in range(1, 13):
+            with self.subTest(block=block):
+                model = make_model()
+                attacker = GDIAttacker(model, fixed_block=block, steps=2, input_diversity_groups=2,
+                                       device=torch.device('cpu'))
+                schedules, views = [], []
+                build = attacker._build_mask_schedule
+                def capture_schedule(values):
+                    schedule = build(values)
+                    schedules.append(schedule)
+                    return schedule
+                forward = attacker._forward_with_schedule
+                def capture_view(values, target, schedule):
+                    loss = forward(values, target, schedule)
+                    local = model.model.blocks[block - 1].last_input[:, 1:]
+                    self.assertEqual(int(local[schedule[0].mask].count_nonzero()), 0)
+                    views.append(schedule)
+                    return loss
+                with patch.object(model, 'select_contraction_checkpoints', side_effect=AssertionError('selection called')), \
+                     patch.object(attacker, '_build_mask_schedule', side_effect=capture_schedule), \
+                     patch.object(attacker, '_forward_with_schedule', side_effect=capture_view), \
+                     patch.object(attacker, '_projected_gaussian_noise', wraps=attacker._projected_gaussian_noise) as noise, \
+                     patch.object(attacker, '_phase_mask_schedule', wraps=attacker._phase_mask_schedule) as phase:
+                    output = attacker.attack_batch(attacker._normalize_output(pixels), labels)
+                self.assertEqual(len(schedules), 4)
+                self.assertEqual(len(views), 8)
+                self.assertEqual(noise.call_count, 8)
+                self.assertEqual(phase.call_count, 4)
+                for schedule in views:
+                    self.assertEqual(schedule[0].checkpoint, f'block{block - 1}')
+                    self.assertEqual(schedule[0].count, 20)
+                    validate_schedule(schedule, batch_size=2)
+                self.assertFalse(torch.equal(schedules[0][0].mask, schedules[1][0].mask))
+                self.assertTrue(torch.isfinite(output).all())
+                self.assertLessEqual(float((attacker._denormalize(output) - pixels).abs().max()), attacker.epsilon + 1e-6)
+                self.assertIsNone(attacker._dynamic_mask_layout)
+
+    def test_fixed_mode_matches_dynamic_replay_at_the_same_boundary_and_rng(self):
+        model = make_model()
+        pixels = torch.linspace(.1, .9, 2 * 3 * 28 * 28).reshape(2, 3, 28, 28)
+        labels = torch.tensor([0, 1])
+        fixed = GDIAttacker(model, fixed_block=11, steps=2, input_diversity_groups=2, device=torch.device('cpu'))
+        dynamic = GDIAttacker(model, steps=2, input_diversity_groups=2, device=torch.device('cpu'))
+        choices = (make_checkpoint('block10', 'block11', .1, (14, 14)),) * 2
+        torch.manual_seed(42)
+        expected = fixed.attack_batch(fixed._normalize_output(pixels), labels)
+        expected_rng = torch.get_rng_state()
+        torch.manual_seed(42)
+        with patch.object(model, 'select_contraction_checkpoints', return_value=choices):
+            actual = dynamic.attack_batch(dynamic._normalize_output(pixels), labels)
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+        self.assertTrue(torch.equal(torch.get_rng_state(), expected_rng))
+
+    def test_fixed_block_rejects_invalid_api_settings_and_cleans_up_on_failure(self):
+        model = make_model()
+        for block in (0, 13, -1, 1.5, True, '1'):
+            with self.subTest(block=block), self.assertRaises(ValueError):
+                GDIAttacker(model, fixed_block=block, device=torch.device('cpu'))
+        with self.assertRaises(ValueError):
+            GDIAttacker(model, fixed_block=1, gdi_drop=False, device=torch.device('cpu'))
+        for name in ('cait_s24_224', 'pit_ti_224', 'deit_base_distilled_patch16_224'):
+            with self.subTest(source=name), patch.object(model, 'model_name', name), self.assertRaises(ValueError):
+                GDIAttacker(model, fixed_block=1, device=torch.device('cpu'))
+        attacker = GDIAttacker(model, fixed_block=12, steps=1, device=torch.device('cpu'))
+        with patch.object(attacker, '_attack_gradients', side_effect=RuntimeError('failure')):
+            with self.assertRaisesRegex(RuntimeError, 'failure'):
+                attacker.attack_batch(torch.zeros(1, 3, 28, 28), torch.tensor([0]))
+        self.assertIsNone(attacker._dynamic_mask_layout)
+
     def test_pit_stage_entry_drops_after_pooling_and_norm_and_preserves_cls(self):
         torch.manual_seed(42)
         model = build_whitebox_model('pit_ti_224', pretrained=False, device=torch.device('cpu'))

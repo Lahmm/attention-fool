@@ -39,6 +39,8 @@ CLI 使用单个 `--drop-ratio`，有效值保留 12 位小数，满足 `0 < r <
 
 `--input-diversity-views-per-group` 保留 1/2 消融，单视图不采样相位。默认平移为 (4,4)/(8,8)/(12,12)，每步最多 20 视图。`--no-gdi-drop` 无 drop 消融跳过干净选层，保留增强与优化。
 
+2026-11-09 新增 ViT-B/16 A2 固定选层消融：`--fixed-block K` 接受 1–12，将全部样本的干预边界固定为第 K 个 block 的输入（内部 `block{K-1}`）。固定模式跳过干净选层前向，使用适配器的原生网格，继续按 step/group 均匀、无放回重采样并构造空间对应的 phase mask；增强、梯度平均、动量和投影沿用共同实现。该参数与 `--no-gdi-drop` 互斥，其他源模型不接受该参数。省略参数继续使用上述逐图 GDI 定位。
+
 ## 基础特征增强（补充实现设置）
 
 直接在 RGB 空间采样 i.i.d. 标准高斯，以真实初始投影权重 W 映射，再逐样本 RMS 匹配：
@@ -54,3 +56,5 @@ RMS 覆盖全部初始局部位置和通道，特征 RMS 与投影权重 detach�
 评估使用 FPR13，ASR 为全部对抗样本的 `1 - adversarial accuracy`；strict 排除完全相同源目标，四源等权平均。当前 i.i.d. 主结果见 [归档](../results/gdi_iid_paired_s42_1000_fpr/README.md)，历史选层与 token 分析见 [结果索引](../results/README.md)。`results/` 保存 FPR13 ASR、参数、直接差值与来源。
 
 当前参数使用 `gdi_drop_enabled`、`noise_enabled` 和 `noise_strength`，增强分布标签为 `noise_structure=isotropic_rgb`，关闭增强时为 `none`。历史执行字段、实际配置和源码哈希由各归档 provenance 保存。
+
+`checkpoint_selection_mode` 区分 `gdi`、`fixed` 和 `disabled`。`checkpoint_selection_enabled` 表示启用干净图像自动选层，只有 `gdi` 为真；`gdi_drop_enabled` 表示是否执行 token drop。固定模式另存 `fixed_block`、`fixed_checkpoint`，逐图保存图像名、边界、网格、实际清零数及比例，不填写 `peak_*` 和其他几何统计。固定及无 drop 模式的选层指标、归一化定义和并列规则为 null。
