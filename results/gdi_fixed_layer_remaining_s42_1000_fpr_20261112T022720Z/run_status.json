@@ -35,13 +35,14 @@
     "pit_t_fixed07",
     "pit_t_fixed08",
     "pit_t_fixed09",
-    "pit_t_fixed10"
+    "pit_t_fixed10",
+    "pit_t_fixed11"
   ],
   "failed": [],
   "publication_errors": [],
-  "current_case": "pit_t_fixed10",
+  "current_case": "pit_t_fixed11",
   "controller_pid": 968690,
   "started_utc": "2026-11-12T02:27:31.723211+00:00",
-  "updated_utc": "2026-11-12T12:37:54.551477+00:00",
+  "updated_utc": "2026-11-12T12:42:48.882637+00:00",
   "stage": "archived"
 }
