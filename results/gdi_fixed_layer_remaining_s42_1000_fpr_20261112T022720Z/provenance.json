@@ -1,6 +1,6 @@
 {
   "run_id": "gdi_fixed_layer_remaining_s42_1000_fpr_20261112T022720Z",
-  "updated_utc": "2026-11-12T11:48:37.551220+00:00",
+  "updated_utc": "2026-11-12T11:53:32.365344+00:00",
   "source_commit": "57aad44d3bd79cbadcea1e6394e6d24751968188",
   "baseline_identity": "byte-for-byte copies with original execution manifest and labels",
   "completed": [
@@ -27,10 +27,11 @@
     "cait_fixed21",
     "cait_fixed22",
     "cait_fixed23",
-    "cait_fixed24"
+    "cait_fixed24",
+    "pit_t_fixed01"
   ],
   "archive_sha256": {
-    "README.md": "b42561e39ae4739b23ad077d1bc503792ae57a338ae37749d8ee2aac2643e70f",
+    "README.md": "82c3693e3357e0b477a975019de53152d9818f4eb0ed4ef1911d1b3cabc76fe7",
     "baselines/cait/attack_params.json": "550de297ac238aa155f97b36b9d163b8f368ba07e933aeeec9c785f68362fb4d",
     "baselines/cait/original_execution_manifest.json": "cb7c4f798981548c46d36b18a0815eaa56d5c6a2e0613611830a98d535149e94",
     "baselines/cait/transfer.csv": "755590e12318d72dc911e9e8aef8d423438a9d12a7f98d1e37c09b62d4e0455c",
@@ -44,8 +45,8 @@
     "baselines/pit_t/transfer.csv": "cb562715848fc433a06ee46024f246b1a4031183e138ba9a218d177d0cbb92ad",
     "baselines/pit_t/transfer.json": "78d776a7f717be3c9e5c08721e7f8524c18abf2255684d8c89eaba1a55514d35",
     "execution_manifest.json": "b0f88da7cc5b3d3764130dbb4c83eb37b8de77f0eaba15f3e6d4ad8fd605c3a4",
-    "per_target.csv": "8946e4b4ed5e1ed5218979cd7ff1f8c18d8d337523b07359eab45e04d2578d10",
-    "run_status.json": "71dbd42d07790826781608b44b95c67c22db9d8239234745b8ad5b12085f2a7b",
+    "per_target.csv": "b1bebbf2b6ed117e14b7f322b3e33950e3733320b489fa0d5a17c78a38b9441f",
+    "run_status.json": "50aa8aa7157968d954e1a931b75773da8be16cb301a8e4c485889ee75f3cb4a7",
     "runs/cait_fixed01/adversarial_images.sha256": "ac087254bb2f3a6163a296b305d8c3113e622be9f766516e2babf303b6fdcbeb",
     "runs/cait_fixed01/attack.exitcode": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
     "runs/cait_fixed01/attack.log": "35fec1ed1089f7ae5b82fc29ea4b1e8a886b7c3ec0ff1ee7621e2f293ac65309",
@@ -286,8 +287,18 @@
     "runs/cait_fixed24/predictions.json": "a45178d2de162e3da5035bcdd646dac691f4bbd085431dbde8043e82dfbe3f21",
     "runs/cait_fixed24/transfer.csv": "e2f7e38fa49ef8d95ea0dfeb12c516a1453303ab7077a7a9f8141112582ea5dd",
     "runs/cait_fixed24/transfer.json": "a3fc25accb5879331732174c2aeedf351d4b145257d5699d56d472e99e2da727",
+    "runs/pit_t_fixed01/adversarial_images.sha256": "ddcbf91c44c9e01ddd3f47de89150d258a2577de4f09bcaf6068f85efc9b8fa1",
+    "runs/pit_t_fixed01/attack.exitcode": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "runs/pit_t_fixed01/attack.log": "72ad5bcbfd6b33416586a47eac030df68683a230b5989f5261c600e9d9deb6cc",
+    "runs/pit_t_fixed01/attack_params.json": "e79c2b874515d98a4b566c5fec1120e2fb5e95b4e8dae91fd434cd74a995168c",
+    "runs/pit_t_fixed01/evaluation.exitcode": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "runs/pit_t_fixed01/evaluation.log": "a56fe4c6741ad70bb92656c7f888a2b89249e992db423fe0ccf6a8898c7ae537",
+    "runs/pit_t_fixed01/execution.json": "a56c9bc5578cba683122750c9e2bb579851b4effbc78370e83a16ddd46e641c9",
+    "runs/pit_t_fixed01/predictions.json": "f6fb2a4a058233bb60f0b956c1d3788843abc1ea639d0a62c3391d3d5b85498d",
+    "runs/pit_t_fixed01/transfer.csv": "6ef7d957ca68682c40897b48633df0eca4d6f22d6d25d01be400633d72275f09",
+    "runs/pit_t_fixed01/transfer.json": "8227b84fade56e40316d2ab1ed8420e87c68eb1a2561b9bf25b25070027f6482",
     "samples.json": "b63bca582f0ac11ab2fa14db8ea3275d8eeeba6eeac5cfccb762c4d412b40882",
-    "summary.csv": "53e3ab1de941f81c2677df1b47f1510a7260b716af5203a1ead74db0c9c2f5fb",
+    "summary.csv": "55b7a1cb1c9bdb3126f7e20ab72053b020456569adf9d1f0a507d3ea1e5562d7",
     "weights.json": "9ae5604d6f3e6f60f265d67996be90a9179ab868faf7041a6f2b9396f1229327"
   }
 }
