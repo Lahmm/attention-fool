@@ -467,3 +467,16 @@ pit_t_fixed12,pit_t,12,stage3_block3,densenet121,True,99,1000,0.901,0.893,0.8000
 pit_t_fixed12,pit_t,12,stage3_block3,efficientnet_b0,True,60,1000,0.94,0.933,0.6999999999999895
 pit_t_fixed12,pit_t,12,stage3_block3,mobilenet_v3_small,True,54,1000,0.946,0.9410000000000001,0.49999999999998934
 pit_t_fixed12,pit_t,12,stage3_block3,resnext50_32x4d,True,234,1000,0.766,0.751,1.5000000000000013
+deit_b_fixed01,deit_b,1,block0,vit_base_patch16_224,True,17,1000,0.983,0.99,-0.7000000000000006
+deit_b_fixed01,deit_b,1,block0,cait_s24_224,True,8,1000,0.992,0.995,-0.30000000000000027
+deit_b_fixed01,deit_b,1,block0,pit_b_224,True,48,1000,0.952,0.964,-1.200000000000001
+deit_b_fixed01,deit_b,1,block0,visformer_small,True,41,1000,0.959,0.966,-0.7000000000000006
+deit_b_fixed01,deit_b,1,block0,swin_tiny_patch4_window7_224,True,27,1000,0.973,0.975,-0.20000000000000018
+deit_b_fixed01,deit_b,1,block0,deit_tiny_patch16_224,True,12,1000,0.988,0.991,-0.30000000000000027
+deit_b_fixed01,deit_b,1,block0,coat_tiny,True,68,1000,0.9319999999999999,0.942,-1.0000000000000009
+deit_b_fixed01,deit_b,1,block0,resnet18,True,83,1000,0.917,0.922,-0.5000000000000004
+deit_b_fixed01,deit_b,1,block0,vgg16,True,76,1000,0.924,0.924,0.0
+deit_b_fixed01,deit_b,1,block0,densenet121,True,68,1000,0.9319999999999999,0.944,-1.200000000000001
+deit_b_fixed01,deit_b,1,block0,efficientnet_b0,True,39,1000,0.961,0.962,-0.10000000000000009
+deit_b_fixed01,deit_b,1,block0,mobilenet_v3_small,True,101,1000,0.899,0.892,0.7000000000000006
+deit_b_fixed01,deit_b,1,block0,resnext50_32x4d,True,78,1000,0.922,0.931,-0.9000000000000008
