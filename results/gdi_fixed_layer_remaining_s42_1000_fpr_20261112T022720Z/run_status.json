@@ -11,13 +11,14 @@
     "cait_fixed07",
     "cait_fixed08",
     "cait_fixed09",
-    "cait_fixed10"
+    "cait_fixed10",
+    "cait_fixed11"
   ],
   "failed": [],
   "publication_errors": [],
-  "current_case": "cait_fixed10",
+  "current_case": "cait_fixed11",
   "controller_pid": 968690,
   "started_utc": "2026-11-12T02:27:31.723211+00:00",
-  "updated_utc": "2026-11-12T06:19:42.811047+00:00",
+  "updated_utc": "2026-11-12T06:42:58.975974+00:00",
   "stage": "archived"
 }

@@ -1,6 +1,6 @@
 # GDI：另外三个源模型的逐层固定输入干预消融
 
-10/48 个配置已完成并通过逐图预测与 ASR 校验；状态见 `run_status.json`。
+11/48 个配置已完成并通过逐图预测与 ASR 校验；状态见 `run_status.json`。
 
 CaiT-S24 固定 24 个局部 block 输入（不含 class-attention），PiT-T 固定原生 2/6/4 stage 内全部 12 个 block 输入，蒸馏 DeiT-B 固定 12 个 block 输入。每配置均为 seed 42、同序 1000 图、10 steps、10 groups × 2 views、动量 1。增强强度按 CaiT/PiT-T/DeiT 为 0.2/0.4/0.2，攻击 batch 为 16/32/48，drop 比例为 30/196、30/196、20/196，并沿用主结果实际参数小数。PiT 三 stage 实际清零 112/30/8 个 token。
 
@@ -18,6 +18,7 @@ FPR13 评估 batch 32、关闭 TF32、无 AMP；ASR 为全部对抗样本的 1 -
 | cait | 8 | block7 | 75.1250% | -13.8583 |
 | cait | 9 | block8 | 74.8250% | -14.1583 |
 | cait | 10 | block9 | 76.0417% | -12.9417 |
+| cait | 11 | block10 | 76.9833% | -12.0000 |
 
 `summary.csv` 和 `per_target.csv` 仅包含已校验的测量及直接 ASR 差值。对应动态主结果按原字节保存在 `baselines/`，保留原参数标签及源码身份；RNG 实现差异按项目约定统一为 seed-42 标准。
 
