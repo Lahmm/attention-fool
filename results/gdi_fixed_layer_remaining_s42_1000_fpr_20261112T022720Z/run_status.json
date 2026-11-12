@@ -1,0 +1,11 @@
+{
+  "status": "running",
+  "total": 48,
+  "completed": [],
+  "failed": [],
+  "publication_errors": [],
+  "current_case": null,
+  "controller_pid": 968690,
+  "started_utc": "2026-11-12T02:27:31.723211+00:00",
+  "updated_utc": "2026-11-12T02:27:38.186339+00:00"
+}

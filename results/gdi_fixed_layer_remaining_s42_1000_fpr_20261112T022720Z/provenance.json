@@ -1,0 +1,26 @@
+{
+  "run_id": "gdi_fixed_layer_remaining_s42_1000_fpr_20261112T022720Z",
+  "updated_utc": "2026-11-12T02:27:38.186708+00:00",
+  "source_commit": "57aad44d3bd79cbadcea1e6394e6d24751968188",
+  "baseline_identity": "byte-for-byte copies with original execution manifest and labels",
+  "completed": [],
+  "archive_sha256": {
+    "README.md": "861753c71066256ece9f829a2f824a4e5c752423073aa18095a199b40b59839e",
+    "baselines/cait/attack_params.json": "550de297ac238aa155f97b36b9d163b8f368ba07e933aeeec9c785f68362fb4d",
+    "baselines/cait/original_execution_manifest.json": "cb7c4f798981548c46d36b18a0815eaa56d5c6a2e0613611830a98d535149e94",
+    "baselines/cait/transfer.csv": "755590e12318d72dc911e9e8aef8d423438a9d12a7f98d1e37c09b62d4e0455c",
+    "baselines/cait/transfer.json": "46acdfc874f506f1518e9476f0c2d4d95f1910ccda3927c06d7166a70ebacf22",
+    "baselines/deit_b/attack_params.json": "5a4664f2ebb376c3b0c40a46783beae55e6a0a6171e6335a4a1ebba0ab7a7ac3",
+    "baselines/deit_b/original_execution_manifest.json": "cb7c4f798981548c46d36b18a0815eaa56d5c6a2e0613611830a98d535149e94",
+    "baselines/deit_b/transfer.csv": "1e72df51dc1782709ab81c7bcaaf989ffc2665564ccc4389235c3903e2695dc2",
+    "baselines/deit_b/transfer.json": "71079806f446b63347752ddf47897cce9b725388d6c77813881aef679fd1b5c0",
+    "baselines/pit_t/attack_params.json": "01d1e3fe79bdafc8f417a57e629a9aae9a42843ca86b47ed290122a468a25190",
+    "baselines/pit_t/original_execution_manifest.json": "cb7c4f798981548c46d36b18a0815eaa56d5c6a2e0613611830a98d535149e94",
+    "baselines/pit_t/transfer.csv": "cb562715848fc433a06ee46024f246b1a4031183e138ba9a218d177d0cbb92ad",
+    "baselines/pit_t/transfer.json": "78d776a7f717be3c9e5c08721e7f8524c18abf2255684d8c89eaba1a55514d35",
+    "execution_manifest.json": "b0f88da7cc5b3d3764130dbb4c83eb37b8de77f0eaba15f3e6d4ad8fd605c3a4",
+    "run_status.json": "710c657225590f75ad1c908bcb5e321bed31b5e8137cc08f6c4dbeef36d06ab2",
+    "samples.json": "b63bca582f0ac11ab2fa14db8ea3275d8eeeba6eeac5cfccb762c4d412b40882",
+    "weights.json": "9ae5604d6f3e6f60f265d67996be90a9179ab868faf7041a6f2b9396f1229327"
+  }
+}
