@@ -1,0 +1,2 @@
+case,source,model,fixed_block,checkpoint,grid,drop_count,drop_ratio,noise_strength,attack_batch_size,num_images,strict_target_count,overall_asr,strict_asr,dynamic_gdi_strict_asr,difference_from_dynamic_gdi_pp
+cait_fixed01,cait,cait_s24_224,1,block0,14x14,30,0.15306122449,0.2,16,1000,12,0.8255384615384617,0.8119166666666667,0.8898333333333334,-7.791666666666663
