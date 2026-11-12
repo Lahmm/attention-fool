@@ -1,6 +1,6 @@
 {
   "run_id": "gdi_fixed_layer_remaining_s42_1000_fpr_20261112T022720Z",
-  "updated_utc": "2026-11-12T14:35:46.622106+00:00",
+  "updated_utc": "2026-11-12T14:57:18.581014+00:00",
   "source_commit": "57aad44d3bd79cbadcea1e6394e6d24751968188",
   "baseline_identity": "byte-for-byte copies with original execution manifest and labels",
   "completed": [
@@ -44,10 +44,11 @@
     "deit_b_fixed02",
     "deit_b_fixed03",
     "deit_b_fixed04",
-    "deit_b_fixed05"
+    "deit_b_fixed05",
+    "deit_b_fixed06"
   ],
   "archive_sha256": {
-    "README.md": "28de58b7935370c31c1f62f70919f926842447f50c415aa1fb44c97ceaaa3de5",
+    "README.md": "d6c969d03c36f2407f12e66ea76d1c0f06dda3c4edf8f064a6f43419573f5403",
     "baselines/cait/attack_params.json": "550de297ac238aa155f97b36b9d163b8f368ba07e933aeeec9c785f68362fb4d",
     "baselines/cait/original_execution_manifest.json": "cb7c4f798981548c46d36b18a0815eaa56d5c6a2e0613611830a98d535149e94",
     "baselines/cait/transfer.csv": "755590e12318d72dc911e9e8aef8d423438a9d12a7f98d1e37c09b62d4e0455c",
@@ -61,8 +62,8 @@
     "baselines/pit_t/transfer.csv": "cb562715848fc433a06ee46024f246b1a4031183e138ba9a218d177d0cbb92ad",
     "baselines/pit_t/transfer.json": "78d776a7f717be3c9e5c08721e7f8524c18abf2255684d8c89eaba1a55514d35",
     "execution_manifest.json": "b0f88da7cc5b3d3764130dbb4c83eb37b8de77f0eaba15f3e6d4ad8fd605c3a4",
-    "per_target.csv": "34612590d69fdb46fb0ebbb2d6d201a39f9faee34673e3780256da77768d9fd3",
-    "run_status.json": "f7464c2c9769c007ab85c4467d045f78dd502ab324cb430e05a1e4592e8c8ca7",
+    "per_target.csv": "e91aeb1c4a14ddeab457d66fee97e6fd02c3061807e26789e3023f8873bfa70f",
+    "run_status.json": "367a26acab880436c276bc96bd2550c5fd10e86c8ddb599434530abc8f73b325",
     "runs/cait_fixed01/adversarial_images.sha256": "ac087254bb2f3a6163a296b305d8c3113e622be9f766516e2babf303b6fdcbeb",
     "runs/cait_fixed01/attack.exitcode": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
     "runs/cait_fixed01/attack.log": "35fec1ed1089f7ae5b82fc29ea4b1e8a886b7c3ec0ff1ee7621e2f293ac65309",
@@ -353,6 +354,16 @@
     "runs/deit_b_fixed05/predictions.json": "2b430df202caae31c2fe2f23e0d872e25613c608daf0b29c28c913ff92bfc52e",
     "runs/deit_b_fixed05/transfer.csv": "dfa9161cd0e84a60e6db97fe4668625fbc733fd4611f9b7244b35d8bc7c2dacf",
     "runs/deit_b_fixed05/transfer.json": "18aff6266528b1d13b44f7a83f4c721fffc5232d8f4c1fba4f9399d93274eba6",
+    "runs/deit_b_fixed06/adversarial_images.sha256": "d6ee89f40fbd1de38e1211b4e9e917ad3ec4fcc6012152cc35cdea0579d1cd37",
+    "runs/deit_b_fixed06/attack.exitcode": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "runs/deit_b_fixed06/attack.log": "d67d4d8b03c86ba4cf2e082c94e38648fd2788211a5eed3bf720cff3fb4aac7f",
+    "runs/deit_b_fixed06/attack_params.json": "179a9b543cbf420c7b34adea9b116ee72c21fa205463883bb3b12759d6379f26",
+    "runs/deit_b_fixed06/evaluation.exitcode": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "runs/deit_b_fixed06/evaluation.log": "a2ac01fbd7aaa6d2dabc9b20f6e8871a683932a42e3bf35e169dec57a9ede3b5",
+    "runs/deit_b_fixed06/execution.json": "7a8ae3d1cf9aaa36ff493ebfb2ca5865e17b36076821b907a044064a56676631",
+    "runs/deit_b_fixed06/predictions.json": "2e778d26cfdcddee48518deb4a612604f2431a974680ee05e537a0105d20d262",
+    "runs/deit_b_fixed06/transfer.csv": "f1de12ac1c960e3ac4dc9ff1717c5f3dc619640e61e4f1cce31e055e83161241",
+    "runs/deit_b_fixed06/transfer.json": "2127d077591cc4a8e0b21a6a530174191b882b2eab8461c58dc436958abb6da9",
     "runs/pit_t_fixed01/adversarial_images.sha256": "ddcbf91c44c9e01ddd3f47de89150d258a2577de4f09bcaf6068f85efc9b8fa1",
     "runs/pit_t_fixed01/attack.exitcode": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
     "runs/pit_t_fixed01/attack.log": "72ad5bcbfd6b33416586a47eac030df68683a230b5989f5261c600e9d9deb6cc",
@@ -474,7 +485,7 @@
     "runs/pit_t_fixed12/transfer.csv": "d107d3d89860b818b5aeeb92978051a71674d9c41525d77a0bf92d313d877fc0",
     "runs/pit_t_fixed12/transfer.json": "c8f4b37300fc9a3147d1347b442d1b12ea2af251d8ccb1a60c0ee1eebfe25415",
     "samples.json": "b63bca582f0ac11ab2fa14db8ea3275d8eeeba6eeac5cfccb762c4d412b40882",
-    "summary.csv": "15007c1e22afc02c842e0330936443e0ba9f2fdafeb16abf172103f903146763",
+    "summary.csv": "4a53a1b12c181c026de8a59f3461543f3ef2d2eedf9dff428ac5de9bc75f5839",
     "weights.json": "9ae5604d6f3e6f60f265d67996be90a9179ab868faf7041a6f2b9396f1229327"
   }
 }
