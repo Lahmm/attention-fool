@@ -100,7 +100,7 @@ def attack_all_samples(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="GDI single-boundary attack and ViT fixed-block ablation")
+    parser = argparse.ArgumentParser(description="GDI single-boundary attack and fixed-block ablations")
     parser.add_argument("--whitebox-model", choices=WHITEBOX_MODEL_CHOICES, default=DEFAULT_MODEL_NAME)
     parser.add_argument("--max-attacked-samples", type=int, default=1000)
     parser.add_argument("--epsilon", type=float, default=16.0 / 255.0)
@@ -119,8 +119,8 @@ def parse_args() -> argparse.Namespace:
         help="Disable checkpoint token drops for mechanism ablations.",
     )
     boundary_options.add_argument(
-        "--fixed-block", type=int, choices=range(1, 13), default=None,
-        help="ViT-B/16 ablation: drop at the input of block K (1-12), resampling token positions.",
+        "--fixed-block", type=int, choices=range(1, 25), default=None,
+        help="Drop at block K's input in native order: 1-24 for CaiT, 1-12 otherwise; PiT spans stages.",
     )
     parser.add_argument(
         "--drop-ratio",
@@ -141,8 +141,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prefetch-factor", type=int, default=4)
     parser.add_argument("--output-dir", default="outputs/attack/gdi")
     args = parser.parse_args()
-    if args.fixed_block is not None and args.whitebox_model != "vit_base_patch16_224":
-        parser.error("--fixed-block is supported only for the ViT-B/16 ablation")
+    max_block = 24 if args.whitebox_model == "cait_s24_224" else 12
+    if args.fixed_block is not None and args.fixed_block > max_block:
+        parser.error(f"--fixed-block must be between 1 and {max_block} for {args.whitebox_model}")
     return args
 
 

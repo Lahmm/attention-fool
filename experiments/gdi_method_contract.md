@@ -39,7 +39,7 @@ CLI 使用单个 `--drop-ratio`，有效值保留 12 位小数，满足 `0 < r <
 
 `--input-diversity-views-per-group` 保留 1/2 消融，单视图不采样相位。默认平移为 (4,4)/(8,8)/(12,12)，每步最多 20 视图。`--no-gdi-drop` 无 drop 消融跳过干净选层，保留增强与优化。
 
-2026-11-09 新增 ViT-B/16 A2 固定选层消融：`--fixed-block K` 接受 1–12，将全部样本的干预边界固定为第 K 个 block 的输入（内部 `block{K-1}`）。固定模式跳过干净选层前向，使用适配器的原生网格，继续按 step/group 均匀、无放回重采样并构造空间对应的 phase mask；增强、梯度平均、动量和投影沿用共同实现。该参数与 `--no-gdi-drop` 互斥，其他源模型不接受该参数。省略参数继续使用上述逐图 GDI 定位。
+`--fixed-block K` 用于逐层固定输入干预消融。2026-11-09 支持 ViT-B/16，2026-11-12 按用户要求扩展至另外三个源。ViT/DeiT 的 K 为 1–12、CaiT 为 1–24（不含 class-attention），内部边界为 `block{K-1}`。PiT-T 的 K 按 stage 顺序编号：1–2 对应 `stage1_block0–1`，3–8 对应 `stage2_block0–5`，9–12 对应 `stage3_block0–3`；stage 入口位于原生 pooling 和 norm 之后，网格依次为 27×27、14×14、7×7，默认比例实际清零 112、30、8 个局部 token。适配器的 `block_input_checkpoints` 枚举有效 block 输入，不包含末端输出边界。全部样本使用指定边界，跳过干净选层前向；继续按 step/group 均匀、无放回重采样并构造空间对应的 phase mask，增强、梯度平均、动量和投影沿用共同实现。该参数与 `--no-gdi-drop` 互斥。省略参数继续使用上述逐图 GDI 定位。
 
 ## 基础特征增强（补充实现设置）
 

@@ -37,7 +37,7 @@ MaskSchedule = tuple[GDIMaskSelection, ...]
 
 
 class GDIAttacker:
-    """Use one input boundary per image and resample token masks, with a ViT fixed-block ablation."""
+    """Use one input boundary per image and resample token masks, with fixed-block ablations."""
 
     def __init__(
         self,
@@ -59,13 +59,14 @@ class GDIAttacker:
         ),
         device: torch.device | None = None,
     ) -> None:
+        fixed_checkpoint = None
         if fixed_block is not None:
-            if type(fixed_block) is not int or not 1 <= fixed_block <= 12:
-                raise ValueError("fixed block must be an integer from 1 to 12.")
+            candidates = model.block_input_checkpoints
+            if type(fixed_block) is not int or not 1 <= fixed_block <= len(candidates):
+                raise ValueError(f"fixed block must be an integer from 1 to {len(candidates)}.")
             if not gdi_drop:
                 raise ValueError("fixed block cannot be combined with disabled GDI drops.")
-            if model.model_name != "vit_base_patch16_224":
-                raise ValueError("fixed block is supported only for the ViT-B/16 ablation.")
+            fixed_checkpoint = candidates[fixed_block - 1]
         if epsilon < 0 or steps <= 0:
             raise ValueError("epsilon must be non-negative and steps must be positive.")
         if step_size is not None and step_size <= 0:
@@ -91,6 +92,7 @@ class GDIAttacker:
         self.model.eval()
         self.gdi_drop = bool(gdi_drop)
         self.fixed_block = fixed_block
+        self.fixed_checkpoint = fixed_checkpoint
         self.device = device if device is not None else DEVICE
         self.drop_ratio = ratio
         self.noise_strength = float(noise_strength)
@@ -173,7 +175,7 @@ class GDIAttacker:
         self._dynamic_mask_layout = tuple(layout)
 
     def _prepare_fixed_mask_layout(self, batch_size: int) -> None:
-        checkpoint = f"block{self.fixed_block - 1}"
+        checkpoint = self.fixed_checkpoint
         grid = self.model.checkpoint_grid_size(checkpoint)
         indices = torch.arange(batch_size, device=self.device)
         active = torch.ones(batch_size, device=self.device, dtype=torch.bool)
@@ -374,7 +376,7 @@ class GDIAttacker:
             "gdi_drop_enabled": self.gdi_drop,
             "checkpoint_selection_mode": mode,
             "fixed_block": self.fixed_block,
-            "fixed_checkpoint": f"block{self.fixed_block - 1}" if self.fixed_block is not None else None,
+            "fixed_checkpoint": self.fixed_checkpoint,
             "noise_enabled": self.noise_strength > 0,
             "noise_strength": self.noise_strength,
             "noise_structure": "isotropic_rgb" if self.noise_strength > 0 else "none",

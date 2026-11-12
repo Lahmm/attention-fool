@@ -1,5 +1,6 @@
 import os
 import unittest
+from unittest.mock import patch
 
 import torch
 
@@ -75,3 +76,59 @@ class AdapterTests(unittest.TestCase):
                 self.assertGreater(float(gradient.norm()), 0)
                 print(f'{name}: grids={grids}, counts={counts}, finite gradients', flush=True)
                 del model, attacker, probe, gradient, loss, pixels, schedule
+
+    @unittest.skipUnless(os.environ.get('RUN_REAL_GDI_ADAPTERS') == '1',
+                         'set RUN_REAL_GDI_ADAPTERS=1 for real-model CPU validation')
+    def test_remaining_sources_fixed_sweep_uses_every_native_input_and_grid(self):
+        torch.set_num_threads(2)
+        for name, count in (('cait_s24_224', 24), ('pit_ti_224', 12),
+                            ('deit_base_distilled_patch16_224', 12)):
+            torch.manual_seed(SEED)
+            model = build_whitebox_model(name, pretrained=False, device=torch.device('cpu'))
+            expected = (tuple(f'stage{s + 1}_block{b}' for s, depth in enumerate((2, 6, 4))
+                              for b in range(depth)) if name == 'pit_ti_224'
+                        else tuple(f'block{b}' for b in range(count)))
+            self.assertEqual(model.block_input_checkpoints, expected)
+            pixels = torch.linspace(.1, .9, 3 * 224 * 224).view(1, 3, 224, 224)
+            for number, checkpoint in enumerate(expected, 1):
+                with self.subTest(source=name, block=number):
+                    attacker = GDIAttacker(model, fixed_block=number, steps=1, input_diversity_groups=1,
+                                           device=torch.device('cpu'))
+                    grid = ((27, 27) if number <= 2 else (14, 14) if number <= 8 else (7, 7)) if name == 'pit_ti_224' else (14, 14)
+                    self.assertEqual(model.checkpoint_grid_size(checkpoint), grid)
+                    drop_count = ((112 if number <= 2 else 30 if number <= 8 else 8)
+                                  if name == 'pit_ti_224' else 30 if name == 'cait_s24_224' else 20)
+                    block = (model.model.transformers[model.checkpoint_order(checkpoint)[0]].blocks[model.checkpoint_order(checkpoint)[1]]
+                             if name == 'pit_ti_224' else model.model.blocks[number - 1])
+                    masked_inputs, captured = [], []
+                    apply_mask = model.apply_gdi_mask
+                    def capture_mask(state, mask):
+                        masked = apply_mask(state, mask)
+                        self.assertEqual(int(masked.local_tokens[mask].count_nonzero()), 0)
+                        self.assertEqual(mask.sum(1).tolist(), [drop_count])
+                        prefix = next((masked.context[key] for key in ('prefix_tokens', 'cls_token')
+                                       if key in masked.context), None)
+                        tokens = torch.cat((prefix, masked.local_tokens), 1) if prefix is not None else masked.local_tokens
+                        masked_inputs.append(tokens.detach().clone())
+                        return masked
+                    def capture_input(module, args):
+                        torch.testing.assert_close(args[0], masked_inputs[len(captured)], rtol=0, atol=0)
+                        captured.append(True)
+                    handle = block.register_forward_pre_hook(capture_input)
+                    try:
+                        with patch.object(model, 'select_contraction_checkpoints', side_effect=AssertionError('selection called')), \
+                             patch.object(model, 'apply_gdi_mask', side_effect=capture_mask):
+                            output = attacker.attack_batch(attacker._normalize_output(pixels), torch.tensor([1]))
+                    finally:
+                        handle.remove()
+                    self.assertEqual(len(captured), 2)
+                    self.assertTrue(torch.isfinite(output).all())
+                    self.assertGreater(float((output - attacker._normalize_output(pixels)).abs().max()), 0)
+                    self.assertLessEqual(float((attacker._denormalize(output) - pixels).abs().max()), attacker.epsilon + 1e-6)
+                    params = attacker.parameters()
+                    self.assertEqual(params['fixed_checkpoint'], checkpoint)
+                    self.assertEqual(params['checkpoint_histogram'], {checkpoint: 1})
+                    self.assertEqual(params['sample_checkpoints'][0]['drop_count'], drop_count)
+            with self.assertRaises(ValueError):
+                GDIAttacker(model, fixed_block=count + 1, device=torch.device('cpu'))
+            print(f'{name}: all {count} fixed block inputs, masks, grids and gradients verified', flush=True)

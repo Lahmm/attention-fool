@@ -12,6 +12,11 @@ class PiTAdapter(GDIAdapter):
     drop_ratio = 0.15306122449
     noise_strength = 0.4
 
+    @property
+    def block_input_checkpoints(self):
+        return tuple(f"stage{stage_index + 1}_block{block_index}"
+                     for stage_index, stage in enumerate(self.model.transformers)
+                     for block_index in range(len(stage.blocks)))
 
     def begin_gdi_forward(self, x):
         base = self.model

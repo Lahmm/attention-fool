@@ -308,9 +308,6 @@ class DynamicCheckpointTests(unittest.TestCase):
                 GDIAttacker(model, fixed_block=block, device=torch.device('cpu'))
         with self.assertRaises(ValueError):
             GDIAttacker(model, fixed_block=1, gdi_drop=False, device=torch.device('cpu'))
-        for name in ('cait_s24_224', 'pit_ti_224', 'deit_base_distilled_patch16_224'):
-            with self.subTest(source=name), patch.object(model, 'model_name', name), self.assertRaises(ValueError):
-                GDIAttacker(model, fixed_block=1, device=torch.device('cpu'))
         attacker = GDIAttacker(model, fixed_block=12, steps=1, device=torch.device('cpu'))
         with patch.object(attacker, '_attack_gradients', side_effect=RuntimeError('failure')):
             with self.assertRaisesRegex(RuntimeError, 'failure'):

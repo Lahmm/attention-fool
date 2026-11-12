@@ -149,6 +149,10 @@ class GDIAdapter(nn.Module):
     def forward(self, x):
         return self.model(x.to(self.device))
 
+    @property
+    def block_input_checkpoints(self):
+        return tuple(f"block{index}" for index in range(len(self.model.blocks)))
+
     def begin_gdi_forward(self, x) -> GDIState:
         raise NotImplementedError
 

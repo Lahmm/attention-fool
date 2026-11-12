@@ -36,13 +36,17 @@ class MainTests(unittest.TestCase):
         self.assertIsNone(args.fixed_block)
 
     def test_fixed_block_cli_accepts_candidates_and_rejects_conflicts(self):
-        for block in range(1, 13):
-            with self.subTest(block=block), patch.object(sys, 'argv', ['main.py', '--fixed-block', str(block)]):
-                self.assertEqual(main.parse_args().fixed_block, block)
+        for name, count in (('vit_base_patch16_224', 12), ('cait_s24_224', 24),
+                            ('pit_ti_224', 12), ('deit_base_distilled_patch16_224', 12)):
+            for block in range(1, count + 1):
+                with self.subTest(source=name, block=block), \
+                     patch.object(sys, 'argv', ['main.py', '--whitebox-model', name, '--fixed-block', str(block)]):
+                    self.assertEqual(main.parse_args().fixed_block, block)
         for options in (['--fixed-block', '0'], ['--fixed-block', '13'],
                         ['--fixed-block', '1.5'], ['--fixed-block', '1', '--no-gdi-drop'],
-                        *(['--fixed-block', '1', '--whitebox-model', name] for name in
-                          ('cait_s24_224', 'pit_ti_224', 'deit_base_distilled_patch16_224'))):
+                        ['--fixed-block', '25', '--whitebox-model', 'cait_s24_224'],
+                        *(['--fixed-block', '13', '--whitebox-model', name] for name in
+                          ('pit_ti_224', 'deit_base_distilled_patch16_224'))):
             with self.subTest(options=options), redirect_stderr(StringIO()), \
                  patch.object(sys, 'argv', ['main.py', *options]), self.assertRaises(SystemExit):
                 main.parse_args()
