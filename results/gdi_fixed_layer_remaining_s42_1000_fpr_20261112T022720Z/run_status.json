@@ -2,13 +2,14 @@
   "status": "running",
   "total": 48,
   "completed": [
-    "cait_fixed01"
+    "cait_fixed01",
+    "cait_fixed02"
   ],
   "failed": [],
   "publication_errors": [],
-  "current_case": "cait_fixed01",
+  "current_case": "cait_fixed02",
   "controller_pid": 968690,
   "started_utc": "2026-11-12T02:27:31.723211+00:00",
-  "updated_utc": "2026-11-12T02:50:38.643314+00:00",
+  "updated_utc": "2026-11-12T03:13:48.682383+00:00",
   "stage": "archived"
 }
