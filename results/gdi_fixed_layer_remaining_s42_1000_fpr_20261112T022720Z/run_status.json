@@ -22,13 +22,14 @@
     "cait_fixed18",
     "cait_fixed19",
     "cait_fixed20",
-    "cait_fixed21"
+    "cait_fixed21",
+    "cait_fixed22"
   ],
   "failed": [],
   "publication_errors": [],
-  "current_case": "cait_fixed21",
+  "current_case": "cait_fixed22",
   "controller_pid": 968690,
   "started_utc": "2026-11-12T02:27:31.723211+00:00",
-  "updated_utc": "2026-11-12T10:37:43.597928+00:00",
+  "updated_utc": "2026-11-12T11:01:23.669813+00:00",
   "stage": "archived"
 }
