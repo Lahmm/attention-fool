@@ -45,13 +45,14 @@
     "deit_b_fixed05",
     "deit_b_fixed06",
     "deit_b_fixed07",
-    "deit_b_fixed08"
+    "deit_b_fixed08",
+    "deit_b_fixed09"
   ],
   "failed": [],
   "publication_errors": [],
-  "current_case": "deit_b_fixed08",
+  "current_case": "deit_b_fixed09",
   "controller_pid": 968690,
   "started_utc": "2026-11-12T02:27:31.723211+00:00",
-  "updated_utc": "2026-11-12T15:40:32.498799+00:00",
+  "updated_utc": "2026-11-12T16:02:11.680359+00:00",
   "stage": "archived"
 }
