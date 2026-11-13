@@ -14,5 +14,6 @@ outputs/*
 CLAUDE.md
 .claude/settings.local.json
 
-# Local LaTeX project
+# Local LaTeX projects
 /CVPR_2026_Submission_Template/
+/author-kit-CVPR2027-v1-latex/
