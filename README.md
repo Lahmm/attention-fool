@@ -87,7 +87,7 @@ python data_collection.py
 | `input.png`、`phase.png` | 原图与真实反射平移图 |
 | `noise.png`、`phase_noise.png` | 两视图实际 RGB 高斯采样；统一显示映射 `clamp(0.5 + noise/6, 0, 1)` |
 | `drop.png`、`phase_drop.png` | 按执行掩码将对应图像区域置黑 |
-| `mask.png`、`phase_mask.png` | 白色为丢弃位置，黑色为保留位置 |
+| `mask.png`、`phase_mask.png` | 黑色为丢弃位置，灰白色（240）为保留位置，带灰色（160）单像素 token 网格线和外框 |
 | `capture.pt` | 两视图原始 RGB 噪声、投影缩放后的特征噪声、掩码及真实 drop 后局部特征 |
 | `metadata.json` | 逐图选层、相位、显示映射、seed、batch size、攻击配置与实际采集范围 |
 

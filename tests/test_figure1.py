@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from torchvision import transforms
 
 from attack import GDIAttacker
-from figure1 import capture_first_pair, export_figure1_elements, rgb_noise_image
+from figure1 import capture_first_pair, export_figure1_elements, rgb_noise_image, spatial_mask
 from nets.vit import DEFAULT_MODEL_NAME, ViTAdapter
 from utils import ImageDataset, SEED
 
@@ -195,8 +195,16 @@ class Figure1Tests(unittest.TestCase):
                     self.assertEqual(image.tobytes(), source.tobytes())
                 original = transforms.PILToTensor()(image)
             saved = torch.load(directory / "capture.pt", weights_only=True)
-            with Image.open(directory / "mask.png") as image:
-                mask = transforms.PILToTensor()(image).bool()
+            mask = spatial_mask(saved["original"]["mask"], (14, 14), (224, 224))
+            for view_name, filename in (("original", "mask.png"), ("phase", "phase_mask.png")):
+                with Image.open(directory / filename) as image:
+                    rendered = transforms.PILToTensor()(image)[0]
+                expected_centers = (~saved[view_name]["mask"]).byte().mul(240)
+                torch.testing.assert_close(rendered[8::16, 8::16].flatten(), expected_centers)
+                self.assertTrue((rendered[::16, :] == 160).all())
+                self.assertTrue((rendered[:, ::16] == 160).all())
+                self.assertTrue((rendered[-1, :] == 160).all())
+                self.assertTrue((rendered[:, -1] == 160).all())
             with Image.open(directory / "drop.png") as image:
                 actual = transforms.PILToTensor()(image)
             torch.testing.assert_close(actual, original.masked_fill(mask, 0), rtol=0, atol=0)

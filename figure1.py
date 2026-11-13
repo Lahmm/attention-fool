@@ -6,7 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 import torch
 from torch.overrides import TorchFunctionMode
 import torch.nn.functional as F
@@ -149,6 +149,19 @@ def save_rgb(tensor, path):
     Image.fromarray(pixels.permute(1, 2, 0).contiguous().numpy()).save(path)
 
 
+def drop_mask_image(mask, grid, image_size):
+    pixel_mask = spatial_mask(mask, grid, image_size)[0].cpu()
+    pixels = (~pixel_mask).byte().mul(240)
+    image = Image.fromarray(pixels.numpy())
+    draw = ImageDraw.Draw(image)
+    height, width = image_size
+    for x in (*range(0, width, width // grid[1]), width - 1):
+        draw.line((x, 0, x, height - 1), fill=160, width=1)
+    for y in (*range(0, height, height // grid[0]), height - 1):
+        draw.line((0, y, width - 1, y), fill=160, width=1)
+    return image
+
+
 def save_sample_elements(directory, sample_index, choice, phase, views, metadata):
     directory.mkdir(parents=True, exist_ok=True)
     checkpoint, grid = choice.checkpoint, choice.grid_size
@@ -164,7 +177,7 @@ def save_sample_elements(directory, sample_index, choice, phase, views, metadata
                  directory / ("noise.png" if is_original else "phase_noise.png"))
         save_rgb(image.masked_fill(pixel_mask, 0),
                  directory / ("drop.png" if is_original else "phase_drop.png"))
-        Image.fromarray(pixel_mask[0].byte().mul(255).numpy()).save(
+        drop_mask_image(mask, grid, image.shape[-2:]).save(
             directory / ("mask.png" if is_original else "phase_mask.png"))
         tensors[name] = {
             "mask": mask.clone(), "local_after_drop": local.clone(),
@@ -191,7 +204,7 @@ def save_sample_elements(directory, sample_index, choice, phase, views, metadata
             "source": "executed mask mapped to RGB patch locations, with dropped areas painted black",
             "interpretation": "spatial illustration of token zeroing, not an inversion of deep features",
             "actual_features": "capture.pt contains the actual selected-block input after hard zeroing",
-            "mask_png": "white = dropped; black = retained; no grid overlay",
+            "mask_png": "black (0) = dropped; off-white (240) = retained; gray (160) one-pixel token grid and border",
             "prefix_tokens": "preserved by the production attack; excluded from local_after_drop",
         },
     })
