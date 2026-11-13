@@ -79,4 +79,15 @@ RUN_REAL_GDI_ADAPTERS=1 python -m unittest discover -s tests -p test_gdi_adapter
 python figure1.py
 ```
 
-`figure1.py` 导出前 50 张真实 ViT 样本的跨层原始余弦分数和热图。几何曲线、观察与干预 ASR 的对应编排，以及 GDI 流程图按 blueprint 准备。内部维护的历史验证见 [精简记录](experiments/gdi_internal_simplification.md)。
+`figure1.py` 按标注文件排序选取前 50 张图像，用预训练 ViT-B/16 的当前 GDI 实现截取第一次迭代、第一组的原始／phase 前向，不执行更新和后续组。默认输出到 `outputs/figure1/attack_elements/<image_stem>/`，已有输出需改用新的 `--output-dir`。
+
+| 文件 | 内容 |
+| --- | --- |
+| `input.png`、`phase.png` | 原图与真实反射平移图 |
+| `noise.png`、`phase_noise.png` | 两视图实际 RGB 高斯采样；统一显示映射 `clamp(0.5 + noise/6, 0, 1)` |
+| `drop.png`、`phase_drop.png` | 按执行掩码将对应图像区域置黑 |
+| `mask.png`、`phase_mask.png` | 白色为丢弃位置，黑色为保留位置 |
+| `capture.pt` | 两视图原始 RGB 噪声、投影缩放后的特征噪声、掩码及真实 drop 后局部特征 |
+| `metadata.json` | 逐图选层、相位、显示映射、seed、batch size、攻击配置与实际采集范围 |
+
+drop 图是干预位置的空间示意；当前模型没有 RGB 重建解码器。噪声图片显示投影前的实际 RGB 采样，模型中加入的是经过投影和 RMS 缩放的特征噪声。运行需安装依赖并准备本地缓存权重；固定 seed 42，自动设备在 MPS 上回落至 CPU，保留选层所需的 float64。根目录 `manifest.json` 记录完整的 50 张样本清单。几何观察与 ASR 图按 blueprint 准备。内部维护的历史验证见 [精简记录](experiments/gdi_internal_simplification.md)。
