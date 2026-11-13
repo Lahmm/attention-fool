@@ -1,7 +1,8 @@
 # Project Instructions
 
 - The assistant may use terminal commands in this repository except `rm` and commands that delete the Git repository.
-- After each completed modification to the current repository contents, the assistant should initiate a `git push`.
+- After each completed modification to Git-tracked repository contents outside the local LaTeX project, the assistant should initiate a `git push`.
+- Any modification within the local LaTeX project `CVPR_2027_Submission_Template/`, including `.tex`, `.bib`, images, configuration and generated files, is exempt from the push requirement. LaTeX-only changes must not trigger `git add`, `git commit` or `git push`; keep the entire directory ignored by Git. This exception takes precedence over the general push rule.
 - The assistant is allowed to use `git push` to push the change to the remote repository.
 - When modifying code, do not add comments at the top of `.py` files.
 - New executions use the fixed seed 42. Retain `--input-diversity-views-per-group` for ablations. Keep the FPR weight downloader, but remove experiment runner scripts.
