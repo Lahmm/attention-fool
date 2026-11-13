@@ -77,6 +77,7 @@ python main.py --whitebox-model vit_base_patch16_224 --fixed-block 11 --batch-si
 python -m unittest discover -s tests
 RUN_REAL_GDI_ADAPTERS=1 python -m unittest discover -s tests -p test_gdi_adapters.py
 python figure1.py
+python data_collection.py
 ```
 
 `figure1.py` 按标注文件排序选取前 50 张图像，用预训练 ViT-B/16 的当前 GDI 实现截取第一次迭代、第一组的原始／phase 前向，不执行更新和后续组。默认输出到 `outputs/figure1/attack_elements/<image_stem>/`，已有输出需改用新的 `--output-dir`。
@@ -91,3 +92,5 @@ python figure1.py
 | `metadata.json` | 逐图选层、相位、显示映射、seed、batch size、攻击配置与实际采集范围 |
 
 drop 图是干预位置的空间示意；当前模型没有 RGB 重建解码器。噪声图片显示投影前的实际 RGB 采样，模型中加入的是经过投影和 RMS 缩放的特征噪声。运行需安装依赖并准备本地缓存权重；固定 seed 42，自动设备在 MPS 上回落至 CPU，保留选层所需的 float64。根目录 `manifest.json` 记录完整的 50 张样本清单。几何观察与 ASR 图按 blueprint 准备。内部维护的历史验证见 [精简记录](experiments/gdi_internal_simplification.md)。
+
+`data_collection.py` 为 Figure 2（§3.2）和 Figure 3（§3.3）收集共同观测数据，默认使用同样排序的前 50 张图像与预训练 ViT-B/16。每张图一次无增强、无 drop 前向，采集全部 12 个 block 的原生输入／输出，以最终归一化 CLS 为共同参考。输出位于 `outputs/data_collection/<image_stem>/`：原图 `input.png`、全部 12×196 个 token 的 `token_scores.csv`、12 层统计 `layer_statistics.csv`、精确保留张量的 `observations.pt` 和逐图选层元数据 `metadata.json`。根目录 `manifest.json` 与 `collection_metadata.json` 记录样本清单、配置、字段说明和代码哈希。逐层统计直接复用当前 `contraction_statistics`，包含均值、总体方差、输入／输出分散度、平均方向方差、R、C、S；逐 token 同时保留 float32 Patch Score、float64 投影及各自中心化数值。导出不做热图归一化、不挑选展示层、不生成最终图像。可用 `--device cpu/cuda`、`--batch-size` 和 `--output-dir`；已有输出须使用新目录。
